@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.ai import context as kp_context
 from app.ai import turn_planner
 from app.models import Base, Character, EventLog, GameSession, Module  # noqa: F401
 
@@ -106,6 +107,34 @@ def test_turn_plan_messages_include_trigger_condition(db_factory):
     assert "搜查书桌" in text
     assert "书桌暗格" in text
     assert "地下室手记" not in text
+
+
+def test_turn_plan_messages_include_canonical_scene_facts_without_exposing_clues(db_factory):
+    """规划器须知道未访问场景的正典位置简述，但仍不能把其线索列为可揭示候选。"""
+    db = db_factory()
+    module, hero, session = _seed(db)
+    messages = turn_planner.build_turn_plan_messages(session, module, hero, [])
+    payload = _payload(messages)
+
+    facts = {scene["id"]: scene for scene in payload["canonical_scene_facts"]}
+    assert facts["hall"]["title"] == "门厅"
+    assert facts["study"]["description"] == "尘封书房"
+    assert "basement" not in {clue["location"] for clue in payload["visible_clues"]}
+    assert "骰子只决定发现多少，不能改写世界原本是什么" in messages[1]["content"]
+
+
+def test_compact_scenes_preserves_title_as_non_current_location_anchor():
+    text = kp_context._compact_scenes(
+        [
+            {"id": "scene_6", "title": "6号车厢", "description": "起始车厢"},
+            {"id": "scene_3", "title": "3号车厢", "description": "驾驶室钥匙掉落在此处"},
+        ],
+        "scene_6",
+    )
+    compact = json.loads(text)
+    scene_3 = next(scene for scene in compact if scene["id"] == "scene_3")
+    assert scene_3["name"] == "3号车厢"
+    assert scene_3["description"] == "驾驶室钥匙掉落在此处"
 
 
 def test_turn_plan_messages_include_characteristic_and_unstuck_hint(db_factory):

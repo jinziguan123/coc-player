@@ -202,6 +202,27 @@ def test_retrieve_scene_boost_promotes_current_scene(db_factory):
     assert boosted[0]["score"] == pytest.approx(0.8 * module_rag_service.SCENE_BOOST, abs=1e-4)
 
 
+def test_retrieve_scene_boost_keeps_global_best_match(db_factory):
+    """场景加权不能把跨章节但与查询最相关的原文完全挤出 top-k。"""
+    db = db_factory()
+    module = _make_module(db, raw="x")
+    # 全局块与查询完全同向，却因 scene_hint 落在相邻章节而不享受 1.3 加权；三个当前场景
+    # 弱相关块加权后都会超过它。这正是“第三个箱子”解释被挤掉的线上形态。
+    _add_chunk(db, module.id, 0, "箱子指车厢，钥匙在三号车厢", [1.0, 0.0], scene_hint="next")
+    _add_chunk(db, module.id, 1, "当前场景片段一", [0.80, 0.60], scene_hint="cur")
+    _add_chunk(db, module.id, 2, "当前场景片段二", [0.79, 0.61], scene_hint="cur")
+    _add_chunk(db, module.id, 3, "当前场景片段三", [0.78, 0.62], scene_hint="cur")
+    db.commit()
+
+    hits = module_rag_service.retrieve(
+        db, module.id, "第三个箱子里的钥匙", k=3, scene_id="cur",
+        embedder=FixedQueryEmbedder([1.0, 0.0]),
+    )
+
+    assert "箱子指车厢，钥匙在三号车厢" in [hit["text"] for hit in hits]
+    assert len(hits) == 3
+
+
 def test_retrieve_empty_when_no_chunks(db_factory):
     db = db_factory()
     module = _make_module(db, raw="x")

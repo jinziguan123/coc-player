@@ -17,11 +17,12 @@ class StreamDelta:
     """stream_chat 的流式增量：文本片段或一次完整的工具调用。
 
     - kind="text"：text 为本次增量文本；
+    - kind="reasoning"：text 为供应商要求在工具续接时原样回传的思考内容，不对玩家展示；
     - kind="tool_call"：tool_call 为聚合完成的调用（供应商的参数分片由 Provider 内部聚合，
       调用方永远拿到完整调用，不需要自己拼 JSON 片段）。
     """
 
-    kind: str  # "text" | "tool_call"
+    kind: str  # "text" | "reasoning" | "tool_call"
     text: str = ""
     tool_call: ToolCall | None = None
 

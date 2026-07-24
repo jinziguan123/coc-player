@@ -108,6 +108,68 @@ def test_planner_items_guard_adds_and_is_idempotent(db_factory):
     assert len(inv.get_inventory(pc)) == 1
 
 
+def test_planner_items_guard_blocks_key_outside_canonical_scene(db_factory):
+    """成功检定或叙事计划不能把三号车厢的关键物品写进六号车厢。"""
+    db = db_factory()
+    module = Module(
+        title="常暗之箱",
+        rule_system="coc",
+        scenes=[
+            {"id": "scene_6", "title": "6号车厢", "description": "门上贴着一张便签"},
+            {"id": "scene_3", "title": "3号车厢", "description": "驾驶室钥匙掉落在此处"},
+        ],
+        clues=[
+            {"id": "hint", "name": "钥匙的位置", "location": "scene_6"},
+            {"id": "key", "name": "驾驶室钥匙", "location": "scene_3"},
+        ],
+        npcs=[],
+    )
+    pc = Character(name="龙牙", rule_system="coc", is_player=True, system_data={})
+    db.add_all([module, pc]); db.flush()
+    gs = GameSession(
+        module_id=module.id, player_character_id=pc.id, status="active",
+        current_scene_id="scene_6", world_state={},
+    )
+    db.add(gs); db.commit()
+    session_service.add_event(
+        db, gs.id, "action", "打开第三个行李箱", actor_id=pc.id, actor_name=pc.name,
+    )
+    plan = TurnPlan(items_gained=[ItemDelta(name="钥匙", qty=1, kind="key")])
+
+    chunks = _run(cs._ensure_planned_items(db, gs.id, gs, pc, [], plan))
+
+    assert chunks == []
+    assert inv.get_inventory(pc) == []
+    assert plan.items_gained == []
+    assert any("事实硬约束" in line for line in plan.narration_brief)
+
+
+def test_planner_items_guard_allows_key_in_canonical_scene(db_factory):
+    db = db_factory()
+    module = Module(
+        title="常暗之箱", rule_system="coc", npcs=[], clues=[],
+        scenes=[
+            {"id": "scene_3", "title": "3号车厢", "description": "驾驶室钥匙掉落在此处"},
+        ],
+    )
+    pc = Character(name="龙牙", rule_system="coc", is_player=True, system_data={})
+    db.add_all([module, pc]); db.flush()
+    gs = GameSession(
+        module_id=module.id, player_character_id=pc.id, status="active",
+        current_scene_id="scene_3", world_state={},
+    )
+    db.add(gs); db.commit()
+    session_service.add_event(
+        db, gs.id, "action", "捡起钥匙", actor_id=pc.id, actor_name=pc.name,
+    )
+    plan = TurnPlan(items_gained=[ItemDelta(name="钥匙", qty=1, kind="key")])
+
+    chunks = _run(cs._ensure_planned_items(db, gs.id, gs, pc, [], plan))
+
+    assert any('"inventory_update"' in chunk for chunk in chunks)
+    assert inv.get_inventory(pc)[0]["name"] == "钥匙"
+
+
 def test_planner_items_guard_removes_lost(db_factory):
     db = db_factory(); sid, pc, _ = _seed(db)
     inv.add_item(db, pc, "火把", kind="gear")

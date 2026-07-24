@@ -42,9 +42,10 @@ def client(tmp_path):
     module = Module(title="测试模组", rule_system="coc", npcs=[], scenes=[])
     hero = Character(name="主角", rule_system="coc", is_player=True)
     ally = Character(name="AI队友", rule_system="coc", is_player=False)
-    db.add_all([module, hero, ally])
+    guest = Character(name="访客角色", rule_system="coc", is_player=True)
+    db.add_all([module, hero, ally, guest])
     db.commit()
-    ids = {"module": module.id, "hero": hero.id, "ally": ally.id}
+    ids = {"module": module.id, "hero": hero.id, "ally": ally.id, "guest": guest.id}
     db.close()
 
     yield TestClient(app), ids
@@ -138,11 +139,44 @@ def test_join_reserves_player_seat_and_persists_session_membership(client):
 
     listed = c.get("/api/sessions", headers=guest)
     assert listed.status_code == 200, listed.text
-    assert sid in {session["id"] for session in listed.json()}
+    reserved_summary = next(session for session in listed.json() if session["id"] == sid)
+    assert reserved_summary["character_name"] is None
 
     joined_again = c.post(f"/api/sessions/{sid}/join", headers=guest)
     assert joined_again.status_code == 200, joined_again.text
     assert len([p for p in joined_again.json()["participants"] if p["is_mine"]]) == 1
+
+    seat_order = mine[0]["seat_order"]
+    claimed = c.post(
+        f"/api/sessions/{sid}/claim",
+        json={"seat_order": seat_order, "character_id": ids["guest"]},
+        headers=guest,
+    )
+    assert claimed.status_code == 200, claimed.text
+    listed_after_claim = c.get("/api/sessions", headers=guest)
+    summary = next(item for item in listed_after_claim.json() if item["id"] == sid)
+    assert summary["character_name"] == "访客角色"
+
+
+def test_human_kp_session_list_uses_kp_role_name(client):
+    c, ids = client
+    kp = {"X-Player-Token": "kp-token"}
+    created = c.post(
+        "/api/sessions",
+        json={
+            "module_id": ids["module"],
+            "kp_mode": "human",
+            "participants": [
+                {"character_id": None, "role": "human", "is_primary": True},
+            ],
+        },
+        headers=kp,
+    )
+    assert created.status_code == 200, created.text
+
+    listed = c.get("/api/sessions", headers=kp)
+    summary = next(item for item in listed.json() if item["id"] == created.json()["id"])
+    assert summary["character_name"] == "KP"
 
 
 def _make_session(c, ids) -> str:

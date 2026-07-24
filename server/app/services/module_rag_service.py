@@ -28,6 +28,9 @@ CHUNK_OVERLAP = 50
 MIN_CHUNK_CHARS = 30
 # 当前场景块的加权系数：让被动注入的摘录大概率是当前场景文本（泄密三重防线之一）。
 SCENE_BOOST = 1.3
+# 场景加权不能垄断全部召回位：至少保留一个纯语义全局最优块。否则跨场景边界的块一旦
+# scene_hint 被归到相邻章节，即使它与玩家原话完全匹配，也会被若干当前场景弱相关块挤出 top-k。
+GLOBAL_RECALL_SLOTS = 1
 
 # 场景标题模糊匹配用的归一化：抹掉空白与常见标点/括注，只比正文字符。
 _NORM_RE = re.compile(r"[\s　，。、：:；;！!？?—\-·・~～*#>《》〈〉()（）\[\]【】「」『』\"'“”‘’]+")
@@ -172,9 +175,26 @@ def retrieve(
         weights = [
             SCENE_BOOST if r.scene_hint == scene_id else 1.0 for r in rows
         ]
-    top = cosine_top_k(
-        [r.embedding for r in rows], embedder.embed_query(query), k, weights=weights,
-    )
+    embeddings = [r.embedding for r in rows]
+    query_vec = embedder.embed_query(query)
+    top = cosine_top_k(embeddings, query_vec, k, weights=weights)
+
+    # 场景权重只负责排序偏好，不能成为信息隔离墙。把纯语义全局最优块保进结果，避免固定
+    # 滑窗跨过章节标题后被单一 scene_hint 误伤。替换最低的加权命中而非扩容，保持 token 预算。
+    if scene_id and k > 0 and top:
+        global_top = cosine_top_k(
+            embeddings, query_vec, min(GLOBAL_RECALL_SLOTS, k), weights=None,
+        )
+        selected = {i for i, _score in top}
+        for global_idx, global_score in global_top:
+            if global_idx in selected:
+                continue
+            dropped_idx, _dropped_score = top[-1]
+            selected.discard(dropped_idx)
+            top[-1] = (global_idx, global_score)
+            selected.add(global_idx)
+        top.sort(key=lambda pair: pair[1], reverse=True)
+
     return [
         {
             "text": rows[i].text,

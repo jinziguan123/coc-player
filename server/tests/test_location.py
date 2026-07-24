@@ -39,8 +39,10 @@ def _seed(db):
 
 
 class _Ev:
-    def __init__(self, etype, content):
+    def __init__(self, etype, content, *, visibility=None, scene_id=None):
         self.event_type, self.content = etype, content
+        self.visibility = visibility or []
+        self.metadata_ = {"scene_id": scene_id} if scene_id else {}
 
 
 def test_known_locations_are_visited_plus_mentioned(db_factory):
@@ -59,6 +61,36 @@ def test_known_locations_are_visited_plus_mentioned(db_factory):
     by_id = {x["id"]: x for x in locs}
     assert by_id["a"]["current"] is True
     assert "d" not in by_id
+
+
+def test_kp_only_event_does_not_unlock_locations(db_factory):
+    """幕后推演即便点名场景，也不能改变玩家侧大地图或沙盘迷雾。"""
+    db = db_factory()
+    sid, _, _, mod_id = _seed(db)
+    session = db.get(GameSession, sid)
+    module = db.get(Module, mod_id)
+    events = [_Ev("system", "幕后角色从档案馆进入隐秘地窖。", visibility=["kp"])]
+
+    assert session_service.known_scene_ids(module, session, events) == {"a"}
+
+
+def test_relative_next_carriage_unlocks_connected_numbered_scene():
+    """叙事在 6 号场景说「下一节车厢」时应解锁 7 号，但不能顺带解锁另一侧的 5 号。"""
+    scenes = [
+        {"id": "car_5", "title": "5号车厢", "connections": ["car_6"]},
+        {"id": "car_6", "title": "6号车厢", "connections": ["car_5", "car_7"]},
+        {"id": "car_7", "title": "7号车厢", "connections": ["car_6"]},
+    ]
+    module = Module(title="列车", rule_system="coc", scenes=scenes, npcs=[])
+    session = GameSession(
+        module_id="m", status="active", current_scene_id="car_6",
+        world_state={"visited_scenes": ["car_6"]},
+    )
+    events = [_Ev(
+        "narration", "透过连接门，可以看见下一节车厢同样空无一人。", scene_id="car_6",
+    )]
+
+    assert session_service.known_scene_ids(module, session, events) == {"car_6", "car_7"}
 
 
 def test_locations_connections_only_within_known(db_factory):
@@ -286,5 +318,4 @@ def test_set_char_location_moves_player(db_factory):
     assert session.current_scene_id == "c"                 # 主角移动同步 current_scene_id
     assert session_service.get_char_location(session, pc_id) == "c"
     assert "c" in (session.world_state or {}).get("visited_scenes")
-
 

@@ -21,6 +21,23 @@ _TRANSIENT_ERRORS = (
 )
 
 
+def _http_error_detail(error: httpx.HTTPStatusError) -> str:
+    """提取上游 4xx/5xx 的短错误信息，避免日志只剩状态码。"""
+    response = error.response
+    try:
+        data = response.json()
+        message = (data.get("error") or {}).get("message") if isinstance(data, dict) else None
+        if message:
+            return str(message).replace("\n", " ")[:500]
+    except Exception:
+        pass
+    try:
+        body = (response.text or "").replace("\n", " ").strip()
+    except Exception:
+        body = ""
+    return body[:500]
+
+
 class ToolCallAggregator:
     """把 OpenAI 流式 delta 里按 index 分片下发的 tool_calls 聚合成完整调用。
 
@@ -167,6 +184,13 @@ class OpenAICompatProvider(LLMProvider):
                 async with self._client.stream(
                     "POST", self._api_url, headers=self._headers(), json=payload,
                 ) as resp:
+                    # 流式响应默认不读取错误正文；先读完 4xx/5xx，后续日志才能给出供应商的
+                    # 具体参数错误（且只记录返回体，不记录请求体/API Key）。
+                    if getattr(resp, "status_code", 200) >= 400:
+                        try:
+                            await resp.aread()
+                        except Exception:
+                            pass
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if not line.startswith("data: "):
@@ -250,6 +274,11 @@ class OpenAICompatProvider(LLMProvider):
                 async with self._client.stream(
                     "POST", self._api_url, headers=self._headers(), json=payload,
                 ) as resp:
+                    if getattr(resp, "status_code", 200) >= 400:
+                        try:
+                            await resp.aread()
+                        except Exception:
+                            pass
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if not line.startswith("data: "):
@@ -269,6 +298,9 @@ class OpenAICompatProvider(LLMProvider):
                 last_exc = e
                 logger.warning("流式建连/传输中断（未产出可见内容），重试 %d/3：%s", attempt + 1, e)
             except httpx.HTTPStatusError as e:
+                detail = _http_error_detail(e)
+                if detail:
+                    logger.error("流式请求被上游拒绝：HTTP %s：%s", e.response.status_code, detail)
                 if e.response.status_code < 500 or produced[0]:
                     raise            # 4xx 或已产出 → 不重试
                 last_exc = e
@@ -309,6 +341,11 @@ class OpenAICompatProvider(LLMProvider):
             if not choices:
                 continue
             delta = choices[0].get("delta") or {}
+            reasoning_content = delta.get("reasoning_content")
+            if reasoning_content:
+                # DeepSeek 思考模型在工具结果续接时要求把本轮 reasoning_content 原样带回。
+                # 它不是玩家可见文本，由 agent loop 单独收集并挂回 assistant 消息。
+                yield StreamDelta(kind="reasoning", text=reasoning_content)
             content = delta.get("content")
             if content:
                 produced[0] = True

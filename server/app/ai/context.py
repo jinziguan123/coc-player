@@ -325,7 +325,7 @@ def _has_plot_state(module: Module) -> bool:
 
 
 def _compact_scenes(scenes: list[dict] | None, current_scene_id: str | None) -> str:
-    """只保留当前和相邻场景的完整信息，其余只保留 id + name"""
+    """当前场景保留完整信息，其余保留 id + 标题 + 简述作为正典位置锚点。"""
     if not scenes:
         return "无"
     result = []
@@ -334,7 +334,11 @@ def _compact_scenes(scenes: list[dict] | None, current_scene_id: str | None) -> 
         if sid == current_scene_id:
             result.append(s)
         else:
-            result.append({"id": sid, "name": s.get("name", ""), "description": s.get("description", "")[:60]})
+            result.append({
+                "id": sid,
+                "name": s.get("title") or s.get("name", ""),
+                "description": s.get("description", "")[:60],
+            })
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 

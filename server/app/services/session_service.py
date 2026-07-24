@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 
 from sqlalchemy.exc import IntegrityError
@@ -1386,19 +1387,67 @@ def scene_unlock_keywords(scene: dict) -> set[str]:
     return stored | derive_scene_keywords(title)
 
 
-def known_scene_ids(module, session: GameSession, events: list | None = None) -> set:
-    """已知地点 = 已访问/当前所在 ∪ 对话中被提及过的场景（KP 或角色提到其名即解锁）。
+_NUMBERED_CARRIAGE_RE = re.compile(r"(?<!\d)(\d+)\s*号车厢")
+_NEXT_CARRIAGE_RE = re.compile(r"下一(?:节|个)?车厢")
 
-    未访问、且对话从未提及的地点不在大地图上显示——避免直接剧透全图。
+
+def _carriage_number(scene: dict | None) -> int | None:
+    """从场景名或解锁词中读取阿拉伯数字车厢号。"""
+    if not scene:
+        return None
+    labels = [scene.get("title"), scene.get("name"), *(scene.get("keywords") or [])]
+    for label in labels:
+        if not isinstance(label, str):
+            continue
+        matched = _NUMBERED_CARRIAGE_RE.search(label)
+        if matched:
+            return int(matched.group(1))
+    return None
+
+
+def _relative_carriage_mentions(by_id: dict, event) -> set[str]:
+    """解析「下一节车厢」这种依赖叙事所在场景的相对称呼。
+
+    只在事件带 ``metadata.scene_id``、且目标确实与来源场景直连时解析，避免把旧叙事按
+    会话当前场景重新解释，也避免顺着编号提前揭露不可达地点。
+    """
+    content = getattr(event, "content", "") or ""
+    if not _NEXT_CARRIAGE_RE.search(content):
+        return set()
+    metadata = getattr(event, "metadata_", None) or {}
+    source_id = metadata.get("scene_id")
+    source = by_id.get(source_id)
+    source_number = _carriage_number(source)
+    if source_number is None:
+        return set()
+    connected = {str(sid) for sid in (source.get("connections") or []) if sid}
+    connected.update(
+        sid for sid, scene in by_id.items()
+        if source_id in {str(item) for item in (scene.get("connections") or []) if item}
+    )
+    return {
+        sid for sid in connected
+        if _carriage_number(by_id.get(sid)) == source_number + 1
+    }
+
+
+def known_scene_ids(module, session: GameSession, events: list | None = None) -> set:
+    """已知地点 = 已访问/当前所在 ∪ 玩家可见叙事中被提及过的场景。
+
+    未访问、且玩家可见内容从未提及的地点不在大地图上显示。KP-only 幕后事件绝不能
+    参与解锁；带场景元数据的「下一节车厢」等确定性相对称呼也会解析为真实场景。
     """
     by_id = {s.get("id"): s for s in (module.scenes or []) if s.get("id")}
     known = set((session.world_state or {}).get("visited_scenes") or [])
     if session.current_scene_id:
         known.add(session.current_scene_id)
+    visible_events = [
+        event for event in (events or [])
+        if getattr(event, "event_type", None) in ("narration", "dialogue", "action", "system")
+        and KP_ONLY_SENTINEL not in (getattr(event, "visibility", None) or [])
+    ]
     convo = "\n".join(
-        (getattr(e, "content", "") or "")
-        for e in (events or [])
-        if getattr(e, "event_type", None) in ("narration", "dialogue", "action", "system")
+        (getattr(event, "content", "") or "") for event in visible_events
     )
     if convo:
         for sid, s in by_id.items():
@@ -1406,6 +1455,8 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
                 continue
             if any(kw in convo for kw in scene_unlock_keywords(s)):
                 known.add(sid)
+    for event in visible_events:
+        known.update(_relative_carriage_mentions(by_id, event))
     return {sid for sid in known if sid in by_id}
 
 

@@ -313,6 +313,9 @@ async def _run_generation(
             rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
         )
         plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
+        planned_effects.enforce_plan_item_locations(
+            plan, module, game_session.current_scene_id,
+        )
         # 世界记忆钩子 a：本轮裁定要揭示线索 → 写入线索台账（纯确定性，零额外 LLM 调用）
         if plan is not None:
             _record_clue_ledger_from_plan(
@@ -713,6 +716,9 @@ async def run_chat_generation(session_id: str) -> None:
                 rule_excerpts=_rule_excerpts_for_planner(db, module, pre_events, game_session),
             )
             plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
+            planned_effects.enforce_plan_item_locations(
+                plan, module, game_session.current_scene_id,
+            )
             logger.info(
                 "耗时|planner %.1fs session=%s", time.monotonic() - t_plan, session_id,
             )
@@ -843,6 +849,9 @@ async def _run_kp_turn(
             rule_excerpts=_rule_excerpts_for_planner(db, module, post_events, game_session),
         )
         plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
+        planned_effects.enforce_plan_item_locations(
+            plan, module, game_session.current_scene_id,
+        )
         if need_sanity:
             async for chunk in _ensure_planned_sanity(
                 db, session_id, game_session, player_char, party_others, plan, pre_gen_seq,

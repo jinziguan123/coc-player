@@ -223,6 +223,39 @@ def test_stream_chat_no_retry_after_first_token(monkeypatch):
     assert calls["n"] == 1   # 未重试
 
 
+def test_stream_chat_emits_deepseek_reasoning_content(monkeypatch):
+    """DeepSeek 流式 reasoning_content 必须作为不可见增量交给 agent loop 保存。"""
+    prov = OpenAICompatProvider(model="deepseek-reasoner", api_key="k")
+    lines = [
+        "data: " + json.dumps({
+            "choices": [{"delta": {"reasoning_content": "需要先检定。"}}],
+        }),
+        "data: " + json.dumps({
+            "choices": [{
+                "delta": {"tool_calls": [{
+                    "index": 0,
+                    "id": "call_1",
+                    "function": {"name": "dice_check", "arguments": '{"skill":"灵感"}'},
+                }]},
+                "finish_reason": "tool_calls",
+            }],
+        }),
+        "data: [DONE]",
+    ]
+    monkeypatch.setattr(prov._client, "stream", lambda *a, **k: _StreamCtx(_LinesResp(lines)))
+
+    async def collect():
+        return [delta async for delta in prov.stream_chat(
+            [{"role": "user", "content": "查看地图"}],
+            tools=[{"type": "function", "function": {"name": "dice_check"}}],
+        )]
+
+    deltas = asyncio.run(collect())
+    assert deltas[0].kind == "reasoning" and deltas[0].text == "需要先检定。"
+    assert deltas[1].kind == "tool_call"
+    assert deltas[1].tool_call.name == "dice_check"
+
+
 def test_complete_tracks_usage_into_accumulator(monkeypatch):
     """服务端 usage 会被累进当前任务的 usage_tracker 累加器（供本局累计 token 消耗）。"""
     from app.ai import usage_tracker

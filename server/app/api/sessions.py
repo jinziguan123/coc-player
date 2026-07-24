@@ -52,14 +52,29 @@ def _session_payload(
         )
         p["is_online"] = bool(sp.owner_token and sp.owner_token in online)
         p["is_kp"] = sp.role == "kp"
-    return {
-        **data,
-        "module_title": module_title,
-        "character_name": (
+    owned_seats = [sp for sp in session.participants if token and sp.owner_token == token]
+    owned_kp_seat = next((sp for sp in owned_seats if sp.role == "kp"), None)
+    owned_player_seat = next(
+        (sp for sp in owned_seats if sp.role == "human" and sp.character_id), None,
+    )
+    if owned_kp_seat:
+        character_name = "KP"
+    elif owned_player_seat:
+        character_name = chars_map.get(owned_player_seat.character_id)
+    elif owned_seats:
+        # 已预留但尚未选择角色的真人席不能回落成房主的主角名。
+        character_name = None
+    else:
+        # 无 token 的本机旧调用、尚未完成身份迁移的存档继续回落到主角快捷字段。
+        character_name = (
             chars_map.get(session.player_character_id)
             if session.player_character_id
             else None
-        ),
+        )
+    return {
+        **data,
+        "module_title": module_title,
+        "character_name": character_name,
     }
 
 

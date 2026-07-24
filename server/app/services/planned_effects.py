@@ -28,6 +28,80 @@ _exec_hp_change = turn_effects._exec_hp_change
 _resolve_hp_target = turn_effects._resolve_hp_target
 _exec_scene_change = turn_effects._exec_scene_change
 
+_META_CLUE_LOCATION_WORDS = ("位置", "下落", "提示", "传闻", "文字", "内容", "线索")
+
+
+def _canonical_item_scene_ids(module: Module | None, item: turn_planner.ItemDelta) -> set[str]:
+    """从结构化场景/实体线索中提取物品的正典出现地点；没有锚点时返回空集并保持兼容。"""
+    if module is None:
+        return set()
+    name = (item.name or "").strip().casefold()
+    if not name:
+        return set()
+    is_key = item.kind == "key" or "钥匙" in name or name == "key"
+    is_document = item.kind == "document"
+    if not (is_key or is_document):
+        return set()
+    terms = {name}
+    # 只有模型确实只写了泛称“钥匙”时才用类型词回退。具体名称（如“酒店房门钥匙”）
+    # 若在模组中没有同名锚点，应视为无法确定而放行，避免误伤合理的临场普通物品。
+    if name in ("钥匙", "key", "一把钥匙"):
+        terms.update(("钥匙", "key"))
+
+    def _matches(text: str) -> bool:
+        haystack = (text or "").casefold()
+        return any(term and term in haystack for term in terms)
+
+    scene_ids: set[str] = set()
+    for scene in module.scenes or []:
+        sid = str(scene.get("id") or "").strip()
+        if sid and _matches(str(scene.get("description") or "")):
+            scene_ids.add(sid)
+
+    # 线索名像“驾驶室钥匙/报纸”时代表实体；“钥匙的位置/某段文字”只是信息，不作为物品落点。
+    for clue in module.clues or []:
+        clue_name = str(clue.get("name") or "")
+        location = str(clue.get("location") or "").strip()
+        if (
+            location
+            and _matches(clue_name)
+            and not any(word in clue_name for word in _META_CLUE_LOCATION_WORDS)
+        ):
+            scene_ids.add(location)
+    return scene_ids
+
+
+def enforce_plan_item_locations(
+    plan: turn_planner.TurnPlan | None,
+    module: Module | None,
+    current_scene_id: str | None,
+    character_scene_ids: dict[str, str | None] | None = None,
+) -> list[str]:
+    """剔除与正典地点冲突的物品获得，并把冲突转成给 KP 的硬叙事约束。"""
+    if plan is None or not plan.items_gained or not current_scene_id:
+        return []
+    kept: list[turn_planner.ItemDelta] = []
+    blocked: list[str] = []
+    for item in plan.items_gained:
+        anchors = _canonical_item_scene_ids(module, item)
+        item_scene_id = (character_scene_ids or {}).get(item.who) or current_scene_id
+        if anchors and item_scene_id not in anchors:
+            blocked.append(
+                f"{item.name} 的正典地点为 {', '.join(sorted(anchors))}，当前是 {item_scene_id}"
+            )
+        else:
+            kept.append(item)
+    if not blocked:
+        return []
+
+    plan.items_gained = kept
+    plan.narration_brief.append(
+        "事实硬约束：当前场景与关键物品的结构化正典地点冲突；不得写成在这里找到、获得或复制该物品。"
+        "应让本轮结果排除错误猜测，或只给出不泄露答案的正确方向。"
+    )
+    logger.warning("规划器物品地点冲突，已阻止写入：%s", "；".join(blocked))
+    return blocked
+
 
 async def _ensure_planned_combat(
     db: Session,
@@ -162,6 +236,17 @@ async def _ensure_planned_items(
     重新生成不会重复增减。物品效果仍由 KP 叙述——这里只保证库存数目可靠。
     """
     if plan is None or (not plan.items_gained and not plan.items_lost):
+        return
+    module = db.get(Module, game_session.module_id)
+    target_scene = game_session.current_scene_id
+    character_scene_ids = {
+        char.name: session_service.get_char_location(game_session, char.id)
+        for char in [player_char, *(teammates or [])]
+    }
+    enforce_plan_item_locations(
+        plan, module, target_scene, character_scene_ids=character_scene_ids,
+    )
+    if not plan.items_gained and not plan.items_lost:
         return
     turn = _current_turn_events(session_service.get_session_events(db, session_id))
     anchor = max(

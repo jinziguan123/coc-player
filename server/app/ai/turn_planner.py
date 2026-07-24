@@ -430,6 +430,16 @@ def build_turn_plan_messages(
         },
         "current_scene": current_scene,
         "scene_neighbors": scene_neighbors,
+        # 全局场景事实只用于防止把关键物品/NPC/事件搬到当前场景；不带 events 与线索正文，
+        # 既给规划器位置锚点，又不让未访问场景的可揭示细节进入 candidate_clue_ids。
+        "canonical_scene_facts": [
+            {
+                "id": scene.get("id", ""),
+                "title": scene.get("title") or scene.get("name", ""),
+                "description": (scene.get("description") or "")[:160],
+            }
+            for scene in resolved_scenes
+        ],
         # 幕后真相：全局裁定依据（线索该不该给、NPC 反应、危险判断都以真相为锚）
         "truth": (getattr(module, "truth", "") or "").strip(),
         "player": _compact_player(player_char),
@@ -506,6 +516,10 @@ def build_turn_plan_messages(
                 "请基于以下运行时资料生成本轮裁定计划。"
                 "线索只有在玩家行动匹配 trigger_condition 时才可进入 candidate_clue_ids。"
                 "不得使用 visible_clues 以外的线索。"
+                "canonical_scene_facts 是仅供裁定防矛盾的全局正典位置索引，不代表玩家已经知道："
+                "若其中明确把物品、NPC 或事件放在其他场景，当前场景里的猜测和任何成功检定都不能"
+                "把它搬来或复制；此时绝不能写入 items_gained，narration_brief 应要求排除错误猜测或只给"
+                "不泄密的正确方向。骰子只决定发现多少，不能改写世界原本是什么。"
                 "clue_ledger 是玩家已掌握线索的台账：status=known（或 discovered=true）"
                 "的线索已完全揭示，不得再进入 candidate_clue_ids；"
                 "status=partial 的仅在玩家行动继续深入时可作为升级揭示的 candidate。"

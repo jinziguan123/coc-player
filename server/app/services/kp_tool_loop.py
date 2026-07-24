@@ -433,11 +433,14 @@ async def _run_kp_agent_loop(
     for _step in range(max_steps):
         step = ["", "", [], [], []]
         tool_calls: list[ToolCall] = []
+        reasoning_parts: list[str] = []
 
-        async def _text_deltas(calls=tool_calls):
+        async def _text_deltas(calls=tool_calls, reasoning=reasoning_parts):
             async for delta in llm.stream_chat(messages, tools=tools, temperature=temperature):
                 if delta.kind == "text" and delta.text:
                     yield delta.text
+                elif delta.kind == "reasoning" and delta.text:
+                    reasoning.append(delta.text)
                 elif delta.kind == "tool_call" and delta.tool_call is not None:
                     calls.append(delta.tool_call)
 
@@ -465,7 +468,7 @@ async def _run_kp_agent_loop(
             natural_end = True
             break
 
-        messages.append({
+        assistant_message = {
             "role": "assistant",
             "content": step[1] or "",
             "tool_calls": [
@@ -479,7 +482,12 @@ async def _run_kp_agent_loop(
                 }
                 for tc in tool_calls
             ],
-        })
+        }
+        if reasoning_parts:
+            # DeepSeek 思考模型要求工具续接请求保留产生 tool_calls 时的完整思考内容；
+            # 其他 OpenAI 兼容供应商没有该字段时保持原消息格式。
+            assistant_message["reasoning_content"] = "".join(reasoning_parts)
+        messages.append(assistant_message)
         suspended = False
         for tc in tool_calls:
             if tc.name in ("dice_check", "opposed_check"):

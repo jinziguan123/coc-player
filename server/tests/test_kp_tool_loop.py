@@ -91,6 +91,10 @@ def _text(t: str) -> StreamDelta:
     return StreamDelta(kind="text", text=t)
 
 
+def _reasoning(t: str) -> StreamDelta:
+    return StreamDelta(kind="reasoning", text=t)
+
+
 def _call(name: str, args: dict, cid: str = "call_1") -> StreamDelta:
     return StreamDelta(kind="tool_call", tool_call=ToolCall(id=cid, name=name, arguments=args))
 
@@ -152,6 +156,29 @@ def test_tool_result_feedback_order():
     # 广播顺序：step1 旁白 → 工具的 system chunk → step2 旁白
     kinds = [json.loads(c[len("data: "):])["type"] for c in chunks]
     assert kinds == ["narration", "system", "narration"]
+
+
+def test_reasoning_content_is_preserved_for_tool_continuation():
+    """DeepSeek 思考内容不展示，但必须原样拼回带 tool_calls 的 assistant 消息。"""
+    llm = _FakeToolLLM([
+        [
+            _reasoning("先判断是否需要检定。"),
+            _reasoning("需要进行灵感检定。"),
+            _call("dice_check", {"skill": "灵感"}),
+        ],
+        [_text("地图上的涂改痕迹逐渐清晰。")],
+    ])
+    executor = _RecordingExecutor({
+        "dice_check": kp_tools.ToolOutcome("灵感检定成功。"),
+    })
+
+    result, chunks = asyncio.run(_run_loop(llm, executor))
+
+    assistant = next(m for m in llm.calls[1]["messages"] if m.get("tool_calls"))
+    assert assistant["reasoning_content"] == "先判断是否需要检定。需要进行灵感检定。"
+    assert "先判断" not in result[0]
+    assert "先判断" not in "".join(chunks)
+    assert result[0] == "地图上的涂改痕迹逐渐清晰。"
 
 
 def test_loop_natural_end_single_step():
