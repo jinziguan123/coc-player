@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator
 
+from app.ai.text_guard import comparable_passages, is_near_duplicate, normalize_comparison_text
 from app.services import command_protocol, world_memory
 from app.services.event_protocol import make_chunk
 
@@ -101,8 +102,13 @@ async def filter_narration_stream(
     group_label: str | None = None,
     guess_speakers: bool = True,
     party_names: set[str] | None = None,
+    shown_dialogues: list[str] | None = None,
+    prior_narration: str = "",
 ) -> AsyncIterator[str]:
     """流式输出 KP 旁白，并把 NPC 台词抽成对话气泡。
+
+    ``shown_dialogues`` 是本轮已经在界面显示的玩家/队友台词。裸引号若与其相同或高度相似，
+    直接丢弃，避免 KP 把玩家气泡再次写进旁白。``prior_narration`` 用于工具续接跨步骤去重。
 
     ``party_names``（玩家 + AI 队友名）给定时，任何归到玩家党名下的台词都**不生成气泡**——
     KP 绝不能替玩家/队友发声。这是显式 [SAY] 与后置说话人路径缺失的守卫（裸引号路径本就避让玩家党）。
@@ -155,6 +161,12 @@ async def filter_narration_stream(
     # 看紧跟其后的文字是不是说话动词（"她说"）；是→抽成气泡，否→原样归还旁白。
     deferring = False
     deferred_open = deferred_buf = deferred_close = deferred_tail = ""
+
+    protected_dialogues = [text for text in (shown_dialogues or []) if (text or "").strip()]
+    seen_narration = comparable_passages(prior_narration, min_chars=24)
+
+    def _is_shown_dialogue(text: str) -> bool:
+        return is_near_duplicate(text, protected_dialogues, min_chars=6, threshold=0.90)
 
     def _looks_like_speech(text: str) -> bool:
         """像台词：有句末标点 / 口语标记 / 够长——用于过滤门牌、招牌等短名词标签。"""
@@ -295,13 +307,37 @@ async def filter_narration_stream(
             kw["metadata"] = md
         return _make_chunk(chunk_type, content, **kw)
 
+    def _commit_one(text: str) -> str:
+        nonlocal narration
+        if not text:
+            return ""
+        if text.strip() and is_near_duplicate(
+            text, seen_narration, min_chars=24, threshold=0.86,
+        ):
+            return ""
+        narration += text
+        result[0] = narration
+        if len(normalize_comparison_text(text)) >= 24:
+            seen_narration.append(text.strip())
+        return text
+
+    def _commit_narration(text: str) -> str | None:
+        """按段提交旁白；明显重复的后写版本不广播也不进入落库结果。"""
+        accepted: list[str] = []
+        remaining = text
+        while "\n\n" in remaining:
+            index = remaining.index("\n\n") + 2
+            accepted.append(_commit_one(remaining[:index]))
+            remaining = remaining[index:]
+        accepted.append(_commit_one(remaining))
+        output = "".join(accepted)
+        return output if output.strip() else None
+
     def _flush_pending() -> str | None:
         nonlocal pending, narration
         if not pending:
             return None
-        narration += pending
-        result[0] = narration
-        out = pending if pending.strip() else None
+        out = _commit_narration(pending)
         pending = ""
         return out
 
@@ -451,7 +487,10 @@ async def filter_narration_stream(
                     ok = False
                 if ok and _is_party_speaker(pending_speaker, party_names):
                     ok = False  # 不替玩家/队友发声
-                if ok:
+                if _is_shown_dialogue(text):
+                    # 玩家/队友台词已经以气泡展示；KP 再次套引号复述时整段丢弃。
+                    pass
+                elif ok:
                     last_speaker = pending_speaker
                     extracted.append((pending_speaker, text))
                     dialogue_marks.append((len(narration), pending_speaker, text))
@@ -492,10 +531,9 @@ async def filter_narration_stream(
                 idx = pending.index("\n\n") + 2
                 chunk = pending[:idx]
                 pending = pending[idx:]
-                narration += chunk
-                result[0] = narration
-                if chunk.strip():
-                    yield _mk("narration", chunk, actor_name="KP")
+                out = _commit_narration(chunk)
+                if out:
+                    yield _mk("narration", out, actor_name="KP")
             if len(pending) > 150:
                 last_b = -1
                 for _i, _ch in enumerate(pending):
@@ -504,10 +542,9 @@ async def filter_narration_stream(
                 if last_b >= 0:
                     chunk = pending[: last_b + 1]
                     pending = pending[last_b + 1:]
-                    narration += chunk
-                    result[0] = narration
-                    if chunk.strip():
-                        yield _mk("narration", chunk, actor_name="KP")
+                    out = _commit_narration(chunk)
+                    if out:
+                        yield _mk("narration", out, actor_name="KP")
 
     if not tag_found:
         if in_say:
@@ -515,7 +552,8 @@ async def filter_narration_stream(
             if chunk:
                 yield chunk
         if in_quote:
-            pending += quote_open + quote_buf.rstrip("\n")   # 未闭合引号：留旁白
+            if not _is_shown_dialogue(quote_buf):
+                pending += quote_open + quote_buf.rstrip("\n")   # 未闭合引号：留旁白
         if in_bracket:
             pending += (bracket_open or "[") + bracket_buf
         if deferring:

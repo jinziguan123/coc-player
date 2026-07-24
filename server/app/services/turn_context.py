@@ -66,6 +66,35 @@ def _current_turn_events(events: list) -> list:
     return events[last_narr + 1:]
 
 
+def _current_party_turn_events(events: list, party_char_ids: set[str]) -> list:
+    """上一段 KP 旁白后、已经展示在界面上的玩家方行动与发言。"""
+    return [
+        event for event in _current_turn_events(events or [])
+        if getattr(event, "event_type", None) in ("action", "dialogue")
+        and getattr(event, "actor_id", None) in party_char_ids
+        and (getattr(event, "content", "") or "").strip()
+    ]
+
+
+def _shown_turn_dialogues(events: list, party_char_ids: set[str]) -> list[str]:
+    """本轮已显示的玩家方台词正文，供实时回显过滤器使用。"""
+    return [
+        event.content.strip()
+        for event in _current_party_turn_events(events, party_char_ids)
+        if event.event_type == "dialogue"
+    ]
+
+
+def _shown_turn_context(events: list, party_char_ids: set[str]) -> str:
+    """本轮已显示的玩家方消息，供终检判断复述和越权代演。"""
+    lines: list[str] = []
+    for event in _current_party_turn_events(events, party_char_ids):
+        actor = (getattr(event, "actor_name", "") or "玩家角色").strip()
+        label = "发言" if event.event_type == "dialogue" else "行动"
+        lines.append(f"[{actor} {label}] {event.content.strip()}")
+    return "\n".join(lines)
+
+
 def commit_pending_travel(db: Session, session_id: str, turn: list | None = None) -> None:
     """把本回合已转正的『前往』动作落成确定性位置同步。
 
@@ -353,7 +382,7 @@ def _recent_seen_text(events: list | None, limit: int = 6) -> str:
 
 async def _validate_and_patch_narration(
     llm, plan: turn_planner.TurnPlan | None, result: list,
-    event_order: list | None = None, seen_context: str = "",
+    event_order: list | None = None, seen_context: str = "", turn_inputs: str = "",
 ) -> None:
     """校验本轮旁白是否违反裁定计划的硬约束（泄露 do_not_reveal / 汇报体+内部标识泄露），
     违反则用改写版本替换落库文本，防止违规内容永久留在会话记录里。
@@ -366,7 +395,12 @@ async def _validate_and_patch_narration(
     """
     if plan is None:
         return
-    validation = await turn_validator.validate_turn_narration(llm, plan, result[0], seen_context)
+    validator_kwargs = {"seen_context": seen_context}
+    if turn_inputs:
+        validator_kwargs["turn_inputs"] = turn_inputs
+    validation = await turn_validator.validate_turn_narration(
+        llm, plan, result[0], **validator_kwargs,
+    )
     if validation is None or not validation.violated:
         return
     logger.warning("KP 回合校验发现违规，已改写落库版本：%s", validation.reason)

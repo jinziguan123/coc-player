@@ -97,6 +97,43 @@ async def test_validate_skips_llm_call_when_not_suspicious():
 
 
 @pytest.mark.asyncio
+async def test_validate_checks_player_echo_and_control_when_turn_inputs_present():
+    """只要本轮有已展示玩家消息，就应启动终检并明确检查回显与越权代演。"""
+    plan = TurnPlan(safety=SafetyPolicy(do_not_reveal=[]))
+    captured: dict = {}
+
+    class _Cap:
+        async def complete(self, messages, **kwargs):
+            captured["messages"] = messages
+            return '{"violated": false}'
+
+    await turn_validator.validate_turn_narration(
+        _Cap(), plan,
+        "江户川龙牙把墨镜往鼻梁上推了推，嘴角勾了起来。",
+        turn_inputs="[江户川龙牙 发言] 怎么，弄丢枪了？",
+    )
+    joined = "\n".join(message["content"] for message in captured["messages"])
+    assert "本轮已在界面展示" in joined
+    assert "复述" in joined and "姿势" in joined and "心理" in joined
+    assert "怎么，弄丢枪了" in joined
+
+
+@pytest.mark.asyncio
+async def test_validate_detects_near_duplicate_passages_without_secret():
+    """没有隐藏真相时，同一回复内明显的重新起笔也应触发终检。"""
+    plan = TurnPlan(safety=SafetyPolicy(do_not_reveal=[]))
+    narration = (
+        "门外的脚步在第三次经过时停了下来，门把手随即缓慢向下转动。\n\n"
+        "相马抬头看向门口，没有出声。\n\n"
+        "门外脚步第三次经过时停了下来，门把手随即缓慢地向下转动。"
+    )
+    llm = _FakeLLM(resp='{"violated": false}')
+    result = await turn_validator.validate_turn_narration(llm, plan, narration)
+    assert llm.called is True
+    assert result is not None
+
+
+@pytest.mark.asyncio
 async def test_validate_calls_llm_when_do_not_reveal_present():
     plan = TurnPlan(safety=SafetyPolicy(do_not_reveal=["管家就是纵火者"]))
     llm = _FakeLLM(resp='{"violated": false, "reason": "", "corrected_narration": ""}')

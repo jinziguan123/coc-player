@@ -539,6 +539,16 @@ def test_kp_context_includes_party(db_factory):
     assert "[阿尔法]" in joined_user and f"[{hero.name}]" in joined_user
     assert "队友·" not in joined_user
 
+    # 本轮事件虽以 user 消息进入上下文，但已在界面显示，必须另有清晰交接边界防止 KP 文学化复述。
+    handoff = "\n".join(
+        m["content"] for m in messages
+        if m["role"] == "system" and "本轮界面交接协议" in m["content"]
+    )
+    assert "已经作为独立气泡展示" in handoff
+    assert "严禁重新描写或润色" in handoff
+    assert "我推开门" in handoff and "我殿后" in handoff
+    assert "把那一个声明动作演细" not in messages[0]["content"]
+
 
 def test_kp_context_uses_viewer_scene_for_split(db_factory):
     """分头行动：build_kp_context 按 viewer_scene_id 给出「该组所在场景」的 NPC，而非只有主角

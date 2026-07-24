@@ -146,6 +146,37 @@ def _acting_player_names(events: list, party_names: list[str]) -> list[str]:
     return names
 
 
+def _format_turn_handoff(events: list, party_char_ids: set[str]) -> str:
+    """把上一段 KP 旁白后的玩家方事件标成“已展示事实”，建立清晰的生成起点。"""
+    last_narration = -1
+    for index, event in enumerate(events or []):
+        if getattr(event, "event_type", None) == "narration":
+            last_narration = index
+
+    lines: list[str] = []
+    for event in (events or [])[last_narration + 1:]:
+        event_type = getattr(event, "event_type", None)
+        actor_id = getattr(event, "actor_id", None)
+        content = (getattr(event, "content", "") or "").strip()
+        if event_type not in ("action", "dialogue") or actor_id not in party_char_ids or not content:
+            continue
+        actor_name = (getattr(event, "actor_name", "") or "玩家角色").strip()
+        label = "发言" if event_type == "dialogue" else "行动"
+        lines.append(f"- [{actor_name} {label}] {content}")
+
+    if not lines:
+        return ""
+    return (
+        "[本轮界面交接协议]\n"
+        "下面列出的玩家/队友消息已经作为独立气泡展示，也是本轮已经发生的事实；"
+        "它们不是待改写的素材。你的新输出必须从最后一条消息之后开始，只写环境产生的新后果、"
+        "NPC 的新反应/台词和必要裁定。\n"
+        + "\n".join(lines)
+        + "\n严禁复述其中任何台词，严禁重新描写或润色其中的玩家动作，也严禁为玩家补写未声明的"
+        "动作、姿势、表情、情绪、心理或决定。即使换词转述、扩成文学描写也算违规。"
+    )
+
+
 def _party_distribution_section(
     session: GameSession,
     party: list[Character],
@@ -715,8 +746,8 @@ def build_kp_context(
                 "名册中**其余玩家角色本轮并未行动**，绝对不许替他们摸/敲/看/走/说/想。"
             )
             actors_line = (
-                "\n4. **本轮行动者只有 " + "、".join(actors) + "**——只可叙述这些角色**已声明动作**的当下过程"
-                "（把那一个声明动作演细，不替他们补上声明外的新动作）；"
+                "\n4. **本轮行动者只有 " + "、".join(actors) + "**——他们的声明已经在界面中完整展示，"
+                "不得在 KP 旁白中重演、润色或换词转述；只从声明之后的世界反馈开始写。"
                 + silent_clause
                 + "给这些沉默角色戏份只能靠环境朝他异动、或 NPC "
                 "主动注意他、对他说话，绝不靠替他行动来「给存在感」。\n"
@@ -999,6 +1030,16 @@ def build_kp_context(
                 "content": "[之前发生的剧情摘要]\n" + summary,
             })
         messages.extend(recent_msgs)
+        # 事件正文可以因滚动摘要被裁剪，但回合边界必须从完整事件流计算，不能把上一轮输入
+        # 误判成“本轮已展示”或反过来漏掉当前回合的玩家消息。
+        handoff = _format_turn_handoff(events, party_char_ids)
+        if handoff:
+            # 放在最后一条玩家消息之前，使模型先读清“这段已展示”，再看到原始事件正文。
+            # 若末尾不是玩家消息（例如系统骰点），则追加在末尾作为最终生成边界。
+            if messages and messages[-1]["role"] == "user":
+                messages.insert(-1, {"role": "system", "content": handoff})
+            else:
+                messages.append({"role": "system", "content": handoff})
         if len(messages) >= 3 and messages[-1]["role"] == "user":
             messages.insert(-1, {
                 "role": "system",

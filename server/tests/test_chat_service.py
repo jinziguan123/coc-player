@@ -1430,6 +1430,43 @@ def test_guess_off_leaves_bare_quote_in_narration():
     assert "交给我吧" in result[0]                            # 台词留在旁白正文里
 
 
+def test_shown_player_dialogue_and_restarted_paragraph_are_filtered():
+    """复现真实异常：KP 复述玩家气泡，并在同一回复里从相同情节重新起笔。"""
+    shown = "怎么，弄丢枪了？回去检讨书怕是少不了了。"
+    text = (
+        "江户川龙牙把墨镜往鼻梁上推了推，侧过头看着相马直树翻检空枪套时那副失魂落魄的模样，"
+        "嘴角勾了起来。\n\n"
+        f"“{shown}”\n\n"
+        "卫衣帽兜下那张拳手惯于挑衅别人的脸上，笑意介于玩笑和刺探之间。\n\n"
+        "江户川龙牙把墨镜往鼻梁上推了推，侧过头看着相马直树翻检空枪套的模样，嘴角勾了起来。\n\n"
+        f"“{shown}”\n\n"
+        "相马终于抬起眼，声音压得很低。"
+    )
+    result = ["", "", [], [], []]
+    chunks = asyncio.run(_collect(chat_service._filter_narration_stream(
+        _one(text), result, guess_speakers=False, shown_dialogues=[shown],
+    )))
+
+    assert shown not in result[0]
+    assert "翻检空枪套时那副失魂落魄的模样" in result[0]
+    assert "翻检空枪套的模样" not in result[0]  # 后写的近重复版本被丢弃
+    assert "相马终于抬起眼" in result[0]         # 后续新增内容仍保留
+    assert shown not in "".join(chunks)          # 实时广播也没有回显
+
+
+def test_prior_narration_prevents_tool_continuation_from_restarting():
+    """工具续接是新的过滤步骤，也必须与已经广播的前半段做跨步骤去重。"""
+    prior = "门外的脚步在第三次经过时停了下来，门把手随即缓慢向下转动。\n\n"
+    repeated = "门外脚步第三次经过时停了下来，门把手随即缓慢地向下转动。\n\n"
+    result = ["", "", [], [], []]
+    asyncio.run(_collect(chat_service._filter_narration_stream(
+        _one(repeated + "锁舌发出一声轻响。"), result,
+        guess_speakers=False, prior_narration=prior,
+    )))
+    assert "门外脚步" not in result[0]
+    assert "锁舌发出一声轻响" in result[0]
+
+
 def test_guess_off_still_honors_explicit_say():
     """guess_speakers=False 只关掉裸引号猜测；显式 [SAY] 标记仍确定性抽取为气泡。"""
     text = "门口传来脚步声。[SAY: who=管家]请进。[/SAY]"

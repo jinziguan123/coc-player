@@ -78,6 +78,8 @@ _record_chunk_event = chat_event_writer.record_chunk_event
 _resolve_scene_ref = turn_context._resolve_scene_ref
 _scene_name = turn_context._scene_name
 _current_turn_events = turn_context._current_turn_events
+_shown_turn_dialogues = turn_context._shown_turn_dialogues
+_shown_turn_context = turn_context._shown_turn_context
 commit_pending_travel = turn_context.commit_pending_travel
 _location_groups = turn_context._location_groups
 _augment_plan_with_backstage = turn_context._augment_plan_with_backstage
@@ -299,6 +301,8 @@ async def _run_generation(
     # 仅在非开场、且模组原文索引就绪时，向 KP 广告 [MODULE_LOOKUP] 能力（镜像规则书模式）
     module_rag_enabled = bool(events) and getattr(module, "rag_status", "") == "ready"
     party_ids = {player_char.id} | {t.id for t in (teammates or [])}
+    shown_dialogues = _shown_turn_dialogues(events, party_ids)
+    turn_inputs = _shown_turn_context(events, party_ids)
     matcher_npcs = _matcher_npcs(module, teammates, game_session)
     # 生成前基线序号：供确定性 SAN 守卫判断「本轮 KP 是否已自行掷过 SAN」（幂等，防重复扣）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
@@ -392,6 +396,7 @@ async def _run_generation(
                 llm, messages, result, execute,
                 tools=kp_tools.openai_tool_schemas(exclude=exclude),
                 npcs=matcher_npcs, plan=plan, party_names=party_names,
+                shown_dialogues=shown_dialogues,
                 event_order=event_order,
             ):
                 room_hub.broadcast(session_id, chunk)
@@ -401,7 +406,9 @@ async def _run_generation(
             raise
         _record_turn_usage(db, game_session, llm, events)   # validator 前，趁 last_usage 仍是主叙事那次
         await _validate_and_patch_narration(
-            llm, plan, result, event_order, seen_context=_recent_seen_text(events))
+            llm, plan, result, event_order, seen_context=_recent_seen_text(events),
+            turn_inputs=turn_inputs,
+        )
         _persist_narration(db, session_id, result, event_order)
         _reorder_turn_events(db, session_id, event_order, base_seq)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
@@ -416,6 +423,7 @@ async def _run_generation(
         try:
             async for chunk in _stream_narration_filtered(
                 kp, messages, result, npcs=matcher_npcs, party_names=party_names,
+                shown_dialogues=shown_dialogues,
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
@@ -424,7 +432,9 @@ async def _run_generation(
             raise
         _record_turn_usage(db, game_session, llm, events)   # validator 前，趁 last_usage 仍是主叙事那次
         await _validate_and_patch_narration(
-            llm, plan, result, seen_context=_recent_seen_text(events))
+            llm, plan, result, seen_context=_recent_seen_text(events),
+            turn_inputs=turn_inputs,
+        )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
         _record_npc_say_memory(
@@ -538,6 +548,8 @@ async def _run_split_generation(
     # 模组原文 RAG：与单场景路径同一门槛（索引就绪才广告 [MODULE_LOOKUP]/注入摘录）
     module_rag_enabled = bool(events) and getattr(module, "rag_status", "") == "ready"
     party_ids = {player_char.id} | {t.id for t in (teammates or [])}
+    shown_dialogues = _shown_turn_dialogues(events, party_ids)
+    turn_inputs = _shown_turn_context(events, party_ids)
 
     combined: list[str] = []
     for grp in groups:
@@ -566,15 +578,19 @@ async def _run_split_generation(
         })
         result = ["", "", [], [], []]
         try:
+            stream_kwargs = {"shown_dialogues": shown_dialogues} if shown_dialogues else {}
             async for chunk in _stream_narration_filtered(
                 kp, messages, result, npcs=matcher_npcs, group_label=label,
+                **stream_kwargs,
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
             _persist_narration(db, session_id, result)
             raise
         await _validate_and_patch_narration(
-            llm, plan, result, seen_context=_recent_seen_text(events))
+            llm, plan, result, seen_context=_recent_seen_text(events),
+            turn_inputs=turn_inputs,
+        )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本组 NPC 台词记入其互动史（听众＝该组成员，信息不跨组共享）
         _record_npc_say_memory(

@@ -66,11 +66,14 @@ async def _stream_narration_filtered(
     npcs: list[dict] | None = None,
     group_label: str | None = None,
     party_names: set[str] | None = None,
+    shown_dialogues: list[str] | None = None,
+    prior_narration: str = "",
 ) -> AsyncIterator[str]:
     """旧路径入口：KPAgent 流式生成 + 台词过滤（核心逻辑在 _filter_narration_stream）。"""
     async for chunk in _filter_narration_stream(
         kp.narrate(messages), result, npcs=npcs, group_label=group_label,
-        party_names=party_names,
+        party_names=party_names, shown_dialogues=shown_dialogues,
+        prior_narration=prior_narration,
     ):
         yield chunk
 

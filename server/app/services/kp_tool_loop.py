@@ -406,6 +406,7 @@ async def _run_kp_agent_loop(
     plan: turn_planner.TurnPlan | None = None,
     max_steps: int = MAX_TOOL_LOOP_STEPS,
     party_names: set[str] | None = None,
+    shown_dialogues: list[str] | None = None,
     event_order: list | None = None,
 ) -> AsyncIterator[str]:
     """KP agent loop：与 _stream_narration_filtered 并列的新路径（use_tool_calls 开启时用）。
@@ -449,6 +450,8 @@ async def _run_kp_agent_loop(
                 _text_deltas(), step, npcs=npcs, group_label=group_label,
                 guess_speakers=False,  # 对话走 say() 工具；旁白里的裸引号一律留旁白、不猜
                 party_names=party_names,  # 内联 [SAY] 误代言玩家/队友也挡下
+                shown_dialogues=shown_dialogues,
+                prior_narration=result[0],
             ):
                 yield chunk
         except BaseException:
@@ -526,6 +529,8 @@ async def _run_kp_agent_loop(
             async for chunk in _filter_narration_stream(
                 _plain_deltas(), step, npcs=npcs, group_label=group_label,
                 guess_speakers=False, party_names=party_names,
+                shown_dialogues=shown_dialogues,
+                prior_narration=result[0],
             ):
                 yield chunk
         except BaseException:
