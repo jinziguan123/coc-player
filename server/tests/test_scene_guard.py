@@ -42,6 +42,10 @@ def _run(coro):
 
 def test_scene_guard_moves_player_by_id(db_factory):
     db = db_factory(); sid, module, pc = _seed(db)
+    from app.services import session_service
+    session_service.add_event(
+        db, sid, "action", "我进入七号车厢", actor_id=pc.id, actor_name=pc.name,
+    )
     plan = TurnPlan(scene_policy=ScenePolicy(scene_change="b"))
     chunks = _run(cs._ensure_planned_scene(db, sid, db.get(GameSession, sid), module, pc, [], plan))
     assert any("场景切换至" in c for c in chunks)
@@ -51,6 +55,10 @@ def test_scene_guard_moves_player_by_id(db_factory):
 def test_scene_guard_resolves_by_name(db_factory):
     """规划器给场景**名**（非 id）也能解析并切换——KP/玩家口头都用名字。"""
     db = db_factory(); sid, module, pc = _seed(db)
+    from app.services import session_service
+    session_service.add_event(
+        db, sid, "action", "我前往七号车厢", actor_id=pc.id, actor_name=pc.name,
+    )
     plan = TurnPlan(scene_policy=ScenePolicy(scene_change="七号车厢"))
     _run(cs._ensure_planned_scene(db, sid, db.get(GameSession, sid), module, pc, [], plan))
     assert db.get(GameSession, sid).current_scene_id == "b"
@@ -79,5 +87,21 @@ def test_scene_guard_noop_when_field_empty(db_factory):
     db = db_factory(); sid, module, pc = _seed(db)
     plan = TurnPlan(scene_policy=ScenePolicy(scene_change=None))
     chunks = _run(cs._ensure_planned_scene(db, sid, db.get(GameSession, sid), module, pc, [], plan))
+    assert chunks == []
+    assert db.get(GameSession, sid).current_scene_id == "a"
+
+
+def test_scene_guard_rejects_discussion_as_movement(db_factory):
+    """讨论/询问去某地不能触发 planner 场景副作用。"""
+    db = db_factory(); sid, module, pc = _seed(db)
+    from app.services import session_service
+    session_service.add_event(
+        db, sid, "dialogue", "我们要不要看一眼七号车厢里面有什么？",
+        actor_id=pc.id, actor_name=pc.name,
+    )
+    plan = TurnPlan(scene_policy=ScenePolicy(scene_change="b"))
+    chunks = _run(cs._ensure_planned_scene(
+        db, sid, db.get(GameSession, sid), module, pc, [], plan,
+    ))
     assert chunks == []
     assert db.get(GameSession, sid).current_scene_id == "a"

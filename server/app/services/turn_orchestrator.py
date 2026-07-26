@@ -453,9 +453,17 @@ async def _run_generation(
     ):
         room_hub.broadcast(session_id, chunk)
 
+    # 确定性场景守卫先执行：真实进入目标场景后，后续 SAN 守卫才能读取该场景的模组机制。
+    async for chunk in _ensure_planned_scene(
+        db, session_id, game_session, module, player_char, teammates, plan,
+        pre_gen_seq=pre_gen_seq,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
     # 确定性 SAN 守卫：计划裁定本轮目睹恐怖但 KP 漏发 SAN → 后端补发（幂等）。
     async for chunk in _ensure_planned_sanity(
         db, session_id, game_session, player_char, teammates, plan, pre_gen_seq,
+        module=module,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -467,12 +475,6 @@ async def _run_generation(
 
     # 确定性战斗伤害守卫：战斗中非常规/范围攻击 → 挂成玩家 pending_roll 亲手掷、扣敌人 HP。
     async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
-        room_hub.broadcast(session_id, chunk)
-
-    # 确定性场景守卫：计划裁定玩家本轮真实移动 → 后端把角色位置/大地图切过去（幂等），补 KP 漏切。
-    async for chunk in _ensure_planned_scene(
-        db, session_id, game_session, module, player_char, teammates, plan,
-    ):
         room_hub.broadcast(session_id, chunk)
 
     await _finish_generation(db, session_id, llm)
@@ -609,9 +611,17 @@ async def _run_split_generation(
     ):
         room_hub.broadcast(session_id, chunk)
 
+    # 先落实有真实移动证据的场景，再据抵达场景的模组机制裁定 SAN。
+    async for chunk in _ensure_planned_scene(
+        db, session_id, game_session, module, player_char, teammates, plan,
+        pre_gen_seq=pre_gen_seq,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
     # 确定性 SAN 守卫：计划裁定本轮目睹恐怖但 KP 漏发 SAN → 后端补发（幂等）。
     async for chunk in _ensure_planned_sanity(
         db, session_id, game_session, player_char, teammates, plan, pre_gen_seq,
+        module=module,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -623,12 +633,6 @@ async def _run_split_generation(
 
     # 确定性战斗伤害守卫：战斗中非常规/范围攻击 → 挂成玩家 pending_roll 亲手掷、扣敌人 HP。
     async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
-        room_hub.broadcast(session_id, chunk)
-
-    # 确定性场景守卫：计划裁定玩家本轮真实移动 → 后端把角色位置/大地图切过去（幂等），补 KP 漏切。
-    async for chunk in _ensure_planned_scene(
-        db, session_id, game_session, module, player_char, teammates, plan,
-    ):
         room_hub.broadcast(session_id, chunk)
 
     await _finish_generation(db, session_id, llm)
@@ -778,10 +782,32 @@ async def run_chat_generation(session_id: str) -> None:
             )
 
         events = session_service.get_session_events(db, session_id)
+        # 队友行动可能补充真实移动、恐怖见闻或新的行动事实；回合起点的 plan 只用于
+        # 队友导演提示，不能继续作为最终副作用裁定。重新规划后的结果才交给 KP 与守卫。
+        generation_plan = plan
+        if ai_teammates:
+            db.refresh(game_session)
+            post_rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
+            post_plan_messages = turn_planner.build_turn_plan_messages(
+                game_session, module, player_char, events,
+                teammates=party_others,
+                rules_lookup_enabled=post_rules_enabled,
+                rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
+            )
+            post_plan = await turn_planner.run_turn_planner(fast_llm, post_plan_messages)
+            if post_plan is not None:
+                generation_plan = post_plan
+                planned_effects.enforce_plan_item_locations(
+                    generation_plan, module, game_session.current_scene_id,
+                )
+                _record_clue_ledger_from_plan(
+                    db, game_session, generation_plan, events, player_char, party_others,
+                    module=module,
+                )
         t_kp = time.monotonic()
         await _run_generation(
             db, session_id, game_session, module, player_char, events,
-            teammates=party_others, blind_results=team_blind, plan=plan,
+            teammates=party_others, blind_results=team_blind, plan=generation_plan,
         )
         logger.info(
             "耗时|KP 叙事 %.1fs session=%s", time.monotonic() - t_kp, session_id,
@@ -871,6 +897,7 @@ async def _run_kp_turn(
         if need_sanity:
             async for chunk in _ensure_planned_sanity(
                 db, session_id, game_session, player_char, party_others, plan, pre_gen_seq,
+                module=module,
             ):
                 room_hub.broadcast(session_id, chunk)
         if need_mishap:

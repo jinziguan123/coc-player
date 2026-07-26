@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator
 
 from sqlalchemy.orm import Session
@@ -29,6 +30,201 @@ _resolve_hp_target = turn_effects._resolve_hp_target
 _exec_scene_change = turn_effects._exec_scene_change
 
 _META_CLUE_LOCATION_WORDS = ("位置", "下落", "提示", "传闻", "文字", "内容", "线索")
+
+# 这些词只表示讨论、建议或假设，不能作为「已经移动」的证据。
+_NON_COMMITTAL_MOVE_MARKERS = (
+    "要不要", "是否", "能不能", "可以吗", "去不去", "要去吗", "建议", "提议",
+    "考虑", "打算", "想去", "想进入", "希望", "准备", "计划", "应该", "不如", "再决定", "如果",
+)
+_MOVE_VERBS = (
+    "进入", "走进", "前往", "去往", "前去", "赶往", "抵达", "到达", "来到",
+    "走向", "移动到", "返回", "回到", "穿过", "去",
+)
+_ENTRY_MARKERS = ("进入", "走进", "抵达", "到达", "来到", "踏入")
+_TERROR_MARKERS = (
+    "尸体", "尸骸", "腐尸", "血腥", "鲜血", "怪物", "生物", "畸形", "触手",
+    "大嘴", "超自然", "非人的", "肢体", "头颅", "残骸", "肉块", "鬼魂", "幽灵",
+    "邪神", "异形", "尖牙", "眼球", "面孔裂",
+)
+
+
+def _scene_terms(module: Module | None, scene_id: str | None) -> set[str]:
+    """返回场景 id 与名称，供移动证据做保守的文本匹配。"""
+    if not module or not scene_id:
+        return set()
+    terms = {str(scene_id).strip()}
+    for scene in module.scenes or []:
+        if str(scene.get("id") or "").strip() != str(scene_id).strip():
+            continue
+        for key in ("name", "title"):
+            value = str(scene.get(key) or "").strip()
+            if value:
+                terms.add(value)
+    return {term for term in terms if term}
+
+
+def _guard_turn_events(
+    db: Session, session_id: str, pre_gen_seq: int | None = None,
+) -> list:
+    """取生成前一段玩家回合及其后果。
+
+    生成结束后最新的 KP narration 会让 ``_current_turn_events`` 只看到尾部系统事件；
+    守卫仍需看到 narration 之前的玩家移动/行动，因此按生成前序号定位上一段旁白。
+    """
+    all_events = session_service.get_session_events(db, session_id)
+    if pre_gen_seq is None:
+        return _current_turn_events(all_events)
+    previous_narr_seq = max(
+        (int(event.sequence_num or 0) for event in all_events
+         if event.event_type == "narration" and int(event.sequence_num or 0) <= pre_gen_seq),
+        default=-1,
+    )
+    return [event for event in all_events if int(event.sequence_num or 0) > previous_narr_seq]
+
+
+def _turn_evidence_text(
+    db: Session, session_id: str, pre_gen_seq: int,
+) -> str:
+    """取本轮行动/对话与生成后新增叙事，避免拿旧回合的恐怖内容重复触发。"""
+    events = _guard_turn_events(db, session_id, pre_gen_seq)
+    texts = []
+    for event in events:
+        seq = int(event.sequence_num or 0)
+        if event.event_type in ("action", "dialogue") or seq > pre_gen_seq:
+            content = (event.content or "").strip()
+            if content:
+                texts.append(content)
+    return "\n".join(texts)
+
+
+def _explicit_player_movement(
+    db: Session,
+    session_id: str,
+    module: Module | None,
+    player_char: Character,
+    target_scene_id: str,
+    pre_gen_seq: int | None = None,
+) -> bool:
+    """判断本轮是否有玩家角色明确执行了前往目标场景的动作。
+
+    只认玩家角色自己的 action/dialogue 或带 travel 元数据的动作；队友的建议、玩家的
+    疑问与条件句全部拒绝。地图 travel 本身是权威证据，普通对话只有同时命中地点和移动动词才算。
+    """
+    terms = _scene_terms(module, target_scene_id)
+    if not terms:
+        return False
+    events = _guard_turn_events(db, session_id, pre_gen_seq)
+    for event in events:
+        if event.actor_id != player_char.id:
+            continue
+        metadata = event.metadata_ or {}
+        travel_scene = str(metadata.get("scene_id") or "").strip()
+        if metadata.get("travel") and travel_scene == target_scene_id:
+            return True
+        if event.event_type not in ("action", "dialogue"):
+            continue
+        text = (event.content or "").strip()
+        if not text or "?" in text or "？" in text:
+            continue
+        if any(marker in text for marker in _NON_COMMITTAL_MOVE_MARKERS):
+            continue
+        if not any(term in text for term in terms):
+            continue
+        if any(verb in text for verb in _MOVE_VERBS):
+            return True
+    return False
+
+
+def _trigger_matches(trigger: str, text: str) -> bool:
+    """允许模组机制 trigger 与叙事有轻微活用差异，但不把单个泛词当命中。"""
+    trigger = (trigger or "").strip()
+    text = (text or "").strip()
+    if not trigger or not text:
+        return False
+    if trigger in text:
+        return True
+    fragments = re.findall(r"[\u4e00-\u9fff]{2,}", trigger)
+    if not fragments:
+        return trigger.casefold() in text.casefold()
+    hits = sum(1 for fragment in fragments if fragment in text)
+    return hits >= (2 if len(fragments) >= 2 else 1)
+
+
+def _scene_sanity_mechanism(
+    module: Module | None,
+    scene_id: str | None,
+    evidence_text: str,
+    entered: bool,
+) -> dict | None:
+    """找出本轮实际命中的当前场景 SAN 机制；进入场景时优先选择 entry 机制。"""
+    if not module or not scene_id:
+        return None
+    scene = next(
+        (s for s in module.scenes or [] if str(s.get("id") or "") == str(scene_id)),
+        None,
+    )
+    mechanisms = [
+        event for event in (scene or {}).get("events", []) or []
+        if isinstance(event, dict) and event.get("kind") == "san_check"
+    ]
+    if not mechanisms:
+        return None
+    for event in mechanisms:
+        if _trigger_matches(str(event.get("trigger") or ""), evidence_text):
+            return event
+    if entered:
+        entry = [
+            event for event in mechanisms
+            if any(marker in str(event.get("trigger") or "") for marker in _ENTRY_MARKERS)
+        ]
+        if len(entry) == 1:
+            return entry[0]
+        if len(mechanisms) == 1:
+            return mechanisms[0]
+    return None
+
+
+def _apply_scene_sanity_mechanism(plan: turn_planner.TurnPlan, mechanism: dict) -> bool:
+    """把模组原文的 ``san_loss=成功/失败`` 规格覆盖到计划，拒绝通用默认骰式。"""
+    raw = str(mechanism.get("san_loss") or "").strip()
+    parts = re.split(r"\s*/\s*", raw, maxsplit=1)
+    if len(parts) != 2 or not all(part.strip() for part in parts):
+        return False
+    plan.sanity.trigger = True
+    plan.sanity.success_loss = parts[0].strip()
+    plan.sanity.failure_loss = parts[1].strip()
+    plan.sanity.source = str(mechanism.get("trigger") or plan.sanity.source or "场景机制").strip()
+    return True
+
+
+def _sanity_has_evidence(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module | None,
+    player_char: Character,
+    plan: turn_planner.TurnPlan,
+    pre_gen_seq: int,
+) -> bool:
+    """SAN 只能由本轮恐怖叙事或当前场景明文机制触发。"""
+    evidence_text = _turn_evidence_text(db, session_id, pre_gen_seq)
+    scene_id = session_service.get_char_location(game_session, player_char.id)
+    entered = bool(scene_id and _explicit_player_movement(
+        db, session_id, module, player_char, scene_id, pre_gen_seq=pre_gen_seq,
+    ))
+    mechanism = _scene_sanity_mechanism(module, scene_id, evidence_text, entered)
+    if mechanism is not None and _apply_scene_sanity_mechanism(plan, mechanism):
+        return True
+    if not plan.sanity.trigger or not evidence_text:
+        return False
+    if not any(marker in evidence_text for marker in _TERROR_MARKERS):
+        return False
+    source = (plan.sanity.source or "").strip()
+    if not source or source in ("本轮目睹的恐怖", "恐怖", "未知恐怖"):
+        return True
+    return _trigger_matches(source, evidence_text) or any(
+        marker in source and marker in evidence_text for marker in _TERROR_MARKERS
+    )
 
 
 def _canonical_item_scene_ids(module: Module | None, item: turn_planner.ItemDelta) -> set[str]:
@@ -158,6 +354,7 @@ async def _ensure_planned_sanity(
     teammates: list[Character] | None,
     plan: turn_planner.TurnPlan | None,
     pre_gen_seq: int,
+    module: Module | None = None,
 ) -> AsyncIterator[str]:
     """确保规划器裁定的『目睹恐怖』一定落成理智检定，补偿 KP 漏发 SAN_CHECK。
 
@@ -165,9 +362,17 @@ async def _ensure_planned_sanity(
     发出（系统自动掷、结算损失与疯狂）。若 KP 本轮已自行掷过 SAN（任意恐怖源），本守卫幂等跳过；
     同一角色对同一恐怖源的去重仍由 _exec_san_check（world_state.san_checked）保证。
     """
-    if plan is None or not plan.sanity.trigger:
+    if plan is None:
         return
     if _san_rolled_this_turn(db, session_id, pre_gen_seq):
+        return
+    if not _sanity_has_evidence(
+        db, session_id, game_session, module, player_char, plan, pre_gen_seq,
+    ):
+        logger.warning(
+            "规划器 SAN 缺少本轮恐怖证据，已跳过：session=%s source=%s",
+            session_id, plan.sanity.source,
+        )
         return
     kv = {
         "success_loss": plan.sanity.success_loss or "0",
@@ -229,6 +434,7 @@ async def _ensure_planned_items(
     player_char: Character,
     teammates: list[Character] | None,
     plan: turn_planner.TurnPlan | None,
+    pre_gen_seq: int | None = None,
 ) -> AsyncIterator[str]:
     """规划器裁定的物品增减确定性落库（获得入库、失去/消耗移除），补偿 KP 不记账——库存是权威状态。
 
@@ -334,6 +540,7 @@ async def _ensure_planned_scene(
     player_char: Character,
     teammates: list[Character] | None,
     plan: turn_planner.TurnPlan | None,
+    pre_gen_seq: int | None = None,
 ) -> AsyncIterator[str]:
     """确保规划器裁定的『玩家本轮真实移动到某场景』一定落成位置/地图切换，补偿 KP 漏调 scene_change。
 
@@ -352,6 +559,21 @@ async def _ensure_planned_scene(
     if not ref:
         return
     db.refresh(game_session)
+    target_scene_id = turn_context._resolve_scene_ref(module, ref)
+    current_scene_id = session_service.get_char_location(game_session, player_char.id)
+    if (
+        target_scene_id
+        and target_scene_id != current_scene_id
+        and not _explicit_player_movement(
+            db, session_id, module, player_char, target_scene_id,
+            pre_gen_seq=pre_gen_seq,
+        )
+    ):
+        logger.warning(
+            "规划器场景切换缺少玩家移动证据，已跳过：session=%s target=%s",
+            session_id, target_scene_id,
+        )
+        return
     chunks, _sid, _note = await _exec_scene_change(
         db, session_id, game_session, module, ref, player_char, teammates,
     )

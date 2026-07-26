@@ -61,8 +61,9 @@ def test_build_message_carries_sanity():
 def test_guard_fires_san_when_planner_triggers(db_factory, monkeypatch):
     db = db_factory(); sid, pc = _seed(db)
     monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)  # 检定失败 → 扣满损失
-    plan = TurnPlan(sanity=SanityPolicy(trigger=True, source="墓室腐尸", success_loss="0", failure_loss="1d6"))
     pre = session_service.get_next_sequence_num(db, sid) - 1
+    session_service.add_event(db, sid, "narration", "手电照出一具腐尸。", actor_name="KP")
+    plan = TurnPlan(sanity=SanityPolicy(trigger=True, source="墓室腐尸", success_loss="0", failure_loss="1d6"))
     chunks = _run(cs._ensure_planned_sanity(db, sid, db.get(GameSession, sid), pc, [], plan, pre))
     assert chunks                                   # 补发了 SAN
     db.refresh(pc)
@@ -88,6 +89,65 @@ def test_guard_noop_when_trigger_false(db_factory):
     pre = session_service.get_next_sequence_num(db, sid) - 1
     plan = TurnPlan(sanity=SanityPolicy(trigger=False))
     assert _run(cs._ensure_planned_sanity(db, sid, db.get(GameSession, sid), pc, [], plan, pre)) == []
+
+
+def test_guard_skips_sanity_without_terror_evidence(db_factory):
+    """只有异响/灯光等普通环境描写时，planner 的误触发不能凭空补 SAN。"""
+    db = db_factory(); sid, pc = _seed(db)
+    pre = session_service.get_next_sequence_num(db, sid) - 1
+    session_service.add_event(db, sid, "narration", "六号车厢方向传来三次异响，灯光闪烁。", actor_name="KP")
+    plan = TurnPlan(sanity=SanityPolicy(trigger=True, source="七号车厢的异响"))
+    chunks = _run(cs._ensure_planned_sanity(
+        db, sid, db.get(GameSession, sid), pc, [], plan, pre,
+    ))
+    assert chunks == []
+    assert not any(
+        e.event_type == "dice" and (e.metadata_ or {}).get("skill") == "SAN"
+        for e in session_service.get_session_events(db, sid)
+    )
+
+
+def test_scene_mechanism_overrides_generic_sanity_loss(db_factory, monkeypatch):
+    """实际进入场景时，优先使用模组明文 1/1d4，而不是 planner 默认 1d6。"""
+    db = db_factory()
+    module = Module(
+        title="列车", rule_system="coc", npcs=[],
+        scenes=[
+            {"id": "car6", "title": "六号车厢"},
+            {
+                "id": "car7", "title": "七号车厢",
+                "events": [{
+                    "trigger": "进入七号车厢", "kind": "san_check", "san_loss": "1/1d4",
+                }],
+            },
+        ],
+    )
+    pc = Character(
+        name="龙牙", rule_system="coc", is_player=True,
+        system_data={"sanity": {"current": 60, "max": 99}},
+    )
+    db.add_all([module, pc]); db.flush()
+    session = GameSession(
+        module_id=module.id, player_character_id=pc.id, status="active",
+        world_state={}, current_scene_id="car6",
+    )
+    db.add(session); db.commit()
+    pre = session_service.get_next_sequence_num(db, session.id) - 1
+    session_service.set_char_location(db, session.id, pc.id, "car7")
+    session_service.add_event(
+        db, session.id, "action", "（前往：七号车厢）", actor_id=pc.id, actor_name=pc.name,
+    )
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
+    plan = TurnPlan(sanity=SanityPolicy(trigger=True, source="七号车厢", failure_loss="1d6"))
+    chunks = _run(cs._ensure_planned_sanity(
+        db, session.id, db.get(GameSession, session.id), pc, [], plan, pre, module=module,
+    ))
+    assert chunks
+    san_event = next(
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "dice" and (e.metadata_ or {}).get("skill") == "SAN"
+    )
+    assert (san_event.metadata_["dice"] or {}).get("notation") == "1d4"
 
 
 def test_check_continuation_fires_san_via_run_kp_turn(db_factory, monkeypatch):
