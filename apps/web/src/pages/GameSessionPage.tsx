@@ -26,7 +26,7 @@ import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { Modal } from '../components/ui/modal'
 import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiLaurelCrown, GiAncientRuins, GiMagnifyingGlass } from 'react-icons/gi'
-import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
+import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
 import { useRepairableImage, type ModuleImageKind } from '../components/module/ModuleImage'
@@ -600,8 +600,23 @@ export function GameSessionPage() {
   const immersiveOn = !!combat && battleLayout === 'immersive' && wideViewport
   // 聊天侧栏折叠：折叠后战场更大；期间到达的新消息计入未读徽标（展开即清）。
   const [chatCollapsed, setChatCollapsed] = useState(false)
+  // KP 控制台侧栏折叠：跨会话记住偏好（KP 常年开着，玩家看不到这一栏）
+  const [kpCollapsed, setKpCollapsed] = useState(
+    () => localStorage.getItem('trpg_kp_panel_collapsed') === '1',
+  )
+  useEffect(() => {
+    localStorage.setItem('trpg_kp_panel_collapsed', kpCollapsed ? '1' : '0')
+  }, [kpCollapsed])
   const chatBaseCount = useRef(0)   // 折叠那一刻的可见消息数（未读 = 当前数 − 它）
   useEffect(() => { if (!immersiveOn) setChatCollapsed(false) }, [immersiveOn])
+  // 沉浸战斗 + KP 控制台成栏后是「战场 | 聊天 | 控制台」三栏，中段棋盘会被压到放不下。
+  // 进入沉浸战斗那一刻替 KP 把聊天收成窄条（战场面板自带战斗日志，聊天此时基本冗余），
+  // 之后 KP 手动展开就不再干预——只在转场瞬间做一次，不持续抢控制权。
+  const kpCollapsedRef = useRef(kpCollapsed)
+  kpCollapsedRef.current = kpCollapsed
+  useEffect(() => {
+    if (immersiveOn && isKp && !kpCollapsedRef.current) setChatCollapsed(true)
+  }, [immersiveOn, isKp])
   // 进出沉浸布局时放一次短暗幕转场（复用场景转场 scene-veil 的观感；reduced-motion 下全局禁用）。
   const [battleVeil, setBattleVeil] = useState(false)
   const prevImmersiveOn = useRef(immersiveOn)
@@ -1976,7 +1991,7 @@ export function GameSessionPage() {
             </button>
           </div>
         )}
-        {isKp && <HumanKpPanel sessionId={currentSession.id} turnReady={turnState?.ready === true} />}
+        {/* KP 控制台已移到右侧独立栏（见布局末尾），不再内联挤占叙事流的竖向空间 */}
         {!streaming && (
           <div className="px-3 pb-1 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -2123,6 +2138,29 @@ export function GameSessionPage() {
                 .filter((p) => p.character_id && p.character_id !== myCharId)
                 .map((p) => ({ id: p.character_id as string, name: p.character_name || '队友' })),
             } : undefined}
+          />
+        </aside>
+      )}
+
+      {/* KP 控制台侧栏：与叙事流并列而非争抢竖向空间。
+          收起后留一条窄条（与聊天侧栏的 .chat-rail 同一套交互），偏好存 localStorage。 */}
+      {isKp && kpCollapsed && (
+        <button
+          onClick={() => setKpCollapsed(false)}
+          className="chat-rail flex-shrink-0"
+          title="展开 KP 控制台"
+        >
+          <PanelLeftOpen size={16} />
+          <span className="kp-rail-label">KP</span>
+        </button>
+      )}
+      {isKp && !kpCollapsed && (
+        <aside className="kp-console-pane flex-shrink-0">
+          <HumanKpPanel
+            sessionId={currentSession.id}
+            turnReady={turnState?.ready === true}
+            variant="sidebar"
+            onCollapse={() => setKpCollapsed(true)}
           />
         </aside>
       )}

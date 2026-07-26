@@ -81,7 +81,9 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
       const r = el.getBoundingClientRect()
       // 预留：横向滚动条余量 12px；纵向「战场」标签 + 移动按钮行约 40px
       const c = Math.floor(Math.min((r.width - 12) / gridCols, (r.height - 40) / gridRows))
-      setFitCell(Math.max(40, Math.min(64, c)))
+      // 下限 32：KP 控制台独立成栏后，战场/聊天/控制台三栏并列时中段会更窄，
+      // 原来的下限 40 会让 10 列棋盘放不下而横向截断。32px 仍够放一个汉字令牌。
+      setFitCell(Math.max(32, Math.min(64, c)))
     }
     measure()
     const ro = new ResizeObserver(measure)

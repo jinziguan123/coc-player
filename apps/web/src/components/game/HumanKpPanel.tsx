@@ -15,6 +15,7 @@ import {
   Maximize2,
   Move,
   NotebookPen,
+  PanelRightClose,
   RefreshCw,
   Search,
   Send,
@@ -272,6 +273,10 @@ type SpeechRecognitionCtor = new () => SpeechRecognitionLike
 interface Props {
   sessionId: string
   turnReady?: boolean
+  /** 'inline' 内联在聊天列（旧版）；'sidebar' 独立右侧栏，撑满高度、内容区自己滚。
+   *  侧栏形态下收起由外层的窄条接管，面板不再自绘收起按钮。 */
+  variant?: 'inline' | 'sidebar'
+  onCollapse?: () => void
 }
 
 const ACTION_LABELS: Record<KpAction, string> = {
@@ -322,8 +327,12 @@ function highlightText(text: string, query: string) {
   ))
 }
 
-export function HumanKpPanel({ sessionId, turnReady = false }: Props) {
-  const [collapsed, setCollapsed] = useState(false)
+export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline', onCollapse }: Props) {
+  const sidebar = variant === 'sidebar'
+  // 侧栏形态没有「内联收起」这回事——整栏的显隐由外层窄条控制，此处恒展开。
+  const [collapsedInline, setCollapsedInline] = useState(false)
+  const collapsed = sidebar ? false : collapsedInline
+  const setCollapsed = setCollapsedInline
   const [tab, setTab] = useState<PanelTab>('tools')
   const [action, setAction] = useState<KpAction>('narration')
   const [busy, setBusy] = useState('')
@@ -727,11 +736,12 @@ export function HumanKpPanel({ sessionId, turnReady = false }: Props) {
   ))
 
   return (
-    <section className="kp-console mx-3 mb-2 rounded-md px-3 py-2">
-      <div className={`${collapsed ? '' : 'mb-2'} flex items-center gap-1.5 overflow-x-auto`}>
+    <section className={`kp-console rounded-md px-3 py-2 ${sidebar ? 'kp-console--sidebar' : 'mx-3 mb-2'}`}>
+      {/* 侧栏形态：抬头固定，标签栏可换行（宽度够，不再把「模组资料」挤出可视区） */}
+      <div className={`${collapsed ? '' : 'mb-2'} flex items-center gap-1.5 ${sidebar ? 'flex-wrap' : 'overflow-x-auto'}`}>
         <span className="kp-console-badge mr-1 whitespace-nowrap">真人 KP</span>
         {!collapsed && (
-          <div className="kp-tabs inline-flex flex-shrink-0 items-center gap-0.5">
+          <div className={`kp-tabs inline-flex items-center gap-0.5 ${sidebar ? 'flex-wrap' : 'flex-shrink-0'}`}>
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
@@ -761,14 +771,17 @@ export function HumanKpPanel({ sessionId, turnReady = false }: Props) {
         </button>
         <button
           type="button"
-          onClick={() => setCollapsed((value) => !value)}
+          onClick={() => (sidebar ? onCollapse?.() : setCollapsed((value) => !value))}
           className="btn-secondary !p-1.5"
           aria-expanded={!collapsed}
-          title={collapsed ? '展开 KP 控制台' : '收起 KP 控制台'}
+          title={sidebar ? '收起 KP 控制台' : collapsed ? '展开 KP 控制台' : '收起 KP 控制台'}
         >
-          {collapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+          {sidebar ? <PanelRightClose size={15} /> : collapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
         </button>
       </div>
+
+      {/* 侧栏形态：抬头以下整体滚动，抬头（含「开放行动」）常驻 */}
+      <div className={sidebar ? 'kp-console-body' : ''}>
 
       {!collapsed && tab === 'tools' && (
         <div>
@@ -1223,6 +1236,7 @@ export function HumanKpPanel({ sessionId, turnReady = false }: Props) {
           </div>
         </div>
       )}
+      </div>
     </section>
   )
 }
