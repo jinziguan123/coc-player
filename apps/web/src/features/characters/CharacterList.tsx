@@ -16,6 +16,41 @@ const ATTRIBUTE_LABELS: Record<string, string> = {
   EDU: '教育',
 }
 
+/** 要害条：低于三成转血红，让「快没了」在列表里一眼可见。 */
+function VitalBar({
+  label,
+  current,
+  max,
+  tone,
+}: { label: string; current: number; max: number; tone: string }) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0
+  const low = pct < 30
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="mb-0.5 flex items-baseline justify-between gap-1">
+        <span
+          className="text-[length:var(--text-2xs)] tracking-wider"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          {label}
+        </span>
+        <span className="font-mono text-[length:var(--text-2xs)] tabular-nums">
+          {current}/{max}
+        </span>
+      </div>
+      <div
+        className="h-1 overflow-hidden rounded-full"
+        style={{ background: 'var(--surface-sunken)' }}
+      >
+        <div
+          className="stat-bar-fill h-full rounded-full"
+          style={{ width: `${pct}%`, background: low ? 'var(--color-danger)' : tone }}
+        />
+      </div>
+    </div>
+  )
+}
+
 interface CharacterListProps {
   characters: Character[]
   selectedId: string | null
@@ -58,7 +93,7 @@ export function CharacterList({
             setPage(1)
           }}
           placeholder="搜索角色名 / 职业 / 规则…"
-          className="input flex-1"
+          className="input w-full max-w-md"
         />
         <span
           className="whitespace-nowrap text-xs"
@@ -66,12 +101,13 @@ export function CharacterList({
         >
           {filtered.length} 个角色
         </span>
+        <span aria-hidden="true" className="flex-1" />
       </div>
 
-      <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {pageItems.length === 0 && (
           <p
-            className="py-6 text-center text-sm"
+            className="col-span-full py-6 text-center text-sm"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             {characters.length === 0
@@ -93,8 +129,13 @@ export function CharacterList({
           return (
             <div
               key={character.id}
-              className="card cursor-pointer transition-colors"
-              style={{ borderColor: isActive ? 'var(--color-accent)' : undefined }}
+              className="card character-card cursor-pointer !p-0 overflow-hidden"
+              style={{
+                borderColor: isActive ? 'var(--color-accent)' : undefined,
+                boxShadow: isActive
+                  ? '0 0 0 1px var(--color-accent), 0 4px 14px var(--shadow-color-strong)'
+                  : undefined,
+              }}
               onClick={() => onSelect(character)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') onSelect(character)
@@ -102,24 +143,32 @@ export function CharacterList({
               role="button"
               tabIndex={0}
             >
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="card-title !mb-0 flex items-center gap-2">
-                  <UserRound className="h-4 w-4 opacity-60" aria-hidden="true" />
-                  {character.name}
-                </h3>
-                <div className="flex items-center gap-2">
-                  {occupation && <span className="badge">{occupation}</span>}
-                  <span className="badge">{character.rule_system.toUpperCase()}</span>
+              {/* 抬头：首字纹章 + 姓名 + 职业/规则，操作按钮 hover 才浮现，静息态更干净 */}
+              <div
+                className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
+                style={{ borderBottom: '1px solid var(--color-border)' }}
+              >
+                <span className="char-sigil" aria-hidden="true">
+                  {character.name.trim().charAt(0) || <UserRound className="h-4 w-4" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]">
+                    {character.name}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {occupation && <span className="chip">{occupation}</span>}
+                    <span className="chip chip--accent">
+                      {character.rule_system.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+                <div className="character-card-actions flex flex-shrink-0 items-center gap-1">
                   <button
                     onClick={(event) => {
                       event.stopPropagation()
                       onEdit(character)
                     }}
-                    className="rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-on-accent)]"
-                    style={{
-                      color: 'var(--color-text-accent)',
-                      border: '1px solid var(--color-border)',
-                    }}
+                    className="chip chip--accent hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
                   >
                     编辑
                   </button>
@@ -135,11 +184,7 @@ export function CharacterList({
                           event.stopPropagation()
                           open()
                         }}
-                        className="rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-[var(--color-danger-deep)] hover:text-white"
-                        style={{
-                          color: 'var(--color-danger)',
-                          border: '1px solid var(--color-danger)',
-                        }}
+                        className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
                       >
                         删除
                       </button>
@@ -147,26 +192,33 @@ export function CharacterList({
                   </ConfirmDialog>
                 </div>
               </div>
-              <div
-                className="flex flex-wrap gap-3 text-sm"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                {Object.entries(character.base_attributes).map(([key, value]) => (
-                  <span key={key}>
-                    {ATTRIBUTE_LABELS[key] || key}{' '}
-                    <strong className="font-mono">{value}</strong>
-                  </span>
-                ))}
-              </div>
-              {Boolean(hitPoints.max) && (
-                <div
-                  className="mt-2 flex gap-4 font-mono text-xs"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  <span>HP {hitPoints.current}/{hitPoints.max}</span>
-                  <span>SAN {sanity.current}/{sanity.max}</span>
+
+              <div className="px-3 py-2.5">
+                {Boolean(hitPoints.max) && (
+                  <div className="mb-2.5 flex gap-3">
+                    <VitalBar
+                      label="HP"
+                      current={hitPoints.current}
+                      max={hitPoints.max}
+                      tone="var(--color-danger-deep)"
+                    />
+                    <VitalBar
+                      label="SAN"
+                      current={sanity.current}
+                      max={sanity.max}
+                      tone="var(--color-accent)"
+                    />
+                  </div>
+                )}
+                <div className="grid grid-cols-4 gap-1">
+                  {Object.entries(character.base_attributes).map(([key, value]) => (
+                    <div key={key} className="stat-tile">
+                      <div className="stat-tile-label">{ATTRIBUTE_LABELS[key] || key}</div>
+                      <div className="stat-tile-value">{value}</div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
             </div>
           )
         })}

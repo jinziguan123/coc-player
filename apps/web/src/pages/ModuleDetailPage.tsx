@@ -473,8 +473,9 @@ export function ModuleDetailPage() {
       }),
     }))
   }
+  // 详情/编辑同样放宽：条目区已改自适应网格，窄栏会白白空掉半屏
   return (
-    <div className={wide ? 'max-w-6xl' : 'max-w-3xl'}>
+    <div className={wide ? 'max-w-6xl' : 'max-w-[100rem]'}>
       <div className="flex items-center gap-3 mb-4">
         <button onClick={() => navigate('/modules')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
           <GiReturnArrow /> 返回
@@ -593,33 +594,37 @@ export function ModuleDetailPage() {
       <>
       {/* 基本信息 */}
       <Section title="基本信息">
-        <Row label="标题">{edit ? <TextInput value={data.title} onChange={(v) => setData((d) => ({ ...d, title: v }))} /> : <span className="font-semibold">{data.title}</span>}</Row>
-        <Row label="规则">{edit ? (
-          <Select value={data.rule_system} onValueChange={(v) => setData((d) => ({ ...d, rule_system: v }))}>
-            <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="coc">CoC</SelectItem><SelectItem value="dnd">DnD</SelectItem></SelectContent>
-          </Select>
-        ) : <span className="badge">{data.rule_system.toUpperCase()}</span>}</Row>
+        <RowGrid>
+          <Row label="标题">{edit ? <TextInput value={data.title} onChange={(v) => setData((d) => ({ ...d, title: v }))} /> : <span className="font-semibold">{data.title}</span>}</Row>
+          <Row label="规则">{edit ? (
+            <Select value={data.rule_system} onValueChange={(v) => setData((d) => ({ ...d, rule_system: v }))}>
+              <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="coc">CoC</SelectItem><SelectItem value="dnd">DnD</SelectItem></SelectContent>
+            </Select>
+          ) : <span className="badge">{data.rule_system.toUpperCase()}</span>}</Row>
+        </RowGrid>
         <Row label="简介">{edit ? <TextInput value={data.description} onChange={(v) => setData((d) => ({ ...d, description: v }))} multiline /> : <span>{data.description || '—'}</span>}</Row>
       </Section>
 
       {/* 世界设定 */}
       <Section title="世界设定">
-        {WS_FIELDS.map(({ key, label }) => (
-          <Row key={key} label={label}>{edit ? <TextInput value={wsStr(data.world_setting, key)} onChange={(v) => updateWS(key, v)} /> : <span>{wsStr(data.world_setting, key) || '—'}</span>}</Row>
-        ))}
-        <Row label="难度">
-          {edit ? (
-            <Select value={wsStr(data.world_setting, 'difficulty') || '__none'} onValueChange={(v) => updateWS('difficulty', v === '__none' ? '' : v)}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="未设定" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none">未设定</SelectItem>
-                {MODULE_DIFFICULTIES.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          ) : <span>{wsStr(data.world_setting, 'difficulty') || '—'}</span>}
-        </Row>
-        <Row label="标签">{edit ? <TextInput value={tagsText} onChange={(v) => updateWS('tags', v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean))} placeholder="逗号分隔" /> : <span>{tagsText || '—'}</span>}</Row>
+        <RowGrid>
+          {WS_FIELDS.map(({ key, label }) => (
+            <Row key={key} label={label}>{edit ? <TextInput value={wsStr(data.world_setting, key)} onChange={(v) => updateWS(key, v)} /> : <span>{wsStr(data.world_setting, key) || '—'}</span>}</Row>
+          ))}
+          <Row label="难度">
+            {edit ? (
+              <Select value={wsStr(data.world_setting, 'difficulty') || '__none'} onValueChange={(v) => updateWS('difficulty', v === '__none' ? '' : v)}>
+                <SelectTrigger className="w-40"><SelectValue placeholder="未设定" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">未设定</SelectItem>
+                  {MODULE_DIFFICULTIES.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            ) : <span>{wsStr(data.world_setting, 'difficulty') || '—'}</span>}
+          </Row>
+          <Row label="标签">{edit ? <TextInput value={tagsText} onChange={(v) => updateWS('tags', v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean))} placeholder="逗号分隔" /> : <span>{tagsText || '—'}</span>}</Row>
+        </RowGrid>
         <Row label="世界观导入">{edit ? <TextInput value={wsStr(data.world_setting, 'intro')} onChange={(v) => updateWS('intro', v)} multiline placeholder="开场朗读用的世界观/基调铺陈（年代、风物、是哪一类故事），无剧透，区别于开场钩子" /> : <span className="whitespace-pre-wrap">{wsStr(data.world_setting, 'intro') || '—'}</span>}</Row>
         <Row label="开场钩子">{edit ? <TextInput value={wsStr(data.world_setting, 'player_brief')} onChange={(v) => updateWS('player_brief', v)} multiline placeholder="玩家开场就合法知道的动机/处境（不含待发现的线索/真相）" /> : <span className="whitespace-pre-wrap">{wsStr(data.world_setting, 'player_brief') || '—'}</span>}</Row>
       </Section>
@@ -638,23 +643,35 @@ export function ModuleDetailPage() {
 
       {/* 场景 */}
       <Section title={`场景（${data.scenes.length}）`} onAdd={edit ? () => setData((d) => ({ ...d, scenes: [...d.scenes, { id: genId('scene'), name: '', description: '', danger: 'calm', atmosphere: '', connections: [] }] })) : undefined}>
+        <ItemGrid>
         {data.scenes.map((s, i) => (
           <ItemCard key={s.id || i} onRemove={edit ? () => removeAt('scenes', i) : undefined}>
             {!edit && s.image && <ModuleImage src={s.image} moduleId={data.id} kind="scene" itemId={s.id} field="image" alt={sceneName(s)} className="mb-3" onRegenerated={(url) => updScene(i, { image: url })} />}
-            <Row label="名称">{edit ? <TextInput value={sceneName(s) === '(未命名场景)' ? '' : sceneName(s)} onChange={(v) => updScene(i, { name: v })} /> : <span className="font-semibold">{sceneName(s)}</span>}</Row>
+            {!edit && (
+              <ItemHead
+                title={sceneName(s)}
+                chips={<>
+                  <span className="chip" style={{ color: dangerMeta(s.danger)?.color, borderColor: dangerMeta(s.danger)?.color }}>
+                    {dangerMeta(s.danger)?.label || '平静'}
+                  </span>
+                  <span className="chip">{BIOME_LABELS[s.map?.biome || 'plain'] || BIOME_LABELS.plain}</span>
+                </>}
+              />
+            )}
+            {edit && <Row label="名称"><TextInput value={sceneName(s) === '(未命名场景)' ? '' : sceneName(s)} onChange={(v) => updScene(i, { name: v })} /></Row>}
             <Row label="描述">{edit ? <TextInput value={s.description || ''} onChange={(v) => updScene(i, { description: v })} multiline /> : <span className="whitespace-pre-wrap">{s.description || '—'}</span>}</Row>
-            <Row label="危险度">{edit ? (
+            {edit && <Row label="危险度">
               <Select value={s.danger || 'calm'} onValueChange={(v) => updScene(i, { danger: v })}>
                 <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
                 <SelectContent>{DANGER_OPTS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
               </Select>
-            ) : <span className="badge" style={{ color: dangerMeta(s.danger)?.color, borderColor: dangerMeta(s.danger)?.color }}>{dangerMeta(s.danger)?.label || '平静'}</span>}</Row>
-            <Row label="地貌">{edit ? (
+            </Row>}
+            {edit && <Row label="地貌">
               <Select value={s.map?.biome ?? 'plain'} onValueChange={(v) => updSceneBiome(i, v)}>
                 <SelectTrigger className="w-28" aria-label={`地貌：${sceneName(s)}`}><SelectValue /></SelectTrigger>
                 <SelectContent>{BIOMES.map((biome) => <SelectItem key={biome} value={biome}>{BIOME_LABELS[biome]}</SelectItem>)}</SelectContent>
               </Select>
-            ) : <span className="badge">{BIOME_LABELS[s.map?.biome || 'plain'] || BIOME_LABELS.plain}</span>}</Row>
+            </Row>}
             <Row label="氛围">{edit ? <TextInput value={s.atmosphere || ''} onChange={(v) => updScene(i, { atmosphere: v })} placeholder="感官+情绪基调，如『腐臭、低压、随时塌方』" /> : <span style={{ color: 'var(--color-text-secondary)' }}>{s.atmosphere || '—'}</span>}</Row>
             <Row label="连接">{edit ? <TextInput value={(s.connections || []).join(', ')} onChange={(v) => updScene(i, { connections: v.split(/[,，]/).map((x) => x.trim()).filter(Boolean) })} placeholder="目标场景 id，逗号分隔" /> : <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{(s.connections || []).join('、') || '—'}　id: {s.id}</span>}</Row>
             <EventList events={s.events} edit={edit}
@@ -676,15 +693,31 @@ export function ModuleDetailPage() {
               )} />
           </ItemCard>
         ))}
+        </ItemGrid>
         {data.scenes.length === 0 && <Empty />}
       </Section>
 
       {/* NPC */}
       <Section title={`NPC（${data.npcs.length}）`} onAdd={edit ? () => setData((d) => ({ ...d, npcs: [...d.npcs, { id: genId('npc'), name: '', description: '', personality: '', secrets: [], initial_location: '', skills: {} }] })) : undefined}>
+        <ItemGrid>
         {data.npcs.map((n, i) => (
           <ItemCard key={n.id || i} onRemove={edit ? () => removeAt('npcs', i) : undefined}>
             {!edit && n.portrait && <ModuleImage src={n.portrait} moduleId={data.id} kind="npc" itemId={n.id} field="portrait" alt={n.name || 'NPC'} aspectRatio="3 / 4" className="mb-3 max-w-48" onRegenerated={(url) => updNpc(i, { portrait: url })} />}
-            <Row label="姓名">{edit ? <TextInput value={n.name || ''} onChange={(v) => updNpc(i, { name: v })} /> : <span className="font-semibold">{n.name || '(未命名)'}</span>}</Row>
+            {!edit && (
+              <ItemHead
+                title={n.name || '(未命名)'}
+                chips={<>
+                  {n.hp != null && <span className="chip">HP {n.hp}</span>}
+                  {n.armor != null && n.armor > 0 && <span className="chip">护甲 {n.armor}</span>}
+                  {(n.secrets || []).filter(Boolean).length > 0 && (
+                    <span className="chip chip--danger" title="含 KP 专属秘密">
+                      <GiPadlock />{(n.secrets || []).filter(Boolean).length}
+                    </span>
+                  )}
+                </>}
+              />
+            )}
+            {edit && <Row label="姓名"><TextInput value={n.name || ''} onChange={(v) => updNpc(i, { name: v })} /></Row>}
             <Row label="描述">{edit ? <TextInput value={n.description || ''} onChange={(v) => updNpc(i, { description: v })} multiline /> : <span className="whitespace-pre-wrap">{n.description || '—'}</span>}</Row>
             <Row label="性格">{edit ? <TextInput value={n.personality || ''} onChange={(v) => updNpc(i, { personality: v })} /> : <span>{n.personality || '—'}</span>}</Row>
             <Row label="生平">{edit ? <TextInput value={n.background || ''} onChange={(v) => updNpc(i, { background: v })} multiline placeholder="来历渊源（与秘密区分）" /> : <span className="whitespace-pre-wrap">{n.background || '—'}</span>}</Row>
@@ -732,20 +765,33 @@ export function ModuleDetailPage() {
               )} />
           </ItemCard>
         ))}
+        </ItemGrid>
         {data.npcs.length === 0 && <Empty />}
       </Section>
 
       {/* 线索 */}
       <Section title={`线索（${data.clues.length}）`} onAdd={edit ? () => setData((d) => ({ ...d, clues: [...d.clues, { id: genId('clue'), name: '', description: '', location: '', trigger_condition: '' }] })) : undefined}>
+        <ItemGrid>
         {data.clues.map((c, i) => (
           <ItemCard key={c.id || i} onRemove={edit ? () => removeAt('clues', i) : undefined}>
             {!edit && c.image && <ModuleImage src={c.image} moduleId={data.id} kind="clue" itemId={c.id} field="image" alt={c.name || '线索'} aspectRatio="4 / 3" className="mb-3" onRegenerated={(url) => updClue(i, { image: url })} />}
-            <Row label="名称">{edit ? <TextInput value={c.name || ''} onChange={(v) => updClue(i, { name: v })} /> : <span className="font-semibold" style={{ color: 'var(--color-danger)' }}>{c.name || '(未命名)'}</span>}</Row>
+            {!edit && (
+              <div className="mb-1.5 flex items-start justify-between gap-2 pb-1.5"
+                style={{ borderBottom: '1px solid var(--color-border)' }}>
+                <h4 className="min-w-0 flex-1 truncate text-[length:var(--text-sm)] font-semibold"
+                  style={{ color: 'var(--color-danger)' }} title={c.name || '(未命名)'}>
+                  {c.name || '(未命名)'}
+                </h4>
+                <span className="chip chip--danger flex-shrink-0" title="线索为 KP 专属"><GiPadlock /></span>
+              </div>
+            )}
+            {edit && <Row label="名称"><TextInput value={c.name || ''} onChange={(v) => updClue(i, { name: v })} /></Row>}
             <Row label="内容">{edit ? <TextInput value={c.description || ''} onChange={(v) => updClue(i, { description: v })} multiline /> : <span className="whitespace-pre-wrap" style={{ color: 'var(--color-danger)' }}>{c.description || '—'}</span>}</Row>
             <Row label="位置">{edit ? <TextInput value={c.location || ''} onChange={(v) => updClue(i, { location: v })} placeholder="场景 id" /> : <span className="text-xs">{c.location || '—'}</span>}</Row>
             <Row label="发现条件">{edit ? <TextInput value={c.trigger_condition || ''} onChange={(v) => updClue(i, { trigger_condition: v })} multiline /> : <span className="whitespace-pre-wrap">{c.trigger_condition || '—'}</span>}</Row>
           </ItemCard>
         ))}
+        </ItemGrid>
         {data.clues.length === 0 && <Empty />}
       </Section>
 
@@ -897,10 +943,11 @@ function Section({ title, onAdd, children }: { title: string; onAdd?: () => void
   )
 }
 
+/* 标签栏用点线与值区隔开，长文换行时左标签仍能对上——比纯留白更稳。 */
 function Row({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex gap-3 py-1 text-sm items-start">
-      <span className="flex-shrink-0 w-20 text-xs pt-1.5" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+    <div className="module-row flex gap-3 py-1 text-sm items-start">
+      <span className="module-row-label flex-shrink-0 w-20 text-xs pt-1.5" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   )
@@ -908,7 +955,8 @@ function Row({ label, children }: { label: React.ReactNode; children: React.Reac
 
 function ItemCard({ onRemove, children }: { onRemove?: () => void; children: React.ReactNode }) {
   return (
-    <div className="rounded-md p-2 mb-2 relative" style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+    <div className="module-item-card relative rounded-md p-2.5 break-inside-avoid"
+      style={{ background: 'var(--surface-2)', border: '1px solid var(--color-border)' }}>
       {onRemove && (
         <button onClick={onRemove} className="absolute top-1.5 right-1.5 p-1 rounded hover:bg-[var(--color-danger-deep)] hover:text-white transition-colors" style={{ color: 'var(--color-danger)' }} title="删除">
           <Trash2 size={13} />
@@ -917,6 +965,32 @@ function ItemCard({ onRemove, children }: { onRemove?: () => void; children: Rea
       {children}
     </div>
   )
+}
+
+/** 条目卡抬头：把名称从「名称」标签行提升为卡片标题，右侧挂状态徽标。
+ *  只在只读态用——编辑态名称仍需是可输入的 Row。 */
+function ItemHead({ title, chips }: { title: string; chips?: React.ReactNode }) {
+  return (
+    <div className="mb-1.5 flex items-start justify-between gap-2 pb-1.5"
+      style={{ borderBottom: '1px solid var(--color-border)' }}>
+      <h4 className="min-w-0 flex-1 truncate text-[length:var(--text-sm)] font-semibold"
+        style={{ color: 'var(--color-text-primary)' }} title={title}>
+        {title}
+      </h4>
+      {chips && <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1">{chips}</div>}
+    </div>
+  )
+}
+
+/** 条目列表容器：宽屏自动分栏，窄屏单列。场景/NPC/线索等并列条目共用。 */
+function ItemGrid({ children }: { children: React.ReactNode }) {
+  return <div className="grid gap-2.5 md:grid-cols-2 2xl:grid-cols-3 items-start">{children}</div>
+}
+
+/** 短字段行的分栏容器：宽屏两列并排，省掉一屏的纵向滚动。
+ *  长文本行（简介、导入、钩子）不要放进来，换行会把列撑歪。 */
+function RowGrid({ children }: { children: React.ReactNode }) {
+  return <div className="row-grid grid gap-x-8 xl:grid-cols-2">{children}</div>
 }
 
 function TextInput({ value, onChange, multiline, placeholder }: { value: string; onChange: (v: string) => void; multiline?: boolean; placeholder?: string }) {

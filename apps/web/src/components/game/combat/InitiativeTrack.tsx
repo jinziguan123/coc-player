@@ -24,26 +24,23 @@ export function InitiativeTrack({ order, turn, myCharId }: { order: Combatant[];
         return (
           <div
             key={c.id}
-            className="flex-shrink-0 rounded px-2 py-1 inline-flex items-center gap-1"
+            className={`init-chip relative ${isActive ? 'init-chip--active' : ''}`}
             style={{
               opacity: out ? 0.4 : passed ? 0.5 : 1,
-              background: isActive ? 'var(--color-bg-tertiary)' : 'transparent',
-              border: isActive ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
-              boxShadow: isActive ? '0 0 8px color-mix(in srgb, var(--color-accent) 30%, transparent)' : 'none',
+              // 已出局者名字划掉，比单纯淡化更明确
+              textDecoration: out ? 'line-through' : undefined,
             }}
             title={isActive ? '当前行动' : isNext ? '下一个' : c.name}
           >
             <span className="inline-block rounded-full" style={{ width: 6, height: 6, background: dot, flexShrink: 0 }} />
-            <span className="text-[11px] whitespace-nowrap" style={{
+            <span className="whitespace-nowrap" style={{
               color: mine ? 'var(--color-text-accent)' : isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
               fontWeight: isActive ? 600 : 400,
             }}>
               {c.name}{mine ? '（我）' : ''}
             </span>
             {isNext && (
-              <span className="text-[9px] px-1 rounded flex-shrink-0" style={{ color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-                下一个
-              </span>
+              <span className="chip !px-1 !py-0" style={{ fontSize: '0.5625rem' }}>下一个</span>
             )}
           </div>
         )

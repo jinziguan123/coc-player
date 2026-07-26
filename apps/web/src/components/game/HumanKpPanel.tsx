@@ -727,31 +727,30 @@ export function HumanKpPanel({ sessionId, turnReady = false }: Props) {
   ))
 
   return (
-    <section
-      className="mx-3 mb-2 rounded-md px-3 py-2"
-      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border-strong)' }}
-    >
-      <div className={`${collapsed ? '' : 'mb-2'} flex items-center gap-1 overflow-x-auto`}>
-        <span className="mr-2 whitespace-nowrap text-xs font-semibold" style={{ color: 'var(--color-text-accent)' }}>
-          真人 KP
-        </span>
-        {!collapsed && TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => {
-              setTab(id)
-              if (id === 'source') {
-                if (sourceOpen) setSourceOpen(false)
-                else void openModuleSource()
-              }
-            }}
-            className="btn-secondary inline-flex items-center gap-1 whitespace-nowrap !px-2 !py-1 text-xs"
-            style={tab === id ? { borderColor: 'var(--color-accent)', color: 'var(--color-text-accent)' } : undefined}
-          >
-            <Icon size={13} /> {label}
-          </button>
-        ))}
+    <section className="kp-console mx-3 mb-2 rounded-md px-3 py-2">
+      <div className={`${collapsed ? '' : 'mb-2'} flex items-center gap-1.5 overflow-x-auto`}>
+        <span className="kp-console-badge mr-1 whitespace-nowrap">真人 KP</span>
+        {!collapsed && (
+          <div className="kp-tabs inline-flex flex-shrink-0 items-center gap-0.5">
+            {TABS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  setTab(id)
+                  if (id === 'source') {
+                    if (sourceOpen) setSourceOpen(false)
+                    else void openModuleSource()
+                  }
+                }}
+                className={`kp-tab inline-flex items-center gap-1 whitespace-nowrap ${tab === id ? 'kp-tab--active' : ''}`}
+                aria-pressed={tab === id}
+              >
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => void endTurn()}

@@ -747,7 +747,8 @@ export function CharacterPage() {
   return (
     <div className="flex h-full gap-0">
       <div className="flex-1 min-w-0 overflow-auto p-4">
-        <div className="max-w-3xl">
+        {/* 建卡流程是线性表单，窄栏更易读；列表是并列卡片，放宽让网格铺开 */}
+        <div className={inCreateFlow ? 'max-w-3xl' : 'max-w-[100rem]'}>
           <div className="flex items-center gap-3 mb-6">
             <button onClick={() => navigate(-1)} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
               <GiReturnArrow /> 返回

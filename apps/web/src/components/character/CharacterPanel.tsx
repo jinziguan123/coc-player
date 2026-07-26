@@ -78,22 +78,40 @@ const BACKSTORY_SECTIONS: { key: string; label: string }[] = [
   { key: 'traits', label: '特点' },
 ]
 
-function StatBar({ label, current, max }: { label: string; current: number; max: number }) {
-  const pct = max > 0 ? (current / max) * 100 : 0
+/** 要害条：数值抬到 text-base 等宽，是角色卡上最该被一眼读到的东西。
+ *  tone 区分 HP（血酒红）与 SAN/MP（琥珀），低于三成一律转告警红。 */
+function StatBar({ label, current, max, tone = 'var(--color-accent)' }: {
+  label: string; current: number; max: number; tone?: string
+}) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0
   const isLow = pct < 30
   return (
     <div className="mb-2">
-      <div className="flex justify-between text-xs mb-0.5">
-        <span>{label}</span>
-        <span className="font-mono">{current}/{max}</span>
+      <div className="flex items-baseline justify-between mb-1">
+        <span
+          className="tracking-wider"
+          style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
+        >
+          {label}
+        </span>
+        <span
+          className="font-mono tabular-nums font-bold"
+          style={{
+            fontSize: 'var(--text-base)',
+            lineHeight: 1.1,
+            color: isLow ? 'var(--color-danger)' : 'var(--color-text-primary)',
+          }}
+        >
+          {current}
+          <span style={{ fontSize: 'var(--text-2xs)', fontWeight: 400, color: 'var(--color-text-secondary)' }}>
+            /{max}
+          </span>
+        </span>
       </div>
-      <div className="h-1.5 rounded-full" style={{ background: 'var(--color-bg-tertiary)' }}>
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-sunken)' }}>
         <div
           className="h-full rounded-full stat-bar-fill"
-          style={{
-            width: `${pct}%`,
-            background: isLow ? 'var(--color-danger)' : 'var(--color-accent)',
-          }}
+          style={{ width: `${pct}%`, background: isLow ? 'var(--color-danger)' : tone }}
         />
       </div>
     </div>
@@ -103,9 +121,9 @@ function StatBar({ label, current, max }: { label: string; current: number; max:
 function InfoRow({ label, value }: { label: string; value: string | number }) {
   if (!value && value !== 0) return null
   return (
-    <div className="flex justify-between text-xs py-0.5">
-      <span style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
-      <span className="font-mono">{value}</span>
+    <div className="meta-row">
+      <span className="meta-row-label">{label}</span>
+      <span className="meta-row-value">{value}</span>
     </div>
   )
 }
@@ -160,43 +178,43 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
 
   return (
     <div className="space-y-3">
-      <div className="text-center">
-        <div
-          className="w-16 h-16 mx-auto rounded-full flex items-center justify-center text-xl mb-1.5"
-          style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)' }}
-        >
+      {/* 抬头：纹章 + 姓名 + 身份，横排比居中大头像省一半竖向空间 */}
+      <div className="flex items-center gap-2.5">
+        <span className="char-sigil !h-11 !w-11 !text-[length:var(--text-xl)]" aria-hidden="true">
           {character.name.charAt(0)}
-        </div>
-        <h3 className="font-semibold text-base" style={{ color: 'var(--color-text-accent)', fontFamily: 'var(--font-title)' }}>
-          {character.name}
-        </h3>
-        <div className="text-xs space-x-2" style={{ color: 'var(--color-text-secondary)' }}>
-          {occupation && <span>{occupation}</span>}
-          {gender && <span>{gender}</span>}
-          {age > 0 && <span>{age}岁</span>}
-        </div>
-        {character.status && character.status !== 'active' && (
-          <div className="mt-1">
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3
+            className="truncate font-semibold"
+            style={{ fontSize: 'var(--text-lg)', color: 'var(--color-text-accent)', fontFamily: 'var(--font-title)' }}
+          >
+            {character.name}
+          </h3>
+          <div
+            className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5"
+            style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
+          >
+            {occupation && <span>{occupation}</span>}
+            {gender && <span>· {gender}</span>}
+            {age > 0 && <span>· {age}岁</span>}
+          </div>
+          {character.status && character.status !== 'active' && (
             <span
-              className="text-xs px-2 py-0.5 rounded"
-              style={{
-                background: STATUS_DANGER.has(character.status) ? 'var(--color-danger-deep)' : 'var(--color-bg-tertiary)',
-                color: STATUS_DANGER.has(character.status) ? 'var(--color-on-danger)' : 'var(--color-text-secondary)',
-              }}
+              className={`chip mt-1 ${STATUS_DANGER.has(character.status) ? 'chip--solid-danger' : ''}`}
             >
               {statusLabel(character.status)}
             </span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className={`rounded ${vitalFlash}`} style={{ padding: '2px' }}>
-        {hp && <StatBar label="HP" current={hp.current} max={hp.max} />}
+        {hp && <StatBar label="HP" current={hp.current} max={hp.max} tone="var(--color-danger-deep)" />}
         {san && <StatBar label="SAN" current={san.current} max={san.max} />}
         {mp && <StatBar label="MP" current={mp.current} max={mp.max} />}
       </div>
 
-      <div className="rounded p-2 space-y-0.5" style={{ background: 'var(--color-bg-tertiary)' }}>
+      <div className="group-box">
         <InfoRow label="幸运" value={luck} />
         <InfoRow label="移动力" value={mov} />
         <InfoRow label="伤害加值" value={damageBonus} />
@@ -206,23 +224,25 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
       </div>
 
       {(residence || birthplace) && (
-        <div className="rounded p-2 space-y-0.5" style={{ background: 'var(--color-bg-tertiary)' }}>
+        <div className="group-box">
           {residence && <InfoRow label="居住地" value={residence} />}
           {birthplace && <InfoRow label="出生地" value={birthplace} />}
         </div>
       )}
 
-      <div className="flex justify-center">
-        <RadarChart labels={RADAR_LABELS} values={radarValues} size={180} />
-      </div>
-
-      <div className="grid grid-cols-4 gap-1 text-center text-xs">
-        {Object.entries(ATTR_LABELS).map(([k, label]) => (
-          <div key={k} className="py-1 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
-            <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.65rem' }}>{label}</div>
-            <div className="font-mono font-bold">{character.base_attributes[k] || 0}</div>
-          </div>
-        ))}
+      <div>
+        <div className="section-head">属性</div>
+        <div className="flex justify-center">
+          <RadarChart labels={RADAR_LABELS} values={radarValues} size={180} />
+        </div>
+        <div className="grid grid-cols-4 gap-1 mt-1">
+          {Object.entries(ATTR_LABELS).map(([k, label]) => (
+            <div key={k} className="stat-tile">
+              <div className="stat-tile-label">{label}</div>
+              <div className="stat-tile-value">{character.base_attributes[k] || 0}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {hasBackstorySections ? (
@@ -232,7 +252,7 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
             if (!val) return null
             return (
               <div key={key}>
-                <h4 className="text-xs font-semibold mb-0.5" style={{ color: 'var(--color-text-accent)' }}>{label}</h4>
+                <h4 className="section-head">{label}</h4>
                 <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{val}</p>
               </div>
             )
@@ -240,7 +260,7 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
         </div>
       ) : character.backstory ? (
         <div>
-          <h4 className="text-xs font-semibold mb-0.5" style={{ color: 'var(--color-text-accent)' }}>背景故事</h4>
+          <h4 className="section-head">背景故事</h4>
           <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text-secondary)' }}>
             {character.backstory}
           </p>
@@ -251,20 +271,33 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
 }
 
 /** 单个技能行：自己持有「检定目标」输入框的状态，互不影响。 */
-function SkillCheckRow({
-  name, value, onSkillCheck,
-}: { name: string; value: number; onSkillCheck: (skill: string, intent: string) => void }) {
-  const [intent, setIntent] = useState('')
-  const row = (
+/** 技能行内容：底衬一条按技能值宽度的琥珀微填充，一列扫下来就能看出强弱分布。 */
+function SkillRowInner({ name, value }: { name: string; value: number }) {
+  return (
     <>
-      <span>{name}</span>
-      <span className="font-mono font-bold" style={{
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 left-0 rounded"
+        style={{
+          width: `${Math.max(0, Math.min(100, value))}%`,
+          background: 'color-mix(in srgb, var(--color-accent) 9%, transparent)',
+        }}
+      />
+      <span className="relative truncate">{name}</span>
+      <span className="relative font-mono tabular-nums font-bold" style={{
         color: value >= 50 ? 'var(--color-success)' : value >= 25 ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
       }}>
         {value}
       </span>
     </>
   )
+}
+
+function SkillCheckRow({
+  name, value, onSkillCheck,
+}: { name: string; value: number; onSkillCheck: (skill: string, intent: string) => void }) {
+  const [intent, setIntent] = useState('')
+  const row = <SkillRowInner name={name} value={value} />
   return (
     <ConfirmDialog
       title="申请检定"
@@ -289,7 +322,7 @@ function SkillCheckRow({
         <button
           onClick={open}
           title={`申请 ${name} 检定`}
-          className="w-full flex items-center justify-between py-1 px-1 rounded text-xs hover:bg-[var(--color-accent)] hover:bg-opacity-10 cursor-pointer transition-colors"
+          className="skill-row relative w-full flex items-center justify-between gap-2 py-1 px-1.5 rounded text-xs cursor-pointer"
         >
           {row}
         </button>
@@ -326,13 +359,8 @@ function SkillsTab({
         {filtered.map(([name, value]) => {
           if (!onSkillCheck) {
             return (
-              <div key={name} className="flex items-center justify-between py-1 px-1 rounded text-xs hover:bg-[var(--color-bg-tertiary)]">
-                <span>{name}</span>
-                <span className="font-mono font-bold" style={{
-                  color: value >= 50 ? 'var(--color-success)' : value >= 25 ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                }}>
-                  {value}
-                </span>
+              <div key={name} className="skill-row relative flex items-center justify-between gap-2 py-1 px-1.5 rounded text-xs">
+                <SkillRowInner name={name} value={value} />
               </div>
             )
           }
@@ -423,11 +451,11 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
     <div className="space-y-3">
       {inventory.length > 0 && (
         <div>
-          <h4 className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-accent)' }}>随身物品</h4>
+          <h4 className="section-head">随身物品</h4>
           <div className="space-y-1">
             {inventory.map((it, i) => (
               <div key={it.id || `${it.name}-${i}`} className="text-xs px-2 py-1.5 rounded"
-                style={{ background: 'var(--color-bg-tertiary)' }} title={it.note || undefined}>
+                style={{ background: 'var(--surface-2)' }} title={it.note || undefined}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold truncate">
                     {it.name}{(it.qty || 1) > 1 ? <span style={{ color: 'var(--color-text-secondary)' }}> ×{it.qty}</span> : null}
@@ -461,14 +489,14 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
       )}
       {weapons.length > 0 && (
         <div>
-          <h4 className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-accent)' }}>武器</h4>
+          <h4 className="section-head">武器</h4>
           <div className="space-y-1">
             {weapons.map((w, i) => {
               const dam = w.dam || w.damage
               const round = w.round || (w.attacks != null ? String(w.attacks) : '')
               const num = w.num || w.ammo
               return (
-                <div key={`${w.name}-${i}`} className="text-xs px-2 py-1.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
+                <div key={`${w.name}-${i}`} className="text-xs px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
                   <div className="flex justify-between">
                     <span className="font-semibold">{w.name}</span>
                     {dam && <span className="font-mono" style={{ color: 'var(--color-text-secondary)' }}>{dam}</span>}
@@ -491,10 +519,10 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
 
       {equipment.length > 0 && (
         <div>
-          <h4 className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-accent)' }}>随身物品</h4>
+          <h4 className="section-head">随身物品</h4>
           <div className="flex flex-wrap gap-1">
             {equipment.map((name, i) => (
-              <span key={`${name}-${i}`} className="text-xs px-2 py-1 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
+              <span key={`${name}-${i}`} className="text-xs px-2 py-1 rounded" style={{ background: 'var(--surface-2)' }}>
                 {name}
               </span>
             ))}
@@ -508,7 +536,7 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <h4 className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-accent)' }}>{title}</h4>
+      <h4 className="section-head">{title}</h4>
       {children}
     </div>
   )
@@ -532,7 +560,7 @@ function ProfileTab({ character }: { character: CharacterData }) {
   return (
     <div className="space-y-3">
       <Section title="资产">
-        <div className="rounded p-2 space-y-0.5" style={{ background: 'var(--color-bg-tertiary)' }}>
+        <div className="rounded p-2 space-y-0.5" style={{ background: 'var(--surface-2)' }}>
           <InfoRow label="信用评级" value={creditRating} />
           <InfoRow label="现金" value={fmt(cash)} />
           <InfoRow label="消费水平" value={fmt(spendingLevel)} />
@@ -569,7 +597,7 @@ function ProfileTab({ character }: { character: CharacterData }) {
         <Section title="模组经历">
           <div className="space-y-1.5">
             {history.map((m, i) => (
-              <div key={i} className="text-xs rounded p-1.5" style={{ background: 'var(--color-bg-tertiary)' }}>
+              <div key={i} className="text-xs rounded p-1.5" style={{ background: 'var(--surface-2)' }}>
                 <div className="font-semibold" style={{ color: 'var(--color-text-accent)' }}>{m.module}</div>
                 {m.experience && <div className="mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{m.experience}</div>}
               </div>

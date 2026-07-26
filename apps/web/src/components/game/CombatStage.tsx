@@ -251,19 +251,15 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   const gridSection = (cellPx: number) => combat.grid && (
     <div className={immersive ? 'flex flex-col min-h-0' : 'mt-2'}>
       <div className="flex items-center justify-between mb-0.5 flex-shrink-0">
-        <span className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>战场</span>
+        <span className="combat-label">战场</span>
         {myTurn && (
           <div className="flex items-center gap-1">
             <button
               onClick={() => setMoveMode((m) => (m === 'move' ? 'none' : 'move'))}
               disabled={submitting}
               title={`常规移动 ⌈mov/2⌉=${me?.move_left ?? 0} 格，移动后仍可攻击`}
-              className="text-[11px] px-2 py-0.5 rounded inline-flex items-center gap-1"
-              style={{
-                border: `1px solid ${moveMode === 'move' ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
-                color: moveMode === 'move' ? 'var(--color-text-accent)' : 'var(--color-text-secondary)',
-                ...(submitting ? { opacity: 0.5 } : {}),
-              }}
+              aria-pressed={moveMode === 'move'}
+              className={`toggle-chip ${moveMode === 'move' ? 'toggle-chip--on' : ''}`}
             >
               <GiRun size={12} /> {moveMode === 'move' ? `移动中（${me?.move_left ?? 0} 格）` : '移动'}
             </button>
@@ -271,12 +267,8 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
               onClick={() => setMoveMode((m) => (m === 'dash' ? 'none' : 'dash'))}
               disabled={submitting}
               title={`冲刺满 mov=${me?.mov ?? 0} 格，但独占本回合（不能再攻击）`}
-              className="text-[11px] px-2 py-0.5 rounded inline-flex items-center gap-1"
-              style={{
-                border: `1px solid ${moveMode === 'dash' ? 'var(--color-danger)' : 'var(--color-border-strong)'}`,
-                color: moveMode === 'dash' ? 'var(--color-danger)' : 'var(--color-text-secondary)',
-                ...(submitting ? { opacity: 0.5 } : {}),
-              }}
+              aria-pressed={moveMode === 'dash'}
+              className={`toggle-chip ${moveMode === 'dash' ? 'toggle-chip--on-danger' : ''}`}
             >
               <GiRun size={12} /> {moveMode === 'dash' ? `冲刺中（${me?.mov ?? 0} 格）` : '冲刺'}
             </button>
@@ -303,9 +295,9 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   // B2 参战方卡片列（我方 / 敌方），带 HP 动画（B3）。
   const sideCol = (label: string, list: Combatant[], alignRight = false) => (
     <div className="flex flex-col gap-1.5">
-      <div className={`text-[10px] uppercase tracking-wide${alignRight ? ' text-right' : ''}`} style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
+      <div className={`combat-label${alignRight ? ' text-right' : ''}`}>{label}</div>
       {list.length === 0
-        ? <div className={`text-[11px]${alignRight ? ' text-right' : ''}`} style={{ color: 'var(--color-text-secondary)' }}>无</div>
+        ? <div className={`text-[length:var(--text-2xs)]${alignRight ? ' text-right' : ''}`} style={{ color: 'var(--color-text-secondary)' }}>无</div>
         : list.map((c) => (
           <CombatantCard key={c.id} c={c} mine={!!(myCharId && c.id === myCharId)} active={c.id === combat.turn} diff={diffs[c.id]} />
         ))}

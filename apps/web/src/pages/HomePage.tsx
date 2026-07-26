@@ -1,28 +1,79 @@
 import { Link } from 'react-router-dom'
 import { Dices, Sparkles, Upload } from 'lucide-react'
+import { GiScrollUnfurled, GiCharacter, GiBookmarklet } from 'react-icons/gi'
+
+/** 首页入口卡：图标 + 标题 + 一句说明，比裸按钮更能交代「点进去是什么」。 */
+const ENTRIES = [
+  {
+    to: '/onboarding',
+    Icon: Sparkles,
+    title: '体验新手团',
+    desc: '十分钟走完一场微型调查，边玩边熟悉规则与投骰',
+    primary: true,
+  },
+  { to: '/game', Icon: Dices, title: '开始游戏', desc: '开新局或用房间码加入队友的桌' },
+  { to: '/modules', Icon: Upload, title: '上传模组', desc: '导入剧本，由 AI 解析成场景、NPC 与线索' },
+] as const
+
+/** 次级入口：已有素材的快速跳转。 */
+const SHORTCUTS = [
+  { to: '/modules', Icon: GiScrollUnfurled, label: '模组库' },
+  { to: '/characters', Icon: GiCharacter, label: '角色' },
+  { to: '/rulebooks', Icon: GiBookmarklet, label: '规则书' },
+] as const
 
 export function HomePage() {
   return (
-    <div className="max-w-2xl mx-auto mt-16 text-center">
-      <h1
-        className="text-3xl font-bold mb-2"
-        style={{ fontFamily: 'var(--font-title)', color: 'var(--color-text-accent)' }}
-      >
-        TRPG Player
-      </h1>
-      <p className="mb-10 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        AI 驱动的跑团平台
-      </p>
-      <div className="flex flex-wrap gap-3 justify-center">
-        <Link to="/onboarding" className="btn-primary flex items-center gap-2 whitespace-nowrap !px-3 !py-3 !text-base">
-          <Sparkles className="h-5 w-5" aria-hidden="true" /> 体验新手团
-        </Link>
-        <Link to="/game" className="btn-secondary flex items-center gap-2 whitespace-nowrap !px-3 !py-3 !text-base">
-          <Dices className="h-5 w-5" aria-hidden="true" /> 开始游戏
-        </Link>
-        <Link to="/modules" className="btn-secondary flex items-center gap-2 whitespace-nowrap !px-3 !py-3 !text-base">
-          <Upload className="h-5 w-5" aria-hidden="true" /> 上传模组
-        </Link>
+    <div className="mx-auto mt-12 w-full max-w-4xl">
+      <div className="mb-10 text-center">
+        <h1
+          className="mb-2 text-4xl font-bold"
+          style={{
+            fontFamily: 'var(--font-display)',
+            color: 'var(--color-text-accent)',
+            letterSpacing: '0.06em',
+            textShadow: '0 0 26px rgba(212, 162, 78, 0.22)',
+          }}
+        >
+          TRPG Player
+        </h1>
+        <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+          AI 驱动的跑团平台
+        </p>
+        {/* 标题下的细分隔纹，收住居中标题与下方卡片 */}
+        <div className="home-rule mx-auto mt-5" />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        {ENTRIES.map(({ to, Icon, title, desc, primary }) => (
+          <Link
+            key={title}
+            to={to}
+            className={`home-entry card !p-4 flex flex-col gap-2 no-underline ${primary ? 'home-entry--primary' : ''}`}
+          >
+            <Icon className="h-6 w-6" aria-hidden="true" style={{ color: 'var(--color-text-accent)' }} />
+            <span
+              className="font-semibold"
+              style={{ fontFamily: 'var(--font-title)', fontSize: 'var(--text-lg)', color: 'var(--color-text-primary)' }}
+            >
+              {title}
+            </span>
+            <span
+              className="leading-relaxed"
+              style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}
+            >
+              {desc}
+            </span>
+          </Link>
+        ))}
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+        {SHORTCUTS.map(({ to, Icon, label }) => (
+          <Link key={label} to={to} className="home-shortcut no-underline">
+            <Icon /> {label}
+          </Link>
+        ))}
       </div>
     </div>
   )
