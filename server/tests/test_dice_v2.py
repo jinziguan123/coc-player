@@ -416,3 +416,61 @@ def test_group_check_scene_filtered(db_factory, monkeypatch):
     )
     actors = [d["metadata"]["actor"] for d in _dice(chunks)]
     assert actors == ["主角"]        # 只有同场景的主角检定，别处的阿尔法不掷
+
+
+def test_dice_is_broadcast_before_waiting_on_housekeeping(db_factory, monkeypatch):
+    """骰子必须先于上一轮后台收尾广播出去。
+
+    以前 run_roll_generation 开头就 await _drain_housekeeping，玩家点了投骰却要先看着
+    「KP 正在整理笔记」等两次 LLM 才出骰子动画——而掷骰本身是纯确定性引擎调用，
+    一次 LLM 都不需要。这条用例把这个顺序钉死。
+    """
+    import asyncio as _asyncio
+
+    import app.database as database
+    from app.services import turn_orchestrator
+    from app.services.room_hub import room_hub
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    session_service.add_pending_check(db, session.id, {
+        "id": "chk1", "skill": "侦查", "difficulty": "normal",
+        "char_ref": "", "char_id": hero.id, "actor_name": hero.name, "source": "",
+    })
+
+    monkeypatch.setattr(database, "SessionLocal", db_factory)
+    monkeypatch.setattr(chat_service, "get_llm", lambda: None)
+    monkeypatch.setattr(chat_service, "get_fast_llm", lambda: None)
+
+    order: list[str] = []
+
+    async def slow_drain(session_id):
+        order.append("drain")
+        await _asyncio.sleep(0)
+
+    def spy_broadcast(session_id, chunk, *a, **k):
+        if '"type": "dice"' in chunk or '"type":"dice"' in chunk:
+            order.append("dice")
+
+    monkeypatch.setattr(turn_orchestrator, "_drain_housekeeping", slow_drain)
+    monkeypatch.setattr(room_hub, "broadcast", spy_broadcast)
+
+    async def fake_stream(kp, messages, result, npcs=None):
+        result[0] = ""
+        result[1] = ""
+        return
+        yield
+
+    monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+    _asyncio.run(chat_service.run_roll_generation(session.id, "chk1"))
+
+    assert "dice" in order, f"没有广播骰子事件：{order}"
+    assert "drain" in order, f"没有等待后台收尾：{order}"
+    assert order.index("dice") < order.index("drain"), (
+        f"骰子必须先广播、再等收尾，实际顺序：{order}"
+    )
+
+    # 顺序变了，但语义不能变：待定检定仍须被消费掉（写入发生在 drain 之后）
+    fresh = db_factory()
+    pending = (fresh.get(GameSession, session.id).world_state or {}).get("pending_checks") or {}
+    assert "chk1" not in pending, "待定检定应当在 drain 之后被消费"

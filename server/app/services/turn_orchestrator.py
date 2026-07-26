@@ -997,14 +997,21 @@ async def run_combat_aftermath_generation(session_id: str) -> None:
 
 
 async def run_roll_generation(session_id: str, check_id: str) -> None:
-    """玩家点『投骰』：取出待定检定 → 按 KP 定的难度掷骰 → 广播达成等级 → KP 据等级续写。"""
-    await _drain_housekeeping(session_id)
+    """玩家点『投骰』：取出待定检定 → 按 KP 定的难度掷骰 → 广播达成等级 → KP 据等级续写。
+
+    **顺序要紧**：掷骰是纯确定性引擎调用，一次 LLM 都不需要，所以先把点数掷出来广播给玩家，
+    再去等上一轮的后台收尾（滚动摘要 / 幕后推演，都是 LLM 调用）。
+    以前是开头就 `await _drain_housekeeping`，玩家点了投骰却先看到「KP 正在整理笔记」、
+    要等两次 LLM 才出骰子动画——点得越快等得越久。
+    """
     from app.database import SessionLocal
 
     db = SessionLocal()
     try:
         game_session = db.get(GameSession, session_id)
-        check = session_service.pop_pending_check(db, session_id, check_id)
+        # 这里只读不弹：待定检定的**消费**（写 world_state）必须放到 drain 之后，
+        # 否则会和 housekeeping 的整体覆盖式写入撞车、丢更新。
+        check = session_service.get_pending_check(db, session_id, check_id)
         if not check:
             room_hub.broadcast(session_id, _make_chunk("done"))
             return
@@ -1044,6 +1051,15 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
             session_id,
             _make_chunk("dice", dice_content, metadata=dice_meta, event_id=ev.id),
         )
+
+        # 骰子已经落地、动画已经在玩家那边跑起来了，现在才等上一轮后台收尾。
+        await _drain_housekeeping(session_id)
+        # housekeeping 是在另一个 Session 里提交的；本会话的身份映射还挂着旧的
+        # world_state，直接写回会把它刚写的摘要/记忆盖掉。expire 掉强制重新取。
+        db.expire_all()
+        # 到这里才真正消费掉待定检定（唯一的 world_state 写入，已在 drain 之后）。
+        session_service.pop_pending_check(db, session_id, check_id)
+        game_session = db.get(GameSession, session_id)
 
         # 治疗类检定成功 → 引擎确定性回血（不靠 KP 自觉发 HP_CHANGE）。广播结算，并把结果并进
         # 回灌 KP 的描述，让 KP 据「已回 N 点」续写而非自己臆断/漏结算。
