@@ -1005,6 +1005,9 @@ body {
   padding: 0.4rem;
 }
 
+/* 桌面端角色卡是并列栏，不需要遮罩；窄屏媒体查询里再打开（须先声明，否则会覆盖它） */
+.char-panel-scrim { display: none; }
+
 @media (max-width: 767px) {
   .game-session-shell .sidebar {
     display: none;
@@ -1020,8 +1023,32 @@ body {
     gap: 0;
   }
 
+  /* 角色卡在窄屏改为从右侧滑入的覆盖式抽屉。
+     此前是 display:none —— 玩家在手机上完全看不到自己的 HP/SAN/技能/道具，
+     顶栏那颗「展开角色卡」按钮点了也没反应。 */
   .game-character-panel {
-    display: none;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    width: min(88vw, 22rem);
+    max-width: none;
+    border-left: 1px solid var(--color-border-strong);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.5);
+    animation: charPanelIn 0.22s ease-out both;
+  }
+  @keyframes charPanelIn {
+    from { opacity: 0; transform: translateX(16px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  /* 抽屉遮罩：点击关闭 */
+  .char-panel-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    background: rgba(0, 0, 0, 0.55);
   }
 }
 

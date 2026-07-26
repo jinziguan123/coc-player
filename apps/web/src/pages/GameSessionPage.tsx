@@ -355,7 +355,10 @@ export function GameSessionPage() {
   const [panelChar, setPanelChar] = useState<Character | null>(null)
   const [panelCharId, setPanelCharId] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
-  const [showPanel, setShowPanel] = useState(true)
+  // 窄屏默认收起：角色卡在手机上是覆盖式抽屉，默认展开会挡住叙事流。
+  const [showPanel, setShowPanel] = useState(
+    () => !(typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches),
+  )
   const [showBigMap, setShowBigMap] = useState(false)         // 大地图（已知地点前往）
   const [showRecap, setShowRecap] = useState(false)           // 战报 / 章节小结弹窗
   const [showGrowth, setShowGrowth] = useState(false)         // 成长结算弹窗
@@ -2094,7 +2097,16 @@ export function GameSessionPage() {
         </div>
       </div>
 
-      {/* 角色卡侧栏：沉浸战斗布局下暂时隐藏（参战卡已带 HP/状态，屏幕让给战场与聊天） */}
+      {/* 角色卡侧栏：沉浸战斗布局下暂时隐藏（参战卡已带 HP/状态，屏幕让给战场与聊天）。
+          窄屏改为覆盖式抽屉 —— 此前窄屏直接 display:none，玩家在手机上完全看不到
+          自己的 HP/SAN/技能/道具，「展开角色卡」按钮点了也没反应。 */}
+      {!immersiveOn && showPanel && panelChar && (
+        <div
+          className="char-panel-scrim"
+          onClick={() => setShowPanel(false)}
+          aria-hidden="true"
+        />
+      )}
       {!immersiveOn && showPanel && panelChar && (
         <aside
           className="game-character-panel w-64 flex-shrink-0 border-l overflow-y-auto game-info"
