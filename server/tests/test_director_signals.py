@@ -264,3 +264,88 @@ class TestWiring:
         henry = Character(name="亨利", rule_system="coc", base_attributes={}, skills={})
         msgs = build_team_context(emma, session, module, [], henry, all_teammates=[emma])
         assert not any("导演提示" in m["content"] for m in msgs)
+
+
+# ── 临场龙套：建议收编 ──
+
+
+class TestPromotableNpcs:
+    def _ws(self, improv):
+        return {"improvised_npcs": improv}
+
+    def test_出场够多且未转正才建议(self):
+        ws = self._ws({
+            "酒馆老板": {"mentions": 5},
+            "路人甲": {"mentions": 1},
+        })
+        assert ds.compute_promotable_npcs(ws) == ["酒馆老板"]
+
+    def test_已转正的不再建议(self):
+        ws = self._ws({"酒馆老板": {"mentions": 9, "card": {"id": "npc_x"}}})
+        assert ds.compute_promotable_npcs(ws) == []
+
+    def test_按出场次数降序且截断(self):
+        ws = self._ws({f"角色{i}": {"mentions": i} for i in range(4, 12)})
+        got = ds.compute_promotable_npcs(ws)
+        assert len(got) == ds.MAX_PROMOTABLE
+        assert got == ["角色11", "角色10", "角色9"]
+
+    def test_台词归属误命中的垃圾名被滤掉(self):
+        """写入侧已经挡了一部分，读取侧再滤一次兼容存量数据。"""
+        ws = self._ws({"她": {"mentions": 9}, "第七节": {"mentions": 9}})
+        assert ds.compute_promotable_npcs(ws) == []
+
+    def test_没有临场角色时静默(self):
+        assert ds.compute_promotable_npcs({}) == []
+
+
+# ── 结局：只提示、不代劳 ──
+
+
+class TestEndingReady:
+    def _module(self, triggers=None, clues=None):
+        return SimpleNamespace(triggers=triggers or [], clues=clues or [])
+
+    def test_空模组不喊结局(self):
+        """没有 triggers 也没有 clues → 无从判断，必须保持沉默，
+        否则一开局就提示结束。"""
+        assert ds.compute_ending_ready(self._module(), {}) is False
+
+    def test_触发器全部触发且线索基本掌握才判结局(self):
+        module = self._module(
+            triggers=[{"set_flags": ["a"]}, {"set_flags": ["b"]}],
+            clues=[{"id": "c1"}, {"id": "c2"}],
+        )
+        ws = {
+            "flags": ["a", "b"],
+            "clue_ledger": {"c1": {"status": "known"}, "c2": {"status": "known"}},
+        }
+        assert ds.compute_ending_ready(module, ws) is True
+
+    def test_还有触发器没触发就不算结局(self):
+        module = self._module(
+            triggers=[{"set_flags": ["a"]}, {"set_flags": ["b"]}, {"set_flags": ["c"]}],
+        )
+        assert ds.compute_ending_ready(module, {"flags": ["a", "b"]}) is False
+
+    def test_内容太少的模组一律不判结局(self):
+        """只有一条线索的模组，线索一被发现就喊结局——那不是结局是刚开始。"""
+        module = self._module(clues=[{"id": "c1"}])
+        ws = {"clue_ledger": {"c1": {"status": "known"}}}
+        assert ds.compute_ending_ready(module, ws) is False
+
+    def test_线索只掌握一半不算结局(self):
+        module = self._module(clues=[{"id": f"c{i}"} for i in range(4)])
+        ws = {"clue_ledger": {"c0": {"status": "known"}, "c1": {"status": "known"}}}
+        assert ds.compute_ending_ready(module, ws) is False
+
+    def test_partial_不算掌握(self):
+        module = self._module(clues=[{"id": "c1"}, {"id": "c2"}, {"id": "c3"}])
+        ws = {"clue_ledger": {c: {"status": "partial"} for c in ("c1", "c2", "c3")}}
+        assert ds.compute_ending_ready(module, ws) is False
+
+    def test_提示语明确把结束权留给玩家(self):
+        """这条守的是措辞：KP 只能提示，不能代玩家宣布结束。"""
+        text = ds.DirectorSignals(ending_ready=True).to_prompt()
+        assert "提示玩家可以结束本模组" in text
+        assert "不要代为宣布结束" in text

@@ -420,13 +420,15 @@ async def promote_improvised_npc(
 ):
     """把某临场 NPC 受控转正为正式配角（据其既有言行生成 NPC 卡，存会话级）。
 
-    仅房主可操作（seat_order==0）。生成失败返回 502；未登记的名字返回 404。
+    **在场的任一真人玩家**都可操作：发现「这个龙套有戏」的往往是跟他对过戏的那个玩家，
+    不一定是房主；多人桌上卡在房主那里只是多一道无谓的摩擦。
+    转正本身是增量且可控的——只生成一张会话级 NPC 卡，不改模组本体、不影响其他人的存档。
+
+    生成失败返回 502；未登记的名字返回 404。
     """
     from app.services import promote_service
 
-    require_session_host(
-        db, session_id, token, detail="仅房主可转正临场 NPC",
-    )
+    require_session_token_actor(db, session_id, token)
     name = (body or {}).get("name")
     if not name:
         raise HTTPException(400, "缺少 name")

@@ -22,6 +22,15 @@ STUCK_THRESHOLD = 3
 MAX_THREADS = 4
 # 节奏单调：最近这么多个玩家回合若清一色是调查（无 NPC 对话）→ 提示换气
 PACING_WINDOW = 5
+# 临场龙套被提及这么多次仍未转正 → 建议收编（他显然已经在桌上站住了）
+PROMOTE_MENTION_THRESHOLD = 4
+# 建议收编最多列几个，避免灌爆规划器输入
+MAX_PROMOTABLE = 3
+# 判定「剧情已抵达结局」时，线索至少要被完整掌握到这个比例
+ENDING_CLUE_RATIO = 0.8
+# 模组至少要有这么多个「节拍」（触发器 + 线索）才谈得上「走完了」。
+# 否则一个只有一条线索的模组，线索一被发现就会被判成结局——那不是结局，是刚开始。
+ENDING_MIN_BEATS = 3
 
 
 @dataclass
@@ -31,10 +40,15 @@ class DirectorSignals:
     stuck_turns: int = 0
     unresolved_threads: list[str] = field(default_factory=list)  # 悬念描述（一句话）
     monotonous: bool = False  # 近期节奏单调（长时间纯调查）
+    promotable_npcs: list[str] = field(default_factory=list)  # 反复出场、值得收编的临场龙套
+    ending_ready: bool = False  # 主线看起来已经走完，可以提示玩家收束
 
     def has_actionable(self) -> bool:
         """是否有值得注入规划器的信号——未解悬念单独存在不算（那是常态）。"""
-        return bool(self.spotlight_starved or self.stuck or self.monotonous)
+        return bool(
+            self.spotlight_starved or self.stuck or self.monotonous
+            or self.promotable_npcs or self.ending_ready
+        )
 
     def to_prompt(self) -> str:
         """渲染成给规划器看的一段中文提示（只在 has_actionable 或有悬念时调用）。"""
@@ -54,6 +68,17 @@ class DirectorSignals:
             lines.append(
                 "- 节奏单调：最近清一色是调查动作、缺少人物互动或情绪起伏。"
                 "考虑 release 一下节奏，安排一段对话/氛围/意外来换气。"
+            )
+        if self.promotable_npcs:
+            lines.append(
+                f"- 已站住脚的临场角色：{'、'.join(self.promotable_npcs)} 已多次出场却还没有正式设定。"
+                "继续使用他们时请保持前后一致的身份与说话方式（房主可在「临场角色」里把他们收编为正式配角）。"
+            )
+        if self.ending_ready:
+            lines.append(
+                "- 主线看起来已经走完（该触发的都触发了、线索也基本掌握）。"
+                "本轮适合收束：把已知真相串起来给一个有分量的收尾，"
+                "并**提示玩家可以结束本模组**——但结束与否由玩家自己决定，你不要代为宣布结束。"
             )
         if self.unresolved_threads:
             lines.append(
@@ -175,6 +200,70 @@ def compute_monotonous(events: list[Any], player_names: list[str]) -> bool:
     return (not has_dialogue) and dice_or_action >= PACING_WINDOW
 
 
+def compute_promotable_npcs(world_state: dict) -> list[str]:
+    """反复出场却仍未收编的临场龙套。
+
+    AI 会即兴造出模组里没有的角色；他们只活在事件流里，上下文一截断人设就散了。
+    ``mentions`` 是登记侧已有的计数——出场够多次就说明这个龙套在桌上站住了，
+    值得提醒把他固化成有卡的配角。
+    """
+    from app.services import world_memory
+
+    improv = (world_state or {}).get("improvised_npcs") or {}
+    out: list[str] = []
+    for name, entry in improv.items():
+        entry = entry if isinstance(entry, dict) else {}
+        if (entry.get("card") or {}).get("id"):
+            continue  # 已转正
+        if int(entry.get("mentions", 0)) < PROMOTE_MENTION_THRESHOLD:
+            continue
+        if not world_memory.is_plausible_npc_name(name):
+            continue  # 台词归属误命中留下的垃圾名
+        out.append(name)
+    # 出场多的排前面，截断避免灌爆输入
+    out.sort(key=lambda n: -int((improv.get(n) or {}).get("mentions", 0)))
+    return out[:MAX_PROMOTABLE]
+
+
+def compute_ending_ready(module: Any, world_state: dict) -> bool:
+    """主线是否已经走完——用于**提示**玩家可以结束，绝不代为结束。
+
+    判据全部取自既有数据，不需要模组额外声明：
+      ① 模组的 triggers 全部已触发（set_flags 都进了 flags）；
+      ② 线索台账里 status=known 的比例达到 ENDING_CLUE_RATIO。
+    前置门槛：模组的触发器 + 线索合计不少于 ENDING_MIN_BEATS，内容太少不做判断——
+    只有一条线索的模组，线索一被发现就喊结局，那不是结局是刚开始。
+    """
+    world_state = world_state or {}
+    active_flags = set(world_state.get("flags") or [])
+
+    triggers = [t for t in (getattr(module, "triggers", None) or []) if (t.get("set_flags") or [])]
+    clues_all = getattr(module, "clues", None) or []
+    # 内容太少的模组不做判断：一条线索被发现不等于故事结束。
+    if len(triggers) + len(clues_all) < ENDING_MIN_BEATS:
+        return False
+
+    if triggers:
+        if not all(
+            all(f in active_flags for f in (t.get("set_flags") or []))
+            for t in triggers
+        ):
+            return False
+
+    clues = getattr(module, "clues", None) or []
+    if clues:
+        ledger = world_state.get("clue_ledger") or {}
+        known = sum(
+            1 for c in clues
+            if ((ledger.get(c.get("id")) or {}).get("status")) == "known"
+        )
+        if known < len(clues) * ENDING_CLUE_RATIO:
+            return False
+
+    # 两样都没有 → 无从判断，不吭声
+    return bool(triggers or clues)
+
+
 def compute_signals(
     events: list[Any], module: Any, world_state: dict, player_names: list[str],
 ) -> DirectorSignals:
@@ -186,4 +275,6 @@ def compute_signals(
         stuck_turns=stuck_turns,
         unresolved_threads=compute_unresolved_threads(module, world_state),
         monotonous=compute_monotonous(events, player_names),
+        promotable_npcs=compute_promotable_npcs(world_state),
+        ending_ready=compute_ending_ready(module, world_state),
     )

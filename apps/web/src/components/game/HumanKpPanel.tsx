@@ -62,6 +62,8 @@ interface DirectorSignals {
   stuck_turns: number
   unresolved_threads: string[]
   monotonous: boolean
+  promotable_npcs?: string[]   // 反复出场、值得收编为正式配角的临场龙套
+  ending_ready?: boolean       // 主线看起来已走完，可提示玩家收束（结束与否仍由玩家决定）
 }
 
 interface ImageSuggestion {
@@ -752,6 +754,17 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   if (signals?.monotonous) {
     signalChips.push({ key: 'monotonous', label: '节奏单调', tone: 'chip--accent' })
   }
+  if (signals?.ending_ready) {
+    // 放在最前：这是「该收尾了」，比冷场/节奏更值得 KP 立刻看到
+    signalChips.unshift({ key: 'ending', label: '主线已走完，可收尾', tone: 'chip--success' })
+  }
+  if (signals?.promotable_npcs?.length) {
+    signalChips.push({
+      key: 'promotable',
+      label: `可收编 ${signals.promotable_npcs.join('、')}`,
+      tone: 'chip--accent',
+    })
+  }
   if (signals?.unresolved_threads?.length) {
     signalChips.push({
       key: 'threads',
@@ -1222,6 +1235,18 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               {!!signals?.spotlight_starved.length && <div>冷场角色：{signals.spotlight_starved.join('、')}</div>}
               {signals?.stuck && <div>卡关迹象：约 {signals.stuck_turns} 个玩家回合没有实质进展</div>}
               {signals?.monotonous && <div>节奏单调：近期调查动作密集，可加入人物互动或情绪换气</div>}
+              {signals?.ending_ready && (
+                <div style={{ color: 'var(--color-success)' }}>
+                  主线已走完（该触发的都触发了、线索也基本掌握）：适合收束并提示玩家结束本模组——
+                  结束与否由玩家投票决定，你不必代为宣布。
+                </div>
+              )}
+              {!!signals?.promotable_npcs?.length && (
+                <div>
+                  已站住脚的临场角色：{signals.promotable_npcs.join('、')}
+                  ——可在顶栏「临场角色」里收编为正式配角，之后他们才有稳定人设与记忆。
+                </div>
+              )}
               {!!signals?.unresolved_threads.length && <div>待回收：{signals.unresolved_threads.join('；')}</div>}
               {!signals?.spotlight_starved.length && !signals?.stuck && !signals?.monotonous && !signals?.unresolved_threads.length && <div>当前没有明显的节奏风险。</div>}
             </div>
