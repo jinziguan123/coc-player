@@ -762,6 +762,74 @@ body {
   font-size: var(--text-2xs);
 }
 
+/* ===== 新手引导浮层 ===== */
+.coach-body {
+  font-size: var(--text-sm);
+  line-height: 1.85;
+  color: var(--color-text-primary);
+}
+.coach-body p { margin: 0 0 0.6em; }
+.coach-body p:last-child { margin-bottom: 0; }
+.coach-body strong { color: var(--color-text-accent); font-weight: 600; }
+.coach-list {
+  margin: 0.4em 0 0.6em;
+  padding-left: 1.1em;
+  list-style: disc;
+}
+.coach-list li { margin: 0.25em 0; }
+/* 行内示例：与正文拉开，让「照着敲就行」一眼可辨 */
+.coach-code {
+  display: inline-block;
+  margin: 0 0.15em;
+  padding: 0.05em 0.4em;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--color-text-accent);
+}
+.coach-note {
+  margin-top: 0.8em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.coach-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  transition: background 0.15s, transform 0.15s;
+}
+.coach-dot--on {
+  background: var(--color-accent);
+  transform: scale(1.25);
+}
+
+/* 新手团「先接模型」的分步说明：左对齐才读得下去，别跟着页面居中 */
+.onboarding-steps {
+  margin: 0 0 1.5rem;
+  padding-left: 1.3rem;
+  list-style: decimal;
+  text-align: left;
+  font-size: var(--text-sm);
+  line-height: 1.9;
+  color: var(--color-text-secondary);
+}
+.onboarding-steps li { margin: 0.35em 0; }
+.onboarding-steps strong { color: var(--color-text-primary); font-weight: 600; }
+.onboarding-steps code {
+  padding: 0.05em 0.35em;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--color-text-accent);
+}
+
 /* 分组容器：面板内的次级表面 */
 .group-box {
   padding: 0.5rem 0.625rem;

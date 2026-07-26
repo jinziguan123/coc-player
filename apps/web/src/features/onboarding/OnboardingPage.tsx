@@ -47,16 +47,39 @@ export function OnboardingPage() {
       {state === 'needs_config' && (
         <>
           <Settings className="mb-5 h-9 w-9" aria-hidden="true" />
-          <h1 className="page-title">需要先配置 AI</h1>
-          <p className="mb-6" style={{ color: 'var(--color-text-secondary)' }}>
-            新手团需要可用的 AI 模型来担任主持人。
+          <h1 className="page-title">先接一个 AI 模型</h1>
+          <p className="mb-5" style={{ color: 'var(--color-text-secondary)' }}>
+            守秘人（KP）由 AI 担任，所以得先给它接一个模型。
+            全程在本机完成，剧本与存档都不上传。
           </p>
+          {/* 此前这里只有一句「需要配置 AI」+ 一个按钮——新用户到设置页面对一堆字段，
+              并不知道该填什么、去哪拿密钥。这里把最短路径直接写出来。 */}
+          <ol className="onboarding-steps">
+            <li>
+              到任一模型服务商拿一个 <strong>API Key</strong>。
+              国内可用 DeepSeek，海外可用 OpenAI / Anthropic；
+              本机跑 Ollama 也行（无需密钥）。
+            </li>
+            <li>
+              点下面的按钮进设置，选「<strong>新增配置</strong>」。
+            </li>
+            <li>
+              只需填四项：<strong>配置名称</strong>（随便起）、
+              <strong>API 协议</strong>（DeepSeek / OpenAI / Ollama 都选「OpenAI 兼容」）、
+              <strong>Base URL</strong> 与 <strong>API Key</strong>，
+              再填<strong>模型名称</strong>（如 <code>deepseek-chat</code>）。
+            </li>
+            <li>
+              保存后点「<strong>测试</strong>」确认通了，再点「<strong>激活</strong>」。
+              回到这里就会自动继续。
+            </li>
+          </ol>
           <button
             className="btn-primary flex items-center gap-2"
             onClick={() => navigate('/settings', { state: { returnTo: '/onboarding' } })}
           >
             <Settings className="h-4 w-4" aria-hidden="true" />
-            配置 AI
+            去设置里新增配置
           </button>
         </>
       )}

@@ -13,6 +13,7 @@ import {
   CheckResultCard, hasCheckReadout, diceAccent, outcomeLabel,
   type CheckResultMeta,
 } from '../components/game/CheckResultCard'
+import { OnboardingCoach, hasSeenCoach } from '../components/game/OnboardingCoach'
 import { buildCheckCaption } from '../components/game/diceNotation'
 import { normalizeOpposedData, type OpposedData, type OpposedSide } from '../components/game/opposedDice'
 import { ContextUsageBadge } from '../components/game/ContextUsageBadge'
@@ -26,7 +27,7 @@ import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { Modal } from '../components/ui/modal'
 import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiLaurelCrown, GiAncientRuins, GiMagnifyingGlass } from 'react-icons/gi'
-import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
+import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, HelpCircle, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
 import { useRepairableImage, type ModuleImageKind } from '../components/module/ModuleImage'
@@ -355,6 +356,9 @@ export function GameSessionPage() {
   const [panelChar, setPanelChar] = useState<Character | null>(null)
   const [panelCharId, setPanelCharId] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
+  // 新手引导：本机从未看过时自动弹一次；之后可从顶栏「操作说明」重开。
+  // KP 席不弹——这三步讲的是玩家侧操作（输入语法/投骰/角色卡），对 KP 没用。
+  const [showCoach, setShowCoach] = useState(false)
   // 窄屏默认收起：角色卡在手机上是覆盖式抽屉，默认展开会挡住叙事流。
   const [showPanel, setShowPanel] = useState(
     () => !(typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches),
@@ -391,6 +395,11 @@ export function GameSessionPage() {
   const isKp = currentSession?.kp_mode === 'human'
     && !!currentSession.participants?.some((p) => p.role === 'kp' && p.is_mine)
   const shownCharId = panelCharId ?? myCharId
+  // 会话载入完、且确认自己是玩家（非 KP）后再决定弹不弹——KP 席不需要这套玩家侧操作说明。
+  useEffect(() => {
+    if (!currentSession || isKp) return
+    if (!hasSeenCoach()) setShowCoach(true)
+  }, [currentSession, isKp])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   // 开局前置校验：是否已配置可用 AI（null=未知/检查中）。未配置时提示去设置，避免开场直接失败。
@@ -1357,6 +1366,15 @@ export function GameSessionPage() {
                 <GiCharacter size={13} /> 临场角色
               </button>
             )}
+            {!isKp && (
+              <button
+                onClick={() => setShowCoach(true)}
+                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                title="操作说明：怎么行动、怎么投骰、角色卡在哪"
+              >
+                <HelpCircle size={13} />
+              </button>
+            )}
             {!immersiveOn && !(showPanel && panelChar) && (
               <button
                 onClick={() => setShowPanel(true)}
@@ -2166,6 +2184,7 @@ export function GameSessionPage() {
           <span className="kp-rail-label">KP</span>
         </button>
       )}
+      {showCoach && <OnboardingCoach onClose={() => setShowCoach(false)} />}
       {isKp && !kpCollapsed && (
         <aside className="kp-console-pane flex-shrink-0">
           <HumanKpPanel

@@ -57,8 +57,11 @@ describe('OnboardingPage', () => {
 
     renderFlow()
 
-    expect(await screen.findByText('需要先配置 AI')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '配置 AI' }))
+    expect(await screen.findByText('先接一个 AI 模型')).toBeInTheDocument()
+    // 除了「说明原因」，还要给出可照做的最短路径，否则新用户到了设置页仍不知道填什么
+    expect(screen.getAllByText(/API Key/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/OpenAI 兼容/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '去设置里新增配置' }))
 
     expect(screen.getByTestId('location')).toHaveTextContent('/settings')
     expect(screen.getByTestId('location')).toHaveTextContent('"returnTo":"/onboarding"')
