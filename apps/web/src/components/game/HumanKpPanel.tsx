@@ -294,6 +294,14 @@ const ACTION_LABELS: Record<KpAction, string> = {
   start_combat: '开始战斗',
 }
 
+/** 跑团里九成操作就是这三件事，提出来做直达按钮；其余仍在「更多」下拉里，一个不少。 */
+const QUICK_ACTIONS: Array<{ id: KpAction; label: string; icon: typeof WandSparkles }> = [
+  { id: 'narration', label: '叙事', icon: WandSparkles },
+  { id: 'dialogue', label: 'NPC 台词', icon: Bot },
+  { id: 'dice_check', label: '检定', icon: GiRollingDices },
+]
+const QUICK_IDS = new Set<KpAction>(QUICK_ACTIONS.map((item) => item.id))
+
 const TABS: Array<{ id: PanelTab; label: string; icon: typeof WandSparkles }> = [
   { id: 'tools', label: '主持', icon: WandSparkles },
   { id: 'advisor', label: '参谋', icon: Bot },
@@ -481,6 +489,20 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
 
   const setField = (key: string, value: string) => {
     setFields((current) => ({ ...current, [key]: value }))
+  }
+
+  /** 采纳参谋建议：切回「主持」并把建议参数预填进表单，交由 KP 过目/微调后再发布。
+   *  与旁边的「执行」不同 —— 执行是立刻广播给全桌，采纳只是把字段填好，还没发出去。 */
+  const adoptToTools = (nextAction: KpAction, nextFields: Record<string, string | undefined>) => {
+    const clean: Record<string, string> = {}
+    for (const [key, value] of Object.entries(nextFields)) {
+      const text = (value ?? '').toString().trim()
+      if (text) clean[key] = text
+    }
+    setAction(nextAction)
+    setFields(clean)
+    setTab('tools')
+    toast.success(`已填入「${ACTION_LABELS[nextAction]}」，确认后再发布`)
   }
 
   const setDiceAdjustment = (prefix: string, bonus: string, penalty: string) => {
@@ -711,6 +733,33 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   }
 
   const signals = workspace?.signals
+  // 常驻信号灯的内容：只留「此刻确实成立」的那几条，没有信号就整条不出现。
+  const signalChips: Array<{ key: string; label: string; tone: string }> = []
+  if (signals?.stuck) {
+    signalChips.push({
+      key: 'stuck',
+      label: `卡关 ${signals.stuck_turns} 回合`,
+      tone: 'chip--danger',
+    })
+  }
+  if (signals?.spotlight_starved?.length) {
+    signalChips.push({
+      key: 'spotlight',
+      label: `冷场 ${signals.spotlight_starved.join('、')}`,
+      tone: 'chip--accent',
+    })
+  }
+  if (signals?.monotonous) {
+    signalChips.push({ key: 'monotonous', label: '节奏单调', tone: 'chip--accent' })
+  }
+  if (signals?.unresolved_threads?.length) {
+    signalChips.push({
+      key: 'threads',
+      label: `待回收 ${signals.unresolved_threads.length}`,
+      tone: '',
+    })
+  }
+
   const defaultActorRef = workspace?.catalogs.characters?.[0]
     ? `character:${workspace.catalogs.characters[0].id}`
     : ''
@@ -780,6 +829,22 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
         </button>
       </div>
 
+      {/* 导演信号常驻条：冷场/卡关/节奏/待回收都是**时效**信号，此前只活在「导演台」标签页里，
+          KP 不主动切过去就永远看不到。这里做成抬头下的一行提示灯，有信号才出现，点击直达导演台。 */}
+      {!collapsed && !!signalChips.length && (
+        <button
+          type="button"
+          onClick={() => setTab('director')}
+          className="kp-signal-strip"
+          title="点击查看导演台详情"
+        >
+          <Info size={12} className="flex-shrink-0" />
+          {signalChips.map((chip) => (
+            <span key={chip.key} className={`chip ${chip.tone}`}>{chip.label}</span>
+          ))}
+        </button>
+      )}
+
       {/* 侧栏形态：抬头以下整体滚动，抬头（含「开放行动」）常驻 */}
       <div className={sidebar ? 'kp-console-body' : ''}>
 
@@ -790,10 +855,30 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               当前还没有真人玩家角色。玩家入座并选择角色后，参谋才能生成针对具体玩家的裁定建议。
             </div>
           )}
-          <div className="mb-2 flex items-center gap-2">
+          {/* 高频三件事做直达按钮，其余收进「更多」——此前 12 个动作平铺在一个下拉里，
+              每发一句旁白都要「开下拉→找条目→填表」。 */}
+          <div className="mb-2 flex flex-wrap items-center gap-1">
+            {QUICK_ACTIONS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { setAction(id); setFields({}) }}
+                aria-pressed={action === id}
+                className={`kp-quick-action ${action === id ? 'kp-quick-action--on' : ''}`}
+              >
+                <Icon size={13} /> {label}
+              </button>
+            ))}
             <Select value={action} onValueChange={(value) => { setAction(value as KpAction); setFields({}) }}>
-              <SelectTrigger className="w-auto min-w-32 text-xs" aria-label="KP 动作">
-                <SelectValue />
+              <SelectTrigger
+                className="w-auto min-w-24 text-xs"
+                aria-label="更多 KP 动作"
+                style={QUICK_IDS.has(action)
+                  ? undefined
+                  : { borderColor: 'var(--color-accent)', color: 'var(--color-text-accent)' }}
+              >
+                {/* 当前动作已在直达按钮里时，下拉只作为「更多」入口，不重复显示同一个标签 */}
+                {QUICK_IDS.has(action) ? <span>更多…</span> : <SelectValue />}
               </SelectTrigger>
               <SelectContent>
                 {Object.entries(ACTION_LABELS).map(([value, label]) => (
@@ -960,24 +1045,96 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
                 {plan.requires_check && plan.check?.skill && (
                   <div className="flex flex-wrap items-center gap-2">
                     <span>建议检定：{plan.check.skill} / {plan.check.difficulty || 'normal'} {plan.check.reason && `· ${plan.check.reason}`}</span>
+                    <button
+                      className="btn-secondary !px-2 !py-0.5"
+                      title="填入主持表单，可改难度/对象后再发起"
+                      onClick={() => adoptToTools('dice_check', {
+                        skill: plan.check?.skill,
+                        difficulty: plan.check?.difficulty,
+                        char: plan.check?.chars,
+                        bonus: plan.check?.bonus ? String(plan.check.bonus) : '',
+                        penalty: plan.check?.penalty ? String(plan.check.penalty) : '',
+                      })}
+                    >
+                      填入
+                    </button>
                     <button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('dice_check', plan.check || {}, '已按建议发起检定')}>照此发起</button>
+                  </div>
+                )}
+                {/* NPC 反应此前是纯文本，没有任何采纳路径：KP 得记住内容、切回主持、
+                    重选 NPC、把台词手抄一遍。 */}
+                {plan.npc_policy?.reaction && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>NPC 反应：{plan.npc_policy.reaction}</span>
+                    <button
+                      className="btn-secondary !px-2 !py-0.5"
+                      title="填入主持表单的 NPC 台词，可改写后再发布"
+                      onClick={() => adoptToTools('dialogue', {
+                        npc_id: plan.npc_policy?.speakers?.[0],
+                        content: plan.npc_policy?.reaction,
+                      })}
+                    >
+                      填入台词
+                    </button>
                   </div>
                 )}
                 {plan.auto_outcome && plan.auto_outcome !== 'none' && <div>免检结论：{plan.auto_outcome} · {plan.auto_outcome_reason}</div>}
                 {!!plan.clue_policy?.candidate_clue_ids?.length && <div>候选线索：{plan.clue_policy.candidate_clue_ids.join('、')} · {plan.clue_policy.notes}</div>}
-                {plan.npc_policy?.reaction && <div>NPC 反应：{plan.npc_policy.reaction}</div>}
                 {plan.scene_policy?.scene_change && (
                   <div className="flex items-center gap-2">建议切场：{plan.scene_policy.scene_change}<button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('scene_change', { scene_id: plan.scene_policy?.scene_change }, '已按建议切换场景')}>执行</button></div>
                 )}
                 {!!plan.scene_policy?.set_flags?.length && <div className="flex flex-wrap items-center gap-2">建议推进标志：{plan.scene_policy.set_flags.map((flag) => <button key={flag} className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('set_flag', { flag }, `已推进标志 ${flag}`)}>{flag}</button>)}</div>}
                 {!!plan.scene_policy?.clear_flags?.length && <div className="flex flex-wrap items-center gap-2">建议解除标志：{plan.scene_policy.clear_flags.map((flag) => <button key={flag} className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('clear_flag', { flag }, `已解除标志 ${flag}`)}>{flag}</button>)}</div>}
                 {plan.sanity?.trigger && (
-                  <div className="flex items-center gap-2">建议理智检定：{plan.sanity.source}<button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('san_check', { chars: plan.sanity?.witnesses?.join('、'), source: plan.sanity?.source, success_loss: plan.sanity?.success_loss, failure_loss: plan.sanity?.failure_loss }, '已按建议进行理智检定')}>执行</button></div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>建议理智检定：{plan.sanity.source}</span>
+                    <button
+                      className="btn-secondary !px-2 !py-0.5"
+                      title="填入主持表单，可改目睹者/损失值后再执行"
+                      onClick={() => adoptToTools('san_check', {
+                        chars: plan.sanity?.witnesses?.join('、'),
+                        source: plan.sanity?.source,
+                        success_loss: plan.sanity?.success_loss,
+                        failure_loss: plan.sanity?.failure_loss,
+                      })}
+                    >
+                      填入
+                    </button>
+                    <button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('san_check', { chars: plan.sanity?.witnesses?.join('、'), source: plan.sanity?.source, success_loss: plan.sanity?.success_loss, failure_loss: plan.sanity?.failure_loss }, '已按建议进行理智检定')}>执行</button>
+                  </div>
                 )}
                 {plan.combat?.should_start && (
-                  <div className="flex items-center gap-2">建议开战：{plan.combat.enemies?.join('、')}<button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('start_combat', { enemies: plan.combat?.enemies?.join('、'), trigger: plan.combat?.trigger }, '已按建议开始战斗')}>执行</button></div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>建议开战：{plan.combat.enemies?.join('、')}</span>
+                    <button
+                      className="btn-secondary !px-2 !py-0.5"
+                      title="填入主持表单，可增删参战敌人后再开战"
+                      onClick={() => adoptToTools('start_combat', {
+                        // 开战表单的 enemies 是逗号分隔（MultiSelect 按 , 切分），与理智检定的顿号不同
+                        enemies: plan.combat?.enemies?.join(','),
+                        trigger: plan.combat?.trigger,
+                      })}
+                    >
+                      填入
+                    </button>
+                    <button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('start_combat', { enemies: plan.combat?.enemies?.join('、'), trigger: plan.combat?.trigger }, '已按建议开始战斗')}>执行</button>
+                  </div>
                 )}
-                {(plan.direction?.nudge || plan.direction?.foreshadow) && <div>导演建议：{plan.direction.nudge || plan.direction.foreshadow}</div>}
+                {/* 导演建议同样是纯文本 —— 补一条「填入叙事」，省去记忆+手抄 */}
+                {(plan.direction?.nudge || plan.direction?.foreshadow) && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>导演建议：{plan.direction.nudge || plan.direction.foreshadow}</span>
+                    <button
+                      className="btn-secondary !px-2 !py-0.5"
+                      title="填入主持表单的旁白，可改写后再发布"
+                      onClick={() => adoptToTools('narration', {
+                        content: plan.direction?.nudge || plan.direction?.foreshadow,
+                      })}
+                    >
+                      填入叙事
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

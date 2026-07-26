@@ -704,6 +704,56 @@ body {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* 常用动作直达按钮：选中态实心，与「更多」下拉并排 */
+.kp-quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.26rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--surface-sunken);
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.kp-quick-action:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+.kp-quick-action--on {
+  color: var(--color-on-accent);
+  background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent));
+  border-color: var(--color-accent);
+  font-weight: 600;
+}
+.kp-quick-action--on:hover { color: var(--color-on-accent); }
+
+/* 导演信号常驻条：整条可点，直达导演台 */
+.kp-signal-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.kp-signal-strip:hover {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
 /* 收起窄条上的竖排「KP」字样 */
 .kp-rail-label {
   writing-mode: vertical-rl;
