@@ -476,7 +476,9 @@ export function ModuleDetailPage() {
   // 详情/编辑同样放宽：条目区已改自适应网格，窄栏会白白空掉半屏
   return (
     <div className={wide ? 'max-w-6xl' : 'max-w-[100rem]'}>
-      <div className="flex items-center gap-3 mb-4">
+      {/* 工具条吸顶：模组正文很长（场景/NPC/线索动辄几屏），编辑时「保存」若随页面滚走，
+          改完底部内容还得先滚回顶部才能存。粘在视口顶端，随时可存可切视图。 */}
+      <div className="module-toolbar flex items-center gap-3 mb-4">
         <button onClick={() => navigate('/modules')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
           <GiReturnArrow /> 返回
         </button>

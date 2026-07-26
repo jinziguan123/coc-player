@@ -655,6 +655,31 @@ body {
   text-shadow: 0 0 14px color-mix(in srgb, var(--color-dice-fumble) 75%, transparent);
 }
 
+/* ===== 模组详情/编辑：吸顶工具条 =====
+   滚动容器是 .app-main（<main>），sticky 相对它生效。
+   负外边距 + 同量内边距：让条的背景横向铺满内容区，遮住从下方滚过的正文，
+   否则半透明处会透出字。 */
+.module-toolbar {
+  position: sticky;
+  top: -1.5rem;               /* 抵消 .app-main 的 p-6，条顶贴合视口 */
+  z-index: 20;
+  margin: -1.5rem -1.5rem 1rem;
+  padding: 1.5rem 1.5rem 0.75rem;
+  background: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border);
+}
+/* 滚动离顶后才显影分隔阴影：静止在顶部时保持干净 */
+.module-toolbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 8px;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--shadow-color), transparent);
+}
+
 /* 分组容器：面板内的次级表面 */
 .group-box {
   padding: 0.5rem 0.625rem;
