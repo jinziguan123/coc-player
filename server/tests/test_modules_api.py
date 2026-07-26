@@ -414,3 +414,95 @@ def test_upload_endpoint_returns_job_id_and_status(client, monkeypatch):
     s = client.get(f"/api/modules/upload/status/{job_id}").json()
     assert s["status"] == "running" and "percent" in s
     assert client.get("/api/modules/upload/status/nonexistent").status_code == 404
+
+
+def _stub_parse(monkeypatch, tmp_path):
+    """把解析任务的外部依赖都换成假的，只留下待测的底图那一步。"""
+    import app.api.modules as mod
+    from app.models import Base
+    from app.services import module_service as ms
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'bd.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(mod, "SessionLocal", sessionmaker(bind=engine))
+
+    async def fake_parse(raw_text, rule_system, on_progress=None):
+        return {"title": "带底图的模组", "scenes": [{"id": "s1", "title": "入口"}], "npcs": [], "clues": []}
+
+    async def fake_supplement(raw_text, parsed, rule_system):
+        return parsed
+
+    monkeypatch.setattr(ms, "parse_module_text", fake_parse)
+    monkeypatch.setattr(ms, "supplement_parse", fake_supplement)
+    return mod
+
+
+def test_upload_job_generates_backdrop_by_default(monkeypatch, tmp_path):
+    """解析完成后默认生成沙盘氛围底图，URL 落在 world_setting.sandbox_backdrop。"""
+    import asyncio
+
+    from app.services import module_map_service as mms
+
+    mod = _stub_parse(monkeypatch, tmp_path)
+    called = {}
+
+    async def fake_backdrop(db, module):
+        called["module_id"] = module.id
+        world = dict(module.world_setting or {})
+        world["sandbox_backdrop"] = "/api/images/backdrop.png"
+        module.world_setting = world
+        db.commit()
+        return {"backdrop": world["sandbox_backdrop"]}
+
+    monkeypatch.setattr(mms, "generate_map_backdrop", fake_backdrop)
+
+    job_id = mod._job_new()
+    asyncio.run(mod._run_upload_job(job_id, "原文", [], "coc"))
+
+    job = mod._upload_jobs[job_id]
+    assert job["status"] == "done", job
+    assert called.get("module_id"), "解析完成后应当自动调用底图生成"
+
+
+def test_backdrop_failure_never_fails_the_parse(monkeypatch, tmp_path):
+    """底图只是装饰层：生成炸了/超时了，模组解析仍须成功落库。
+    这条守的是「别让一张背景画拖垮整个上传流程」。"""
+    import asyncio
+
+    from app.services import module_map_service as mms
+
+    mod = _stub_parse(monkeypatch, tmp_path)
+
+    async def boom(db, module):
+        raise ValueError("当前 AI 配置不支持文生图")
+
+    monkeypatch.setattr(mms, "generate_map_backdrop", boom)
+
+    job_id = mod._job_new()
+    asyncio.run(mod._run_upload_job(job_id, "原文", [], "coc"))
+
+    job = mod._upload_jobs[job_id]
+    assert job["status"] == "done" and job["percent"] == 100
+    assert job["result"]["title"] == "带底图的模组"
+
+
+def test_backdrop_timeout_is_bounded(monkeypatch, tmp_path):
+    """底图生成挂住时不能无限期拖着上传任务——超时即放弃，任务照常完成。"""
+    import asyncio
+
+    from app.services import module_map_service as mms
+
+    mod = _stub_parse(monkeypatch, tmp_path)
+    monkeypatch.setattr(mod, "_BACKDROP_TIMEOUT_S", 0.05)
+
+    async def hang(db, module):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(mms, "generate_map_backdrop", hang)
+
+    job_id = mod._job_new()
+    asyncio.run(mod._run_upload_job(job_id, "原文", [], "coc"))
+
+    assert mod._upload_jobs[job_id]["status"] == "done"

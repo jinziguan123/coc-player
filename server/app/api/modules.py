@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 # 完成/失败的任务保留在表里供前端末轮轮询取结果，超量时按插入序淘汰最旧。
 _upload_jobs: dict[str, dict] = {}
 _MAX_UPLOAD_JOBS = 20
+# 底图是装饰层，不值得让用户为它多等——超过这个时间就放弃，之后仍可在沙盘页手动点「AI 生成氛围底图」。
+_BACKDROP_TIMEOUT_S = 90
 
 
 def _job_new() -> str:
@@ -271,6 +273,20 @@ async def _run_upload_job(
                 description=module.description, scenes_count=len(module.scenes),
                 npcs_count=len(module.npcs), clues_count=len(module.clues),
             ).model_dump()
+
+            # 沙盘氛围底图：纯装饰层，解析完顺手生成一张，省得用户再去点一次按钮。
+            # 三重兜底——超时上限、异常吞掉、未配置文生图直接跳过：
+            # 底图失败绝不能让整个模组解析失败，模组本身已经落库可用了。
+            _job_update(job_id, stage="生成沙盘氛围底图", percent=95)
+            try:
+                await asyncio.wait_for(
+                    module_map_service.generate_map_backdrop(db, module),
+                    timeout=_BACKDROP_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("沙盘底图生成超时，跳过：module=%s", module.id)
+            except Exception:  # noqa: BLE001 — 装饰层失败不影响解析结果
+                logger.warning("沙盘底图生成失败，跳过：module=%s", module.id, exc_info=True)
         finally:
             db.close()
         _job_update(job_id, status="done", stage="完成", percent=100, result=result)
