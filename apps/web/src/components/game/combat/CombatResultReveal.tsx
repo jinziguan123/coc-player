@@ -34,9 +34,10 @@ export function CombatResultReveal({ result, order }: { result: CombatResultView
         >
           <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
           <span className="text-xs font-semibold truncate max-w-full" style={{ color: 'var(--color-text-primary)' }}>{s.name}</span>
-          <span className="font-bold leading-none my-0.5" style={{ fontSize: '1.4rem', color: accent }}>{s.roll}</span>
+          {/* 点数走与聊天流结果卡同一套读数样式，两处数字观感一致 */}
+          <span className="dice-readout-roll my-0.5" style={{ color: accent }}>{s.roll}</span>
           <span style={{ fontSize: '0.6rem', color: 'var(--color-text-secondary)' }}>{s.skill} / {s.target}</span>
-          <span style={{ fontSize: '0.65rem', color: accent }}>{outcomeLabel(s.outcome)}</span>
+          <span className="dice-outcome-chip mt-0.5" style={{ color: accent, borderColor: accent }}>{outcomeLabel(s.outcome)}</span>
         </div>
       )
     }
@@ -62,10 +63,27 @@ export function CombatResultReveal({ result, order }: { result: CombatResultView
   const accent = typeof hit === 'boolean'
     ? (hit ? 'var(--color-danger)' : 'var(--color-text-secondary)')
     : outcomeAccent(String(meta.outcome ?? ''))
+  // 单侧检定若带齐点数/目标，同样把读数抬出来；纯命中判定（无 roll）仍走原散文。
+  const roll = typeof meta.roll === 'number' ? meta.roll : null
+  const target = typeof meta.target === 'number' ? meta.target : null
   return (
     <div className="mb-2 rounded-md px-2.5 py-1.5 flex items-center gap-2 text-xs" style={{ borderLeft: `3px solid ${accent}`, background: 'var(--color-bg-secondary)' }}>
       <GiRollingDices style={{ color: accent, fontSize: '1rem', flexShrink: 0 }} />
-      <span className="whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>{result.content.replace(/^🎲\s*/, '')}</span>
+      {roll !== null && target !== null ? (
+        <>
+          <span className="flex items-baseline gap-1 flex-shrink-0">
+            <span className="dice-readout-roll" style={{ color: accent }}>{roll}</span>
+            <span className="font-mono tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>/{target}</span>
+          </span>
+          {meta.outcome != null && (
+            <span className="dice-outcome-chip" style={{ color: accent, borderColor: accent }}>
+              {outcomeLabel(String(meta.outcome))}
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>{result.content.replace(/^🎲\s*/, '')}</span>
+      )}
     </div>
   )
 }

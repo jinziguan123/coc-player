@@ -9,6 +9,10 @@ import { CharacterPanel } from '../components/character/CharacterPanel'
 import { PartyRoster } from '../components/game/PartyRoster'
 import { SeatIcon, type SeatKind } from '../components/game/SeatIcon'
 import { DiceRoller, type DiceRollerHandle, type DiceSpec } from '../components/game/DiceRoller'
+import {
+  CheckResultCard, hasCheckReadout, diceAccent, outcomeLabel,
+  type CheckResultMeta,
+} from '../components/game/CheckResultCard'
 import { buildCheckCaption } from '../components/game/diceNotation'
 import { normalizeOpposedData, type OpposedData, type OpposedSide } from '../components/game/opposedDice'
 import { ContextUsageBadge } from '../components/game/ContextUsageBadge'
@@ -188,26 +192,7 @@ function fmtTime(ts?: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** 检定结果按成败取强调色。兼容引擎英文枚举与 SAN 检定的中文。 */
-function diceAccent(outcome: string): string {
-  const s = String(outcome || '')
-  if (s.includes('critical') || s.includes('大成功')) return 'var(--color-dice-gold)'    // 大成功：金黄
-  if (s.includes('fumble') || s.includes('大失败')) return 'var(--color-dice-fumble)'    // 大失败：刺目血色（暗底上黑色不可见）
-  if (s.includes('success') || s === '成功') return 'var(--color-success)'    // 其余成功：绿
-  if (s.includes('fail') || s.includes('失败')) return 'var(--color-danger)'  // 普通失败：红
-  return 'var(--color-text-secondary)'
-}
-
-/** 检定 outcome 枚举 → 中文短标签（对抗卡每侧的成败注脚）。 */
-function outcomeLabel(outcome: string): string {
-  const s = String(outcome || '')
-  if (s.includes('critical') || s === '大成功') return '大成功'
-  if (s.includes('fumble') || s === '大失败') return '大失败'
-  if (s.includes('hard_success')) return '困难成功'
-  if (s.includes('success') || s === '成功') return '成功'
-  if (s.includes('fail') || s.includes('失败')) return '失败'
-  return outcome
-}
+// diceAccent / outcomeLabel 已移到 CheckResultCard 同文件，供结果卡与对抗卡/连射卡共用。
 
 /** 对抗判定卡：攻守两方并排 + 中央 VS + 高亮胜方（参考博得之门3的对抗结算呈现）。
  *  远程无守方检定时降级为单侧命中卡。 */
@@ -233,9 +218,10 @@ function OpposedCard({ data, fresh, ts }: { data: OpposedData; fresh: boolean; t
           {won && <GiLaurelCrown style={{ color: accent, fontSize: '0.8rem', flexShrink: 0 }} />}
           <span className="text-xs font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>{s.name}</span>
         </div>
-        <div className="font-bold leading-none my-0.5" style={{ fontSize: '1.5rem', color: accent }}>{s.roll}</div>
+        {/* 与聊天流结果卡、战斗结算回显共用同一套读数样式 */}
+        <div className="dice-readout-roll my-0.5" style={{ color: accent }}>{s.roll}</div>
         <div style={{ fontSize: '0.6rem', color: 'var(--color-text-secondary)' }}>{s.skill} / {s.target}</div>
-        <div style={{ fontSize: '0.65rem', color: accent }}>{outcomeLabel(s.outcome)}</div>
+        <span className="dice-outcome-chip mt-0.5" style={{ color: accent, borderColor: accent }}>{outcomeLabel(s.outcome)}</span>
       </div>
     )
   }
@@ -1661,32 +1647,52 @@ export function GameSessionPage() {
                 else if (!blind && (oc.includes('fumble') || oc.includes('大失败'))) diceAnim = 'dice-fumble'
                 else diceAnim = 'dice-enter'
               }
+              // 奖惩骰注记与伤害标志（贯穿/燃烧/晕）——两种卡型共用
+              const noteChips = (
+                <>
+                  {checkCap && (
+                    <span className="chip font-semibold"
+                      title={`${checkCap.rule}；${checkCap.breakdown} → 结果 ${checkCap.result}`}
+                      style={{
+                        color: checkCap.kind === 'bonus' ? 'var(--color-dice-gold)' : 'var(--color-dice-fumble)',
+                        borderColor: checkCap.kind === 'bonus' ? 'var(--color-dice-gold)' : 'var(--color-dice-fumble)',
+                      }}>
+                      {checkCap.title}
+                    </span>
+                  )}
+                  {diceFlags.map((f) => {
+                    const gold = f === '贯穿'
+                    const col = gold ? 'var(--color-dice-gold)' : 'var(--color-danger)'
+                    return (
+                      <span key={f} className="chip font-semibold" style={{ color: col, borderColor: col }}>
+                        {gold ? '贯穿!' : f}
+                      </span>
+                    )
+                  })}
+                </>
+              )
+              // 元数据齐备（技能检定）→ 结构化读数卡；否则（追逐/自定义骰/旧事件）回落散文行。
+              const checkMeta = msg.metadata as CheckResultMeta | undefined
+              if (hasCheckReadout(checkMeta)) {
+                return (
+                  <div key={msg.id} className="chat-msg py-1">
+                    <CheckResultCard
+                      meta={checkMeta as CheckResultMeta}
+                      blind={blind}
+                      animClass={diceAnim}
+                      chips={noteChips}
+                      ts={fmtTime(msg.ts)}
+                    />
+                  </div>
+                )
+              }
               return (
                 <div key={msg.id} className="chat-msg py-1">
                   <div className={`dice-card rounded-md px-3 py-2 text-sm flex items-start gap-2 ${diceAnim}`}
                     style={{ borderLeft: `3px solid ${accent}`, width: 'fit-content', maxWidth: '100%' }}>
                     <GiRollingDices style={{ color: accent, fontSize: '1.1rem', flexShrink: 0, marginTop: '0.1rem' }} />
                     <span className="whitespace-pre-wrap">{diceText}</span>
-                    {checkCap && (
-                      <span className="text-[10px] px-1 rounded flex-shrink-0 self-center font-semibold"
-                        title={`${checkCap.rule}；${checkCap.breakdown} → 结果 ${checkCap.result}`}
-                        style={{
-                          color: checkCap.kind === 'bonus' ? 'var(--color-dice-gold)' : 'var(--color-dice-fumble)',
-                          border: `1px solid ${checkCap.kind === 'bonus' ? 'var(--color-dice-gold)' : 'var(--color-dice-fumble)'}`,
-                        }}>
-                        {checkCap.title}
-                      </span>
-                    )}
-                    {diceFlags.map((f) => {
-                      const gold = f === '贯穿'
-                      const col = gold ? 'var(--color-dice-gold)' : 'var(--color-danger)'
-                      return (
-                        <span key={f} className="text-[10px] px-1 rounded flex-shrink-0 self-center font-semibold"
-                          style={{ color: col, border: `1px solid ${col}` }}>
-                          {gold ? '贯穿!' : f}
-                        </span>
-                      )
-                    })}
+                    {noteChips}
                     {fmtTime(msg.ts) && <span className="self-end" style={{ fontSize: '0.6rem', opacity: 0.5, flexShrink: 0 }}>{fmtTime(msg.ts)}</span>}
                   </div>
                 </div>

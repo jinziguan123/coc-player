@@ -624,6 +624,37 @@ body {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* ===== 检定结果读数卡 ===== */
+/* 掷出的点数：整张卡的主角。等宽 tabular-nums 让连续几条检定的数字竖向对齐。 */
+.dice-readout-roll {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1;
+}
+/* 成败标签：描边胶囊，颜色由行内 accent 注入（与点数同色，一眼对应） */
+.dice-outcome-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+/* 大成功/大失败：点数本身发光，不只靠颜色区分（色觉障碍下也能看出「这次不一样」） */
+.dice-critical .dice-readout-roll {
+  text-shadow: 0 0 14px color-mix(in srgb, var(--color-dice-gold) 75%, transparent);
+}
+.dice-fumble .dice-readout-roll {
+  text-shadow: 0 0 14px color-mix(in srgb, var(--color-dice-fumble) 75%, transparent);
+}
+
 /* 分组容器：面板内的次级表面 */
 .group-box {
   padding: 0.5rem 0.625rem;
