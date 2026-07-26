@@ -1736,7 +1736,7 @@ export function GameSessionPage() {
                 return (
                   <div key={msg.id} className="chat-msg py-2 flex justify-center">
                     <div className="rounded-md px-4 py-3 max-w-2xl w-full"
-                      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+                      style={{ background: 'var(--surface-2)', border: '1px solid var(--color-border-strong)' }}>
                       <div className="flex items-center gap-2 mb-2" style={{ color: 'var(--color-text-accent)' }}>
                         <IllustIcon style={{ fontSize: '1.1rem', flexShrink: 0 }} />
                         <span className="font-semibold text-sm">{title || msg.content}</span>
@@ -1773,7 +1773,7 @@ export function GameSessionPage() {
                 return (
                   <div key={msg.id} className="chat-msg py-2 flex justify-center">
                     <div className="rounded-lg px-4 py-3 max-w-2xl w-full"
-                      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+                      style={{ background: 'var(--surface-2)', border: '1px solid var(--color-border-strong)' }}>
                       <div className="flex items-center gap-2 mb-1" style={{ color: 'var(--color-text-accent)' }}>
                         <GiScrollUnfurled />
                         <span className="font-semibold">{title}</span>

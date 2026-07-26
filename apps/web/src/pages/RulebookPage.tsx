@@ -29,10 +29,14 @@ const STATUS_LABEL: Record<string, string> = {
   ready: '可检索',
   failed: '失败',
 }
-const STATUS_COLOR: Record<string, string> = {
-  indexing: '#b45309',
-  ready: '#2d7d46',
-  failed: '#991b1b',
+/** 状态徽标取色：走主题语义色而非写死十六进制，羊皮纸主题下同样可读。 */
+function statusChipStyle(status: string): React.CSSProperties {
+  const tone = ({
+    indexing: 'var(--color-dice-gold)',
+    ready: 'var(--color-success)',
+    failed: 'var(--color-danger)',
+  } as Record<string, string>)[status]
+  return tone ? { color: tone, borderColor: tone } : {}
 }
 
 export function RulebookPage() {
@@ -135,7 +139,7 @@ export function RulebookPage() {
   const hasReady = books.some((b) => b.status === 'ready' && b.rule_system === ruleSystem)
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-[100rem]">
       <div className="flex items-center gap-3 mb-6">
         <button onClick={() => navigate(-1)} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
           <GiReturnArrow /> 返回
@@ -143,11 +147,11 @@ export function RulebookPage() {
         <h2 className="page-title !mb-0">规则书</h2>
       </div>
 
-      <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+      <p className="text-sm mb-4 max-w-3xl" style={{ color: 'var(--color-text-secondary)' }}>
         上传规则书 PDF（如《守秘人规则书》），系统会在本地建立可检索索引。游戏中守秘人遇到拿不准的精确规则时，会按需查阅规则书原文再裁定。
       </p>
 
-      <div className="card mb-8">
+      <div className="card mb-8 max-w-3xl">
         <h3 className="card-title flex items-center gap-2">
           <GiUpCard /> 上传规则书
         </h3>
@@ -205,18 +209,26 @@ export function RulebookPage() {
       {books.length === 0 ? (
         <p style={{ color: 'var(--color-text-secondary)' }}>暂无规则书，请上传</p>
       ) : (
-        <div className="space-y-3 mb-8">
+        <div className="grid gap-3 mb-8 lg:grid-cols-2 2xl:grid-cols-3">
           {books.map((b) => (
-            <div key={b.id} className="card">
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="card-title !mb-0 flex items-center gap-2">
-                  <GiBookCover className="opacity-60" /> {b.title}
-                </h3>
-                <div className="flex items-center gap-2">
-                  <span className="badge">{b.rule_system.toUpperCase()}</span>
-                  <span className="badge" style={{ background: STATUS_COLOR[b.status] || 'var(--color-accent)', color: '#fff' }}>
-                    {STATUS_LABEL[b.status] || b.status}
-                  </span>
+            <div key={b.id} className="card entity-card !p-0 flex flex-col overflow-hidden">
+              <div
+                className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
+                style={{ borderBottom: '1px solid var(--color-border)' }}
+              >
+                <span className="char-sigil" aria-hidden="true"><GiBookCover /></span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]" title={b.title}>
+                    {b.title}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="chip chip--accent">{b.rule_system.toUpperCase()}</span>
+                    <span className="chip" style={statusChipStyle(b.status)}>
+                      {STATUS_LABEL[b.status] || b.status}
+                    </span>
+                  </div>
+                </div>
+                <div className="entity-card-actions flex flex-shrink-0 items-center gap-1">
                   <ConfirmDialog
                     title="删除规则书"
                     description={`确定要删除「${b.title}」及其索引吗？此操作不可恢复。`}
@@ -226,8 +238,7 @@ export function RulebookPage() {
                     {(open) => (
                       <button
                         onClick={open}
-                        className="text-xs px-1.5 py-0.5 rounded hover:bg-[var(--color-danger-deep)] hover:text-white transition-colors"
-                        style={{ color: 'var(--color-danger)', border: '1px solid var(--color-danger)' }}
+                        className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
                       >
                         删除
                       </button>
@@ -235,14 +246,32 @@ export function RulebookPage() {
                   </ConfirmDialog>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-4 mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{b.page_count} 页</span>
-                <span>{b.chunk_count} 个片段</span>
-                {b.embed_model && <span>模型 {b.embed_model}</span>}
+              <div className="flex flex-1 flex-col px-3 py-2.5">
+                <div className="grid grid-cols-2 gap-1">
+                  <div className="stat-tile">
+                    <div className="stat-tile-value">{b.page_count}</div>
+                    <div className="stat-tile-label">页</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-tile-value">{b.chunk_count}</div>
+                    <div className="stat-tile-label">片段</div>
+                  </div>
+                </div>
+                {b.embed_model && (
+                  <div
+                    className="mt-1.5 truncate"
+                    style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
+                    title={b.embed_model}
+                  >
+                    模型 {b.embed_model}
+                  </div>
+                )}
+                {b.status === 'failed' && b.error && (
+                  <p className="mt-1.5" style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-danger)' }}>
+                    错误：{b.error}
+                  </p>
+                )}
               </div>
-              {b.status === 'failed' && b.error && (
-                <p className="text-xs mt-2" style={{ color: 'var(--color-danger)' }}>错误：{b.error}</p>
-              )}
             </div>
           ))}
         </div>

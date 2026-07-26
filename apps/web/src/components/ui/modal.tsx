@@ -39,8 +39,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100]"
-      style={{ background: 'rgba(0,0,0,0.72)' }}
+      className="fixed inset-0 z-[100] modal-backdrop"
       onClick={onClose}
     >
       <div
@@ -48,12 +47,11 @@ export function Modal({
         style={{ top: 0, bottom: 0, left, right: 0, paddingTop: align === 'top' ? '10vh' : undefined }}
       >
         <div
-          className={`w-full ${widthClass} mx-4 rounded-lg shadow-2xl overflow-hidden ${padded ? 'p-5' : ''}`}
+          className={`modal-panel w-full ${widthClass} mx-4 rounded-lg overflow-hidden ${padded ? 'p-5' : ''}`}
           style={{
             // 双层背景保证**不透明**（浅色主题 --color-bg-card 带 alpha）：不透明底 + 卡片色
             background: 'var(--color-bg-tertiary)',
             backgroundImage: 'linear-gradient(var(--color-bg-card), var(--color-bg-card))',
-            border: '1px solid var(--color-border)',
             maxHeight: '86vh',
           }}
           onClick={(e) => e.stopPropagation()}

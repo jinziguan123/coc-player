@@ -10,6 +10,18 @@ import { Loader2 } from 'lucide-react'
 
 const ALLOWED_EXTS = ['txt', 'md', 'pdf', 'docx', 'doc', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
 
+/** 难度徽标取色：走主题语义色而非写死的 #2d7d46/#991b1b，两套主题下都能读。
+ *  只上描边与文字色（不填实心），与同排其它 chip 保持同一视觉重量。 */
+function difficultyChipStyle(difficulty: string): React.CSSProperties {
+  const tone = ({
+    入门: 'var(--color-success)',
+    普通: 'var(--color-text-secondary)',
+    困难: 'var(--color-dice-gold)',
+    噩梦: 'var(--color-danger)',
+  } as Record<string, string>)[difficulty]
+  return tone ? { color: tone, borderColor: tone } : {}
+}
+
 export function ModulePage() {
   const { modules, loading, fetchModules, startUpload } = useModuleStore()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -117,7 +129,8 @@ export function ModulePage() {
   const totalSize = selectedFiles.reduce((s, f) => s + f.size, 0)
 
   return (
-    <div className="max-w-3xl">
+    // 上传区是线性表单（窄栏更好用），列表是并列卡片（放宽让网格铺开）——分别限宽
+    <div className="max-w-[100rem]">
       <div className="flex items-center gap-3 mb-6">
         <button onClick={() => navigate(-1)} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
           <GiReturnArrow /> 返回
@@ -128,7 +141,7 @@ export function ModulePage() {
         </button>
       </div>
 
-      <div className="card mb-8">
+      <div className="card mb-8 max-w-3xl">
         <h3 className="card-title flex items-center gap-2">
           <GiUpCard /> 上传模组
         </h3>
@@ -245,39 +258,43 @@ export function ModulePage() {
       ) : modules.length === 0 ? (
         <p style={{ color: 'var(--color-text-secondary)' }}>暂无模组，请上传</p>
       ) : (
-        <div className="space-y-3">
+        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           {modules.map((m) => (
-            <div key={m.id} className="card hover:border-[var(--color-accent)] transition-colors">
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="card-title !mb-0 flex items-center gap-2">
-                  <GiScrollUnfurled className="opacity-60" /> {m.title}
-                </h3>
-                <div className="flex items-center gap-2">
-                  <span className="badge">{m.rule_system.toUpperCase()}</span>
-                  {m.rag_status === 'ready' && (
-                    <span className="badge flex items-center gap-1" title="模组原文已建索引，跑团时 KP 可引用原文">
-                      <GiArchiveResearch /> 原文索引
-                    </span>
-                  )}
-                  {m.rag_status === 'indexing' && (
-                    <span className="badge flex items-center gap-1" title="正在为模组原文建索引">
-                      <Loader2 className="animate-spin" size={12} /> 索引中
-                    </span>
-                  )}
-                  {m.rag_status === 'failed' && (
-                    <span
-                      className="badge flex items-center gap-1"
-                      style={{ background: 'var(--color-danger)', color: '#fff' }}
-                      title="原文索引构建失败，可点「重建索引」重试"
-                    >
-                      <GiArchiveResearch /> 索引失败
-                    </span>
-                  )}
+            <div key={m.id} className="card entity-card !p-0 flex flex-col overflow-hidden">
+              {/* 抬头：卷轴纹章 + 标题 + 规则/索引态；操作按钮 hover 才浮现 */}
+              <div
+                className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
+                style={{ borderBottom: '1px solid var(--color-border)' }}
+              >
+                <span className="char-sigil" aria-hidden="true"><GiScrollUnfurled /></span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]" title={m.title}>
+                    {m.title}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="chip chip--accent">{m.rule_system.toUpperCase()}</span>
+                    {m.rag_status === 'ready' && (
+                      <span className="chip chip--success" title="模组原文已建索引，跑团时 KP 可引用原文">
+                        <GiArchiveResearch /> 原文索引
+                      </span>
+                    )}
+                    {m.rag_status === 'indexing' && (
+                      <span className="chip" title="正在为模组原文建索引">
+                        <Loader2 className="animate-spin" size={11} /> 索引中
+                      </span>
+                    )}
+                    {m.rag_status === 'failed' && (
+                      <span className="chip chip--danger" title="原文索引构建失败，可点「重建索引」重试">
+                        <GiArchiveResearch /> 索引失败
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="entity-card-actions flex flex-shrink-0 flex-wrap items-center justify-end gap-1">
                   {m.rag_status !== 'indexing' && (
                     <button
                       onClick={() => rebuildRag(m.id)}
-                      className="text-xs px-1.5 py-0.5 rounded transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-on-accent)] flex items-center gap-1"
-                      style={{ color: 'var(--color-text-accent)', border: '1px solid var(--color-border)' }}
+                      className="chip chip--accent hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
                       title="（重）建模组原文索引：让 KP 跑团时能检索并引用模组原文"
                     >
                       <GiArchiveResearch /> 重建索引
@@ -292,8 +309,7 @@ export function ModulePage() {
                     {(open) => (
                       <button
                         onClick={open}
-                        className="text-xs px-1.5 py-0.5 rounded transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-on-accent)]"
-                        style={{ color: 'var(--color-text-accent)', border: '1px solid var(--color-border)' }}
+                        className="chip chip--accent hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
                       >
                         查看/编辑
                       </button>
@@ -308,8 +324,7 @@ export function ModulePage() {
                     {(open) => (
                       <button
                         onClick={open}
-                        className="text-xs px-1.5 py-0.5 rounded hover:bg-[var(--color-danger-deep)] hover:text-white transition-colors"
-                        style={{ color: 'var(--color-danger)', border: '1px solid var(--color-danger)' }}
+                        className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
                       >
                         删除
                       </button>
@@ -317,38 +332,42 @@ export function ModulePage() {
                   </ConfirmDialog>
                 </div>
               </div>
-              <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {m.description}
-              </p>
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {Boolean(m.world_setting?.era) && (
-                  <span className="badge">{String(m.world_setting.era)}</span>
-                )}
-                {Boolean(m.world_setting?.region) && (
-                  <span className="badge">{String(m.world_setting.region)}</span>
-                )}
-                {Boolean(m.world_setting?.player_count) && (
-                  <span className="badge">{String(m.world_setting.player_count)}人</span>
-                )}
-                {Boolean(m.world_setting?.difficulty) && (
-                  <span
-                    className="badge"
-                    style={{
-                      background: ({ '入门': '#2d7d46', '普通': '#6b7280', '困难': '#b45309', '噩梦': '#991b1b' } as Record<string, string>)[String(m.world_setting.difficulty)] || 'var(--color-accent)',
-                      color: '#fff',
-                    }}
-                  >
-                    {String(m.world_setting.difficulty)}
-                  </span>
-                )}
-                {(m.world_setting?.tags as string[] || []).map((t: string) => (
-                  <span key={t} className="badge" style={{ opacity: 0.8 }}>{t}</span>
-                ))}
-              </div>
-              <div className="flex gap-4 mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{m.scenes?.length ?? 0} 个场景</span>
-                <span>{m.npcs?.length ?? 0} 个 NPC</span>
-                <span>{m.clues?.length ?? 0} 条线索</span>
+
+              <div className="flex flex-1 flex-col px-3 py-2.5">
+                <p
+                  className="mb-2 leading-relaxed"
+                  style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}
+                >
+                  {m.description}
+                </p>
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {Boolean(m.world_setting?.era) && <span className="chip">{String(m.world_setting.era)}</span>}
+                  {Boolean(m.world_setting?.region) && <span className="chip">{String(m.world_setting.region)}</span>}
+                  {Boolean(m.world_setting?.player_count) && <span className="chip">{String(m.world_setting.player_count)}人</span>}
+                  {Boolean(m.world_setting?.difficulty) && (
+                    <span className="chip" style={difficultyChipStyle(String(m.world_setting.difficulty))}>
+                      {String(m.world_setting.difficulty)}
+                    </span>
+                  )}
+                  {(m.world_setting?.tags as string[] || []).map((t: string) => (
+                    <span key={t} className="chip" style={{ opacity: 0.75 }}>{t}</span>
+                  ))}
+                </div>
+                {/* 规模数字置底对齐，卡片高度不齐时这一行仍成一条基线 */}
+                <div className="mt-auto grid grid-cols-3 gap-1 pt-1">
+                  <div className="stat-tile">
+                    <div className="stat-tile-value">{m.scenes?.length ?? 0}</div>
+                    <div className="stat-tile-label">场景</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-tile-value">{m.npcs?.length ?? 0}</div>
+                    <div className="stat-tile-label">NPC</div>
+                  </div>
+                  <div className="stat-tile">
+                    <div className="stat-tile-value">{m.clues?.length ?? 0}</div>
+                    <div className="stat-tile-label">线索</div>
+                  </div>
+                </div>
               </div>
             </div>
           ))}

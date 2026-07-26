@@ -12,7 +12,8 @@ export function GamePage() {
   const [showNew, setShowNew] = useState(false)
 
   return (
-    <div className="mx-auto mt-8 max-w-2xl">
+    // 开局表单是线性流程，房间列表是并列卡片——容器放到 4xl，够两列房间卡又不至于把表单拉散
+    <div className="mx-auto mt-8 max-w-4xl">
       <div className="mb-6 flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}

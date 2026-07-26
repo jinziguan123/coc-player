@@ -758,7 +758,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
           {profiles.map((p) => (
             <div
               key={p.id}
-              className="card"
+              className={`card ${p.is_active ? 'active-rail' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -774,21 +774,10 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
                   <span className="badge">
                     {p.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI'}
                   </span>
-                  {p.is_active && (
-                    <span
-                      className="badge"
-                      style={{
-                        background: 'rgba(45, 90, 30, 0.15)',
-                        color: 'var(--color-success)',
-                      }}
-                    >
-                      已激活
-                    </span>
-                  )}
+                  {p.is_active && <span className="chip chip--success">已激活</span>}
                   {p.is_fast && (
                     <span
-                      className="badge"
-                      style={{ color: 'var(--color-text-accent)' }}
+                      className="chip chip--accent"
                       title="裁定 planner、AI 队友、滚动摘要等结构化副任务走此配置；KP 叙事仍走激活配置"
                     >
                       快模型
@@ -796,8 +785,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
                   )}
                   {p.image_backend === 'comfyui' && (
                     <span
-                      className="badge"
-                      style={{ color: 'var(--color-text-accent)' }}
+                      className="chip chip--accent"
                       title={`手书配图走本地 ComfyUI 工作流${p.comfyui_base_url ? `（${p.comfyui_base_url}）` : ''}`}
                     >
                       ComfyUI
@@ -818,68 +806,55 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
                 </div>
               </div>
 
-              {/* 操作按钮 */}
-              <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+              {/* 操作区：七个同款描边按钮曾把每行撑成一堵墙。
+                  改为——「激活」是这里唯一有后果的主动作，保留实心按钮；
+                  其余降为 chip 级次要动作；删除单独走危险色。 */}
+              <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1">
                 {!p.is_active && (
-                  <button
-                    className="btn-secondary"
-                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
-                    onClick={() => handleActivate(p.id)}
-                  >
+                  <button className="btn-primary !px-2.5 !py-1 !text-[length:var(--text-xs)]" onClick={() => handleActivate(p.id)}>
                     激活
                   </button>
                 )}
                 <button
-                  className="btn-secondary"
-                  style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                  className="chip chip--accent hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
                   onClick={() => handleToggleFast(p.id)}
                   title="快模型：裁定 planner、AI 队友、滚动摘要等结构化副任务改走此配置（KP 叙事仍走激活配置）；再点一次取消"
                 >
                   {p.is_fast ? '取消快模型' : '设为快模型'}
                 </button>
                 <button
-                  className="btn-secondary"
-                  style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"
                   onClick={() => startEdit(p)}
                   disabled={editingId !== null}
                 >
                   编辑
                 </button>
                 <button
-                  className="btn-secondary"
-                  style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
                   onClick={() => handleDuplicate(p.id)}
                   title="复制一份此配置（含密钥），改个模型名即可做成快模型变体"
                 >
                   复制
                 </button>
                 <button
-                  className="btn-secondary"
-                  style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"
                   onClick={() => handleTest(p.id)}
                   disabled={testing !== null}
                 >
-                  {testing?.id === p.id && testing.kind === 'conn' ? '测试中...' : '测试'}
+                  {testing?.id === p.id && testing.kind === 'conn' ? '测试中…' : '测试'}
                 </button>
                 {(p.image_model || p.image_backend === 'comfyui') && (
                   <button
-                    className="btn-secondary"
-                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                    className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"
                     onClick={() => handleTestImage(p.id)}
                     disabled={testing !== null}
                     title={p.image_backend === 'comfyui' ? '测试文生图（ComfyUI）' : `测试文生图（${p.image_model}）`}
                   >
-                    {testing?.id === p.id && testing.kind === 'image' ? '测试中...' : '测试生图'}
+                    {testing?.id === p.id && testing.kind === 'image' ? '测试中…' : '测试生图'}
                   </button>
                 )}
                 <button
-                  className="btn-secondary"
-                  style={{
-                    padding: '0.25rem 0.6rem',
-                    fontSize: '0.8rem',
-                    color: 'var(--color-danger)',
-                    borderColor: 'var(--color-danger)',
-                  }}
+                  className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
                   onClick={() => handleDelete(p.id, p.name)}
                 >
                   删除

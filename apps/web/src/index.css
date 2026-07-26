@@ -312,19 +312,26 @@ body {
   box-shadow: inset 0 0 10px var(--card-inset);
 }
 
-/* 操作按钮静息隐形、hover/键盘聚焦时浮现 —— 列表静息态只剩信息 */
-.character-card .character-card-actions {
+/* 操作按钮静息隐形、hover/键盘聚焦时浮现 —— 列表静息态只剩信息。
+   角色卡与模组卡共用（.character-card 是历史名，保留以免遗漏调用点）。 */
+.character-card .character-card-actions,
+.entity-card .entity-card-actions {
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 .character-card:hover .character-card-actions,
-.character-card:focus-within .character-card-actions {
+.character-card:focus-within .character-card-actions,
+.entity-card:hover .entity-card-actions,
+.entity-card:focus-within .entity-card-actions {
   opacity: 1;
 }
 /* 触屏无 hover：直接常显，否则按钮永远够不着 */
 @media (hover: none) {
-  .character-card .character-card-actions { opacity: 1; }
+  .character-card .character-card-actions,
+  .entity-card .entity-card-actions { opacity: 1; }
 }
+/* 纹章内放图标时，字号继承会让 svg 过大 —— 收到与单字相当的尺寸 */
+.char-sigil svg { font-size: 1.05rem; }
 
 /* ===== 模组详情：标签—值行 =====
    行间细分隔线让长列表可横向扫读；相邻行不重复画线，末行不画。 */
@@ -575,6 +582,48 @@ body {
 }
 .toggle-chip--on-danger:hover:not(:disabled) { color: var(--color-on-danger); border-color: var(--color-danger); }
 
+/* 左缘琥珀色带：标记「当前生效的那一个」。
+   与参战方卡片的阵营色带同一套语言，全站复用（激活的 AI 配置、当前会话等）。 */
+.active-rail {
+  position: relative;
+  overflow: hidden;
+}
+.active-rail::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 60%, transparent);
+}
+
+/* ===== 悬浮窗 ===== */
+/* 遮罩：压暗 + 轻虚化，把注意力从背后的列表拉到窗体上；入场淡入一次 */
+.modal-backdrop {
+  background: radial-gradient(ellipse at center, rgba(6, 7, 11, 0.7), rgba(3, 4, 6, 0.86));
+  backdrop-filter: blur(2px);
+  animation: modalBackdropIn 0.18s ease-out both;
+}
+@keyframes modalBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 窗体：琥珀细描边 + 顶缘高光，与卡片拉开层级；入场微微上浮 */
+.modal-panel {
+  border: 1px solid var(--color-border-strong);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-accent) 18%, transparent);
+  animation: modalPanelIn 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes modalPanelIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* 分组容器：面板内的次级表面 */
 .group-box {
   padding: 0.5rem 0.625rem;
@@ -797,10 +846,23 @@ body {
   color: var(--color-text-primary);
   background: rgba(212, 162, 78, 0.06);
 }
+/* 选中项左缘加琥珀竖条——与「当前生效」的 .active-rail、参战方色带同一套语言 */
 .sidebar-link.active {
+  position: relative;
   color: var(--color-text-accent);
   background: rgba(212, 162, 78, 0.1);
   font-weight: 600;
+}
+.sidebar-link.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 70%, transparent);
 }
 .sidebar-link svg {
   font-size: 1.1rem;

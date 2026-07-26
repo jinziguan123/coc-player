@@ -24,9 +24,13 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex-1 py-2 text-xs text-center transition-colors cursor-pointer border-b-2',
+      // 字距+衬线标题字让页签更像「分区」而非普通文字；hover 先给一层轻反馈
+      'flex-1 py-2 text-center transition-colors cursor-pointer border-b-2 tracking-wider',
+      'text-[length:var(--text-xs)] font-[family-name:var(--font-title)]',
       'border-transparent text-[var(--color-text-secondary)]',
+      'hover:text-[var(--color-text-primary)] hover:bg-[var(--surface-2)]',
       'data-[state=active]:border-[var(--color-accent)] data-[state=active]:text-[var(--color-text-accent)] data-[state=active]:font-semibold',
+      'data-[state=active]:bg-[color-mix(in_srgb,var(--color-accent)_7%,transparent)]',
       className,
     )}
     {...props}

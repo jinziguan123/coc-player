@@ -381,7 +381,7 @@ export function RoomLobbyPage() {
           {kpSeats.length > 0 && (
             <div className="mb-2 space-y-1.5">
               {kpSeats.map((p) => (
-                <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
+                <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
                   <SeatIcon kind={p.is_host ? 'host' : 'human'} size={15} />
                   <span className="text-sm flex-1" style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}>
                     {p.claimed ? '真人 KP' : '空席 · 等待真人 KP 加入'}
@@ -406,7 +406,7 @@ export function RoomLobbyPage() {
                   ? (p.is_mine ? '已加入，等待选择角色' : '已预留 · 等待玩家选择角色')
                   : '空席 · 等待真人加入'
               return (
-                <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
+                <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
                   <SeatIcon kind={seatKind(p)} size={15} />
                   {showDot && (
                     <span
