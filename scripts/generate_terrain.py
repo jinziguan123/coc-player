@@ -15,8 +15,11 @@ ssl_ctx = ssl.create_default_context()
 ssl_ctx.check_hostname = False
 ssl_ctx.verify_mode = ssl.CERT_NONE
 
-API_KEY = "sk-157a4033171ac778771f9fd18e228d6fedd38ec3f5b3725b7d6f50e074143fdd"
-BASE_URL = "https://lucen.cc"
+# 密钥一律从环境变量读——这个文件曾经把 key 硬编码在这里，一旦被提交就是泄漏，
+# 而仓库 CI 是带 gitleaks 的。用法：
+#   TERRAIN_API_KEY=sk-xxx python3 scripts/generate_terrain.py [变体数]
+API_KEY = os.environ.get("TERRAIN_API_KEY", "")
+BASE_URL = os.environ.get("TERRAIN_BASE_URL", "https://lucen.cc")
 OUTPUT_DIR = Path("apps/web/public/terrain")
 
 BIOMES: list[tuple[str, str]] = [
@@ -109,33 +112,47 @@ def convert_to_webp(png_path: Path, webp_path: Path) -> bool:
     return False
 
 
+def variant_stem(biome: str, variant: int) -> str:
+    """与前端 lib/biome.ts 的 biomeTextureUrl 保持一致：主图无后缀，变体从 -2 起。"""
+    return biome if variant == 0 else f"{biome}-{variant + 1}"
+
+
 def main():
+    if not API_KEY:
+        print("请先设置 TERRAIN_API_KEY 环境变量（不要把密钥写回本文件）")
+        sys.exit(1)
+
+    # 变体数：同一地貌成片时若共用一张图，平铺痕迹很明显；多几张变体由前端按 (q,r) 随机取。
+    variants = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("=== 开始生成 11 张沙盘地貌纹理 ===")
-    print(f"输出目录: {OUTPUT_DIR.resolve()}")
-    print(f"共 {len(BIOMES)} 个地貌\n")
+    jobs = [(biome, prompt, v) for biome, prompt in BIOMES for v in range(variants)]
+    print(f"=== 开始生成 {len(jobs)} 张沙盘地貌纹理（{len(BIOMES)} 地貌 × {variants} 变体）===")
+    print(f"输出目录: {OUTPUT_DIR.resolve()}\n")
 
-    for i, (biome, prompt) in enumerate(BIOMES, 1):
-        print(f"[{i}/{len(BIOMES)}] {biome} - 生成中...")
+    for i, (biome, prompt, variant) in enumerate(jobs, 1):
+        stem = variant_stem(biome, variant)
+        webp_path = OUTPUT_DIR / f"{stem}.webp"
+        if webp_path.exists():
+            print(f"[{i}/{len(jobs)}] {stem} - 已存在，跳过")
+            continue
+        print(f"[{i}/{len(jobs)}] {stem} - 生成中...")
 
-        image_url = generate_image(prompt)
+        # 变体之间加一句差异化指令，避免同一提示词反复出图几乎一样
+        seeded = prompt if variant == 0 else f"{prompt}, variation {variant + 1}, different layout and detail placement"
+        image_url = generate_image(seeded)
         if not image_url:
-            print(f"  [SKIP] 跳过 {biome}\n")
+            print(f"  [SKIP] 跳过 {stem}\n")
             continue
 
-        print(f"  图片 URL: {image_url}")
-
-        png_path = OUTPUT_DIR / f"{biome}.png"
+        png_path = OUTPUT_DIR / f"{stem}.png"
         if not download_image(image_url, png_path):
-            print(f"  [SKIP] 跳过 {biome}\n")
+            print(f"  [SKIP] 跳过 {stem}\n")
             continue
 
         size_kb = png_path.stat().st_size / 1024
         print(f"  PNG 已保存: {png_path} ({size_kb:.0f} KB)")
 
-        # 转换 WebP
-        webp_path = OUTPUT_DIR / f"{biome}.webp"
         if convert_to_webp(png_path, webp_path):
             size_kb = webp_path.stat().st_size / 1024
             print(f"  WebP 已保存: {webp_path} ({size_kb:.0f} KB)")
@@ -143,9 +160,7 @@ def main():
             print(f"  [WARN] 未找到 WebP 转换工具 (cwebp/convert/ffmpeg)，保留 PNG")
 
         print()
-
-        # 避免触发限流
-        if i < len(BIOMES):
+        if i < len(jobs):
             time.sleep(2)
 
     print("=== 全部完成! ===")

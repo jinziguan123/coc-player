@@ -274,3 +274,82 @@ async def enrich_module_map(db, module) -> dict:
         "connections_added": connections_added,
         "positions_updated": positions_updated,
     }
+
+
+_BACKDROP_PROMPT_SYS = (
+    "你是奇幻 TRPG 区域地图的美术指导。根据模组资料，写一句英文的图像生成提示词，"
+    "描述这片区域**整体的地理氛围底图**——俯视视角的区域地貌全景，"
+    "不含任何文字、地名、图标、边框、指北针与网格线。"
+    "只输出提示词本身，不要解释、不要引号。"
+)
+# 底图会被六边形网格盖在上面，所以要压暗、去细节、别抢主体
+_BACKDROP_STYLE = (
+    "top-down aerial regional terrain map, painterly fantasy cartography, "
+    "muted desaturated tones, dark moody atmosphere, soft edges, "
+    "no text, no labels, no icons, no grid, no border, no compass"
+)
+
+
+def _backdrop_material(module) -> str:
+    """底图只需要「这片区域长什么样」，不需要剧情——因此只喂地理与地貌分布。"""
+    world = module.world_setting if isinstance(module.world_setting, dict) else {}
+    biomes: list[str] = []
+    for scene in module.scenes or []:
+        if not isinstance(scene, dict) or scene.get("kind") == "chapter":
+            continue
+        label = hex_map.biome_label(scene)
+        if label and label not in biomes:
+            biomes.append(label)
+    return (
+        f"标题：{module.title}\n"
+        f"年代：{world.get('era') or ''}\n"
+        f"地区：{world.get('region') or ''}\n"
+        f"地点：{world.get('location') or ''}\n"
+        f"基调：{world.get('tone') or ''}\n"
+        f"区域内出现的地貌：{'、'.join(biomes) or '未知'}\n"
+        f"简介：{str(module.description or '')[:300]}"
+    )
+
+
+async def generate_map_backdrop(db, module) -> dict:
+    """给沙盘生成一张氛围底图，URL 存进 world_setting.sandbox_backdrop。
+
+    这是纯装饰层：六边形网格与全部游戏逻辑（方位、迷雾、旅行）都不依赖它，
+    生成失败或未生成时沙盘照常工作，只是没有背景画。
+    """
+    from app.ai.llm_factory import get_llm
+    from app.services import image_store
+
+    image_llm = get_llm()
+    if not image_llm.supports_image_gen():
+        raise ValueError("当前 AI 配置不支持文生图，请在设置里填写图像模型")
+
+    try:
+        raw = await get_fast_llm().complete(
+            [
+                {"role": "system", "content": _BACKDROP_PROMPT_SYS},
+                {"role": "user", "content": _backdrop_material(module)},
+            ],
+            temperature=0.7,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"底图提示词生成失败：{exc}") from exc
+
+    prompt = (raw or "").strip().splitlines()[0].strip()[:500] if raw else ""
+    if not prompt:
+        raise ValueError("底图提示词为空，请重试")
+
+    try:
+        b64 = await image_llm.generate_image(f"{prompt}, {_BACKDROP_STYLE}")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"底图生成失败：{exc}") from exc
+    url = image_store.save_image_b64(b64) if b64 else None
+    if not url:
+        raise ValueError("底图保存失败，请重试")
+
+    world = dict(module.world_setting or {})
+    world["sandbox_backdrop"] = url
+    module.world_setting = world
+    db.commit()
+    db.refresh(module)
+    return {"backdrop": url}

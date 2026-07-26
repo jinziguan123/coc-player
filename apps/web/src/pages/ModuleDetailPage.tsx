@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '../api/client'
+import { api, getServerUrl } from '../api/client'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiReturnArrow, GiScrollUnfurled, GiPadlock } from 'react-icons/gi'
 import {
-  Plus, Trash2, Pencil, Save, X, Eye, Network, FileText, GitBranch, Hexagon, Sparkles, ListChecks,
+  Plus, Trash2, Pencil, Save, X, Eye, Network, FileText, GitBranch, Hexagon, Sparkles, ListChecks, Image,
   Link2, Unlink, Wheat, Trees, Waves, ShipWheel, Sun, Mountain, Droplets, Building2, Castle, DoorOpen, Route,
   type LucideIcon,
 } from 'lucide-react'
@@ -80,6 +80,13 @@ let _idc = 0
 const genId = (p: string) => `${p}_${Date.now().toString(36)}_${_idc++}`
 const sceneName = (s: Partial<Scene>) => s.name || s.title || '(未命名场景)'
 const wsStr = (ws: Record<string, unknown>, k: string) => (ws[k] == null ? '' : String(ws[k]))
+/** 后端返回的是 /api/images/xxx 相对地址；客人模式要拼上房主地址。与 ModuleImage 同源逻辑。 */
+const imageUrl = (src: string): string | undefined => {
+  const value = (src || '').trim()
+  if (!value) return undefined
+  return /^https?:\/\//i.test(value) ? value : `${getServerUrl()}${value}`
+}
+
 const cloneModule = (value: ModuleData): ModuleData => JSON.parse(JSON.stringify(value)) as ModuleData
 
 const BIOME_VISUALS: Record<string, { fill: string; edge: string; Icon: LucideIcon }> = {
@@ -215,6 +222,7 @@ export function ModuleDetailPage() {
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [enriching, setEnriching] = useState(false)
+  const [backdropping, setBackdropping] = useState(false)
   const [sandboxSelection, setSandboxSelection] = useState<string[]>([])
   const [connectionTargetId, setConnectionTargetId] = useState('')
   const [editSnapshot, setEditSnapshot] = useState<ModuleData | null>(null)
@@ -338,6 +346,21 @@ export function ModuleDetailPage() {
       toast.error(`AI 补全失败：${e instanceof Error ? e.message : '未知错误'}`)
     } finally {
       setEnriching(false)
+    }
+  }
+
+  const makeBackdrop = async () => {
+    if (!id || edit) return
+    setBackdropping(true)
+    try {
+      const res = await api.post<{ backdrop: string }>(`/modules/${id}/map/backdrop`)
+      // 只更新底图字段，不整包覆盖——避免把用户此刻的其它编辑吞掉
+      setData((d) => ({ ...d, world_setting: { ...d.world_setting, sandbox_backdrop: res.backdrop } }))
+      toast.success('已生成沙盘氛围底图')
+    } catch (e) {
+      toast.error(`底图生成失败：${e instanceof Error ? e.message : '未知错误'}`)
+    } finally {
+      setBackdropping(false)
     }
   }
 
@@ -518,7 +541,7 @@ export function ModuleDetailPage() {
         <div className={edit ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_252px]' : ''}>
           <div className="min-w-0">
           {!edit && (
-            <div className="flex justify-end mb-2">
+            <div className="flex justify-end gap-2 mb-2">
               <ConfirmDialog
                 title="AI 补全沙盘"
                 description="将由 AI 重排场景落位、补全地貌与连接；已有连接不会被删除，之后仍可拖拽微调。"
@@ -531,6 +554,11 @@ export function ModuleDetailPage() {
                   </button>
                 )}
               </ConfirmDialog>
+              <button onClick={() => void makeBackdrop()} disabled={backdropping || enriching}
+                className="btn-secondary flex items-center gap-1 text-sm"
+                title="生成一张俯视区域氛围底图垫在网格之下（纯装饰，不影响方位与迷雾）">
+                <Image size={14} /> {backdropping ? '生成底图中…' : 'AI 生成氛围底图'}
+              </button>
             </div>
           )}
           {edit && (
@@ -559,6 +587,7 @@ export function ModuleDetailPage() {
             </div>
           )}
           <HexSandbox locations={sandboxLocs} disabled editable={edit} onMoveScene={moveScene}
+            backdropUrl={imageUrl(wsStr(data.world_setting, 'sandbox_backdrop'))}
             selectedIds={activeSandboxSelection} onToggleScene={toggleSandboxScene}
             onAddNode={addSandboxNode}
             onDropBiome={dropSandboxBiome}

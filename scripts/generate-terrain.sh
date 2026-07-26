@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 
-API_KEY="sk-157a4033171ac778771f9fd18e228d6fedd38ec3f5b3725b7d6f50e074143fdd"
+# 密钥从环境变量读，别写回文件（仓库 CI 带 gitleaks，硬编码一旦提交即泄漏）
+API_KEY="${TERRAIN_API_KEY:?请先设置 TERRAIN_API_KEY 环境变量}"
 BASE_URL="https://lucen.cc"
 OUTPUT_DIR="apps/web/public/terrain"
 

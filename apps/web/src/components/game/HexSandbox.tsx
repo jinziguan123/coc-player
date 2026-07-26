@@ -1,8 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Stage, Layer, Group, RegularPolygon, Line, Rect, Circle, Text, Shape } from 'react-konva'
+import { Stage, Layer, Group, RegularPolygon, Line, Rect, Circle, Text, Shape, Image as KonvaImage } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
-import { terrainGeometryKey } from '@/lib/terrain'
-import { BIOME_TEXTURES } from '@/lib/biome'
+import { hexRng, terrainGeometryKey } from '@/lib/terrain'
+import { BIOME_TEXTURES, BIOME_VARIANTS, biomeTextureUrl } from '@/lib/biome'
 
 /** 沙盘节点。sceneId 为空时是普通地貌节点；两者使用完全相同的六边形底图。 */
 export interface SandboxLocation {
@@ -38,6 +38,8 @@ interface Props {
   onDropBiome?: (q: number, r: number, biome: string) => void
   /** 节点被拖出沙盘边界时触发删除 */
   onDeleteNode?: (id: string) => void
+  /** 氛围底图 URL：纯装饰层，铺在网格之下；缺省则不渲染，沙盘照常工作。 */
+  backdropUrl?: string
   height?: string
 }
 
@@ -193,17 +195,24 @@ const DANGER_COLORS: Record<string, string> = { uneasy: '#e5c84c', dangerous: '#
 export function HexSandbox({
   locations, disabled, onPick, editable, onMoveScene, onMoveNode,
   selectedIds = [], onToggleScene, revealUnknownTokens = false,
-  onAddNode, onDropBiome, onDeleteNode,
+  onAddNode, onDropBiome, onDeleteNode, backdropUrl,
   height = 'clamp(320px, 58vh, 560px)',
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 640, h: 420 })
   const [dragOver, setDragOver] = useState(false)
-  const [textures, setTextures] = useState<Record<string, HTMLImageElement>>({})
+  // 贴图按 URL 存：同一地貌有多张变体，按格子选用哪一张（见 textureFor）。
+  const [texturesByUrl, setTexturesByUrl] = useState<Record<string, HTMLImageElement>>({})
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.Image === 'undefined') return
     let active = true
-    const loads = [...new Set(Object.values(BIOME_TEXTURES))].map((url) => new Promise<[string, HTMLImageElement]>((resolve) => {
+    // 主图 + 各变体一起预载；变体素材未生成时 onerror 也会 resolve，
+    // 随后按 naturalWidth 过滤掉，渲染时自动回落到主图。
+    const urls = new Set<string>()
+    for (const biome of Object.keys(BIOME_TEXTURES)) {
+      for (let v = 0; v < BIOME_VARIANTS; v++) urls.add(biomeTextureUrl(biome, v))
+    }
+    const loads = [...urls].map((url) => new Promise<[string, HTMLImageElement]>((resolve) => {
       const image = new window.Image()
       image.decoding = 'async'
       image.onload = () => resolve([url, image])
@@ -212,13 +221,38 @@ export function HexSandbox({
     }))
     Promise.all(loads).then((loaded) => {
       if (!active) return
-      const byUrl = Object.fromEntries(loaded.filter(([, image]) => image.naturalWidth > 0))
-      setTextures(Object.fromEntries(Object.entries(BIOME_TEXTURES)
-        .map(([biome, url]) => [biome, byUrl[url]])
-        .filter(([, image]) => image)))
+      setTexturesByUrl(Object.fromEntries(loaded.filter(([, image]) => image.naturalWidth > 0)))
     })
     return () => { active = false }
   }, [])
+
+  // 氛围底图：与地貌贴图同样的「加载失败就当没有」策略。
+  const [backdrop, setBackdrop] = useState<HTMLImageElement | undefined>()
+  useEffect(() => {
+    if (!backdropUrl || typeof window === 'undefined' || typeof window.Image === 'undefined') {
+      setBackdrop(undefined)
+      return
+    }
+    let active = true
+    const image = new window.Image()
+    image.decoding = 'async'
+    image.onload = () => { if (active && image.naturalWidth > 0) setBackdrop(image) }
+    image.onerror = () => { if (active) setBackdrop(undefined) }
+    image.src = backdropUrl
+    return () => { active = false }
+  }, [backdropUrl])
+
+  /** 某格该用哪张贴图：按 (q,r) 确定性挑变体，缺素材时逐级回落到主图。 */
+  const textureFor = useMemo(() => (biome: string, q: number, r: number) => {
+    const key = (biome || 'plain').toLowerCase()
+    const pick = Math.floor(hexRng(q, r)() * BIOME_VARIANTS)
+    for (let step = 0; step < BIOME_VARIANTS; step++) {
+      const hit = texturesByUrl[biomeTextureUrl(key, (pick + step) % BIOME_VARIANTS)]
+      if (hit) return hit
+    }
+    return undefined
+  }, [texturesByUrl])
+
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
@@ -347,6 +381,17 @@ export function HexSandbox({
       onDragEnd={(e: KonvaEventObject<DragEvent>) => { const s = e.target.getStage(); if (s === e.target.getStage() && e.target.getClassName() === 'Stage') setView((v) => ({ ...v, x: s!.x(), y: s!.y() })) }}
       style={{ background: 'radial-gradient(ellipse 80% 70% at 50% 45%, #2a2418 0%, #17130d 68%, #0b0906 100%)', cursor: 'grab' }}>
       <Layer>
+        {backdrop && located.length > 0 && (() => {
+          // 底图铺满地图外接矩形并向外扩一圈，低透明度垫底；纯装饰，不监听事件。
+          const xs = located.map((l) => hexXY(l.map!.q, l.map!.r).x)
+          const ys = located.map((l) => hexXY(l.map!.q, l.map!.r).y)
+          const pad = R * 2.4
+          const x = Math.min(...xs) - pad, y = Math.min(...ys) - pad
+          const w = Math.max(...xs) - Math.min(...xs) + pad * 2
+          const h = Math.max(...ys) - Math.min(...ys) + pad * 2
+          return <KonvaImage image={backdrop} x={x} y={y} width={w} height={h}
+            opacity={0.42} listening={false} perfectDrawEnabled={false} />
+        })()}
         {located.map((l) => {
           const p = hexXY(l.map!.q, l.map!.r); const style = biomeOf(l.map!.biome); const isScene = l.nodeKind !== 'terrain' && !!l.sceneId
           const unknown = l.known === false; const isSelected = editable && selected.has(l.id); const active = l.current || isSelected
@@ -382,7 +427,7 @@ export function HexSandbox({
               stroke={active ? CANDLE : isScene ? style.stroke : 'rgba(24, 18, 11, 0.45)'}
               strokeWidth={active ? 3 : isScene ? 2 : 0.8}
               opacity={0.97}
-              texture={textures[(l.map!.biome || 'plain').toLowerCase()]}
+              texture={textureFor(l.map!.biome, l.map!.q, l.map!.r)}
               neighbors={neighborsOf.get(l.id)} />
             {showToken && <RegularPolygon sides={6} radius={R - 8} stroke={DANGER_COLORS[l.danger || ''] || 'rgba(245,230,190,0.65)'} strokeWidth={1.2} opacity={0.85} listening={false} perfectDrawEnabled={false} />}
             {showToken && <Group listening={false}>
