@@ -14,6 +14,9 @@ const ATTRIBUTE_LABELS: Record<string, string> = {
   INT: '智力',
   POW: '意志',
   EDU: '教育',
+  // 幸运也是九维之一，缺了它就会在卡片上露出生键名「LUCK」
+  LUCK: '幸运',
+  LUK: '幸运',
 }
 
 /** 要害条：低于三成转血红，让「快没了」在列表里一眼可见。 */

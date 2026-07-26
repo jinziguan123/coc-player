@@ -27,7 +27,7 @@ import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { Modal } from '../components/ui/modal'
 import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiLaurelCrown, GiAncientRuins, GiMagnifyingGlass } from 'react-icons/gi'
-import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, HelpCircle, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
+import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
 import { useRepairableImage, type ModuleImageKind } from '../components/module/ModuleImage'
@@ -43,6 +43,10 @@ interface KnownLocation {
 }
 interface MapNodePayload { id: string; q: number; r: number; biome: string; scene_id?: string | null }
 interface SearchHit { id: string; sequence_num: number; event_type: string; actor_name: string; content: string }
+
+// 距底多少像素以内算「已经在最新处」。留一点余量：markdown 渲染完成后高度会有零点几像素的
+// 抖动，卡死 0 会让按钮在贴底时忽隐忽现。
+const BOTTOM_SLACK = 120
 
 // [MOVE]/[MAP_MARK] 地图功能已下线，但旧事件文本里可能残留标签 → 保留在剔除名单里
 const CMD_TAG_RE = /\[(DICE_CHECK|NPC_ACT|SCENE_CHANGE|SAY|GROUP|MOVE|MAP_MARK|HANDOUT)[^\]]*\]|\[\/SAY\]/g
@@ -420,6 +424,11 @@ export function GameSessionPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 「跳到最新」：贴底时不显示。ref 与 state 各留一份——自动滚底的副作用要同步读当前值，
+  // 走 state 会读到上一帧的旧值。
+  const atBottomRef = useRef(true)
+  const [atBottom, setAtBottom] = useState(true)
+  const [hasNewBelow, setHasNewBelow] = useState(false)
   const pinActive = useRef(false)   // 初次加载「持续钉底」窗口是否进行中（期间抑制平滑滚动，避免抢滚）
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const openingTriggered = useRef(false)
@@ -975,10 +984,25 @@ export function GameSessionPage() {
   }, [hasMessages])
 
   // 后续新消息：平滑到底（初次钉底窗口期间交给钉底循环，避免两者抢滚）。
+  // 但**只在用户本来就贴着底**时才滚——他要是正往上翻看之前的线索，
+  // 新叙事把他一把拽回底部是很恼人的；此时改为亮出「跳到最新」提示，由他自己决定。
   useEffect(() => {
     if (!hasMessages || pinActive.current) return
+    if (!atBottomRef.current) {
+      setHasNewBelow(true)
+      return
+    }
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages.length])
+
+  const jumpToLatest = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    atBottomRef.current = true
+    setAtBottom(true)
+    setHasNewBelow(false)
+  }, [])
 
   // 分头行动的每个场景列是各自独立滚动的容器，主页面的「滚到底」管不到它们。初次钉底窗口
   // 期间由上面的钉底循环负责；窗口结束后（如实时新增的分栏内容）在此把各列各自滚到底。
@@ -993,7 +1017,14 @@ export function GameSessionPage() {
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
-    if (!el || !sessionId || loadingOlder || !hasMoreHistory) return
+    if (!el) return
+    // 先记「是否贴底」——这段不能被下面加载旧史的早退挡掉，否则翻到顶部时状态就不更新了。
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_SLACK
+    atBottomRef.current = nearBottom
+    setAtBottom(nearBottom)
+    if (nearBottom) setHasNewBelow(false)   // 自己滚回底部即消掉新内容提示
+
+    if (!sessionId || loadingOlder || !hasMoreHistory) return
     if (el.scrollTop < 80) {
       const prevHeight = el.scrollHeight
       loadOlderEvents(sessionId).then(() => {
@@ -1006,12 +1037,15 @@ export function GameSessionPage() {
     }
   }, [sessionId, loadingOlder, hasMoreHistory, loadOlderEvents])
 
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    el.addEventListener('scroll', handleScroll)
-    return () => el.removeEventListener('scroll', handleScroll)
-  }, [handleScroll])
+  // 滚动监听走 JSX 的 onScroll，不要再用 effect + addEventListener 手动挂。
+  //
+  // 原来那版是：useEffect(() => { const el = scrollRef.current; if (!el) return; ... }, [handleScroll])
+  // 组件在 currentSession 为空时会先 return 一个「加载中」，此时挂载的 DOM 里根本没有滚动容器，
+  // scrollRef.current 是 null、effect 直接早退；而 handleScroll 的依赖
+  // （sessionId/loadingOlder/hasMoreHistory/loadOlderEvents）在会话载入前后并不变，
+  // 它的函数标识因此始终不变 → effect 永不重跑 → 监听器一次都没挂上。
+  // 结果是「滚到顶部加载更早历史」其实一直是失效的，只是没人注意到。
+  // 交给 React 的 onScroll 就没有这个时序问题：容器一挂载就带着监听。
 
   // 玩家「申请」检定：只报技能，难度交 KP 裁定（玩家不指定）；intent 是顺带说明的检定目标，
   // 场景里同时有多条线索/多个可疑点时，光报技能名 KP 猜不出玩家具体想查什么。
@@ -1555,7 +1589,7 @@ export function GameSessionPage() {
             })}
           </div>
         )}
-        <div ref={scrollRef} className="flex-1 overflow-auto pb-4 chat-scroll game-info">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto pb-4 chat-scroll game-info">
           {loadingOlder && (
             <div className="text-center py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               加载更早的记录...
@@ -2077,6 +2111,19 @@ export function GameSessionPage() {
               </button>
             )}
           </div>
+        )}
+        {/* 跳到最新：只在用户离开底部时出现；期间来了新内容则改为高亮提示。
+            贴底时整颗按钮不渲染，不占位、也不挡叙事。 */}
+        {!atBottom && (
+          <button
+            type="button"
+            onClick={jumpToLatest}
+            className={`jump-latest ${hasNewBelow ? 'jump-latest--new' : ''}`}
+            title={hasNewBelow ? '下面有新内容，点击跳转' : '回到最新内容'}
+          >
+            <ChevronDown size={14} />
+            {hasNewBelow ? '有新内容' : '最新'}
+          </button>
         )}
         <div className="chat-input-bar">
           <textarea

@@ -830,6 +830,52 @@ body {
   color: var(--color-text-accent);
 }
 
+/* ===== 跳到最新 ===== */
+/* 浮在输入栏正上方、居中；absolute 定位以聊天列（.flex-col.relative）为参照，
+   不占布局高度，所以出现/消失不会把叙事顶得一跳。 */
+.jump-latest {
+  position: absolute;
+  left: 50%;
+  /* 让开输入栏与它上方那一行「推进本回合 / 重新生成」，否则会压在动作行上 */
+  bottom: 6.75rem;
+  z-index: 8;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 4px 14px var(--shadow-color-strong);
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  animation: jumpLatestIn 0.18s ease-out both;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.jump-latest:hover {
+  color: var(--color-text-accent);
+  border-color: var(--color-accent);
+  background: var(--surface-3);
+}
+/* 离开底部期间来了新内容：转琥珀实心，比「只是没贴底」更值得一看 */
+.jump-latest--new {
+  color: var(--color-on-accent);
+  background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent));
+  border-color: var(--color-accent);
+  font-weight: 600;
+}
+.jump-latest--new:hover {
+  color: var(--color-on-accent);
+  background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent));
+}
+@keyframes jumpLatestIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 /* 分组容器：面板内的次级表面 */
 .group-box {
   padding: 0.5rem 0.625rem;

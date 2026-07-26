@@ -158,7 +158,13 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
   const san = sd.sanity as { current: number; max: number } | undefined
   const mp = sd.magicPoints as { current: number; max: number } | undefined
   const vitalFlash = useVitalFlash(character.id, san?.current, hp?.current)
-  const luck = (sd.luck as number) || 0
+  // 幸运有三种存法：system_data.luck（建卡流程写的）、base_attributes.LUCK（Excel 导入
+  // 与预设调查员写的）、base_attributes.LUK（雷达图那套键名）。只认第一种的话，
+  // 后两类角色的「幸运」会显示 0，连带把属性雷达的幸运轴压塌。
+  const luck = (sd.luck as number)
+    || (character.base_attributes?.LUCK as number)
+    || (character.base_attributes?.LUK as number)
+    || 0
   const mov = (sd.move as number) || 0
   const occupation = (sd.occupation as string) || ''
   const age = (sd.age as number) || 0

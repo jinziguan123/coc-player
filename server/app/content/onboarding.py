@@ -385,12 +385,22 @@ SAMPLE_CHARACTER = {
         "斗殴": 45,      # 四幕战斗——原版一个战斗技能都没有，进了战斗轮只能挨打
         "闪避": 40,
         "母语": 65,
+        # 信用评级是 CoC 的正式技能，缺了它角色卡上的「信用评级」一栏恒为 0
+        "信用评级": 35,
     },
     "system_data": {
         "occupation": "记者",
+        "age": 29,
+        "gender": "男",
+        "residence": "雾港",
+        "birthplace": "内陆·安溪",
         "hitPoints": {"current": 10, "max": 10},
         "sanity": {"current": 60, "max": 99},
         "magicPoints": {"current": 12, "max": 12},
+        # 幸运在角色卡面板上单独占一行，也是属性雷达的一根轴。
+        # 只写在 base_attributes.LUCK 里的话，老版面板读不到会显示 0。
+        "luck": 55,
+        "creditRating": 35,
         # 键名必须是 move：chase_service 与 combat_service 都读 sd["move"]，
         # 旧版写的 moveRate 两处都不认，追逐/战斗时会静默回落成默认值。
         "move": 8,
@@ -404,3 +414,22 @@ SAMPLE_CHARACTER = {
     },
     "backstory": "地方报记者，对无法解释的细节有近乎固执的好奇心。",
 }
+
+# 角色卡「基本信息」页的背景分段与「档案」页的资产/人际，都从 system_data 的这些键读。
+# 预设调查员是新用户见到的第一张角色卡，全空会让人以为功能坏了——这里补齐成一张完整的卡。
+SAMPLE_CHARACTER["system_data"].update(
+    {
+        "personalDescription": "瘦高，风衣袖口常年沾着油墨；说话前习惯先按亮怀里的手电确认电量。",
+        "ideologyBeliefs": "没有解释不了的事，只有还没找到的那一页记录。",
+        "significantPeople": "带他入行的老主编，去年冬天倒在排版房里，稿子还压在手下。",
+        "meaningfulLocations": "报社顶楼的晒版台——他在那里第一次看清整座雾港的轮廓。",
+        "treasuredPossessions": "一台二手相机，镜头有道划痕，拍出来的照片左上角永远发白。",
+        "traits": "过分好奇；一旦开始记笔记就很难停下。",
+        "cash": 40,
+        "spendingLevel": 10,
+        "assets": "报社宿舍一间，旧自行车一辆。",
+        "relations": [
+            {"name": "林恩港务员", "relation": "旧识，偶尔互通消息"},
+        ],
+    }
+)
