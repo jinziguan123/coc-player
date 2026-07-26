@@ -96,12 +96,28 @@ const texturePattern = (ctx: CanvasRenderingContext2D, image: HTMLImageElement) 
   return pattern
 }
 
-/** 地貌六角格：纯色打底 + 纹理叠加，不再绘制程序化符号。
+/** 水系地貌：与陆地交界处要画岸线。 */
+const WATER_BIOMES = new Set(['water', 'coast', 'swamp'])
+
+/** 邻格方向序（与 hex 顶点序对应）：pointy-top、顶点从正上方起顺时针。
+ *  第 i 条边连接顶点 i 与 i+1，其外侧邻格即 HEX_NEIGHBORS[i]。 */
+const HEX_NEIGHBORS: readonly (readonly [number, number])[] = [
+  [1, -1], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1],
+]
+
+/** 地貌六角格：纯色打底 + 纹理叠加 + **向异色邻格的渐隐过渡**。
+ *
+ *  没有过渡时每格都是硬切的六边形边，整张图像贴瓷砖；把邻格颜色沿共享边往内渐隐，
+ *  相邻地貌互相咬合，观感才接近手绘区域图。陆↔水交界再单独描一道浅色岸线。
+ *
  *  命中检测由父级 Group 中的透明 RegularPolygon 负责，本 Shape 不监听事件。 */
-const TerrainTile = memo(function TerrainTile({ biome, stroke, strokeWidth, opacity, texture }: {
+const TerrainTile = memo(function TerrainTile({ biome, stroke, strokeWidth, opacity, texture, neighbors }: {
   biome: string; stroke: string; strokeWidth: number; opacity: number; texture?: TerrainTexture
+  /** 六个方向的邻格地貌，无邻格为 undefined；顺序与 HEX_NEIGHBORS 一致 */
+  neighbors?: readonly (string | undefined)[]
 }) {
   const style = biomeOf(biome)
+  const selfIsWater = WATER_BIOMES.has((biome || '').toLowerCase())
   return <Shape
     listening={false}
     perfectDrawEnabled={false}
@@ -109,25 +125,62 @@ const TerrainTile = memo(function TerrainTile({ biome, stroke, strokeWidth, opac
     opacity={opacity}
     sceneFunc={(context, shape) => {
       const ctx = (context as unknown as { _context: CanvasRenderingContext2D })._context
-      const hex = Array.from({ length: 6 }, (_, i) => {
+      const corner = (i: number) => {
         const angle = Math.PI / 3 * i - Math.PI / 2
         return [Math.cos(angle) * (R - 1), Math.sin(angle) * (R - 1)] as const
-      })
-      ctx.beginPath(); ctx.moveTo(hex[0][0], hex[0][1])
-      hex.slice(1).forEach(([x, y]) => ctx.lineTo(x, y)); ctx.closePath()
+      }
+      const hex = Array.from({ length: 6 }, (_, i) => corner(i))
+      const tracePath = () => {
+        ctx.beginPath(); ctx.moveTo(hex[0][0], hex[0][1])
+        hex.slice(1).forEach(([x, y]) => ctx.lineTo(x, y)); ctx.closePath()
+      }
+      tracePath()
       context.fillStrokeShape(shape)
       if (texture?.complete && texture.naturalWidth > 0) {
         const pattern = texturePattern(ctx, texture)
         if (pattern) {
           ctx.save()
-          ctx.beginPath(); ctx.moveTo(hex[0][0], hex[0][1])
-          hex.slice(1).forEach(([x, y]) => ctx.lineTo(x, y)); ctx.closePath(); ctx.clip()
+          tracePath(); ctx.clip()
           ctx.globalAlpha = 0.55
           ctx.fillStyle = pattern
           ctx.fillRect(-R, -R, R * 2, R * 2)
           ctx.restore()
         }
       }
+
+      if (!neighbors) return
+      ctx.save()
+      tracePath(); ctx.clip()   // 过渡一律裁在本格内，不糊到邻格上
+      for (let i = 0; i < 6; i++) {
+        const other = neighbors[i]
+        if (!other || other.toLowerCase() === (biome || '').toLowerCase()) continue
+        const [ax, ay] = hex[i]
+        const [bx, by] = hex[(i + 1) % 6]
+        // 边中点 → 格心：过渡带的方向
+        const mx = (ax + bx) / 2, my = (ay + by) / 2
+        const len = Math.hypot(mx, my) || 1
+        const inset = R * 0.62                      // 渐隐深度
+        const ix = mx - (mx / len) * inset, iy = my - (my / len) * inset
+        const grad = ctx.createLinearGradient(mx, my, ix, iy)
+        const otherStyle = biomeOf(other)
+        grad.addColorStop(0, otherStyle.fill)
+        grad.addColorStop(1, 'transparent')
+        ctx.globalAlpha = 0.5
+        ctx.fillStyle = grad
+        // 沿这条边张开一个三角楔形，覆盖到格心方向
+        ctx.beginPath()
+        ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(0, 0); ctx.closePath()
+        ctx.fill()
+
+        // 陆↔水：在共享边上描一道浅色岸线，让海岸真正读得出来
+        if (selfIsWater !== WATER_BIOMES.has(other.toLowerCase())) {
+          ctx.globalAlpha = 0.55
+          ctx.strokeStyle = 'rgba(242, 226, 186, 0.9)'
+          ctx.lineWidth = 2
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
+        }
+      }
+      ctx.restore()
     }}
     fill={style.fill}
     stroke={stroke}
@@ -177,6 +230,20 @@ export function HexSandbox({
 
   const located = useMemo(() => locations.filter((l) => l.map && Number.isFinite(l.map.q) && Number.isFinite(l.map.r)), [locations])
   const scenes = useMemo(() => located.filter((l) => l.nodeKind !== 'terrain' && l.sceneId !== undefined), [located])
+  // (q,r) → 地貌：给每格算出六个方向的邻格地貌，供瓦片画交界过渡。
+  const biomeAt = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const l of located) map.set(`${l.map!.q},${l.map!.r}`, (l.map!.biome || 'plain').toLowerCase())
+    return map
+  }, [located])
+  const neighborsOf = useMemo(() => {
+    const cache = new Map<string, readonly (string | undefined)[]>()
+    for (const l of located) {
+      const { q, r } = l.map!
+      cache.set(l.id, HEX_NEIGHBORS.map(([dq, dr]) => biomeAt.get(`${q + dq},${r + dr}`)))
+    }
+    return cache
+  }, [located, biomeAt])
   const selected = useMemo(() => new Set(selectedIds), [selectedIds])
   const fit = useMemo(() => {
     if (!located.length) return { x: size.w / 2, y: size.h / 2, scale: 1 }
@@ -310,9 +377,13 @@ export function HexSandbox({
             {/* 六边形命中检测区域：透明、始终监听，确保父 Group 的事件正确触发 */}
             <RegularPolygon sides={6} radius={R - 2} fill="transparent" listening={true} perfectDrawEnabled={false} />
             <TerrainTile biome={l.map!.biome}
-              stroke={active ? CANDLE : style.stroke} strokeWidth={active ? 3 : isScene ? 2 : 1.3}
+              // 普通地形格用极淡的暗描边：每格都镶一圈亮色轮廓，整片陆地就散成了棋盘方块；
+              // 场景格保留亮边（它是可点的锚点，需要被认出来）。
+              stroke={active ? CANDLE : isScene ? style.stroke : 'rgba(24, 18, 11, 0.45)'}
+              strokeWidth={active ? 3 : isScene ? 2 : 0.8}
               opacity={0.97}
-              texture={textures[(l.map!.biome || 'plain').toLowerCase()]} />
+              texture={textures[(l.map!.biome || 'plain').toLowerCase()]}
+              neighbors={neighborsOf.get(l.id)} />
             {showToken && <RegularPolygon sides={6} radius={R - 8} stroke={DANGER_COLORS[l.danger || ''] || 'rgba(245,230,190,0.65)'} strokeWidth={1.2} opacity={0.85} listening={false} perfectDrawEnabled={false} />}
             {showToken && <Group listening={false}>
               <Circle y={-3} radius={14} fill="#242019" stroke={active ? CANDLE : '#f1d18a'} strokeWidth={2} shadowColor={CANDLE} shadowBlur={active ? 8 : 0} />

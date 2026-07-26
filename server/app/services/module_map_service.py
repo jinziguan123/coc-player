@@ -97,6 +97,22 @@ _NATURAL_BIOME_HINTS = (
 
 _URBAN_TITLE_HINTS = ("办公室", "警局", "公安", "派出所", "档案馆", "仓库", "工厂", "车间", "商店", "商铺", "旅馆", "酒店", "餐馆", "酒馆", "饭店", "住宅", "公寓", "街", "街区", "镇", "村", "广场", "车站", "码头", "学校", "医院", "诊所", "邮局", "银行", "局", "馆", "店", "楼", "宅", "家", "厂", "所")
 
+# 能把 urban 顶掉的「强自然地标」——比 _NATURAL_BIOME_HINTS 窄得多，只收
+# **不可能是城镇建成区**的词。实测 AI 会把礁岸上的灯塔判成 urban（贴上密集屋顶贴图），
+# 就是因为提示词里写着「无法判断时优先 urban」。
+#
+# 刻意不收「码头/港口/村/镇」这类两可词：港务所判 urban 是站得住的，
+# 用词表去掀翻一个合理判断，错得会比现在更难查。
+_STRONG_NATURAL_HINTS = (
+    ("coast", ("灯塔", "礁", "滩涂", "海滩", "沙滩", "栈桥", "海崖", "潮间", "防波堤")),
+    ("water", ("海面", "海上", "水下", "船舱", "甲板", "河心", "湖心")),
+    ("mountain", ("悬崖", "峭壁", "山顶", "山脊", "矿坑", "矿洞", "峡谷", "山洞")),
+    ("forest", ("森林", "密林", "树海", "林地深处")),
+    ("swamp", ("沼泽", "湿地", "红树林", "泥潭")),
+    ("desert", ("沙漠", "戈壁", "沙丘", "绿洲")),
+    ("ruin", ("废墟", "遗迹", "断壁", "残垣")),
+)
+
 
 def _normalize_proposed_biome(proposal: dict, target: dict) -> str:
     """把 AI 的地貌建议按当前地图尺度做一次保守归一。"""
@@ -111,6 +127,15 @@ def _normalize_proposed_biome(proposal: dict, target: dict) -> str:
     # 它给了别的值就不动（宁可信 AI，也不要用关键词去覆盖一个合理判断）。
     if biome == "plain":
         for natural, hints in _NATURAL_BIOME_HINTS:
+            if any(hint in context for hint in hints):
+                return natural
+        return biome
+
+    # urban 是提示词里的另一个兜底值（「无法判断时优先 urban」），于是礁岸上的灯塔
+    # 被贴上了密集城镇屋顶。只在出现**不可能是建成区**的强自然地标时才顶掉它，
+    # 用的是比上面窄得多的词表。
+    if biome == "urban":
+        for natural, hints in _STRONG_NATURAL_HINTS:
             if any(hint in context for hint in hints):
                 return natural
         return biome

@@ -222,3 +222,29 @@ def test_non_plain_proposals_are_not_overridden_by_keywords():
     target = {"name": "海边小屋", "description": "岸边的木屋"}
     assert _normalize_proposed_biome({"biome": "urban"}, target) == "urban"
     assert _normalize_proposed_biome({"biome": "water"}, target) == "water"
+
+
+def test_urban_is_overridden_only_by_strong_natural_landmarks():
+    """AI 把礁岸上的灯塔判成 urban（提示词里「无法判断时优先 urban」的副作用），
+    贴出来是密集城镇屋顶。只有不可能是建成区的地标才顶掉 urban。"""
+    from app.services.module_map_service import _normalize_proposed_biome
+
+    overridden = [
+        ({"name": "灯塔底层", "description": "铁门虚掩，堆着煤油桶"}, "coast"),
+        ({"name": "退潮阶梯", "description": "凿进礁石的阶梯"}, "coast"),
+        ({"name": "断崖哨所", "description": "悬崖边的木屋"}, "mountain"),
+        ({"name": "沉船遗迹", "description": "半埋在沙里的废墟"}, "ruin"),
+    ]
+    for target, expected in overridden:
+        got = _normalize_proposed_biome({"biome": "urban"}, target)
+        assert got == expected, f"{target['name']}: 期望 {expected}，实得 {got}"
+
+    # 两可的地方保持 urban——港务所、码头、渔村判 urban 是站得住的，
+    # 用词表去掀翻合理判断，错得比现在更难查。
+    kept = [
+        {"name": "港务所", "description": "港口边的木屋，堆着航海日志"},
+        {"name": "渔村集市", "description": "村口的市集"},
+        {"name": "码头仓库", "description": "堆满货箱"},
+    ]
+    for target in kept:
+        assert _normalize_proposed_biome({"biome": "urban"}, target) == "urban", target["name"]
