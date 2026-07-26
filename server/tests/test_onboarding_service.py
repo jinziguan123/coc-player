@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.content.onboarding import SAMPLE_SLUG
 from app.models import Base, Character, GameSession, Module, SessionParticipant
 
 
@@ -31,7 +32,8 @@ def test_start_creates_owned_sample_module_character_and_active_session(db):
     module = db.get(Module, game.module_id)
     assert module is not None
     assert module.world_setting["source"] == "trpg-player-original"
-    assert module.world_setting["sample_slug"] == "first-case-v1"
+    # 跟着常量走：换版本（v1→v2…）时不该顺带弄挂这条用例
+    assert module.world_setting["sample_slug"] == SAMPLE_SLUG
     assert len(module.scenes) >= 2
 
     character = db.get(Character, game.player_character_id)
