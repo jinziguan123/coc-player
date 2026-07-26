@@ -18,10 +18,26 @@ _ENRICH_SYSTEM_PROMPT = """你是 TRPG 模组的沙盘地图整理助手。根�
 
 规则：
 1. biome 只能是 plain / forest / water / coast / desert / mountain / swamp / urban /
-   ruin / interior / road 之一。当前沙盘默认是城镇/区域尺度：道路、街巷、桥梁、关卡和交通路线
-   使用 road；独立的警局、办公室、商店、工厂、仓库、住宅、旅馆、餐馆等使用 urban；只有明确表示同一建筑内部的房间、走廊、
-   楼梯、地下室，或车厢/船舱/隧道等封闭空间才使用 interior。无法判断时优先 urban，
-   不要因为场景发生在建筑物里就使用 interior。
+   ruin / interior / road 之一。
+
+   **先定大环境，再定单个场景**：先读 world_setting 的 region / location / tone 与模组
+   description，判断整个故事发生在什么样的地理环境里（海岸渔村 / 山区 / 沙漠 / 林地 /
+   沼泽 / 城市街区……），把它作为所有**户外或半户外**场景的底色。例如 region 是「北海岸」、
+   location 是「雾港」，那么码头、栈桥、灯塔、礁滩、海崖这类场景应当是 coast 或 water，
+   **不是 plain**；山区模组的山道应当是 mountain 而不是 plain。
+   plain 是「确实是开阔平地/原野」时才用的地貌，不是兜底值——一整张沙盘全是 plain
+   基本可以断定判断有误。
+
+   自然地貌参考：临海、码头、海滩、礁岸、灯塔、渔村用 coast；水面、湖、河、海上、
+   船只所在位置用 water；山地、悬崖、矿坑、高原用 mountain；森林、林地、树海用 forest；
+   沼泽、湿地、红树林用 swamp；沙漠、戈壁、绿洲用 desert；废墟、遗迹、坍塌建筑群用 ruin。
+
+   人造地貌参考：道路、街巷、桥梁、关卡和交通路线使用 road；独立的警局、办公室、商店、
+   工厂、仓库、住宅、旅馆、餐馆等使用 urban；只有明确表示同一建筑内部的房间、走廊、
+   楼梯、地下室，或车厢/船舱/隧道等封闭空间才使用 interior，不要因为场景发生在建筑物里
+   就使用 interior。
+
+   实在无法判断时：城镇/都市背景的模组用 urban，其余按上面判定的大环境选最接近的自然地貌。
 2. q/r 是 pointy-top axial 整数坐标：东为 +q，正北大致沿 (+1,-2) 方向。坐标只表达方位与
    相对远近，不表达比例尺；场景不得重叠，相连场景距离保持 1-3 格，线性结构沿直线排列。
 3. add_connections 只填写物理上直接相连、一步可达的场景，例如门、通道或楼梯直通。
@@ -65,18 +81,42 @@ def _parse_proposals(raw: str) -> list:
 
 
 _INTERIOR_TITLE_HINTS = ("房间", "走廊", "楼梯", "地下室", "地窖", "卧室", "厨房", "客厅", "车厢", "船舱", "舱室", "隧道")
+# AI 把 plain 当兜底值用时的纠正表：仅在场景文字明确指向该地貌时才生效。
+# 顺序即优先级——「海边悬崖」既有海也有崖，先判 coast 更贴近沙盘上的观感。
+# 只收无歧义的词：像「原野」「平地」这类本来就该是 plain 的不列入。
+_NATURAL_BIOME_HINTS = (
+    ("coast", ("海岸", "海边", "岸边", "码头", "港口", "渔村", "灯塔", "海滩", "沙滩",
+               "礁", "滩涂", "堤", "栈桥", "海崖", "潮")),
+    ("water", ("海面", "海上", "湖", "河", "江", "水下", "水面", "船上", "甲板", "泳池", "运河")),
+    ("mountain", ("山", "峰", "崖", "岭", "矿坑", "矿洞", "高原", "峡谷")),
+    ("forest", ("森林", "林地", "树林", "丛林", "密林", "树海")),
+    ("swamp", ("沼泽", "湿地", "红树林", "泥潭")),
+    ("desert", ("沙漠", "戈壁", "绿洲", "沙丘")),
+    ("ruin", ("废墟", "遗迹", "断壁", "残垣")),
+)
+
 _URBAN_TITLE_HINTS = ("办公室", "警局", "公安", "派出所", "档案馆", "仓库", "工厂", "车间", "商店", "商铺", "旅馆", "酒店", "餐馆", "酒馆", "饭店", "住宅", "公寓", "街", "街区", "镇", "村", "广场", "车站", "码头", "学校", "医院", "诊所", "邮局", "银行", "局", "馆", "店", "楼", "宅", "家", "厂", "所")
 
 
 def _normalize_proposed_biome(proposal: dict, target: dict) -> str:
     """把 AI 的地貌建议按当前地图尺度做一次保守归一。"""
     biome = str(proposal.get("biome") or "").strip().lower()
-    if biome != "interior":
-        return biome
     context = " ".join(
         str(target.get(key) or "")
         for key in ("title", "name", "description", "atmosphere")
     )
+
+    # plain 常被当成兜底值用——海岸模组整张沙盘变成原野就是这么来的。
+    # 只在 AI 给出 plain、而场景文字明确指向某种自然地貌时纠正；
+    # 它给了别的值就不动（宁可信 AI，也不要用关键词去覆盖一个合理判断）。
+    if biome == "plain":
+        for natural, hints in _NATURAL_BIOME_HINTS:
+            if any(hint in context for hint in hints):
+                return natural
+        return biome
+
+    if biome != "interior":
+        return biome
     if any(hint in context for hint in _INTERIOR_TITLE_HINTS):
         return "interior"
     if any(hint in context for hint in _URBAN_TITLE_HINTS):

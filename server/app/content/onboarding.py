@@ -63,6 +63,7 @@ SAMPLE_MODULE = {
         # —— 第一幕：探索与对话。教「用自己的话行动」「检定是怎么来的」——
         {
             "id": "harbor_office",
+            "map": {"biome": "coast"},
             "name": "港务所",
             "description": (
                 "潮湿的木屋里堆着航海日志，煤油灯把林恩的影子钉在墙上。"
@@ -98,6 +99,7 @@ SAMPLE_MODULE = {
         # —— 第二幕：检定难度。教「难度分级」与「失败也推进」——
         {
             "id": "fog_pier",
+            "map": {"biome": "water"},
             "name": "雾中栈桥",
             "description": (
                 "通往灯塔的木栈桥浸在齐膝的雾里，木板被水汽泡得发滑，缆绳结着盐霜。"
@@ -128,6 +130,7 @@ SAMPLE_MODULE = {
         # —— 第三幕：理智检定。san_loss 规格写死，引擎会照此覆盖 ——
         {
             "id": "lighthouse_base",
+            "map": {"biome": "coast"},
             "name": "灯塔底层",
             "description": (
                 "铁门虚掩。底层堆着煤油桶与备用灯芯，墙上却用粗盐画满同一种螺旋，"
@@ -158,6 +161,7 @@ SAMPLE_MODULE = {
         # —— 第四幕：战斗。KP 需自行调用 start_combat，这里用 note 明写 ——
         {
             "id": "lamp_room",
+            "map": {"biome": "interior"},
             "name": "灯室",
             "description": (
                 "螺旋铁梯尽头就是灯室。巨大的菲涅尔透镜蒙着一层盐膜，灯座是冷的。"
@@ -189,6 +193,7 @@ SAMPLE_MODULE = {
         # —— 第五幕：追逐。同样只能暗示，用 note 明写 ——
         {
             "id": "tide_stair",
+            "map": {"biome": "water"},
             "name": "退潮阶梯",
             "description": (
                 "灯塔背面有一道凿进礁石的阶梯，平时淹在水下，今夜整条露了出来，"
@@ -214,6 +219,7 @@ SAMPLE_MODULE = {
         # —— 第六幕：结局。按 flags 分支 ——
         {
             "id": "dawn_harbor",
+            "map": {"biome": "coast"},
             "name": "黎明港口",
             "description": (
                 "天边泛白，潮水正沿着礁盘退回去。港口的钟敲了五下，"

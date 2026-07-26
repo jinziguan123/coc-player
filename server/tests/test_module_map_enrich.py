@@ -195,3 +195,30 @@ async def test_输入不含秘密且调用不设max_tokens(monkeypatch):
     assert "幕后真相标记" not in serialized
     assert "线索秘密标记" not in serialized
     assert llm.kwargs == {"temperature": 0, "response_format": {"type": "json_object"}}
+
+
+def test_plain_is_corrected_when_scene_text_clearly_says_otherwise():
+    """AI 常把 plain 当兜底值用，海岸模组整张沙盘因此变成原野。
+    只在它给出 plain 时按场景文字纠正；给了别的值一律不动。"""
+    from app.services.module_map_service import _normalize_proposed_biome
+
+    cases = [
+        ({"name": "港务所", "description": "潮湿的木屋，窗外是码头"}, "coast"),
+        ({"name": "雾中栈桥", "description": "木栈桥浸在雾里"}, "coast"),
+        ({"name": "退潮阶梯", "description": "凿进礁石的阶梯，海面下有东西"}, "coast"),
+        ({"name": "黑松林", "description": "密林深处"}, "forest"),
+        ({"name": "废弃矿坑", "description": "塌了一半的矿洞"}, "mountain"),
+        ({"name": "开阔草场", "description": "一望无际的平地"}, "plain"),   # 确实是原野，不动
+    ]
+    for target, expected in cases:
+        got = _normalize_proposed_biome({"biome": "plain"}, target)
+        assert got == expected, f"{target['name']}: 期望 {expected}，实得 {got}"
+
+
+def test_non_plain_proposals_are_not_overridden_by_keywords():
+    """AI 给出的非 plain 判断不该被关键词覆盖——宁可信模型，也不要用词表硬掰。"""
+    from app.services.module_map_service import _normalize_proposed_biome
+
+    target = {"name": "海边小屋", "description": "岸边的木屋"}
+    assert _normalize_proposed_biome({"biome": "urban"}, target) == "urban"
+    assert _normalize_proposed_biome({"biome": "water"}, target) == "water"

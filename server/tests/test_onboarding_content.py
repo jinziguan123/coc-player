@@ -100,6 +100,26 @@ def test_pregen_character_can_fight_and_run():
     assert system_data.get("move"), "移动力必须写在 move 键上，否则追逐会静默回落成默认值"
 
 
+def test_every_scene_declares_a_valid_biome():
+    """每一幕都要自带地貌。不写 map 的场景在沙盘上会回落成 plain（原野）——
+    而这个团整个发生在北海岸的雾港，一张全是原野的沙盘是明显错的。"""
+    from app.services import hex_map
+
+    for scene in SCENES:
+        biome = ((scene.get("map") or {}).get("biome") or "").strip()
+        assert biome, f"场景 {scene['id']} 没声明地貌，沙盘上会变成原野"
+        assert biome in hex_map.BIOMES, f"场景 {scene['id']} 的地貌 {biome!r} 不是合法枚举值"
+
+
+def test_coastal_module_is_not_mapped_as_inland_plain():
+    """这是个海岸模组：不该有 plain，且至少半数场景是水/岸。
+    守的是「地貌与故事发生地对不上」这类错误，而不是某个具体取值。"""
+    biomes = [(scene.get("map") or {}).get("biome") for scene in SCENES]
+    assert "plain" not in biomes, "北海岸的雾港不该出现原野"
+    coastal = sum(1 for b in biomes if b in ("coast", "water"))
+    assert coastal >= len(SCENES) / 2, f"临海场景只有 {coastal}/{len(SCENES)}，与故事发生地不符"
+
+
 def test_tutorial_beats_are_spelled_out_for_the_kp():
     """战斗与追逐是 KP 自主调用的工具、写不死，所以模组必须在 events 里明写要求。
     这条用例守的是「别把这两句提示不小心删了」。"""
