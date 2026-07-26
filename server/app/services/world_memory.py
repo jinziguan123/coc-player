@@ -393,7 +393,10 @@ def format_team_self_memory(ws: dict, char_id: str) -> str:
     mem = team_memory_of(ws, char_id)
     if not mem:
         return ""
-    lines = ["【你的私人记忆】（只有你自己知道；你的言行应与之连贯，并主动推进你的目标）"]
+    lines = [
+        "【你的私人记忆】（只有你自己知道；让它影响你的判断和情绪，但不必急于完成目标；"
+        "若当下感受、关系或风险与目标冲突，优先按角色当下的真实反应行事）",
+    ]
     goals = [str(g) for g in (mem.get("goals") or []) if str(g).strip()]
     if goals:
         lines.append("你当前的个人目标：" + "；".join(goals))

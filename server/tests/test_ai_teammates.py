@@ -22,7 +22,7 @@ from app.models import (  # noqa: F401 — 注册全部表
     Module,
     SessionParticipant,
 )
-from app.services import chat_service, session_service
+from app.services import chat_service, session_service, team_turn_service
 
 
 @pytest.fixture
@@ -92,6 +92,47 @@ def test_team_turn_runs_once_per_teammate(db_factory, monkeypatch):
     assert len(dialogues) == 2
     # 走前端气泡的 npc_dialogue chunk
     assert sum('"npc_dialogue"' in c for c in chunks) == 2
+
+
+def test_team_turn_normalizes_self_reference_to_first_person(db_factory, monkeypatch):
+    """队友输出明显的自称第三人称时，事件与私有记忆统一保存为第一人称。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    teammate = teammates[0]
+
+    async def fake_decide(self, messages):
+        if self.character_id == teammate.id:
+            return '{"action":"act","content":"阿尔法走到门边观察走廊"}'
+        return '{"action":"speak","content":"贝塔说：‘我不喜欢这里。’"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+
+    events = session_service.get_session_events(db, session.id)
+    alpha_action = next(e for e in events if e.actor_id == teammate.id and e.event_type == "action")
+    assert alpha_action.content == "我走到门边观察走廊"
+    deeds = (db.get(GameSession, session.id).world_state or {}).get("team_memory", {})
+    assert deeds[teammate.id]["deeds"][-1]["summary"] == "做：我走到门边观察走廊"
+
+
+def test_team_prompt_prioritizes_roleplay_over_game_progress(db_factory):
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    system = ctx.build_team_context(
+        teammates[0], session, module, [], hero, all_teammates=teammates,
+    )[0]["content"]
+    assert "输出必须是第一人称" in system
+    assert "不是为了让剧情继续" in system
+    assert "模组的真相、未揭示的线索" in system
+
+
+def test_normalize_team_content_only_changes_leading_self_label():
+    normalize = team_turn_service._normalize_team_content
+    assert normalize("阿尔法走到门边", "阿尔法", "act") == "我走到门边"
+    assert normalize("阿尔法说：‘我不信。’", "阿尔法", "speak") == "我不信。"
+    assert normalize("看着阿尔法", "阿尔法", "act") == "看着阿尔法"
 
 
 def test_team_turn_check_rolls_dice(db_factory, monkeypatch):

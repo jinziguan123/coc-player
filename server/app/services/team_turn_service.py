@@ -115,6 +115,52 @@ def _parse_team_decision(raw) -> dict | None:
     }
 
 
+_SELF_REF_WORDS = ("他", "她", "该角色")
+_SELF_SPEECH_VERBS = (
+    "说道", "说", "道", "表示", "问道", "回答", "喊道", "低声道", "低声说",
+    "喃喃道", "喃喃说", "冷冷地说", "轻声说",
+)
+
+
+def _normalize_team_content(content: str, character_name: str, action: str) -> str:
+    """把明显的「角色名/他/她 + 自己动作」归一为队友第一人称。
+
+    这是输出边界的保守清洗，不试图改写整段中文；只处理开头的自称标签，避免第三人称
+    继续进入事件流和 team_memory，随后又被模型当成自己的说话习惯模仿。
+    """
+    text = (content or "").strip()
+    name = (character_name or "").strip()
+    if not text or not name:
+        return text
+
+    prefix = None
+    for candidate in (name, *(_SELF_REF_WORDS)):
+        for wrapped in (candidate, f"【{candidate}】", f"[{candidate}]", f"「{candidate}」"):
+            if text.startswith(wrapped):
+                prefix = wrapped
+                break
+        if prefix:
+            break
+    if prefix is None:
+        return text
+
+    rest = text[len(prefix):].lstrip()
+    if action == "speak":
+        # 「林知微说：『……』」/「林知微：『……』」应只保留角色实际说出口的内容。
+        verb_pattern = "|".join(re.escape(verb) for verb in sorted(_SELF_SPEECH_VERBS, key=len, reverse=True))
+        rest = re.sub(
+            rf"^(?:{verb_pattern})\s*[:：,，]?\s*", "", rest,
+        )
+        rest = rest.lstrip(" :：,，")
+        if len(rest) >= 2 and rest[0] in "「『“‘\"" and rest[-1] in "」』”’\"":
+            rest = rest[1:-1].strip()
+        return rest
+
+    # 非台词内容保留动作，只把开头的第三人称主体换成「我」。
+    rest = rest.lstrip(" :：,，")
+    return "我" + rest
+
+
 async def _run_team_turn(
     db: Session,
     session_id: str,
@@ -182,7 +228,8 @@ async def _run_team_turn(
         if not decision:
             continue  # 解析失败：hold，不重试不递归
         action = decision["action"]
-        content = decision["content"]
+        content = _normalize_team_content(decision["content"], teammate.name, action)
+        decision["content"] = content
         # 队友「前往」：显式移动，确定性切换其所在场景（仅限已知地点），落一条「前往」事件。
         # 队友的移动由此动作触发，KP 不再从其台词臆测搬人；分头分组据 party_locations 归并。
         if action == "travel":
