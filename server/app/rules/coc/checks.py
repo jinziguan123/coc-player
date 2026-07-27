@@ -14,6 +14,9 @@ _CHARACTERISTIC_ALIAS = {
     "灵感": "INT", "知识": "EDU",  # CoC 7e：灵感=INT 直接判定，知识=EDU
 }
 
+# 理智检定的写法：SAN 不在技能表也不在属性表，需单独回落到 system_data.sanity.current
+_SANITY_ALIAS = ("理智", "san", "SAN", "Sanity", "sanity", "理智值")
+
 # 「达成等级」中文标签：纯按骰值算出的六档（与要求难度无关），用于检定提示与分层反馈。
 TIER_LABEL_CN = {
     "critical": "大成功",
@@ -68,6 +71,14 @@ def resolve_skill_check(
     # 否则 KP 按手册发起「幸运」检定会以 0 结算（必失败）。
     if not skill_value and skill_name in ("幸运", "运气"):
         skill_value = (character_data.get("system_data") or {}).get("luck") or 0
+    # 理智骰同理：SAN 存于 system_data.sanity.current，既不在技能表也不在属性表。
+    # KP 若发的是 [DICE_CHECK: skill=理智] 而非 [SAN_CHECK]，此前会以 0 结算 → 必失败
+    # （实测一局里三名角色同时掷出「失败 (34 > 0)」就是这么来的）。
+    # 注意：这里只修正**判定基数**；理智损失与疯狂发作仍只由 SAN_CHECK 路径处理，
+    # 裸的理智检定不扣 SAN——这与手册一致（不是每次理智骰都伴随损失）。
+    if not skill_value and skill_name in _SANITY_ALIAS:
+        sanity = (character_data.get("system_data") or {}).get("sanity") or {}
+        skill_value = sanity.get("current") or 0
 
     if difficulty == "hard":
         target = skill_value // 2

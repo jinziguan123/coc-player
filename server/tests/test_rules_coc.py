@@ -261,6 +261,26 @@ class TestCharacteristicRolls:
         # 没有 system_data 时不抛错、按 0 结算
         assert resolve_skill_check({"skills": {}}, "幸运").skill_value == 0
 
+    def test_sanity_roll_uses_system_data(self):
+        """理智同理：SAN 存于 system_data.sanity.current，既不在技能表也不在属性表。
+
+        实测踩过的坑：KP 发的是 [DICE_CHECK: skill=理智] 而非 [SAN_CHECK] 时，
+        技能值取到 0 → 目标值 0 → 一桌三个人同时「失败 (34 > 0)」，必然全灭。
+        """
+        cd = {"skills": {}, "base_attributes": {"POW": 60},
+              "system_data": {"sanity": {"current": 45, "max": 99}}}
+        for name in ("理智", "SAN", "san", "理智值"):
+            assert resolve_skill_check(cd, name).skill_value == 45, name
+        # 难度分级要基于真实 SAN 而不是 0
+        assert resolve_skill_check(cd, "理智", "hard").target == 22
+        # 没有 system_data 时不抛错、按 0 结算
+        assert resolve_skill_check({"skills": {}}, "理智").skill_value == 0
+
+    def test_sanity_skill_entry_still_wins(self):
+        """角色卡上真的有「理智」技能项时以它为准，回落只在缺省时兜底。"""
+        cd = {"skills": {"理智": 70}, "system_data": {"sanity": {"current": 45}}}
+        assert resolve_skill_check(cd, "理智").skill_value == 70
+
 
 class TestOccupationWeaponData:
     """112 职业 / 106 武器 / 专精数据完整性。"""
