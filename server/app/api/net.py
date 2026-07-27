@@ -18,6 +18,9 @@ class NetStatus(BaseModel):
     restart_required: bool
     addresses: list[str]
     """本机可供其他玩家填写的地址（不含回环）。"""
+    port: int | None = None
+    """后端实际监听的端口。桌面版端口是启动时挑的，客人必须连地址+端口才连得上，
+    所以要一并给出；开发态直接跑 uvicorn 时未知，由前端回落到当前页面端口。"""
 
 
 class LanToggle(BaseModel):
@@ -34,6 +37,7 @@ def _status(request: Request) -> NetStatus:
         listening_on_lan=listening,
         restart_required=enabled != listening,
         addresses=net_access.local_addresses() if enabled else [],
+        port=getattr(request.app.state, "bound_port", None),
     )
 
 

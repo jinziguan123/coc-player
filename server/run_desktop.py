@@ -36,10 +36,11 @@ def main() -> None:
     from app.services import net_access
 
     host = net_access.bind_host()
-    # 记下真实绑定情况：设置页据此判断「改了开关但还没重启」。
-    app.state.listening_on_lan = host != net_access.LOOPBACK_HOST
-
     port = _pick_port(host)
+    # 记下真实绑定情况：设置页据此判断「改了开关但还没重启」，并拼出客人要填的地址。
+    app.state.listening_on_lan = host != net_access.LOOPBACK_HOST
+    app.state.bound_port = port
+
     # 先告知外壳端口（外壳随后轮询 /api/health 确认就绪，不依赖此行的时序）。
     print(f"{PORT_LINE_PREFIX}{port}", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="warning")

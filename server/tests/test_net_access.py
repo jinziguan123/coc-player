@@ -100,6 +100,7 @@ def test_status_endpoint_reports_restart_required(client):
         "listening_on_lan": False,
         "restart_required": False,
         "addresses": [],
+        "port": None,
     }
 
     r = client.post("/api/net/lan", json={"enabled": True})
@@ -109,3 +110,12 @@ def test_status_endpoint_reports_restart_required(client):
     # 进程仍绑在回环上 → 提示需要重启
     assert body["listening_on_lan"] is False
     assert body["restart_required"] is True
+
+
+def test_status_reports_bound_port(client):
+    """客人要连的是「地址 + 端口」，桌面版端口是启动时挑的，必须由后端给出。"""
+    app.state.bound_port = 8756
+    try:
+        assert client.get("/api/net").json()["port"] == 8756
+    finally:
+        app.state.bound_port = None

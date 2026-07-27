@@ -200,6 +200,7 @@ interface NetStatus {
   listening_on_lan: boolean
   restart_required: boolean
   addresses: string[]
+  port: number | null
 }
 
 function NetworkSettingsPanel() {
@@ -222,12 +223,16 @@ function NetworkSettingsPanel() {
     }
   }
 
-  const copyAddr = (addr: string) => {
-    navigator.clipboard?.writeText(addr)
+  const copyAddr = (url: string) => {
+    navigator.clipboard?.writeText(url)
     toast.success('地址已复制')
   }
 
   const enabled = status?.lan_enabled ?? false
+  // 桌面版端口是后端启动时挑的，由 /net 给出；开发态后端不知道自己被绑在哪个端口，
+  // 回落到当前页面的端口（同源托管时二者一致）。
+  const port = status?.port ?? (Number(window.location.port) || null)
+  const urlFor = (addr: string) => (port ? `http://${addr}:${port}` : `http://${addr}`)
 
   return (
     <div>
@@ -278,12 +283,12 @@ function NetworkSettingsPanel() {
             {status.addresses.map((addr) => (
               <button
                 key={addr}
-                onClick={() => copyAddr(addr)}
+                onClick={() => copyAddr(urlFor(addr))}
                 className="badge inline-flex items-center gap-1"
                 style={{ marginRight: '0.4rem' }}
                 title="点击复制"
               >
-                {addr} <Copy size={11} />
+                {urlFor(addr)} <Copy size={11} />
               </button>
             ))}
           </div>

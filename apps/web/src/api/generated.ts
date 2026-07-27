@@ -2674,6 +2674,8 @@ export interface components {
             lan_enabled: boolean;
             /** Listening On Lan */
             listening_on_lan: boolean;
+            /** Port */
+            port?: number | null;
             /** Restart Required */
             restart_required: boolean;
         };

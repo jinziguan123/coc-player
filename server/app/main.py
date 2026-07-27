@@ -34,9 +34,10 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="TRPG Player", version="0.1.0", lifespan=lifespan)
 
-# 本进程实际绑在哪：默认按回环记，``run_desktop.py`` 启动时按开关改写。
-# 设置页据此判断「改了开关但还没重启」。
+# 本进程实际绑在哪：默认按回环记，``run_desktop.py`` 启动时按开关与实挑端口改写。
+# 设置页据此判断「改了开关但还没重启」，并给出客人要填的完整地址。
 app.state.listening_on_lan = False
+app.state.bound_port = None
 
 
 @app.middleware("http")

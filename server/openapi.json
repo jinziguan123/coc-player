@@ -1541,6 +1541,17 @@
             "title": "Listening On Lan",
             "type": "boolean"
           },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
           "restart_required": {
             "title": "Restart Required",
             "type": "boolean"
