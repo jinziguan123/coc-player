@@ -435,8 +435,6 @@ export function HexSandbox({
               <Line points={[0, 9, -6, 17, 6, 17]} closed fill="#242019" stroke={active ? CANDLE : '#f1d18a'} strokeWidth={1.5} perfectDrawEnabled={false} />
               <Text text={(l.name || l.id).slice(0, 1)} x={-9} y={-9} width={18} align="center" fontSize={13} fontStyle="bold" fill={PARCH} />
             </Group>}
-            {showToken && (l.party || []).slice(0, 3).map((name, i) => <Group key={name + i} x={R * 0.62 - i * 15} y={-R * 0.78} listening={false}><Circle radius={8} fill="#29221b" stroke={CANDLE} strokeWidth={1} /><Text text={name.slice(0, 1)} x={-8} y={-5.5} width={16} align="center" fontSize={10} fill={PARCH} /></Group>)}
-            {showToken && (l.clues?.length || 0) > 0 && <Group x={-R * 0.66} y={-R * 0.78} listening={false}><Circle radius={8} fill={THREAD} /><Text text={String(l.clues!.length)} x={-8} y={-5.5} width={16} align="center" fontSize={10} fontStyle="bold" fill={PARCH} /></Group>}
           </Group>
         })}
         {edges.map(({ a, b }) => {
@@ -455,6 +453,34 @@ export function HexSandbox({
             <Line points={points} stroke={active ? CANDLE : EDGE_LIGHT} strokeWidth={active ? 4 : 3} dash={[14, 8]} lineCap="round" opacity={0.98} perfectDrawEnabled={false} />
             <Circle x={points[0]} y={points[1]} radius={active ? 4 : 3} fill={active ? CANDLE : EDGE_LIGHT} stroke={EDGE_DARK} strokeWidth={1.5} perfectDrawEnabled={false} />
             <Circle x={points[2]} y={points[3]} radius={active ? 4 : 3} fill={active ? CANDLE : EDGE_LIGHT} stroke={EDGE_DARK} strokeWidth={1.5} perfectDrawEnabled={false} />
+          </Group>
+        })}
+        {/* 队伍头像与线索角标：必须画在瓦片**与连线之后**。
+            它们挂在格子上沿（y≈-0.78R），实际已越出六边形边界——留在瓦片组里时，
+            既会被后画的邻格盖住，也会被最后画的连线压过去（玩家所在格尤其明显：
+            通往该格的虚线正好终止在头像上）。抽成独立一遍绘制即可彻底避开遮挡。
+            编辑器的 sandboxLocs 不含 party/clues，所以这一遍在编辑态是空的，
+            拖拽时没有「头像不跟手」的问题。 */}
+        {located.filter((l) => l.nodeKind !== 'terrain' && !!l.sceneId
+          && (l.known !== false || revealUnknownTokens)).map((l) => {
+          const p = hexXY(l.map!.q, l.map!.r)
+          const party = (l.party || []).slice(0, 3)
+          const clueCount = l.clues?.length || 0
+          if (!party.length && !clueCount) return null
+          return <Group key={`badges-${l.id}`} x={p.x} y={p.y} listening={false}>
+            {party.map((name, i) => (
+              // 间距 17 > 直径 16：原来的 15 会让相邻头像互相咬掉一圈描边
+              <Group key={name + i} x={R * 0.62 - i * 17} y={-R * 0.78}>
+                <Circle radius={8} fill="#29221b" stroke={CANDLE} strokeWidth={1} />
+                <Text text={name.slice(0, 1)} x={-8} y={-5.5} width={16} align="center" fontSize={10} fill={PARCH} />
+              </Group>
+            ))}
+            {clueCount > 0 && (
+              <Group x={-R * 0.66} y={-R * 0.78}>
+                <Circle radius={8} fill={THREAD} />
+                <Text text={String(clueCount)} x={-8} y={-5.5} width={16} align="center" fontSize={10} fontStyle="bold" fill={PARCH} />
+              </Group>
+            )}
           </Group>
         })}
         {scenes.filter((l) => l.known !== false || revealUnknownTokens).map((l) => { const p = hexXY(l.map!.q, l.map!.r); const isSelected = editable && selected.has(l.id); const nameW = Math.max(52, (l.name || l.id).length * 13 + 16); return <Group key={`label-${l.id}`} x={p.x} y={p.y} listening={false}>
