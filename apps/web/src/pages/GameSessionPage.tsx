@@ -5,6 +5,14 @@ import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { api, connectSSE, getServerUrl } from '../api/client'
 import { runLiveSession } from '@/lib/liveSession'
+import {
+  assertAllLogHandled,
+  assertAllNonLogHandled,
+  categoryOf,
+  type LogEventType,
+  type NonLogEventType,
+  type RoomEventType,
+} from '@/lib/roomEvents'
 import { useSessionStore, type ChatMessage } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { PartyRoster } from '../components/game/PartyRoster'
@@ -338,7 +346,9 @@ interface Character {
 }
 
 interface ChunkPayload {
-  type: string
+  /** 后端 room_events.py 登记的类型集合（经 OpenAPI 生成）。用具体联合而不是 string，
+   *  下面的分发才能靠 switch 的 never 分支保证「新增事件必须被处理」。 */
+  type: RoomEventType
   content?: string
   actor_name?: string
   actor_id?: string
@@ -719,9 +729,13 @@ export function GameSessionPage() {
     }, 400)
   }, [sessionId, setCurrentSession])
 
-  // 处理一条房间实时事件（/live）。离散事件按 id 去重；叙述 token 流式拼接。
-  const handleLiveChunk = useCallback((chunk: ChunkPayload) => {
-    const t = chunk.type
+  // 处理一条房间实时事件（/live）。
+  //
+  // 结构对应 room_events.py 的三分类：`log` 类走「按 id 去重 → 收流 → 落消息」的公共
+  // 路径（下半段），`stream`/`sync` 类各自独立处理、不参与去重（上半段）。两段各自以
+  // never 分支收尾——后端新增一种事件而这里没处理，编译不过。
+  // stream / sync 类：面板与流控状态，不进消息流、不参与 id 去重。
+  const handleNonLogChunk = useCallback((chunk: ChunkPayload, t: NonLogEventType) => {
     if (t === 'ready') {
       setLiveConnected(true)
       // 权威同步生成态：ready 由服务端在 subscribe 之后捕获，据此校正 streaming，
@@ -731,7 +745,6 @@ export function GameSessionPage() {
       if (!gen) { setThinking(false); setTailNote('') }
       return
     }
-    if (t === 'replay_done') return
     if (t === 'generating') { setStreaming(true); setThinking(true); return }
     if (t === 'turn_state') { setTurnState((chunk.metadata as { confirmed_ids: string[]; total: number; ready: boolean }) || null); return }
     if (t === 'kp_request' || t === 'kp_turn_ready' || t === 'kp_roll_ready') {
@@ -825,7 +838,17 @@ export function GameSessionPage() {
       appendToStream(chunk.content || '')
       return
     }
-    // 以下为离散事件：按 id 去重（与历史/重连对齐）
+    // 明确忽略：这两类是大厅页的事，游戏页收到也无事可做。
+    // （由穷尽性检查逼出来的——此前它们只是无声地落进 if 链末尾。）
+    //   lobby   —— 席位/准备态变化，游戏页的队伍条由 seat/presence 驱动
+    //   started —— 开局广播，大厅页据此跳转；本页已经在局内
+    if (t === 'lobby' || t === 'started') return
+    // 走到这里说明有 stream/sync 类型没被处理——加了新事件就必须在上面补一支。
+    assertAllNonLogHandled(t)
+  }, [refetchSession, resyncHistory, addMessage, removeMessage, updateMessage, patchMessageMetadata, endStream, startStreamMessage, appendToStream, isKp])
+
+  // log 类：进消息流的持久事件。公共前导 = 按 id 去重（与历史/重连对齐）+ 收流。
+  const handleLogChunk = useCallback((chunk: ChunkPayload, t: LogEventType) => {
     if (chunk.id) {
       if (seenIds.current.has(chunk.id)) return
       seenIds.current.add(chunk.id)
@@ -850,8 +873,18 @@ export function GameSessionPage() {
       // 先本地认它待投，避免卡片先闪「已投骰」再翻成按钮。
       const cid = String((chunk.metadata as Record<string, unknown> | undefined)?.id ?? '')
       if (cid) setOptimisticPending((s) => new Set(s).add(cid))
+    } else {
+      // 走到这里说明有 log 类型没被渲染——加了新事件就必须在上面补一支。
+      assertAllLogHandled(t)
     }
-  }, [addMessage, removeMessage, updateMessage, patchMessageMetadata, appendToStream, endStream, startStreamMessage, resyncHistory, refetchSession, isKp])
+  }, [addMessage, endStream])
+
+  const handleLiveChunk = useCallback((chunk: ChunkPayload) => {
+    const t = chunk.type
+    if (categoryOf(t) === 'log') { handleLogChunk(chunk, t as LogEventType); return }
+    handleNonLogChunk(chunk, t as NonLogEventType)
+  }, [handleLogChunk, handleNonLogChunk])
+
 
   useEffect(() => {
     if (!sessionId) return
