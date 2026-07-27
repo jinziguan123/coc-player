@@ -2,12 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api import ai_settings
-from app.api.deps import player_token
+from app.api.deps import player_token, require_local_client
 from app.database import get_db
 from app.schemas.onboarding import OnboardingStartResponse
 from app.services.onboarding_service import start_onboarding
 
-router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])
+# 会建会话并调用 AI，属于房主本机的操作
+router = APIRouter(
+    prefix="/api/onboarding", tags=["onboarding"],
+    dependencies=[Depends(require_local_client)],
+)
 
 
 @router.post("/start", response_model=OnboardingStartResponse)

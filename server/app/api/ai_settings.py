@@ -7,9 +7,10 @@ import time
 import uuid
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.api.deps import require_local_client
 from app.config import settings
 
 # 配置文件与数据库同目录：dev 下是 server/ai_settings.json（行为不变）；打包运行时落到用户
@@ -17,7 +18,16 @@ from app.config import settings
 # 退出即删）导致配置读不到 / 重启丢失。
 SETTINGS_FILE = settings.db_path.parent / "ai_settings.json"
 
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+# 配置的增删改查仅限房主本机：这里既能读到明文 API key，也能改 base_url（可被指向他人服务）。
+router = APIRouter(
+    prefix="/api/settings", tags=["settings"],
+    dependencies=[Depends(require_local_client)],
+)
+
+# 例外：只读的「配没配好」探针对客人开放。客人要判断的正是**房主**有没有配好 AI
+# （AI 调用发生在房主机器上），把它一并锁掉会让客人的开局前置校验永远失败。
+# 它只返回一个布尔和配置昵称，不含任何凭据。
+public_router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
 # ---------- 数据模型 ----------
@@ -207,7 +217,7 @@ class AIStatus(BaseModel):
     name: str | None = None
 
 
-@router.get("/ai/status", response_model=AIStatus)
+@public_router.get("/ai/status", response_model=AIStatus)
 def ai_status():
     """开局前置校验：是否存在可用的激活 AI 配置（有 api_key + model_name）。
 

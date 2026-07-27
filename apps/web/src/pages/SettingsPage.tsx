@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { AlertTriangle, Copy, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '../api/client'
+import { api, localApi } from '../api/client'
 import { Modal } from '../components/ui/modal'
 import {
   Select,
@@ -208,13 +208,13 @@ function NetworkSettingsPanel() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    api.get<NetStatus>('/net').then(setStatus).catch(() => setStatus(null))
+    localApi.get<NetStatus>('/net').then(setStatus).catch(() => setStatus(null))
   }, [])
 
   const toggle = async (enabled: boolean) => {
     setSaving(true)
     try {
-      setStatus(await api.post<NetStatus>('/net/lan', { enabled }))
+      setStatus(await localApi.post<NetStatus>('/net/lan', { enabled }))
       toast.success(enabled ? '已允许局域网加入' : '已关闭局域网加入')
     } catch {
       toast.error('设置失败')
@@ -634,7 +634,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
 
   const fetchProfiles = useCallback(async () => {
     try {
-      const data = await api.get<AIProfile[]>('/settings/ai/profiles')
+      const data = await localApi.get<AIProfile[]>('/settings/ai/profiles')
       setProfiles(data)
     } catch {
       toast.error('加载配置列表失败')
@@ -691,7 +691,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   /* 取表单里 key 的明文：列表接口恒掩码，显示/复制前先向后端要真实值（仅编辑已有配置时需要） */
   const ensureRealKey = async (): Promise<string> => {
     if (editingId && editingId !== 'new' && form.api_key.includes('****')) {
-      const res = await api.get<{ api_key: string }>(`/settings/ai/profiles/${editingId}/key`)
+      const res = await localApi.get<{ api_key: string }>(`/settings/ai/profiles/${editingId}/key`)
       setForm((f) => ({ ...f, api_key: res.api_key }))
       return res.api_key
     }
@@ -727,7 +727,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   /* 一键复制整个配置（后端完整拷贝，含真实 key；典型用途：改个模型名做快模型变体） */
   const handleDuplicate = async (id: string) => {
     try {
-      await api.post(`/settings/ai/profiles/${id}/duplicate`)
+      await localApi.post(`/settings/ai/profiles/${id}/duplicate`)
       toast.success('已复制配置（名称加「副本」，含密钥）')
       await fetchProfiles()
     } catch {
@@ -744,10 +744,10 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
     setSaving(true)
     try {
       if (editingId === 'new') {
-        await api.post('/settings/ai/profiles', form)
+        await localApi.post('/settings/ai/profiles', form)
         toast.success('配置已创建')
       } else {
-        await api.put(`/settings/ai/profiles/${editingId}`, form)
+        await localApi.put(`/settings/ai/profiles/${editingId}`, form)
         toast.success('配置已更新')
       }
       setEditingId(null)
@@ -763,7 +763,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   /* 激活配置 */
   const handleActivate = async (id: string) => {
     try {
-      await api.post(`/settings/ai/profiles/${id}/activate`)
+      await localApi.post(`/settings/ai/profiles/${id}/activate`)
       toast.success('已切换激活配置')
       await fetchProfiles()
     } catch {
@@ -774,7 +774,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   /* 标记/取消快模型（结构化副任务：裁定 planner、AI 队友、滚动摘要走它，省时提速） */
   const handleToggleFast = async (id: string) => {
     try {
-      const res = await api.post<{ is_fast: boolean }>(`/settings/ai/profiles/${id}/set-fast`)
+      const res = await localApi.post<{ is_fast: boolean }>(`/settings/ai/profiles/${id}/set-fast`)
       toast.success(res.is_fast ? '已设为快模型（裁定/队友/摘要将走它）' : '已取消快模型，副任务回落主模型')
       await fetchProfiles()
     } catch {
@@ -786,7 +786,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   const handleDelete = async (id: string, name: string) => {
     if (!window.confirm(`确定要删除配置「${name}」吗？`)) return
     try {
-      await api.delete(`/settings/ai/profiles/${id}`)
+      await localApi.delete(`/settings/ai/profiles/${id}`)
       toast.success('配置已删除')
       if (editingId === id) cancelEdit()
       await fetchProfiles()
@@ -799,7 +799,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   const handleTest = async (id: string) => {
     setTesting({ id, kind: 'conn' })
     try {
-      const result = await api.post<TestResult>(
+      const result = await localApi.post<TestResult>(
         `/settings/ai/profiles/${id}/test`,
       )
       if (result.success) {
@@ -819,7 +819,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   const handleTestImage = async (id: string) => {
     setTesting({ id, kind: 'image' })
     try {
-      const result = await api.post<TestResult>(`/settings/ai/profiles/${id}/test-image`)
+      const result = await localApi.post<TestResult>(`/settings/ai/profiles/${id}/test-image`)
       if (result.success) toast.success(`${result.message}（${result.latency_ms}ms）`)
       else toast.error(`生图测试失败: ${result.message}`)
     } catch (e) {

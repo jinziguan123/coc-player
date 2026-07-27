@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '../api/client'
+import { api, localApi } from '../api/client'
 import { useModuleStore } from '../stores/moduleStore'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
@@ -44,7 +44,7 @@ export function ModulePage() {
 
   const rebuildRag = async (id: string) => {
     try {
-      await api.post(`/modules/${id}/rag/rebuild`)
+      await localApi.post(`/modules/${id}/rag/rebuild`)
       toast.success('已开始重建原文索引')
       fetchModules()
     } catch (e) {
@@ -118,7 +118,7 @@ export function ModulePage() {
 
   const deleteModule = async (id: string) => {
     try {
-      await api.delete(`/modules/${id}`)
+      await localApi.delete(`/modules/${id}`)
       fetchModules()
       toast.success('模组已删除')
     } catch {

@@ -1,4 +1,4 @@
-import { api } from '@/api/client'
+import { api, localApi } from '@/api/client'
 
 export interface Character {
   id: string
@@ -31,13 +31,13 @@ export function listAvailableCharacters(isPlayer: boolean) {
 export function generateCharacter<T = Record<string, unknown>>(
   request: GenerateCharacterRequest,
 ) {
-  return api.post<T>('/characters/ai-generate', request)
+  return localApi.post<T>('/characters/ai-generate', request)
 }
 
 export function createCharacter<T = Character>(payload: unknown) {
-  return api.post<T>('/characters', payload)
+  return localApi.post<T>('/characters', payload)
 }
 
 export function removeCharacter(characterId: string) {
-  return api.delete(`/characters/${characterId}`)
+  return localApi.delete(`/characters/${characterId}`)
 }

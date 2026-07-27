@@ -2,20 +2,18 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { api } from '@/api/client'
+import { localApi } from '@/api/client'
 import { SettingsPage } from '@/pages/SettingsPage'
 
+// AI 配置走 localApi（始终打本机）——见 ADR-007：这些端点只接受回环来源，
+// 客人模式下必须读写自己的机器，不能打到房主那儿去。
 vi.mock('@/api/client', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  localApi: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
 
-const mockGet = vi.mocked(api.get)
-const mockPost = vi.mocked(api.post)
+const mockGet = vi.mocked(localApi.get)
+const mockPost = vi.mocked(localApi.post)
 
 function LocationProbe() {
   return <span data-testid="pathname">{useLocation().pathname}</span>

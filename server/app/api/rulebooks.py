@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_local_client
 from app.database import get_db
 from app.models.rulebook import Rulebook
 from app.schemas.rulebook import RuleSearchResponse, RulebookRead
@@ -25,7 +26,7 @@ def _ingest_bg(rulebook_id: str, pdf_bytes: bytes) -> None:
         db.close()
 
 
-@router.post("/upload", response_model=RulebookRead)
+@router.post("/upload", dependencies=[Depends(require_local_client)], response_model=RulebookRead)
 async def upload_rulebook(
     background: BackgroundTasks,
     file: UploadFile,
@@ -74,7 +75,7 @@ def search_rules(
     return RuleSearchResponse(query=q, hits=hits)
 
 
-@router.delete("/{rulebook_id}")
+@router.delete("/{rulebook_id}", dependencies=[Depends(require_local_client)])
 def delete_rulebook(rulebook_id: str, db: Session = Depends(get_db)):
     if not rulebook_service.delete_rulebook(db, rulebook_id):
         raise HTTPException(404, "规则书不存在")

@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_local_client
 from app.database import SessionLocal, get_db
 from app.schemas.module import ModuleRead, ModuleUploadResponse, ModuleWrite
 from app.services import (
@@ -303,7 +304,7 @@ async def _run_upload_job(
         _job_update(job_id, status="failed", detail="解析失败，请重试")
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(require_local_client)])
 async def upload_module(
     files: list[UploadFile],
     rule_system: str = "coc",
@@ -368,7 +369,7 @@ def list_modules(db: Session = Depends(get_db)):
     return module_service.list_modules(db)
 
 
-@router.post("", response_model=ModuleRead)
+@router.post("", dependencies=[Depends(require_local_client)], response_model=ModuleRead)
 def create_module(data: ModuleWrite, db: Session = Depends(get_db)):
     """手动新建模组（结构化内容，非 PDF 解析）。"""
     if not data.title.strip():
@@ -376,7 +377,7 @@ def create_module(data: ModuleWrite, db: Session = Depends(get_db)):
     return module_service.create_module(db, data.model_dump())
 
 
-@router.put("/{module_id}", response_model=ModuleRead)
+@router.put("/{module_id}", dependencies=[Depends(require_local_client)], response_model=ModuleRead)
 def update_module(module_id: str, data: ModuleWrite, db: Session = Depends(get_db)):
     """整体编辑模组结构化内容。"""
     if not data.title.strip():
@@ -394,7 +395,7 @@ class SceneMapPatch(BaseModel):
     biome: str | None = None
 
 
-@router.patch("/{module_id}/scene-map")
+@router.patch("/{module_id}/scene-map", dependencies=[Depends(require_local_client)])
 def patch_scene_map(module_id: str, data: SceneMapPatch, db: Session = Depends(get_db)):
     """沙盘编辑：把场景移到指定 hex 格（KP 拖拽修正），可顺带改地貌。撞格等非法情形 400。"""
     module = module_service.get_module(db, module_id)
@@ -407,7 +408,7 @@ def patch_scene_map(module_id: str, data: SceneMapPatch, db: Session = Depends(g
     return {"scene_id": data.scene_id, "map": new_map}
 
 
-@router.post("/{module_id}/map/enrich")
+@router.post("/{module_id}/map/enrich", dependencies=[Depends(require_local_client)])
 async def enrich_map(module_id: str, db: Session = Depends(get_db)):
     """AI 补全沙盘：地貌、物理连接与语义落位。"""
     module = module_service.get_module(db, module_id)
@@ -419,7 +420,7 @@ async def enrich_map(module_id: str, db: Session = Depends(get_db)):
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.post("/{module_id}/map/backdrop")
+@router.post("/{module_id}/map/backdrop", dependencies=[Depends(require_local_client)])
 async def generate_map_backdrop(module_id: str, db: Session = Depends(get_db)):
     """给沙盘生成一张氛围底图（纯装饰层，网格与游戏逻辑都不依赖它）。"""
     module = module_service.get_module(db, module_id)
@@ -446,7 +447,7 @@ def get_module(module_id: str, db: Session = Depends(get_db)):
     return module
 
 
-@router.post("/{module_id}/images/regenerate")
+@router.post("/{module_id}/images/regenerate", dependencies=[Depends(require_local_client)])
 async def regenerate_module_image(
     module_id: str,
     data: ModuleImageRegenerateRequest,
@@ -470,7 +471,7 @@ async def regenerate_module_image(
     return {"url": url, "kind": data.kind, "item_id": data.item_id}
 
 
-@router.post("/{module_id}/rag/rebuild", response_model=ModuleRead)
+@router.post("/{module_id}/rag/rebuild", dependencies=[Depends(require_local_client)], response_model=ModuleRead)
 def rebuild_module_rag(
     module_id: str,
     background: BackgroundTasks,
@@ -492,7 +493,7 @@ def rebuild_module_rag(
 
 
 
-@router.delete("/{module_id}")
+@router.delete("/{module_id}", dependencies=[Depends(require_local_client)])
 def delete_module(module_id: str, db: Session = Depends(get_db)):
     if not module_service.delete_module(db, module_id):
         raise HTTPException(404, "模组不存在")

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import NoReturn
 
-from fastapi import HTTPException, Security
+from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
 
 from app.models.character import Character
 from app.models.session import GameSession
-from app.services import session_service
+from app.services import net_access, session_service
 
 
 _PLAYER_TOKEN_HEADER = APIKeyHeader(name="X-Player-Token", auto_error=False)
@@ -22,6 +22,27 @@ def player_token(
     前端在 localStorage 生成 UUID，并以 ``X-Player-Token`` 头随请求带上。
     """
     return x_player_token
+
+
+def require_local_client(request: Request) -> None:
+    """只允许房主本机调用：管理本机资产的端点用它把关。
+
+    「管理本机资产」指 AI 配置和素材库的增删改——这些是房主在自己机器上的事，
+    客人没有任何正当理由去动房主的。此前它们完全没有把关，于是客人模式下：
+
+    - 客人的设置页显示的是**房主的** AI 配置，连「显示密钥」都能点，房主的 API key
+      就这么给出去了；
+    - 客人能删房主的模组、角色、规则书，能触发生图/解析烧房主的额度。
+
+    这不是「公网才有的问题」——ADR-001 说的可信局域网是「相信朋友不捣乱」，
+    不该延伸到「默认把凭据给朋友看」。
+
+    按**来源**而不是按 token 判定：token 是客户端自造的明文串、可以随便伪造，
+    而请求来自不来自回环是传输层的事实。
+    """
+    client = request.client.host if request.client else None
+    if not net_access.is_local_request(client):
+        raise HTTPException(403, "此操作只能在房主本机进行")
 
 
 def require_session_viewer(

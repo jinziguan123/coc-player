@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api, getApiBase, getPlayerToken } from '../api/client'
+import { api, getApiBase, getPlayerToken, localApi } from '../api/client'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiBookCover, GiUpCard, GiReturnArrow, GiMagnifyingGlass } from 'react-icons/gi'
@@ -113,7 +113,7 @@ export function RulebookPage() {
 
   const deleteBook = async (id: string) => {
     try {
-      await api.delete(`/rulebooks/${id}`)
+      await localApi.delete(`/rulebooks/${id}`)
       fetchBooks()
       toast.success('规则书已删除')
     } catch {

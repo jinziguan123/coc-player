@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.ai_settings import public_router as ai_settings_public_router
 from app.api.ai_settings import router as ai_settings_router
 from app.api.characters import router as characters_router
 from app.api.chat import router as chat_router
@@ -24,5 +25,6 @@ api_router.include_router(kp_router)
 api_router.include_router(combat_router)
 api_router.include_router(inventory_router)
 api_router.include_router(ai_settings_router)
+api_router.include_router(ai_settings_public_router)
 api_router.include_router(rulebooks_router)
 api_router.include_router(net_router)

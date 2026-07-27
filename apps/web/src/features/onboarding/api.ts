@@ -1,4 +1,4 @@
-import { api } from '@/api/client'
+import { api, localApi } from '@/api/client'
 
 export interface AIStatus {
   configured: boolean
@@ -16,5 +16,5 @@ export function checkAIStatus() {
 }
 
 export function startOnboarding() {
-  return api.post<OnboardingStartResult>('/onboarding/start')
+  return localApi.post<OnboardingStartResult>('/onboarding/start')
 }

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import player_token
+from app.api.deps import require_local_client
 from app.database import get_db
 from app.models.module import Module
 from app.schemas.character import (
@@ -149,7 +150,7 @@ async def evaluate_character(data: EvaluateRequest, db: Session = Depends(get_db
     return json.loads(result)
 
 
-@router.post("/characters/import-excel")
+@router.post("/characters/import-excel", dependencies=[Depends(require_local_client)])
 async def import_from_excel(
     module_id: str,
     file: UploadFile = File(...),
@@ -247,14 +248,14 @@ def get_character(character_id: str, db: Session = Depends(get_db)):
     return char
 
 
-@router.delete("/characters/{character_id}")
+@router.delete("/characters/{character_id}", dependencies=[Depends(require_local_client)])
 def delete_character(character_id: str, db: Session = Depends(get_db)):
     if not character_service.delete_character(db, character_id):
         raise HTTPException(404, "角色不存在")
     return {"ok": True}
 
 
-@router.put("/characters/{character_id}", response_model=CharacterRead)
+@router.put("/characters/{character_id}", dependencies=[Depends(require_local_client)], response_model=CharacterRead)
 def update_character(
     character_id: str, data: CharacterUpdate, db: Session = Depends(get_db)
 ):
