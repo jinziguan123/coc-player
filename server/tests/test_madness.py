@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.ai.context import _format_player_info
 from app.models import Base, Character, GameSession, Module  # noqa: F401
 from app.rules.coc import madness as m
+from tests.wire import wires
 from app.services import chat_service as cs
 
 
@@ -84,7 +85,7 @@ def test_到期解除并广播恢复(db_factory):
     pc.system_data = sd; pc.status = "temporary_insanity"; db.add(pc); db.commit()
 
     out = cs._tick_madness_recovery(db, sid, [pc])   # turns_left 1→0 → 解除
-    assert any("恢复了神智" in c for c in out)
+    assert any("恢复了神智" in c for c in wires(out))
     assert pc.status == "active" and "madness" not in (pc.system_data or {})
 
 

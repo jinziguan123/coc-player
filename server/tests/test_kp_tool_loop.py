@@ -154,7 +154,7 @@ def test_tool_result_feedback_order():
     # 两步文本聚合进同一 result（validator/落库直接复用旧路径收尾）
     assert result[0] == "你俯身敲击。尘埃落定。"
     # 广播顺序：step1 旁白 → 工具的 system chunk → step2 旁白
-    kinds = [json.loads(c[len("data: "):])["type"] for c in chunks]
+    kinds = [c.type for c in chunks]
     assert kinds == ["narration", "system", "narration"]
 
 
@@ -177,7 +177,7 @@ def test_reasoning_content_is_preserved_for_tool_continuation():
     assistant = next(m for m in llm.calls[1]["messages"] if m.get("tool_calls"))
     assert assistant["reasoning_content"] == "先判断是否需要检定。需要进行灵感检定。"
     assert "先判断" not in result[0]
-    assert "先判断" not in "".join(chunks)
+    assert "先判断" not in "".join(c.content for c in chunks)
     assert result[0] == "地图上的涂改痕迹逐渐清晰。"
 
 
@@ -261,7 +261,7 @@ def test_requires_check_fallback_rolls_deterministically(db_factory):
 
     assert llm.calls[0]["temperature"] == _CHECK_TURN_TEMPERATURE  # 裁定轮降温
     assert len(llm.calls) == 1                    # 补掷挂起后不再继续生成
-    assert any('"check_request"' in c for c in chunks)  # 已广播「待玩家投骰」
+    assert any(c.type == "check_request" for c in chunks)  # 已广播「待玩家投骰」
     pending = (db.get(GameSession, session_id).world_state or {}).get("pending_checks") or {}
     assert pending and list(pending.values())[0]["skill"] == "侦查"
 
@@ -288,7 +288,7 @@ def test_requires_check_model_calls_tool_no_double_roll(db_factory):
 
     chunks = asyncio.run(_go())
     assert len(llm.calls) == 1
-    assert sum(1 for c in chunks if '"check_request"' in c) == 1
+    assert sum(1 for c in chunks if c.type == "check_request") == 1
     pending = (db.get(GameSession, session_id).world_state or {}).get("pending_checks") or {}
     assert len(pending) == 1
 
@@ -329,7 +329,7 @@ def test_planned_combat_fallback_starts_once_when_model_omits_tool(db_factory):
     state = combat_service.get_combat(db.get(GameSession, session_id))
     assert state and state["active"] is True
     assert any(p["name"] == "循声者" for p in state["initiative"])
-    assert any('"combat_start"' in chunk for chunk in first)
+    assert any(chunk.type == "combat_start" for chunk in first)
 
     second = asyncio.run(_ensure())
     assert second == []
@@ -480,7 +480,7 @@ def test_say_tool_interleaves_dialogue_in_persist_order(db_factory):
         ("narration", "他转身离去。"),
     ]
     # 广播里含 dialogue 气泡（实时也能看到）
-    kinds = [json.loads(c[len("data: "):])["type"] for c in chunks]
+    kinds = [c.type for c in chunks]
     assert "dialogue" in kinds
 
 

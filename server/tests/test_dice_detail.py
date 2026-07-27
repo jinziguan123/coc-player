@@ -9,7 +9,6 @@
 """
 
 import asyncio
-import json
 
 import pytest
 from sqlalchemy import create_engine
@@ -178,13 +177,8 @@ def _run(db, module, hero, teammates, session, kp_text, monkeypatch):
 
 
 def _dice(chunks):
-    out = []
-    for c in chunks:
-        if c.startswith("data: "):
-            d = json.loads(c[6:])
-            if d.get("type") == "dice":
-                out.append(d)
-    return out
+    """挑出骰子事件的线上负载（收口后广播产出的是 RoomEvent，不再是 SSE 串）。"""
+    return [c.as_wire() for c in chunks if c.type == "dice"]
 
 
 def _assert_check_contract(d):

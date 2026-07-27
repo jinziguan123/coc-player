@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Callable
@@ -224,12 +223,9 @@ def persist_narration(
         attach_npc_portraits(db, session_id, dialogue_evs)
 
 
-def record_chunk_event(event_order: list, chunk: str, offset: int) -> None:
-    """把一条广播 chunk 对应的「已落库事件」记入重排清单：(此刻旁白长度作偏移, 事件 id)。
+def record_chunk_event(event_order: list, chunk, offset: int) -> None:
+    """把一条广播事件对应的「已落库事件」记入重排清单：(此刻旁白长度作偏移, 事件 id)。
     只记带 id 的持久事件（骰子/检定请求/NPC 台词/HP 变化等 loop 内即时落库的展示事件）。"""
-    try:
-        data = json.loads(chunk[len("data: "):]) if chunk.startswith("data: ") else None
-    except (ValueError, TypeError):
-        return
-    if data and data.get("id"):
-        event_order.append((offset, data["id"]))
+    event_id = getattr(chunk, "id", None)
+    if event_id:
+        event_order.append((offset, event_id))

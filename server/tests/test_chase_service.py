@@ -60,7 +60,7 @@ def test_escape_folds_result(db_factory, monkeypatch):
     session = db.get(GameSession, sid)
     assert chase_service.get_chase(session) is None                       # 追逐态已清
     assert session.world_state.get("combat_result", {}).get("outcome") == "escaped"
-    assert any('"chase_end"' in c for c in chunks)
+    assert any(c.type == "chase_end" for c in chunks)
 
 
 def test_caught_folds_result(db_factory, monkeypatch):

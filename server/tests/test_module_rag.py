@@ -6,6 +6,8 @@
 
 import asyncio
 
+from tests.wire import wires
+
 import numpy as np
 import pytest
 from sqlalchemy import create_engine
@@ -339,7 +341,7 @@ def test_excerpts_helper_gates_on_rag_status(db_factory, monkeypatch):
 # ---------- [MODULE_LOOKUP]：路由、配额合并、检索回灌 ----------
 
 async def _collect(agen):
-    return [c async for c in agen]
+    return wires([c async for c in agen])
 
 
 def test_process_commands_routes_module_lookup(db_factory, monkeypatch):

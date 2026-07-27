@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import re
+
+from app.services.room_events import RoomEvent
 
 
 OOC_RE = re.compile(r"（[^（）]*）|\([^()]*\)")
@@ -43,22 +44,25 @@ def make_chunk(
     metadata: dict | None = None,
     event_id: str | None = None,
     actor_id: str | None = None,
-) -> str:
-    """把房间消息编码为 SSE data chunk。"""
-    data: dict = {"type": chunk_type, "content": content}
-    if actor_name:
-        data["actor_name"] = actor_name
-    if metadata:
-        data["metadata"] = metadata
-    if event_id:
-        data["id"] = event_id
-    if actor_id:
-        data["actor_id"] = actor_id
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+) -> RoomEvent:
+    """构造一条房间事件。
+
+    只负责「造」，不负责「编码」——编码是传输层的事（见 ``room_hub.encode_sse``）。
+    未登记的 ``chunk_type`` 会在这里被 Pydantic 挡下，而不是悄悄发到前端后无人处理。
+    空 metadata 归一成 None，保持与收口前一致的线上负载（不下发空对象）。
+    """
+    return RoomEvent(
+        type=chunk_type,  # type: ignore[arg-type]  # 由 Pydantic 按 Literal 校验
+        content=content,
+        actor_name=actor_name or None,
+        metadata=metadata or None,
+        id=event_id or None,
+        actor_id=actor_id or None,
+    )
 
 
-def event_to_chunk(event) -> str:
-    """把持久 EventLog 序列化为 `/live` 重放用的 chunk。"""
+def event_to_chunk(event) -> RoomEvent:
+    """把持久 EventLog 转成 `/live` 重放用的事件。"""
     type_map = {
         "dialogue": "dialogue",
         "action": "action",

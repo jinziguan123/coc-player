@@ -9,7 +9,6 @@ HP·重伤应用（玩家队友同步角色卡，敌人只在战斗态）/ 结�
 from __future__ import annotations
 
 import copy
-import json
 import re
 import uuid
 
@@ -21,6 +20,8 @@ from app.rules.coc import combat as engine
 from app.rules.coc import positioning
 from app.rules.coc.weapons import WEAPON_CATEGORY_ORDER
 from app.services import session_service, world_state
+from app.services.event_protocol import make_chunk
+from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
 
 # 火器大类（决定先攻火器优先与「远程」判定）
@@ -28,9 +29,19 @@ _FIREARM_CATEGORIES = {"手枪", "半自动步枪", "全自动步枪", "霰弹�
 _ = WEAPON_CATEGORY_ORDER  # 引用以示来源（大类枚举取自武器表）
 
 
-def _chunk(chunk_type: str, content: str = "", **extra) -> str:
-    data = {"type": chunk_type, "content": content, **{k: v for k, v in extra.items() if v is not None}}
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _chunk(chunk_type: str, content: str = "", **extra) -> RoomEvent:
+    """本模块的事件构造快捷方式（``id=`` 是 ``event_id`` 的历史写法）。
+
+    收口前这里自己拼 SSE 字符串，绕开了 ``make_chunk``——于是战斗/追逐的事件类型
+    既不在注册表里、也不受校验。现在统一走注册表。
+    """
+    return make_chunk(
+        chunk_type, content,
+        actor_name=extra.get("actor_name"),
+        metadata=extra.get("metadata"),
+        event_id=extra.get("id"),
+        actor_id=extra.get("actor_id"),
+    )
 
 
 def _weapon_is_firearm(weapon_name: str) -> bool:

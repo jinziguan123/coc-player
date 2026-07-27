@@ -2,16 +2,23 @@
 
 import asyncio
 
-from app.services.room_hub import MAX_PENDING_CHUNKS, RoomHub, stream_room
+from app.services.room_events import RoomEvent
+from app.services.room_hub import (
+    MAX_PENDING_CHUNKS,
+    RoomHub,
+    encode_sse,
+    stream_room,
+)
 
 
 def test_broadcast_reaches_all_subscribers():
     hub = RoomHub()
     a = hub.subscribe("r1")
     b = hub.subscribe("r1")
-    hub.broadcast("r1", "x")
-    assert a.get_nowait() == "x"
-    assert b.get_nowait() == "x"
+    ev = RoomEvent(type="system", content="x")
+    hub.broadcast("r1", ev)
+    assert a.get_nowait() is ev
+    assert b.get_nowait() is ev
     assert hub.member_count("r1") == 2
 
 
@@ -19,19 +26,20 @@ def test_broadcast_isolated_per_room():
     hub = RoomHub()
     a = hub.subscribe("r1")
     hub.subscribe("r2")
-    hub.broadcast("r2", "y")
+    hub.broadcast("r2", RoomEvent(type="system", content="y"))
     assert a.empty()  # r1 订阅者收不到 r2 的广播
 
 
 def test_inflight_replay_for_midstream_join():
     hub = RoomHub()
     hub.begin_generation("r1")
-    hub.broadcast("r1", "chunk1")
-    hub.broadcast("r1", "chunk2")
+    c1, c2 = RoomEvent(type="system", content="1"), RoomEvent(type="system", content="2")
+    hub.broadcast("r1", c1)
+    hub.broadcast("r1", c2)
     # 生成中途接入：应立即重放已广播的 chunk
     late = hub.subscribe("r1")
-    assert late.get_nowait() == "chunk1"
-    assert late.get_nowait() == "chunk2"
+    assert late.get_nowait() is c1
+    assert late.get_nowait() is c2
     # 结束生成后清空 buffer，新订阅者不再重放
     hub.end_generation("r1")
     later = hub.subscribe("r1")
@@ -49,13 +57,14 @@ def test_generation_prelude_is_buffered():
 
     async def run():
         gm = GenerationManager()
-        task = gm.start("r_prelude", _noop(), prelude=["player-evt", "data: gen"])
+        prelude = [RoomEvent(type="action", content="player-evt"), RoomEvent(type="generating")]
+        task = gm.start("r_prelude", _noop(), prelude=prelude)
         late = room_hub.subscribe("r_prelude")  # 中途接入：应重放 prelude
         got = [late.get_nowait(), late.get_nowait()]
         await task
         return got
 
-    assert asyncio.run(run()) == ["player-evt", "data: gen"]
+    assert [e.type for e in asyncio.run(run())] == ["action", "generating"]
 
 
 def test_unsubscribe_removes():
@@ -63,15 +72,16 @@ def test_unsubscribe_removes():
     a = hub.subscribe("r1")
     hub.unsubscribe("r1", a)
     assert hub.member_count("r1") == 0
-    hub.broadcast("r1", "z")  # 不应抛错
+    hub.broadcast("r1", RoomEvent(type="system", content="z"))  # 不应抛错
     assert a.empty()
 
 
 def test_stream_room_yields_until_none():
     hub = RoomHub()
     q = hub.subscribe("r1")
-    q.put_nowait("a")
-    q.put_nowait("b")
+    a, b = RoomEvent(type="typing"), RoomEvent(type="presence")
+    q.put_nowait(a)
+    q.put_nowait(b)
     q.put_nowait(None)
 
     # stream_room 使用模块级单例 room_hub 退订，这里只验证产出序列
@@ -81,7 +91,8 @@ def test_stream_room_yields_until_none():
             out.append(c)
         return out
 
-    assert asyncio.run(collect()) == ["a", "b"]
+    # 传输层负责编码：进队列的是事件对象，出去的是 SSE 文本
+    assert asyncio.run(collect()) == [encode_sse(a), encode_sse(b)]
 
 
 def test_stream_room_emits_heartbeat_when_idle():
@@ -108,7 +119,7 @@ def test_heartbeat_does_not_swallow_events():
     async def collect():
         async def feed():
             await asyncio.sleep(0.05)  # 先空转出若干次心跳
-            hub.broadcast("r1", "late")
+            hub.broadcast("r1", RoomEvent(type="system", content="late"))
             q.put_nowait(None)
 
         task = asyncio.ensure_future(feed())
@@ -118,7 +129,7 @@ def test_heartbeat_does_not_swallow_events():
 
     got = asyncio.run(collect())
     assert got.count(": ping\n\n") >= 1
-    assert got[-1] == "late"  # 心跳期间到达的事件照常送达
+    assert "late" in got[-1]  # 心跳期间到达的事件照常送达
 
 
 def test_stalled_subscriber_is_dropped_and_others_unaffected():
@@ -128,13 +139,14 @@ def test_stalled_subscriber_is_dropped_and_others_unaffected():
     healthy = hub.subscribe("r1")
 
     for i in range(MAX_PENDING_CHUNKS + 1):
-        hub.broadcast("r1", f"c{i}")
+        hub.broadcast("r1", RoomEvent(type="system", content=f"c{i}"))
         healthy.get_nowait()  # 健康连接持续消费
 
     assert stalled.get_nowait() is None  # 积压被清空，只剩终止信号
     assert stalled.empty()
-    hub.broadcast("r1", "after")
-    assert healthy.get_nowait() == "after"
+    after = RoomEvent(type="system", content="after")
+    hub.broadcast("r1", after)
+    assert healthy.get_nowait() is after
 
 
 def test_inflight_replay_is_capped_to_queue_capacity():
@@ -142,8 +154,18 @@ def test_inflight_replay_is_capped_to_queue_capacity():
     hub = RoomHub()
     hub.begin_generation("r1")
     for i in range(MAX_PENDING_CHUNKS + 10):
-        hub.broadcast("r1", f"c{i}")
+        hub.broadcast("r1", RoomEvent(type="system", content=f"c{i}"))
 
     late = hub.subscribe("r1")  # 不应抛 QueueFull
     assert late.qsize() == MAX_PENDING_CHUNKS
-    assert late.get_nowait() == "c10"  # 只重放尾部，更早的内容客户端从 DB 拉
+    assert late.get_nowait().content == "c10"  # 只重放尾部，更早的内容客户端从 DB 拉
+
+
+def test_broadcast_rejects_raw_strings():
+    """拒收裸字符串：防止再出现绕开 make_chunk、自己拼 SSE 的旁路（战斗/追逐曾经如此）。"""
+    import pytest
+
+    hub = RoomHub()
+    hub.subscribe("r1")
+    with pytest.raises(TypeError, match="只接受 RoomEvent"):
+        hub.broadcast("r1", 'data: {"type":"combat_state"}\n\n')

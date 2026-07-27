@@ -116,7 +116,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description 健康检查兼版本握手。
+         *
+         *     ``protocol_version`` 是房间事件协议的版本（见 ``app.services.room_events``）。
+         *     客人连接房主前先比对：不一致说明两端版本不匹配，应当明确提示升级，而不是连上去
+         *     以「有些事件收不到、界面莫名其妙不更新」的方式半坏。
+         */
         get: operations["health_api_health_get"];
         put?: never;
         post?: never;
@@ -1406,6 +1413,34 @@ export interface paths {
          *     按事件 id 去重，避免开连接与拉历史之间的竞态丢事件。
          */
         get: operations["live_api_sessions__session_id__live_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/live/_schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live Schema
+         * @description 只为契约存在的端点：把 ``RoomEvent`` 带进 OpenAPI。
+         *
+         *     SSE 的负载不会出现在 OpenAPI 里（它不是响应体的一部分），这曾经让实时层成为
+         *     前后端契约治理的裸奔区——后端加一种事件类型，前端不会有任何提示。挂上这个
+         *     ``response_model`` 之后，既有的 ``pnpm api:generate`` 就会把类型集合生成到
+         *     ``apps/web/src/api/generated.ts``，前端那份 ``Record<RoomEventType, …>`` 漏一个
+         *     类型就编译不过。
+         *
+         *     不要真去调它——返回值只是一个占位样例。
+         */
+        get: operations["live_schema_api_sessions__session_id__live__schema_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2781,6 +2816,35 @@ export interface components {
         RollRequest: {
             /** Check Id */
             check_id: string;
+        };
+        /**
+         * RoomEvent
+         * @description 一条房间事件的线上格式。
+         *
+         *     字段顺序即 JSON 键顺序，与收口前 ``make_chunk`` 手搓的顺序保持一致。
+         *     值为 ``None`` 的字段不下发（见 ``as_wire``），所以线上负载没有变化。
+         */
+        RoomEvent: {
+            /** Actor Id */
+            actor_id?: string | null;
+            /** Actor Name */
+            actor_name?: string | null;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /** Id */
+            id?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "generating" | "done" | "ready" | "typing" | "presence" | "housekeeping" | "narration" | "dialogue" | "action" | "dice" | "narration_full" | "npc_dialogue" | "system" | "ooc" | "check_request" | "lobby" | "seat" | "started" | "status" | "end_vote" | "turn_state" | "character_update" | "inventory_update" | "kp_turn_ready" | "kp_roll_ready" | "kp_action" | "kp_request" | "event_update" | "event_delete" | "event_patch" | "combat_start" | "combat_state" | "combat_reaction_prompt" | "combat_end" | "chase_start" | "chase_state" | "chase_end";
         };
         /** RuleHit */
         RuleHit: {
@@ -5640,6 +5704,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    live_schema_api_sessions__session_id__live__schema_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomEvent"];
                 };
             };
         };

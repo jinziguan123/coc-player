@@ -13,12 +13,19 @@ from app.models.character import Character
 from app.models.session import GameSession
 from app.rules.coc import chase as engine
 from app.services import session_service
+from app.services.event_protocol import make_chunk
+from app.services.room_events import RoomEvent
 
 
-def _chunk(t: str, content: str = "", **extra) -> str:
-    import json
-    data = {"type": t, "content": content, **{k: v for k, v in extra.items() if v is not None}}
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _chunk(t: str, content: str = "", **extra) -> RoomEvent:
+    """本模块的事件构造快捷方式（``id=`` 是 ``event_id`` 的历史写法）。见 combat_service 同名函数。"""
+    return make_chunk(
+        t, content,
+        actor_name=extra.get("actor_name"),
+        metadata=extra.get("metadata"),
+        event_id=extra.get("id"),
+        actor_id=extra.get("actor_id"),
+    )
 
 
 def get_chase(session: GameSession) -> dict | None:

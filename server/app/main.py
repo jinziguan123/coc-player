@@ -88,7 +88,15 @@ app.include_router(api_router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    """健康检查兼版本握手。
+
+    ``protocol_version`` 是房间事件协议的版本（见 ``app.services.room_events``）。
+    客人连接房主前先比对：不一致说明两端版本不匹配，应当明确提示升级，而不是连上去
+    以「有些事件收不到、界面莫名其妙不更新」的方式半坏。
+    """
+    from app.services.room_events import PROTOCOL_VERSION
+
+    return {"status": "ok", "protocol_version": PROTOCOL_VERSION}
 
 
 # 单服务 / 打包模式：若存在前端构建产物（apps/web/dist），由后端同源托管，Tauri 窗口直接指向

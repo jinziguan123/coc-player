@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections import defaultdict
 from collections.abc import AsyncIterator
+
+from app.services.room_events import RoomEvent
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,15 @@ MAX_PENDING_CHUNKS = 2048
 # 掐断，且断开往往不通知任一端。定期发一行 SSE 注释行保活；注释行不是 `data:`
 # 开头，前端 SSE 解析器天然忽略，不需要配套改动。
 HEARTBEAT_SECONDS = 15.0
+
+
+def encode_sse(event: RoomEvent) -> str:
+    """把一条房间事件编码成 SSE data 行。
+
+    编码是传输层的职责，业务代码只造 ``RoomEvent``、不碰 ``data:`` 前缀——
+    将来换成 WebSocket 只需要换掉这里和 ``stream_room``。
+    """
+    return f"data: {json.dumps(event.as_wire(), ensure_ascii=False)}\n\n"
 
 
 class RoomHub:
@@ -68,7 +80,15 @@ class RoomHub:
     def online_tokens(self, room_id: str) -> set[str]:
         return set(self._presence.get(room_id, {}).keys())
 
-    def broadcast(self, room_id: str, chunk: str) -> None:
+    def broadcast(self, room_id: str, chunk: RoomEvent) -> None:
+        if not isinstance(chunk, RoomEvent):
+            # 曾经踩过：combat_service / chase_service 各自拼 SSE 字符串绕开 make_chunk，
+            # 事件类型既不在注册表也不受校验，直到 stream_room 编码时才炸——而且只炸在
+            # 某个订阅者的连接上，调用方毫无感知。在入口挡住，让错误落在生产者身上。
+            raise TypeError(
+                f"broadcast 只接受 RoomEvent，收到 {type(chunk).__name__}；"
+                "请用 event_protocol.make_chunk 构造事件，不要自己拼 SSE 字符串"
+            )
         buf = self._inflight.get(room_id)
         if buf is not None:
             buf.append(chunk)
@@ -120,7 +140,7 @@ async def stream_room(
                 continue
             if chunk is None:
                 break
-            yield chunk
+            yield encode_sse(chunk)
     finally:
         room_hub.unsubscribe(room_id, q, token)
-        room_hub.broadcast(room_id, 'data: {"type":"presence"}\n\n')
+        room_hub.broadcast(room_id, RoomEvent(type="presence"))

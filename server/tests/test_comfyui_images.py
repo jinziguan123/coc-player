@@ -1,6 +1,8 @@
 """ComfyUI 文生图对接：工作流注入 / Provider 委托 / 图片存取 / 手书配图管线。不打真网。"""
 
 import asyncio
+
+from tests.wire import wire, wires
 import base64
 import io
 import json
@@ -176,7 +178,7 @@ def test_illustrate_handout_patches_event_and_broadcasts(db_factory, monkeypatch
     sent: list[str] = []
     monkeypatch.setattr(chat_service.illustration_service, "get_fast_llm", lambda: PromptLLM())
     monkeypatch.setattr(chat_service.illustration_service, "get_llm", lambda: ImageLLM())
-    monkeypatch.setattr(chat_service.room_hub, "broadcast", lambda sid, chunk: sent.append(chunk))
+    monkeypatch.setattr(chat_service.room_hub, "broadcast", lambda sid, chunk: sent.append(wire(chunk)))
 
     asyncio.run(chat_service._illustrate_handout(session.id, ev.id, "遗书", "letter", ev.content))
 
@@ -241,7 +243,7 @@ def _wire_image_stubs(monkeypatch, db_factory, tmp_path, prompt: str):
     monkeypatch.setattr(
         chat_service.illustration_service, "get_llm", lambda: _CountingImageLLM(calls),
     )
-    monkeypatch.setattr(chat_service.room_hub, "broadcast", lambda sid, chunk: sent.append(chunk))
+    monkeypatch.setattr(chat_service.room_hub, "broadcast", lambda sid, chunk: sent.append(wire(chunk)))
     return calls, sent
 
 
@@ -269,7 +271,7 @@ def test_scene_illustration_first_entry_generates_and_caches(db_factory, monkeyp
     db.add(session); db.commit()
 
     async def first_entry():
-        chunks = chat_service._maybe_scene_illustration(db, session.id, module, "s1")
+        chunks = wires(chat_service._maybe_scene_illustration(db, session.id, module, "s1"))
         assert len(chunks) == 1 and "抵达" in chunks[0] and "废弃教堂" in chunks[0]
         # 同会话再次进入：scene_cards 防重 → 不再落卡、不再生图
         assert chat_service._maybe_scene_illustration(db, session.id, module, "s1") == []
@@ -300,7 +302,7 @@ def test_scene_illustration_first_entry_generates_and_caches(db_factory, monkeyp
     m2 = db2.get(Module, module.id)
 
     async def second_session():
-        chunks = chat_service._maybe_scene_illustration(db2, session2.id, m2, "s1")
+        chunks = wires(chat_service._maybe_scene_illustration(db2, session2.id, m2, "s1"))
         assert len(chunks) == 1 and url in chunks[0]
         await _drain_bg_tasks()
 
@@ -324,7 +326,7 @@ def test_scene_illustration_discards_missing_cached_file(db_factory, monkeypatch
     db.add(session); db.commit()
 
     async def enter():
-        chunks = chat_service._maybe_scene_illustration(db, session.id, module, "s1")
+        chunks = wires(chat_service._maybe_scene_illustration(db, session.id, module, "s1"))
         assert len(chunks) == 1 and "/api/images/deleted.jpg" not in chunks[0]
         await _drain_bg_tasks()
 

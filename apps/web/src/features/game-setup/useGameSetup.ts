@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, getServerUrl, setServerUrl } from '@/api/client'
+import { PROTOCOL_VERSION } from '@/lib/roomEvents'
 import { useModuleStore } from '@/stores/moduleStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import {
@@ -149,6 +150,18 @@ export function useGameSetup() {
     if (host && !/:\d+$/.test(host)) host = `${host}:8000`
     setServerUrl(host)
     try {
+      // 先握手协议版本：房主与客人版本不一致时，有些事件类型对方根本不认，
+      // 连进去只会表现成「界面莫名其妙不更新」。明说比半坏好。
+      const health = await api.get<{ protocol_version?: number }>('/health')
+      const hostProtocol = health.protocol_version ?? 0
+      if (hostProtocol !== PROTOCOL_VERSION) {
+        setServerUrl('')
+        setError(
+          `主机与本机版本不一致（主机协议 v${hostProtocol}，本机 v${PROTOCOL_VERSION}），` +
+          '请双方升级到同一版本后再联机。',
+        )
+        return
+      }
       const room = await api.get<RoomInfo>(`/sessions/by-code/${code}`)
       navigate(`/room/${room.id}`)
     } catch (reason: unknown) {

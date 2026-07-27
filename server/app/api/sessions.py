@@ -25,12 +25,13 @@ from app.schemas.session import (
 )
 from app.services import session_service
 from app.services.event_protocol import make_chunk as _make_chunk
+from app.services.room_events import RoomEvent
 from app.services.turn_orchestrator import (
     initialize_human_session,
     run_opening_generation,
 )
 from app.services.generation_manager import generation_manager
-from app.services.room_hub import room_hub, stream_room
+from app.services.room_hub import encode_sse, room_hub, stream_room
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -598,6 +599,21 @@ async def check_generating(
     return {"generating": generation_manager.is_generating(session_id)}
 
 
+@router.get("/{session_id}/live/_schema", response_model=RoomEvent)
+def live_schema() -> RoomEvent:
+    """只为契约存在的端点：把 ``RoomEvent`` 带进 OpenAPI。
+
+    SSE 的负载不会出现在 OpenAPI 里（它不是响应体的一部分），这曾经让实时层成为
+    前后端契约治理的裸奔区——后端加一种事件类型，前端不会有任何提示。挂上这个
+    ``response_model`` 之后，既有的 ``pnpm api:generate`` 就会把类型集合生成到
+    ``apps/web/src/api/generated.ts``，前端那份 ``Record<RoomEventType, …>`` 漏一个
+    类型就编译不过。
+
+    不要真去调它——返回值只是一个占位样例。
+    """
+    return RoomEvent(type="ready")
+
+
 @router.get("/{session_id}/live")
 async def live(
     session_id: str,
@@ -624,9 +640,10 @@ async def live(
         # ready 携带订阅后捕获的权威生成态：客户端据此同步 streaming，不再依赖独立的
         # GET /generating（它与订阅之间有竞态：若生成恰在两者之间结束，done 会被漏收，
         # 导致客户端 streaming 卡在 true、界面永远显示「整理笔记」且输入锁死，需刷新才恢复）。
-        yield _make_chunk("ready", metadata={"generating": generating})
+        # 这两条不经 broadcast（只给本连接），所以要自己走传输层的编码。
+        yield encode_sse(_make_chunk("ready", metadata={"generating": generating}))
         if generating:
-            yield _make_chunk("generating")
+            yield encode_sse(_make_chunk("generating"))
         async for chunk in stream_room(session_id, q, token):
             yield chunk
 

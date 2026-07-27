@@ -4,7 +4,6 @@
 """
 
 import asyncio
-import json
 
 import pytest
 from sqlalchemy import create_engine
@@ -60,14 +59,13 @@ def _roll(db, sid, actor_id):
 
 def test_mechanical_chunks_carry_combat_log_flag(db_factory):
     """机械结算行（system）带 combat_log 供前端归入折叠日志抽屉；KP 叙述（narration_full）不带。"""
-    import json
     db = db_factory()
     sid, _ = _seed(db)
     line = combat_service._combat_line(db, sid, "打手 受到 3 点伤害（HP 8→5）")
-    ldata = json.loads(line.removeprefix("data: "))
+    ldata = line.as_wire()
     assert ldata["type"] == "system" and ldata["metadata"]["combat_log"] is True
     narr = combat_service._combat_narration(db, sid, "拳风掠过，血光四溅。")
-    ndata = json.loads(narr.removeprefix("data: "))
+    ndata = narr.as_wire()
     assert ndata["type"] == "narration_full" and "combat_log" not in ndata.get("metadata", {})
 
 
@@ -152,7 +150,7 @@ def test_fight_back_counter_is_player_rolled(db_factory, monkeypatch):
     # 反击对抗：e1 格斗90失败、hero 格斗5成功 → hero 胜 → 反击命中攻方（damage_to=attacker）。
     _fix_rolls(monkeypatch, [90, 5], die=2)   # 反击伤害 1D3(die=2)=2 < 半血，不触发 CON 检定
     out = asyncio.run(combat_service.resolve_reaction(db, sid, hero.id, "fight_back"))
-    assert any('"combat_state"' in c for c in out)
+    assert any(c.type == "combat_state" for c in out)
     st = combat_service.get_combat(db.get(GameSession, sid))
     pr = st["pending_roll"]
     assert pr and pr["kind"] == "damage" and pr["actor_id"] == hero.id and pr["victim_id"] == "e1"
@@ -167,15 +165,11 @@ def test_fight_back_counter_is_player_rolled(db_factory, monkeypatch):
 
 
 def _opposed_meta(chunks):
-    """从 SSE 分片里取出带 metadata.opposed 的骰事件（对抗卡数据）。"""
+    """取出带 metadata.opposed 的骰事件（对抗卡数据）。"""
     for c in chunks:
-        for line in c.splitlines():
-            if not line.startswith("data: "):
-                continue
-            d = json.loads(line[len("data: "):])
-            meta = d.get("metadata") or {}
-            if d.get("type") == "dice" and "opposed" in meta:
-                return meta["opposed"]
+        meta = c.metadata or {}
+        if c.type == "dice" and "opposed" in meta:
+            return meta["opposed"]
     return None
 
 
@@ -322,11 +316,8 @@ def test_burst_emits_shots_event(db_factory, monkeypatch):
     out = asyncio.run(combat_service.resolve_player_action(db, sid, hero.id, action))
     burst = None
     for c in out:
-        for line in c.splitlines():
-            if line.startswith("data: "):
-                d = json.loads(line[len("data: "):])
-                if (d.get("metadata") or {}).get("combat_burst"):
-                    burst = d["metadata"]
+        if (c.metadata or {}).get("combat_burst"):
+            burst = c.metadata
     assert burst is not None and len(burst["shots"]) == 3
     assert all(s["penalty"] == 0 for s in burst["shots"])   # 同目标连开不加罚
 
@@ -550,7 +541,7 @@ def test_start_pauses_at_human_and_broadcasts_state(db_factory):
     state, chunks = _start(db, sid, hero, enemy, trigger="打手扑上来")
     actor = combat_service.current_actor(state)
     assert actor["id"] == hero.id and actor["is_human"] is True    # DEX70>40，先攻首位是英雄
-    assert any('"combat_start"' in c for c in chunks)
+    assert any(c.type == "combat_start" for c in chunks)
 
 
 def test_player_attack_two_step_hit_then_damage(db_factory, monkeypatch):
@@ -569,7 +560,7 @@ def test_player_attack_two_step_hit_then_damage(db_factory, monkeypatch):
     assert st["pending_roll"] and st["pending_roll"]["actor_id"] == hero.id
     thug = next(p for p in st["initiative"] if p["id"] == "npc_thug")
     assert thug["hp"] == thug["max_hp"]                       # 伤害还没结算
-    assert any('"combat_roll"' in c and '"dice"' in c for c in chunks)   # 命中骰事件（可动画）
+    assert any(c.type == "dice" and (c.metadata or {}).get("combat_roll") for c in chunks)   # 命中骰事件（可动画）
 
     # 未完成投掷前不许再提交行动。
     with pytest.raises(ValueError, match="待掷"):
@@ -581,7 +572,7 @@ def test_player_attack_two_step_hit_then_damage(db_factory, monkeypatch):
     thug2 = next(p for p in st2["initiative"] if p["id"] == "npc_thug")
     assert thug2["hp"] < thug2["max_hp"]                      # 伤害已结算
     assert not st2.get("pending_roll")
-    assert any('"combat_roll"' in c and '"dice"' in c for c in roll_chunks)
+    assert any(c.type == "dice" and (c.metadata or {}).get("combat_roll") for c in roll_chunks)
 
 
 def test_player_attack_miss_no_pending_roll(db_factory, monkeypatch):
@@ -596,7 +587,7 @@ def test_player_attack_miss_no_pending_roll(db_factory, monkeypatch):
     chunks = _act(db, sid, hero.id, {"type": "attack", "target_id": "npc_thug", "weapon": "徒手格斗"})
     st = combat_service.get_combat(db.get(GameSession, sid))
     assert st is None or not st.get("pending_roll")   # 未命中不挂待掷
-    assert any('"dice"' in c for c in chunks)
+    assert any(c.type == "dice" for c in chunks)
 
 
 def test_reject_action_out_of_turn(db_factory):
@@ -627,7 +618,7 @@ def test_combat_ends_when_enemy_down(db_factory, monkeypatch):
     session = db.get(GameSession, sid)
     assert combat_service.get_combat(session) is None
     assert session.world_state.get("combat_result", {}).get("outcome") == "players_win"
-    assert any('"combat_end"' in c for c in chunks)
+    assert any(c.type == "combat_end" for c in chunks)
 
 
 def test_combat_result_folds_into_kp_context(db_factory):
@@ -672,7 +663,7 @@ def test_key_npc_uses_agent_decision(db_factory):
         db, sid, [hero], [boss], {hero.id}, agent=agent,
         deployment={hero.id: {"x": 5, "y": 5}, "npc_boss": {"x": 6, "y": 5}}))   # 开局相邻
     assert agent.decided is True                              # 关键 NPC 走了子代理决策
-    assert any('"combat_reaction_prompt"' in c for c in chunks)   # 决策的攻击路由到交互暂停
+    assert any(c.type == "combat_reaction_prompt" for c in chunks)   # 决策的攻击路由到交互暂停
     pr = state.get("pending_reaction")
     assert pr and pr["attacker_id"] == "npc_boss" and pr["defender_id"] == hero.id
     assert agent.narrated is False                            # 暂停时不叙述（叙述归 resolve_reaction）
@@ -700,7 +691,7 @@ def test_drive_npcs_pauses_when_npc_attacks_human(db_factory):
     pr = state.get("pending_reaction")
     assert pr and pr["defender_id"] == hero.id and pr["attacker_id"] == "npc_thug"
     assert pr["allowed"] == ["fight_back", "dodge"]                  # 徒手非火器
-    assert any('"combat_reaction_prompt"' in c for c in chunks)      # 广播了反应提示
+    assert any(c.type == "combat_reaction_prompt" for c in chunks)      # 广播了反应提示
     # 未结算伤害：真人 HP 不变，pending 期间无骰子结算
     hero_p = combat_service._find(state, hero.id)
     assert hero_p["hp"] == hp_before
@@ -743,7 +734,7 @@ def test_resolve_reaction_dodge_success_no_damage_to_attacker(db_factory, monkey
     assert hero_p["hp"] == 11                          # 闪开了，真人也没掉血
     assert st.get("pending_reaction") is None          # pending 已清空
     assert combat_service.current_actor(st)["id"] == hero.id   # 攻方已行动 → 推进到英雄回合
-    assert any('"dice"' in c for c in out)             # 结算广播了骰子
+    assert any(c.type == "dice" for c in out)             # 结算广播了骰子
 
 
 def test_resolve_reaction_rejects_wrong_defender(db_factory):
@@ -794,7 +785,7 @@ def test_dying_participant_ticks_each_round(db_factory, monkeypatch):
 
     dp = combat_service._find(state, "npc_dying")
     assert dp["status"] == "dead"                                      # 濒死体质检定失败 → 气绝
-    assert any("濒死体质检定" in c for c in chunks)                      # 广播了濒死检定行
+    assert any("濒死体质检定" in c.content for c in chunks)                      # 广播了濒死检定行
 
 
 # ── P2：主动动作集（状态机分发 / apply_heal / 条件落库 / aim 消费）──────

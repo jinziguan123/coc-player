@@ -5,6 +5,8 @@
 
 import asyncio
 
+from tests.wire import wires
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
@@ -46,7 +48,7 @@ def _seed_session(db) -> str:
 
 
 async def _collect(agen) -> list:
-    return [chunk async for chunk in agen]
+    return wires([chunk async for chunk in agen])
 
 
 def _narrations(db_factory, session_id) -> list:
@@ -185,8 +187,8 @@ def test_duplicate_dice_check_deduped(db_factory):
     c2, _, p2 = asyncio.run(chat_service._exec_dice_check(db, gs.id, gs, module, dict(kv), pc, []))
 
     assert p1 and p2  # 两次都收束本轮（suspend）
-    req1 = [c for c in c1 if '"type": "check_request"' in c]
-    req2 = [c for c in c2 if '"type": "check_request"' in c]
+    req1 = [c for c in c1 if c.type == "check_request"]
+    req2 = [c for c in c2 if c.type == "check_request"]
     assert len(req1) == 1 and len(req2) == 0  # 第一次弹卡；第二次去重、不再弹
     pending = (db.get(GameSession, gs.id).world_state or {}).get("pending_checks") or {}
     assert len(pending) == 1  # 只挂了一个待投检定
@@ -222,7 +224,7 @@ def test_finish_generation_detaches_housekeeping(monkeypatch, db_factory):
         order.append("backstage")
 
     def fake_broadcast(sid, chunk):
-        if '"type": "done"' in chunk:
+        if chunk.type == "done":
             order.append("done")
 
     monkeypatch.setattr(database, "SessionLocal", db_factory)

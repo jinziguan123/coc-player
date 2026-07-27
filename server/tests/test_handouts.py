@@ -7,6 +7,8 @@
 
 import asyncio
 
+from tests.wire import wires
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -74,7 +76,7 @@ def _seed(db, handouts=None):
 
 
 async def _collect(agen):
-    return [c async for c in agen]
+    return wires([c async for c in agen])
 
 
 def _handout_events(db, session_id):

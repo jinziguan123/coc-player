@@ -4,6 +4,8 @@
 
 import asyncio
 
+from tests.wire import wires
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -45,9 +47,9 @@ def _seed(db) -> tuple[Module, Character, str]:
 
 
 def _run_hp_change(db, module, char, session_id, delta: str):
-    return asyncio.run(chat_service._exec_hp_change(
+    return wires(asyncio.run(chat_service._exec_hp_change(
         db, session_id, char, "player", delta, "测试伤害", module=module,
-    ))
+    )))
 
 
 def _events(db, session_id):
@@ -138,9 +140,9 @@ def test_无module时向后兼容不检定(db_factory):
     db = db_factory()
     module, char, sid = _seed(db)
 
-    chunks = asyncio.run(chat_service._exec_hp_change(
+    chunks = wires(asyncio.run(chat_service._exec_hp_change(
         db, sid, char, "player", "-5", "测试",
-    ))
+    )))
 
     # 只有 HP 结算，无检定（module 缺省 → 与旧行为一致）；character_update 刷新信号不计
     assert len([c for c in chunks if "character_update" not in c]) == 1

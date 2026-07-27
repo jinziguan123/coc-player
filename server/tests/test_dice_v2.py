@@ -5,7 +5,6 @@ KP 续写用 fake 桩避免真实 LLM。
 """
 
 import asyncio
-import json
 
 import pytest
 from sqlalchemy import create_engine
@@ -44,13 +43,8 @@ def _seed(db):
 
 
 def _of_type(chunks, t):
-    out = []
-    for c in chunks:
-        if c.startswith("data: "):
-            d = json.loads(c[6:])
-            if d.get("type") == t:
-                out.append(d)
-    return out
+    """按类型挑出事件并取其线上负载（收口后广播产出的是 RoomEvent，不再是 SSE 串）。"""
+    return [c.as_wire() for c in chunks if c.type == t]
 
 
 def _dice(chunks):
@@ -449,7 +443,7 @@ def test_dice_is_broadcast_before_waiting_on_housekeeping(db_factory, monkeypatc
         await _asyncio.sleep(0)
 
     def spy_broadcast(session_id, chunk, *a, **k):
-        if '"type": "dice"' in chunk or '"type":"dice"' in chunk:
+        if chunk.type == "dice":
             order.append("dice")
 
     monkeypatch.setattr(turn_orchestrator, "_drain_housekeeping", slow_drain)

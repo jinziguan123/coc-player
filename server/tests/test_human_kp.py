@@ -1,7 +1,8 @@
 """真人 KP M1：席位授权、不开 AI 生成、工具动作复用确定性执行器。"""
 
 import asyncio
-import json
+
+from tests.wire import wire
 
 import pytest
 from sqlalchemy import create_engine
@@ -120,7 +121,7 @@ def test_human_kp_skill_check_selects_npc_and_applies_bonus_die(tmp_path):
         {"skill": "潜行", "char": "npc:guard", "bonus": "1"},
     ))
 
-    payload = json.loads(chunks[0].splitlines()[0][6:])
+    payload = chunks[0].as_wire()
     detail = payload["metadata"]["dice"]
     assert payload["metadata"]["actor"] == "守门人"
     assert detail["bonus"] == 1 and detail["penalty"] == 0
@@ -152,7 +153,7 @@ def test_human_kp_generic_roll_supports_pool_and_blind_result(tmp_path):
         db, session.id, session, module, "generic_roll",
         {"count": 2, "sides": 8, "modifier": 3, "reason": "参战敌人数"},
     ))
-    payload = json.loads(chunks[0].splitlines()[0][6:])
+    payload = chunks[0].as_wire()
     assert payload["metadata"]["dice"]["kind"] == "pool"
     assert payload["metadata"]["dice"]["notation"] == "2d8+3"
     assert len(payload["metadata"]["dice"]["dice"]) == 2
@@ -184,7 +185,7 @@ def test_human_kp_action_broadcast_never_contains_blind_result(tmp_path, monkeyp
     db = _db(tmp_path)()
     _module, _hero, session = _seed(db)
     broadcasts: list[str] = []
-    monkeypatch.setattr(room_hub, "broadcast", lambda _sid, chunk: broadcasts.append(chunk))
+    monkeypatch.setattr(room_hub, "broadcast", lambda _sid, chunk: broadcasts.append(wire(chunk)))
 
     response = asyncio.run(kp_action(
         session.id,
@@ -220,7 +221,7 @@ def test_human_kp_opposed_check_rejects_self_and_emits_frontend_contract(tmp_pat
             "b": "npc:guard", "b_skill": "力量", "b_penalty": "1",
         },
     ))
-    payload = json.loads(chunks[0].splitlines()[0][6:])
+    payload = chunks[0].as_wire()
     opposed = payload["metadata"]["opposed"]
     assert opposed["attacker"]["name"] == "调查员"
     assert opposed["defender"]["name"] == "守门人"
