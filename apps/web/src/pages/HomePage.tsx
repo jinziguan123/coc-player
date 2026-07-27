@@ -11,8 +11,9 @@ const ENTRIES = [
     desc: '十分钟走完一场微型调查，边玩边熟悉规则与投骰',
     primary: true,
   },
-  { to: '/game', Icon: Dices, title: '开始游戏', desc: '开新局或用房间码加入队友的桌' },
-  { to: '/modules', Icon: Upload, title: '上传模组', desc: '导入剧本，由 AI 解析成场景、NPC 与线索' },
+  // primary 要每项都有：`as const` 下缺省会让联合类型里读不到该字段
+  { to: '/game', Icon: Dices, title: '开始游戏', desc: '开新局或用房间码加入队友的桌', primary: false },
+  { to: '/modules', Icon: Upload, title: '上传模组', desc: '导入剧本，由 AI 解析成场景、NPC 与线索', primary: false },
 ] as const
 
 /** 次级入口：已有素材的快速跳转。 */

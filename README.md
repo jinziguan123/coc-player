@@ -84,7 +84,7 @@ AI 配置优先通过应用设置页管理，存放在本地数据目录旁的 `
 ```bash
 # 前端
 pnpm --filter web exec vitest run
-pnpm --filter web exec tsc --noEmit
+pnpm --filter web typecheck
 pnpm --filter web build
 pnpm --filter web lint
 

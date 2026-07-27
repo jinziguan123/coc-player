@@ -270,7 +270,7 @@ function NetworkSettingsPanel() {
           </p>
         )}
 
-        {enabled && (
+        {status?.lan_enabled && (
           <div style={{ marginTop: '0.85rem' }}>
             <div
               className="text-xs"

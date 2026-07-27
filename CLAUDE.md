@@ -19,6 +19,6 @@
 
 ## 提交与验证
 - 所有回复、git commit 信息用**中文**；commit 末尾加 `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`。
-- 改后端跑 `cd server && .venv/bin/pytest -q && .venv/bin/ruff check .`；改前端跑 `cd apps/web && npx tsc --noEmit && npx vite build`。
+- 改后端跑 `cd server && .venv/bin/pytest -q && .venv/bin/ruff check .`；改前端跑 `pnpm --filter web typecheck && pnpm --filter web build`（**不要用 `tsc --noEmit`**：根 tsconfig 是 solution 式的 `files: []` + references，那条命令什么都不检查）。
 - CI（`.github/workflows/ci.yml`）会跑后端 pytest+ruff、前端 tsc+build+oxlint、gitleaks 密钥扫描。
 - 新行为补单测，别破坏既有断言。

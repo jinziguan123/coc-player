@@ -17,7 +17,7 @@ pnpm dev:web
 
 ```bash
 pnpm --filter web exec vitest run
-pnpm --filter web exec tsc --noEmit
+pnpm --filter web typecheck
 pnpm --filter web build
 pnpm --filter web lint
 ```

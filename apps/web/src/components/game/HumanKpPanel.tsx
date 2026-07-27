@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react'
+import { type ComponentType, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api, getServerUrl } from '@/api/client'
 import { GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
@@ -297,7 +297,8 @@ const ACTION_LABELS: Record<KpAction, string> = {
 }
 
 /** 跑团里九成操作就是这三件事，提出来做直达按钮；其余仍在「更多」下拉里，一个不少。 */
-const QUICK_ACTIONS: Array<{ id: KpAction; label: string; icon: typeof WandSparkles }> = [
+// icon 同时收 lucide 组件与 react-icons 的 IconType，取二者都满足的最小形状
+const QUICK_ACTIONS: Array<{ id: KpAction; label: string; icon: ComponentType<{ size?: number }> }> = [
   { id: 'narration', label: '叙事', icon: WandSparkles },
   { id: 'dialogue', label: 'NPC 台词', icon: Bot },
   { id: 'dice_check', label: '检定', icon: GiRollingDices },

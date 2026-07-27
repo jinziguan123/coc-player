@@ -34,7 +34,7 @@ server/app/services/turn_event_order.py
 ```bash
 server/.venv/bin/ruff check server/app server/tests
 server/.venv/bin/pytest -q
-pnpm --filter web exec tsc --noEmit
+pnpm --filter web typecheck
 pnpm --filter web build
 ```
 

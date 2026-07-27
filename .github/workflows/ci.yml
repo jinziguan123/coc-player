@@ -51,7 +51,7 @@ jobs:
       - name: OpenAPI 类型无未提交变化
         run: git diff --exit-code -- apps/web/src/api/generated.ts
       - name: 类型检查
-        run: pnpm --filter web exec tsc --noEmit
+        run: pnpm --filter web typecheck
       - name: 构建
         run: pnpm --filter web build
       - name: Oxlint
