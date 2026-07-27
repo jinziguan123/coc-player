@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { Copy, Eye, EyeOff } from 'lucide-react'
+import { AlertTriangle, Copy, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api/client'
 import { Modal } from '../components/ui/modal'
@@ -105,6 +105,7 @@ const PROTOCOL_INFO: Record<
 
 const SETTINGS_TABS = [
   { key: 'ai', label: 'AI 配置' },
+  { key: 'network', label: '联机' },
   { key: 'appearance', label: '外观' },
   { key: 'rag', label: 'RAG 统计' },
   // 未来扩展：{ key: 'game', label: '游戏设置' },
@@ -184,8 +185,134 @@ export function SettingsPage() {
             onTestSuccess={returnTo ? () => navigate(returnTo, { replace: true }) : undefined}
           />
         )}
+        {activeTab === 'network' && <NetworkSettingsPanel />}
         {activeTab === 'appearance' && <AppearanceSettingsPanel />}
         {activeTab === 'rag' && <RagStatsPanel />}
+      </div>
+    </div>
+  )
+}
+
+/* ---------- 联机面板 ---------- */
+
+interface NetStatus {
+  lan_enabled: boolean
+  listening_on_lan: boolean
+  restart_required: boolean
+  addresses: string[]
+}
+
+function NetworkSettingsPanel() {
+  const [status, setStatus] = useState<NetStatus | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.get<NetStatus>('/net').then(setStatus).catch(() => setStatus(null))
+  }, [])
+
+  const toggle = async (enabled: boolean) => {
+    setSaving(true)
+    try {
+      setStatus(await api.post<NetStatus>('/net/lan', { enabled }))
+      toast.success(enabled ? '已允许局域网加入' : '已关闭局域网加入')
+    } catch {
+      toast.error('设置失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const copyAddr = (addr: string) => {
+    navigator.clipboard?.writeText(addr)
+    toast.success('地址已复制')
+  }
+
+  const enabled = status?.lan_enabled ?? false
+
+  return (
+    <div>
+      <h2 className="page-title">联机</h2>
+
+      <div className="card">
+        <h3 className="card-title">允许局域网加入</h3>
+        <p
+          className="text-xs"
+          style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
+        >
+          关闭时后端只监听本机，同一网络内的其他设备也连不上——这是默认状态。
+          打开后其他玩家可以在「加入房间」处填你的地址进来。
+        </p>
+
+        <button
+          onClick={() => toggle(!enabled)}
+          disabled={saving || status === null}
+          className="btn"
+          style={{
+            border: `1px solid ${enabled ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
+            background: enabled ? 'rgba(212, 162, 78, 0.08)' : 'var(--color-input-bg)',
+          }}
+        >
+          {enabled ? '已允许 · 点击关闭' : '未允许 · 点击开启'}
+        </button>
+
+        {status?.restart_required && (
+          <p
+            className="text-xs"
+            style={{ color: 'var(--color-text-accent)', marginTop: '0.75rem' }}
+          >
+            设置已保存，但监听地址要重启应用才会改变——
+            {enabled ? '重启后其他玩家才能连进来。' : '重启前本机之外的请求已经被拒绝。'}
+          </p>
+        )}
+
+        {enabled && (
+          <div style={{ marginTop: '0.85rem' }}>
+            <div
+              className="text-xs"
+              style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
+            >
+              {status.addresses.length > 0
+                ? '把下面的地址连同房间码发给其他玩家：'
+                : '没有找到可用的局域网地址——本机可能没连上网，或只连着会接管路由的 VPN。'}
+            </div>
+            {status.addresses.map((addr) => (
+              <button
+                key={addr}
+                onClick={() => copyAddr(addr)}
+                className="badge inline-flex items-center gap-1"
+                style={{ marginRight: '0.4rem' }}
+                title="点击复制"
+              >
+                {addr} <Copy size={11} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 className="card-title">
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: '0.3rem' }} />
+          开启前请确认
+        </h3>
+        <ul
+          className="text-xs"
+          style={{ color: 'var(--color-text-secondary)', lineHeight: 1.8, paddingLeft: '1.1rem' }}
+        >
+          <li>
+            本应用没有账号体系，也没有传输加密。同一网络里任何人只要知道你的地址和房间码，
+            就能读写房间内容、并消耗你配置的 AI 额度。
+          </li>
+          <li>只在可信网络开启：家里或朋友家的 Wi-Fi。公共 Wi-Fi、酒店、公司网络都不要开。</li>
+          <li>
+            不要把这个端口转发到公网。即使转发了，来自互联网的请求也会被拒绝，
+            但这只是兜底，不是可以依赖的防护。
+          </li>
+          <li>
+            想和不在同一网络的朋友一起玩，用 Tailscale 这类覆盖网络把双方接进同一个虚拟内网，
+            而不是暴露端口——它们的地址段本应用已经放行。
+          </li>
+        </ul>
       </div>
     </div>
   )

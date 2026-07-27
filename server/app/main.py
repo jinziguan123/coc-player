@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
@@ -34,6 +34,10 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="TRPG Player", version="0.1.0", lifespan=lifespan)
 
+# 本进程实际绑在哪：默认按回环记，``run_desktop.py`` 启动时按开关改写。
+# 设置页据此判断「改了开关但还没重启」。
+app.state.listening_on_lan = False
+
 
 @app.middleware("http")
 async def _maintenance_gate(request: Request, call_next):
@@ -50,6 +54,22 @@ async def _maintenance_gate(request: Request, call_next):
             "可升级到匹配的程序版本后重试，或从备份恢复。</p>"
             "</body></html>",
             status_code=503,
+        )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def _peer_gate(request: Request, call_next):
+    """来源校验：见 ``app.services.net_access`` 的两道闸说明。
+
+    注册在维护闸之后 → 位于其外层，未授权来源连维护页也拿不到。
+    """
+    from app.services import net_access
+
+    client = request.client.host if request.client else None
+    if not net_access.is_trusted_peer(client):
+        return JSONResponse(
+            {"detail": "房主未允许局域网加入，或请求来自不可信网络"}, status_code=403
         )
     return await call_next(request)
 

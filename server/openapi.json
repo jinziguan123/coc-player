@@ -1291,6 +1291,19 @@
         "title": "KpWorkspaceUpdate",
         "type": "object"
       },
+      "LanToggle": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "LanToggle",
+        "type": "object"
+      },
       "ModuleImageRegenerateRequest": {
         "properties": {
           "field": {
@@ -1509,6 +1522,37 @@
           "title"
         ],
         "title": "ModuleWrite",
+        "type": "object"
+      },
+      "NetStatus": {
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
+          "lan_enabled": {
+            "title": "Lan Enabled",
+            "type": "boolean"
+          },
+          "listening_on_lan": {
+            "title": "Listening On Lan",
+            "type": "boolean"
+          },
+          "restart_required": {
+            "title": "Restart Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lan_enabled",
+          "listening_on_lan",
+          "restart_required",
+          "addresses"
+        ],
+        "title": "NetStatus",
         "type": "object"
       },
       "OnboardingStartResponse": {
@@ -2995,6 +3039,47 @@
         ]
       }
     },
+    "/api/modules/{module_id}/map/backdrop": {
+      "post": {
+        "description": "给沙盘生成一张氛围底图（纯装饰层，网格与游戏逻辑都不依赖它）。",
+        "operationId": "generate_map_backdrop_api_modules__module_id__map_backdrop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "module_id",
+            "required": true,
+            "schema": {
+              "title": "Module Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Map Backdrop",
+        "tags": [
+          "modules"
+        ]
+      }
+    },
     "/api/modules/{module_id}/map/enrich": {
       "post": {
         "description": "AI 补全沙盘：地貌、物理连接与语义落位。",
@@ -3127,6 +3212,69 @@
         "summary": "Patch Scene Map",
         "tags": [
           "modules"
+        ]
+      }
+    },
+    "/api/net": {
+      "get": {
+        "operationId": "get_net_status_api_net_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Net Status",
+        "tags": [
+          "net"
+        ]
+      }
+    },
+    "/api/net/lan": {
+      "post": {
+        "description": "开关局域网加入。\n\n只有本机才能改：这个开关决定别人能不能连进来，不能让已经连进来的客人自己放宽它。",
+        "operationId": "set_lan_api_net_lan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LanToggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Lan",
+        "tags": [
+          "net"
         ]
       }
     },
@@ -5063,7 +5211,7 @@
     },
     "/api/sessions/{session_id}/improvised-npcs/promote": {
       "post": {
-        "description": "把某临场 NPC 受控转正为正式配角（据其既有言行生成 NPC 卡，存会话级）。\n\n仅房主可操作（seat_order==0）。生成失败返回 502；未登记的名字返回 404。",
+        "description": "把某临场 NPC 受控转正为正式配角（据其既有言行生成 NPC 卡，存会话级）。\n\n**在场的任一真人玩家**都可操作：发现「这个龙套有戏」的往往是跟他对过戏的那个玩家，\n不一定是房主；多人桌上卡在房主那里只是多一道无谓的摩擦。\n转正本身是增量且可控的——只生成一张会话级 NPC 卡，不改模组本体、不影响其他人的存档。\n\n生成失败返回 502；未登记的名字返回 404。",
         "operationId": "promote_improvised_npc_api_sessions__session_id__improvised_npcs_promote_post",
         "parameters": [
           {

@@ -8,6 +8,7 @@ from app.api.inventory import router as inventory_router
 from app.api.kp import router as kp_router
 from app.api.images import router as images_router
 from app.api.modules import router as modules_router
+from app.api.net import router as net_router
 from app.api.onboarding import router as onboarding_router
 from app.api.rulebooks import router as rulebooks_router
 from app.api.sessions import router as sessions_router
@@ -24,3 +25,4 @@ api_router.include_router(combat_router)
 api_router.include_router(inventory_router)
 api_router.include_router(ai_settings_router)
 api_router.include_router(rulebooks_router)
+api_router.include_router(net_router)

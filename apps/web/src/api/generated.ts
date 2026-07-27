@@ -268,6 +268,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/modules/{module_id}/map/backdrop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Map Backdrop
+         * @description 给沙盘生成一张氛围底图（纯装饰层，网格与游戏逻辑都不依赖它）。
+         */
+        post: operations["generate_map_backdrop_api_modules__module_id__map_backdrop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/modules/{module_id}/map/enrich": {
         parameters: {
             query?: never;
@@ -329,6 +349,45 @@ export interface paths {
          * @description 沙盘编辑：把场景移到指定 hex 格（KP 拖拽修正），可顺带改地貌。撞格等非法情形 400。
          */
         patch: operations["patch_scene_map_api_modules__module_id__scene_map_patch"];
+        trace?: never;
+    };
+    "/api/net": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Net Status */
+        get: operations["get_net_status_api_net_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/net/lan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Lan
+         * @description 开关局域网加入。
+         *
+         *     只有本机才能改：这个开关决定别人能不能连进来，不能让已经连进来的客人自己放宽它。
+         */
+        post: operations["set_lan_api_net_lan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/onboarding/start": {
@@ -1027,7 +1086,11 @@ export interface paths {
          * Promote Improvised Npc
          * @description 把某临场 NPC 受控转正为正式配角（据其既有言行生成 NPC 卡，存会话级）。
          *
-         *     仅房主可操作（seat_order==0）。生成失败返回 502；未登记的名字返回 404。
+         *     **在场的任一真人玩家**都可操作：发现「这个龙套有戏」的往往是跟他对过戏的那个玩家，
+         *     不一定是房主；多人桌上卡在房主那里只是多一道无谓的摩擦。
+         *     转正本身是增量且可控的——只生成一张会话级 NPC 卡，不改模组本体、不影响其他人的存档。
+         *
+         *     生成失败返回 502；未登记的名字返回 404。
          */
         post: operations["promote_improvised_npc_api_sessions__session_id__improvised_npcs_promote_post"];
         delete?: never;
@@ -2475,6 +2538,11 @@ export interface components {
             /** Notes */
             notes?: string | null;
         };
+        /** LanToggle */
+        LanToggle: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** ModuleImageRegenerateRequest */
         ModuleImageRegenerateRequest: {
             /** Field */
@@ -2597,6 +2665,17 @@ export interface components {
             world_setting: {
                 [key: string]: unknown;
             };
+        };
+        /** NetStatus */
+        NetStatus: {
+            /** Addresses */
+            addresses: string[];
+            /** Lan Enabled */
+            lan_enabled: boolean;
+            /** Listening On Lan */
+            listening_on_lan: boolean;
+            /** Restart Required */
+            restart_required: boolean;
         };
         /** OnboardingStartResponse */
         OnboardingStartResponse: {
@@ -3498,6 +3577,37 @@ export interface operations {
             };
         };
     };
+    generate_map_backdrop_api_modules__module_id__map_backdrop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     enrich_map_api_modules__module_id__map_enrich_post: {
         parameters: {
             query?: never;
@@ -3582,6 +3692,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_net_status_api_net_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetStatus"];
+                };
+            };
+        };
+    };
+    set_lan_api_net_lan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LanToggle"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetStatus"];
                 };
             };
             /** @description Validation Error */
