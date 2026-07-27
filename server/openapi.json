@@ -7027,6 +7027,68 @@
         ]
       }
     },
+    "/api/sessions/{session_id}/sync": {
+      "get": {
+        "description": "一次取齐所有 ``sync`` 类状态的快照 + 事件水位线，供断线重连对齐。\n\n此前重连只重拉聊天历史，战斗/追逐态仅在**进页**时各拉一次、回合确认态更是\n连查询端点都没有——断线期间错过那几条广播，HUD 就一直是错的，直到下一次广播。\n\n``systems`` 可用逗号分隔限定范围（如 ``combat,turn``），缺省全取。",
+        "operationId": "get_sync_api_sessions__session_id__sync_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "systems",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Systems"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Get Sync",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{session_id}/travel": {
       "post": {
         "description": "玩家经大地图『前往』某已知地点：确定性切换该玩家所在场景，再由 KP 叙述抵达见闻。\n\n场景切换由玩家显式发起（而非 KP 据只言片语臆测），杜绝「说句话就被自动搬走」。",

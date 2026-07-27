@@ -1710,6 +1710,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sync
+         * @description 一次取齐所有 ``sync`` 类状态的快照 + 事件水位线，供断线重连对齐。
+         *
+         *     此前重连只重拉聊天历史，战斗/追逐态仅在**进页**时各拉一次、回合确认态更是
+         *     连查询端点都没有——断线期间错过那几条广播，HUD 就一直是错的，直到下一次广播。
+         *
+         *     ``systems`` 可用逗号分隔限定范围（如 ``combat,turn``），缺省全取。
+         */
+        get: operations["get_sync_api_sessions__session_id__sync_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/travel": {
         parameters: {
             query?: never;
@@ -6140,6 +6165,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sync_api_sessions__session_id__sync_get: {
+        parameters: {
+            query?: {
+                systems?: string | null;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

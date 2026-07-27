@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { api, connectSSE, getServerUrl } from '../api/client'
+import { runLiveSession } from '@/lib/liveSession'
 import { useSessionStore, type ChatMessage } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { PartyRoster } from '../components/game/PartyRoster'
@@ -345,6 +346,17 @@ interface ChunkPayload {
   metadata?: Record<string, unknown>
 }
 
+/** GET /sessions/{id}/sync：sync 类状态的快照 + 事件水位线（见后端 room_sync.py）。 */
+interface SyncSnapshot {
+  seq: number
+  generating: boolean
+  systems: {
+    combat?: { active: boolean; pending_reaction?: PendingReaction | null; started_seq?: number | null }
+    chase?: { active: boolean }
+    turn?: { confirmed_ids: string[]; total: number; ready: boolean }
+  }
+}
+
 export function GameSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
@@ -677,6 +689,26 @@ export function GameSessionPage() {
     liveTypeRef.current = ''
   }, [sessionId, loadHistory])
 
+  // 从服务端重新对齐所有 sync 类状态（战斗/追逐/回合确认）。
+  // 用于：进页 + **每次重连**。此前战斗/追逐只在进页时各拉一次、回合确认态更是连
+  // 查询端点都没有——断线期间战斗开打或结束、别人确认了回合，HUD 会一直停在旧状态，
+  // 直到下一次恰好有相关广播才纠正。
+  const resyncState = useCallback(async () => {
+    if (!sessionId) return
+    try {
+      const s = await api.get<SyncSnapshot>(`/sessions/${sessionId}/sync`)
+      const combatSnap = s.systems.combat
+      setCombat(combatSnap?.active ? (combatSnap as unknown as CombatState) : null)
+      setPendingReaction(combatSnap?.active ? (combatSnap.pending_reaction ?? null) : null)
+      setCombatLogSince(combatSnap?.active ? (combatSnap.started_seq ?? null) : null)
+      const chaseSnap = s.systems.chase
+      setChase(chaseSnap?.active ? (chaseSnap as unknown as ChaseState) : null)
+      setTurnState(s.systems.turn ?? null)
+    } catch {
+      // 取不到就维持现状：宁可显示旧状态，也不要在网络抖动时把战斗面板清空
+    }
+  }, [sessionId])
+
   // 节流刷新会话（席位/在线变更用）：合并 400ms 内的连续 presence/seat，避免风暴
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refetchSession = useCallback(() => {
@@ -842,46 +874,25 @@ export function GameSessionPage() {
       if (session.status === 'setup') { navigate(`/room/${sessionId}`, { replace: true }); return }
       setCurrentSession(session as never)
 
-      // 进页/重连恢复战斗态：active 时置入面板，否则清空（战斗中刷新页面不丢面板）。
-      // 同时恢复 pending_reaction：断线时若正等我反应，重连后仍弹反应提示。
-      // 并用 started_seq 初始化日志抽屉下限：重连（不经 combat_start 分支）进入第 2+ 场战斗时，
-      // 抽屉据此只收本场（seq>started_seq）的 combat_log，不掺同会话上一场的结算行。
-      api.get<{ active: boolean; round?: number; turn?: string | null; order?: unknown; pending_reaction?: PendingReaction | null; started_seq?: number | null }>(`/sessions/${sessionId}/combat`)
-        .then((c) => {
-          if (cancelled) return
-          setCombat(c.active ? (c as unknown as CombatState) : null)
-          setPendingReaction(c.active ? (c.pending_reaction ?? null) : null)
-          setCombatLogSince(c.active ? (c.started_seq ?? null) : null)
-        })
-        .catch(() => { if (!cancelled) { setCombat(null); setPendingReaction(null); setCombatLogSince(null) } })
-
-      // 进页/重连恢复追逐态：active 时置入面板，否则清空。
-      api.get<{ active: boolean }>(`/sessions/${sessionId}/chase`)
-        .then((c) => { if (!cancelled) setChase(c.active ? (c as unknown as ChaseState) : null) })
-        .catch(() => { if (!cancelled) setChase(null) })
-
       if (isNew && !openingTriggered.current) {
         openingTriggered.current = true
         setStreaming(true)
         api.post(`/sessions/${sessionId}/opening`).catch(() => {})
       }
 
-      // /live 常驻消费 + 自动重连：连接断开（服务重启 / 网络抖动 / 休眠）后
-      // 自动重连并每次从 DB 重新对齐，不再「悄悄停更直到手动刷新」。
-      while (!cancelled) {
-        try {
-          await resyncHistory()
-          if (cancelled) break
-          // 生成态不再用独立 GET（与订阅有竞态）——由 /live 首个 ready 事件权威给出（见 handleLiveChunk）
-          for await (const chunk of connectSSE(`/sessions/${sessionId}/live`, ac.signal)) {
-            if (cancelled) break
-            handleLiveChunk(chunk as ChunkPayload)
-          }
-        } catch { /* 连接断开或被取消 */ }
-        if (cancelled) break
-        setLiveConnected(false)  // 断开 → 显示「连接中…」，下次 ready 复位
-        await new Promise((r) => setTimeout(r, 1500))  // 重连退避
-      }
+      // /live 常驻消费 + 自动重连。时序（先订阅后对齐、缓冲回放、每次重连都对齐）
+      // 抽到 lib/liveSession.ts，那里有针对性的单测——这段逻辑的正确性全在顺序上，
+      // 埋在组件里既没法测也容易看漏。
+      // 生成态不再用独立 GET（与订阅有竞态）——由 /live 首个 ready 事件权威给出（见 handleLiveChunk）
+      await runLiveSession<ChunkPayload>({
+        connect: (signal) => connectSSE(`/sessions/${sessionId}/live`, signal) as AsyncIterable<ChunkPayload>,
+        resync: async () => { await Promise.all([resyncHistory(), resyncState()]) },
+        onEvent: handleLiveChunk,
+        onDisconnect: () => setLiveConnected(false),  // → 显示「连接中…」，下次 ready 复位
+        isCancelled: () => cancelled,
+        wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+        signal: ac.signal,
+      })
     }
     init()
     return () => { cancelled = true; ac.abort() }

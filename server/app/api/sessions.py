@@ -25,6 +25,7 @@ from app.schemas.session import (
 )
 from app.services import session_service
 from app.services.event_protocol import make_chunk as _make_chunk
+from app.services import room_sync
 from app.services.room_events import RoomEvent
 from app.services.turn_orchestrator import (
     initialize_human_session,
@@ -597,6 +598,29 @@ async def check_generating(
 ):
     require_session_viewer(db, session_id, token)
     return {"generating": generation_manager.is_generating(session_id)}
+
+
+@router.get("/{session_id}/sync")
+def get_sync(
+    session_id: str,
+    systems: str | None = None,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """一次取齐所有 ``sync`` 类状态的快照 + 事件水位线，供断线重连对齐。
+
+    此前重连只重拉聊天历史，战斗/追逐态仅在**进页**时各拉一次、回合确认态更是
+    连查询端点都没有——断线期间错过那几条广播，HUD 就一直是错的，直到下一次广播。
+
+    ``systems`` 可用逗号分隔限定范围（如 ``combat,turn``），缺省全取。
+    """
+    session = require_session_viewer(db, session_id, token)
+    wanted = [s.strip() for s in systems.split(",")] if systems else None
+    return {
+        "seq": room_sync.current_seq(db, session_id),
+        "generating": generation_manager.is_generating(session_id),
+        "systems": room_sync.snapshot(db, session, wanted),
+    }
 
 
 @router.get("/{session_id}/live/_schema", response_model=RoomEvent)
