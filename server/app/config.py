@@ -36,7 +36,10 @@ class Settings(BaseSettings):
     # 真要调 SQL 时在 .env 设 SQL_ECHO=true。
     sql_echo: bool = False
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # extra="ignore"：.env 里的历史遗留变量（如已废弃的 OPENAI_API_KEY）不该让进程起不来。
+    # pydantic-settings 默认是 forbid，于是从仓库根启动后端会崩在一句难懂的校验错误上；
+    # 打包版若被以带 .env 的目录为 CWD 拉起也一样。本类只认下面声明的几项，其余忽略。
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

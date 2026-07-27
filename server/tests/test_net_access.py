@@ -119,3 +119,17 @@ def test_status_reports_bound_port(client):
         assert client.get("/api/net").json()["port"] == 8756
     finally:
         app.state.bound_port = None
+
+
+def test_settings_ignores_unknown_env_vars(tmp_path, monkeypatch):
+    """.env 里的历史遗留变量不能让进程起不来。
+
+    pydantic-settings 默认 extra=forbid，仓库根的 .env 残留一个已废弃的 OPENAI_API_KEY
+    就会让「从仓库根启动后端」崩在一句难懂的校验错误上（打包版同理）。
+    """
+    from app.config import Settings
+
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=sk-obsolete\nSOME_FUTURE_VAR=1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    Settings(_env_file=str(env))  # 不抛异常即通过

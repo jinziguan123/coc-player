@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,8 @@ from app.schemas.session import (
 )
 from app.services import session_service
 from app.services.event_protocol import make_chunk as _make_chunk
-from app.services import room_sync
+from app.services import rate_limit, room_sync
+from app.services.rate_limit import limiter
 from app.services.room_events import RoomEvent
 from app.services.turn_orchestrator import (
     initialize_human_session,
@@ -137,7 +138,9 @@ def list_sessions(
 
 
 @router.get("/by-code/{room_code}")
+@limiter.limit(rate_limit.ROOM_CODE_LOOKUP_LIMIT, exempt_when=rate_limit.exempt_local)
 def get_session_by_code(
+    request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
     room_code: str,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
@@ -152,7 +155,9 @@ def get_session_by_code(
 
 
 @router.post("/{session_id}/join")
+@limiter.limit(rate_limit.JOIN_LIMIT, exempt_when=rate_limit.exempt_local)
 def join_session(
+    request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
     session_id: str,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),

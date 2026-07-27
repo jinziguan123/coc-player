@@ -7,7 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 from app.api.router import api_router
+from app.services.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,11 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="TRPG Player", version="0.1.0", lifespan=lifespan)
+
+# 速率限制（slowapi 要求把 limiter 挂在 app.state 上）。限的是房间码枚举与烧额度的
+# 操作，房主本机豁免；见 app/services/rate_limit.py。
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # 本进程实际绑在哪：默认按回环记，``run_desktop.py`` 启动时按开关与实挑端口改写。
 # 设置页据此判断「改了开关但还没重启」，并给出客人要填的完整地址。

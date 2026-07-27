@@ -17,6 +17,8 @@ dependencies = [
     "python-docx>=1.1.0",
     "numpy>=1.26",
     "fastembed>=0.8.0",
+    # 速率限制（内存后端；桌面单进程单 worker，无需 Redis）
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

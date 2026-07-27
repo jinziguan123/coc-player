@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-import uuid
+import secrets
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,12 +23,20 @@ def is_kp_only_event(ev: EventLog) -> bool:
     return KP_ONLY_SENTINEL in (ev.visibility or [])
 
 
+# 房间码字母表：去掉 I/O/0/1（手抄易混）。8 位 → 32^8 ≈ 1.1e12，约 40 bit。
+# 旧版是 uuid4().hex[:6]，只有 16 个字符、24 bit——配合当时没有的限流，
+# 在线枚举是可行的。已发出的旧房间码继续有效（查询按精确匹配）。
+_ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+_ROOM_CODE_LEN = 8
+
+
 def _gen_room_code(db: Session) -> str:
     for _ in range(20):
-        code = uuid.uuid4().hex[:6].upper()
+        code = "".join(secrets.choice(_ROOM_CODE_ALPHABET) for _ in range(_ROOM_CODE_LEN))
         if not db.query(GameSession).filter(GameSession.room_code == code).first():
             return code
-    return uuid.uuid4().hex[:8].upper()
+    # 撞了 20 次说明库里房间多到不正常，加长而不是放弃随机性
+    return "".join(secrets.choice(_ROOM_CODE_ALPHABET) for _ in range(_ROOM_CODE_LEN + 4))
 
 
 def active_character_ids(
