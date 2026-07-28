@@ -4,11 +4,11 @@ import logging
 import uuid
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_local_client
+from app.api.deps import player_token, require_local_client, require_session_kp
 from app.database import SessionLocal, get_db
 from app.schemas.module import ModuleRead, ModuleUploadResponse, ModuleWrite
 from app.services import (
@@ -18,6 +18,8 @@ from app.services import (
     module_rag_service,
     module_service,
 )
+from app.services.event_protocol import make_chunk
+from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
 
@@ -393,18 +395,48 @@ class SceneMapPatch(BaseModel):
     q: int
     r: int
     biome: str | None = None
+    session_id: str | None = None
+    """局内拖拽时带上：据此按「该局的真人 KP」授权。省略则按模组管理处理，仅限本机。"""
 
 
-@router.patch("/{module_id}/scene-map", dependencies=[Depends(require_local_client)])
-def patch_scene_map(module_id: str, data: SceneMapPatch, db: Session = Depends(get_db)):
-    """沙盘编辑：把场景移到指定 hex 格（KP 拖拽修正），可顺带改地貌。撞格等非法情形 400。"""
+@router.patch("/{module_id}/scene-map")
+def patch_scene_map(
+    module_id: str,
+    data: SceneMapPatch,
+    request: Request,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """沙盘编辑：把场景移到指定 hex 格（KP 拖拽修正），可顺带改地貌。撞格等非法情形 400。
+
+    两种调用语境，授权方式不同：
+
+    - **局内**（带 ``session_id``）：真人 KP 在大地图上拖动修正。KP 可能是连进来的
+      客人，所以不能按「仅限本机」把关——那会让远程 KP 根本拖不动；要按**该局的
+      KP 席位**授权（``require_session_kp``），并确认这局用的确实是本模组，
+      免得拿一个自己是 KP 的房间去改别人的模组。
+    - **模组管理**（不带 ``session_id``）：房主在自己机器上整理模组，沿用 ADR-007
+      的仅限本机。
+    """
     module = module_service.get_module(db, module_id)
     if not module:
         raise HTTPException(404, "模组不存在")
+
+    if data.session_id:
+        game_session = require_session_kp(db, data.session_id, token)
+        if game_session.module_id != module_id:
+            raise HTTPException(403, "该房间用的不是这个模组")
+    else:
+        require_local_client(request)
+
     try:
         new_map = hex_map.set_scene_map(db, module, data.scene_id, data.q, data.r, data.biome)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+    if data.session_id:
+        # 同时开着大地图的其他人要跟着更新，否则各自看到的位置不一致
+        room_hub.broadcast(data.session_id, make_chunk("map_update", metadata={"module_id": module_id}))
     return {"scene_id": data.scene_id, "map": new_map}
 
 

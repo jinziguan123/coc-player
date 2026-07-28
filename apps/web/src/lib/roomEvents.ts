@@ -40,6 +40,7 @@ export type SyncEventType =
   | 'event_update' | 'event_delete' | 'event_patch'
   | 'combat_start' | 'combat_state' | 'combat_reaction_prompt' | 'combat_end'
   | 'chase_start' | 'chase_state' | 'chase_end'
+  | 'map_update'
 
 export type NonLogEventType = StreamEventType | SyncEventType
 
@@ -95,6 +96,7 @@ export const CATEGORY: Record<RoomEventType, EventCategory> = {
   chase_start: 'sync',
   chase_state: 'sync',
   chase_end: 'sync',
+  map_update: 'sync',
 }
 
 export function categoryOf(type: string): EventCategory | undefined {

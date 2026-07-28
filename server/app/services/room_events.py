@@ -74,6 +74,7 @@ RoomEventType = Literal[
     "chase_start",
     "chase_state",
     "chase_end",
+    "map_update",
 ]
 
 CATEGORY: dict[str, Category] = {
@@ -114,6 +115,7 @@ CATEGORY: dict[str, Category] = {
     "chase_start": "sync",
     "chase_state": "sync",
     "chase_end": "sync",
+    "map_update": "sync",
 }
 
 ALL_TYPES: tuple[str, ...] = get_args(RoomEventType)

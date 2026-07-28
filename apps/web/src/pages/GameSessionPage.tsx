@@ -682,6 +682,11 @@ export function GameSessionPage() {
       appendToStream(chunk.content || '')
       return
     }
+    if (t === 'map_update') {
+      // 局内 KP 拖动了场景位置：同时开着大地图的人跟着刷新，否则各自看到的位置不一致
+      setRefreshTick((x) => x + 1)
+      return
+    }
     // 明确忽略：这两类是大厅页的事，游戏页收到也无事可做。
     // （由穷尽性检查逼出来的——此前它们只是无声地落进 if 链末尾。）
     //   lobby   —— 席位/准备态变化，游戏页的队伍条由 seat/presence 驱动
@@ -803,6 +808,25 @@ export function GameSessionPage() {
       .then((r) => { setLocations(r.locations || []); setMapNodes(r.map_nodes || []); setCanGodView(!!r.god_view) })
       .catch(() => { setLocations([]); setMapNodes([]); setCanGodView(false) })
   }, [showBigMap, sessionId, myCharId, currentSession?.current_scene_id, refreshTick])
+
+  // 局内沙盘拖拽（真人 KP 专属）：单格移动立即落库并广播，撞格等非法情形由后端拒绝。
+  // 走 PATCH /modules/{id}/scene-map 而不是整体保存模组——局内 KP 只该改位置，
+  // 不该有整体改模组的权限；后端按 session_id 校验 KP 席位（远程 KP 也能拖）。
+  const dragScene = useCallback(async (nodeId: string, q: number, r: number) => {
+    const moduleId = currentSession?.module_id
+    if (!moduleId || !sessionId) return
+    const node = mapNodes.find((n) => n.id === nodeId)
+    const sceneId = node?.scene_id || nodeId
+    try {
+      await api.patch(`/modules/${moduleId}/scene-map`, {
+        scene_id: sceneId, q, r, session_id: sessionId,
+      })
+      setRefreshTick((x) => x + 1)
+    } catch (reason: unknown) {
+      toast.error(reason instanceof Error ? reason.message : '移动失败')
+      setRefreshTick((x) => x + 1)   // 拉回权威位置，避免界面停在拖到一半的样子
+    }
+  }, [currentSession?.module_id, sessionId, mapNodes])
 
   const sandboxLocations = useMemo(() => {
     const scenesById = new Map(locations.map((loc) => [loc.id, loc]))
@@ -1421,6 +1445,8 @@ export function GameSessionPage() {
                   locations={playerSandboxLocations}
                   disabled={streaming}
                   revealUnknownTokens={canGodView && !playerView}
+                  editable={canGodView && !playerView}
+                  onMoveScene={dragScene}
                   onPick={(loc) => setConfirmTravel(locations.find((item) => item.id === (loc.sceneId || loc.id)) || null)}
                   height="clamp(320px, 58vh, 560px)" />
               ) : (

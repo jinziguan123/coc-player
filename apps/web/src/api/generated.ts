@@ -354,6 +354,15 @@ export interface paths {
         /**
          * Patch Scene Map
          * @description 沙盘编辑：把场景移到指定 hex 格（KP 拖拽修正），可顺带改地貌。撞格等非法情形 400。
+         *
+         *     两种调用语境，授权方式不同：
+         *
+         *     - **局内**（带 ``session_id``）：真人 KP 在大地图上拖动修正。KP 可能是连进来的
+         *       客人，所以不能按「仅限本机」把关——那会让远程 KP 根本拖不动；要按**该局的
+         *       KP 席位**授权（``require_session_kp``），并确认这局用的确实是本模组，
+         *       免得拿一个自己是 KP 的房间去改别人的模组。
+         *     - **模组管理**（不带 ``session_id``）：房主在自己机器上整理模组，沿用 ADR-007
+         *       的仅限本机。
          */
         patch: operations["patch_scene_map_api_modules__module_id__scene_map_patch"];
         trace?: never;
@@ -2901,7 +2910,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "generating" | "done" | "ready" | "typing" | "presence" | "housekeeping" | "narration" | "dialogue" | "action" | "dice" | "narration_full" | "npc_dialogue" | "system" | "ooc" | "check_request" | "lobby" | "seat" | "started" | "status" | "end_vote" | "turn_state" | "character_update" | "inventory_update" | "kp_turn_ready" | "kp_roll_ready" | "kp_action" | "kp_request" | "event_update" | "event_delete" | "event_patch" | "combat_start" | "combat_state" | "combat_reaction_prompt" | "combat_end" | "chase_start" | "chase_state" | "chase_end";
+            type: "generating" | "done" | "ready" | "typing" | "presence" | "housekeeping" | "narration" | "dialogue" | "action" | "dice" | "narration_full" | "npc_dialogue" | "system" | "ooc" | "check_request" | "lobby" | "seat" | "started" | "status" | "end_vote" | "turn_state" | "character_update" | "inventory_update" | "kp_turn_ready" | "kp_roll_ready" | "kp_action" | "kp_request" | "event_update" | "event_delete" | "event_patch" | "combat_start" | "combat_state" | "combat_reaction_prompt" | "combat_end" | "chase_start" | "chase_state" | "chase_end" | "map_update";
         };
         /** RuleHit */
         RuleHit: {
@@ -2952,6 +2961,8 @@ export interface components {
             r: number;
             /** Scene Id */
             scene_id: string;
+            /** Session Id */
+            session_id?: string | null;
         };
         /** SessionCreate */
         SessionCreate: {
