@@ -1,7 +1,9 @@
 # TRPG Player 现状架构与架构评审
 
-> 文档版本：v1.0
-> 梳理日期：2026-07-19
+> 文档版本：v1.1
+> 梳理日期：2026-07-19；2026-07-27 按「实时层与联机边界」一轮改动更新
+> 更新原则：**不重写评审结论**，只把已落地的条目就地标注现状（保留原始描述，
+> 以便看清当初为什么这么判断），并在 §8 开头加本轮小结。
 > 适用范围：当前仓库代码、配置、测试、打包文档；不把设计稿中的规划能力当作已实现能力。
 
 本次梳理同时参考了代码知识图谱与仓库文件：当前项目索引约含 6,325 个节点、23,459 条关系，识别出 78 个路由节点；关键规模指标以源码行数为准，避免把图谱中的测试/fixture 节点误当成生产代码。
@@ -228,7 +230,18 @@ Tauri 窗口
 
 ### 6.2 前后端契约问题
 
-历史上的 `packages/shared` 没有任何业务导入，且其 camelCase 类型与后端 snake_case Schema 已经漂移；本次已删除该包，REST 契约改由 `server/openapi.json` 和 `apps/web/src/api/generated.ts` 维护。当前生成类型覆盖 REST 基线，SSE、流式 chunk、动态 metadata 和未声明 `response_model` 的匿名响应仍保留手写协议。
+历史上的 `packages/shared` 没有任何业务导入，且其 camelCase 类型与后端 snake_case Schema 已经漂移；本次已删除该包，REST 契约改由 `server/openapi.json` 和 `apps/web/src/api/generated.ts` 维护。
+
+**2026-07-27 更新：SSE 事件类型已纳入同一条契约流水线。** 房间事件的类型集合收敛到
+`server/app/services/room_events.py`，并通过一个只为契约存在的端点
+`GET /sessions/{id}/live/_schema`（`response_model=RoomEvent`）进入 OpenAPI——SSE 负载
+本身不出现在 OpenAPI 里，挂个 response_model 是把它带进去的最省事办法，不需要新增
+任何工具链。前端由既有的 `pnpm api:generate` 拿到字面量联合，`lib/roomEvents.ts` 的
+`Record<RoomEventType, Category>` 与分发的 `never` 守卫共同保证：后端加一种事件而前端
+没归类或没处理，`pnpm --filter web typecheck` 直接失败。
+
+仍保留手写协议的部分：动态 `metadata`（各事件的载荷形状差异大，尚未逐类建模）与
+未声明 `response_model` 的匿名 `dict` 响应。
 
 ## 7. 已有设计优点
 
@@ -243,7 +256,29 @@ Tauri 窗口
 
 以下按“对系统性演进的影响”排序，而不是按代码风格排序。
 
-本轮已完成的架构基线修正：
+### 2026-07-27 一轮落地（实时层与联机边界）
+
+这一轮针对下表里的若干条做了实现，逐条对应关系写在各行的「现状」里。总结：
+
+- **实时层**：SSE 心跳（15s）、订阅队列有界化与积压终止；事件编码下沉到传输层，
+  业务代码只造 `RoomEvent` 不碰 `data:` 前缀；`broadcast` 显式拒收裸字符串
+  （此前 `combat_service`/`chase_service` 各有一份私拼 SSE 的旁路，其 7 种事件类型
+  既不在注册表也不受校验）。
+- **协议语义**：`/api/health` 给出 `protocol_version` 并在客人加入前握手；事件按
+  生命周期分成 `stream`/`log`/`sync` 三类，各自的持久化、重放、去重规则不同——
+  这正是此前重连逻辑要写一堆特判的根因。
+- **重连**：新增 `GET /sessions/{id}/sync`（快照注册表 + 事件水位线 seq），
+  **每次重连**都对齐 `sync` 类状态。此前战斗/追逐只在进页时各拉一次、回合确认态
+  连查询端点都没有，断线期间战斗开打或结束、别人确认了回合，HUD 会一直停在旧状态。
+  同时把「先拉历史再订阅」倒过来改成「先订阅、期间事件进缓冲、对齐后回放」，
+  堵掉两者之间丢事件的窗口。
+- **联机边界**：局域网可达性默认关闭（监听地址 + 来源校验两道闸）；管理本机资产的
+  端点仅限回环来源（[ADR-007](adr/ADR-007-管理端点仅限本机.md)）；房间码 24 bit → 40 bit
+  并加限流；房间级 AI 配额（默认关闭）；玩家 token 按主机隔离。
+- **可测性**：重连时序（`lib/liveSession.ts`）与页面纯派生逻辑
+  （`features/game-session/derive.ts`）从两千行组件里抽出并补测，此前均零覆盖。
+
+本轮之前已完成的架构基线修正：
 
 - `event_logs(session_id, sequence_num)` 已增加数据库唯一约束，迁移会先检查历史重复值，写入冲突会回滚重试，回合重排使用临时序号区间。
 - 会话级读权限已收敛到 `require_session_viewer()` / `can_view_session()`，覆盖历史、搜索、地点、战报、成长、库存、战斗、追逐和 SSE；setup 阶段仍保留空席大厅的受控访客例外。
@@ -254,8 +289,8 @@ Tauri 窗口
 
 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|
-| 信任边界仍是 MVP 级别 | `server/app/api/deps.py` 只读取 `X-Player-Token`；前端 token 存 `localStorage`；`main.py:58-65` 为 `allow_origins=["*"]`；README 明确不支持公网 | token 可复制，跨网传输无 TLS，CORS 与权限模型不适合不可信网络 | 明确部署边界；近期统一强制 token/房主/席位校验；后续增加账号、签名会话、TLS 终止、限流和审计日志 |
-| 实时与生成状态只存在进程内 | `RoomHub` 使用 `dict[str, list[asyncio.Queue]]`；`GenerationManager` 使用 `dict[str, asyncio.Task]` | 重启丢失连接和进行中的生成；多进程/多副本时广播与锁失效 | 当前阶段保持单进程并在文档中固化；若要扩展，使用 Redis Pub/Sub + 持久任务状态 + 外部队列 |
+| 信任边界仍是 MVP 级别 | `server/app/api/deps.py` 只读取 `X-Player-Token`；前端 token 存 `localStorage`；`allow_origins=["*"]`；README 明确不支持公网 | token 可复制，跨网传输无 TLS，权限模型不适合不可信网络 | **部分完成（2026-07-27）**：局域网可达性默认关闭；管理端点仅限本机（ADR-007）；房间码加强 + 限流；房间级 AI 配额；token 按主机隔离，不再一个 token 走遍所有房主。**仍缺 TLS 与账号体系**——因此 ADR-001「不要暴露到公网」依然有效，跨网走覆盖网络（[文档](跨网联机-tailscale.md)） |
+| 实时与生成状态只存在进程内 | `RoomHub` 使用 `dict[str, list[asyncio.Queue]]`；`GenerationManager` 使用 `dict[str, asyncio.Task]` | 重启丢失连接和进行中的生成；多进程/多副本时广播与锁失效 | 结论不变：**刻意保持单进程**（见 ADR-005）。2026-07-27 补强的是单进程内的健壮性——队列有界 + 积压即终止该连接让其重连、SSE 心跳、重连按快照对齐。限流与配额也都基于单进程内存，桌面版不存在「加了 --workers 4 就悄悄失效」的路径 |
 
 ### P1：会阻碍持续演进的问题
 
@@ -264,8 +299,8 @@ Tauri 窗口
 | `chat_service.py` 是事实上的“上帝模块” | 约 5,042 行，包含输入解析、AI 编排、工具执行、规则补偿、事件持久化、广播、RAG、后台收尾等职责；首批事件顺序逻辑已提取到 `turn_event_order.py` | 修改一个规则或提示链路容易影响实时、数据库和其他回合入口；难以建立稳定测试边界 | 按《chat_service 增量拆分纪律》逐簇拆为 `turn_orchestrator`、`narration_pipeline`、`tool_executor`、`event_writer`、`generation_hooks`；先保持同一进程和同一数据库 |
 | 会话服务边界过宽 | `session_service.py` 约 1,171 行，同时处理席位、权限、事件、场景图、回合确认、世界状态写入 | 领域模型、授权策略和持久化细节相互耦合 | 把“房间/席位”“事件仓库”“场景导航”“授权策略”拆为独立模块，统一由 application service 编排 |
 | `world_state` 过度承载异构状态 | `GameSession.world_state` JSON 同时存战斗、剧情、记忆、统计、战报等；适配器文档也承认旧调用点仍未迁移 | 难以校验、查询、迁移和做并发合并；任意键名变化都可能成为隐性兼容问题 | 将战斗、追逐、回合、用量、RAG 统计等高频/强一致状态拆成表；剧情记忆保留 JSON，但建立 Pydantic schema 与版本迁移 |
-| REST 契约已统一但强类型覆盖不完整 | OpenAPI 已生成；部分接口仍返回裸 `dict`、动态 metadata，`/live` 是手写 SSE | 生成类型不能覆盖匿名响应和流式协议，前端仍需手写协议 DTO | 为稳定 REST 响应补充 Pydantic `response_model`；为 SSE 定义版本、事件 id、generation id 和游标语义 |
-| 页面和状态容器过大 | `GameSessionPage.tsx`、`CharacterPage.tsx`、`SettingsPage.tsx` 均超过千行 | UI 变更、API 调整、状态回放和测试耦合在同一文件 | 按 feature/use-case 拆分 query、command、view model 和展示组件；页面只负责路由级组合 |
+| REST 契约已统一但强类型覆盖不完整 | OpenAPI 已生成；部分接口仍返回裸 `dict`、动态 metadata | 生成类型不能覆盖匿名响应，前端仍需手写部分 DTO | **SSE 部分已完成（2026-07-27）**：事件类型经 `_schema` 端点进入 OpenAPI，协议版本走 `/api/health` 握手，`/sync` 提供 seq 水位线。**仍待办**：为稳定 REST 响应补 `response_model`；按事件类型给 `metadata` 逐类建模 |
+| 页面和状态容器过大 | `GameSessionPage.tsx`、`CharacterPage.tsx`、`SettingsPage.tsx` 均超过千行 | UI 变更、API 调整、状态回放和测试耦合在同一文件 | **部分完成**：重连时序与纯派生逻辑已抽成可测模块（`lib/liveSession.ts`、`features/game-session/derive.ts`），事件分发按三分类切开并做穷尽检查。**刻意未做**：把剩余 JSX 拆成子组件——纯 prop plumbing、无可断言行为，而主链路无组件测试，风险大于收益。等需要为它写测试时再拆 |
 | 生成完成与后台收尾存在隐含时序 | `_finish_generation()` 先广播 `done`，再后台执行摘要/幕后推演；下一轮入口再 `_drain_housekeeping()` | 客户端看到 done 时，部分世界记忆可能尚未更新；异常恢复依赖进程内 task | 将生成状态、收尾状态、游标和失败原因显式化；对外返回 generation id 与阶段状态 |
 
 ### P2：影响质量与长期维护的问题
@@ -274,7 +309,7 @@ Tauri 窗口
 |---|---|---|
 | 规则系统抽象已存在，但产品范围与实现不一致 | `RuleEngine` 支持注册多个规则系统，模型枚举允许 `dnd`，README 又明确 DnD 尚未完整实现 | 将“可选规则系统”“已实现规则系统”“仅数据兼容”分开建模，避免调用方误以为 DnD 可用 |
 | API 路由仍有历史兼容痕迹 | 同一领域同时存在 `/start`、`/api/onboarding/start`、前端多种访问路径；图谱中还有未绑定 handler 的 Route 节点 | 建立版本化 API 或兼容层清单，删除未使用旧路由，给每个公开端点定义 owner |
-| SSE 协议缺少显式版本和游标语义 | chunk 以 JSON `type` 为主，流式 token 与持久事件的 seq 语义不同 | 定义 `protocol_version`、`generation_id`、`event_id`、`sequence_num`、`cursor` 和幂等规则，前端按协议而不是按字符串分支 |
+| ~~SSE 协议缺少显式版本和游标语义~~ **已完成（2026-07-27）** | 曾以 JSON `type` 字符串为主，流式 token 与持久事件的 seq 语义混同 | `protocol_version` 走 `/api/health` 握手；事件类型收敛为字面量联合并按 `stream`/`log`/`sync` 分类，三类的幂等规则各自明确（流控最后一条为准、日志按 id 去重、状态后到者覆盖）；`/sync` 给出 seq 水位线。前端已改为按类型联合分发，不再按字符串分支。**未做** `generation_id`——目前「同一房间同时至多一次生成」由 `GenerationManager` 保证，尚未出现需要它的场景 |
 | 本地 RAG 以 SQLite BLOB 存向量，扩展性有限 | `RuleChunk`/`ModuleChunk` 直接存 `LargeBinary` embedding，检索在应用服务内完成 | 当前单机可接受；数据规模上升后抽象 `VectorStore`，预留 Qdrant/SQLite-vec 等后端 |
 | 评估体系与线上观测还未完全闭环 | 有 `server/evals`、usage、RAG stats，但主要是离线 fixture 和本地统计 | 增加 generation trace、prompt/模型版本、工具调用耗时、失败原因、用户可见质量指标，形成可回放样本 |
 
@@ -322,9 +357,16 @@ API Adapter
 - **已完成**：增加 `event_logs(session_id, sequence_num)` 唯一约束、迁移前重复检查、冲突重试与并发回归测试。
 - **已完成会话 HTTP 读写路径**：统一 viewer、actor、token actor、host 和 manager 语义，覆盖 REST、SSE、聊天、战斗、追逐、库存、成长、战报、开场、大厅、投票和管理入口；服务层保留兼容包装与防御性校验。
 - **已完成**：删除 `packages/shared`，以 OpenAPI 导出和 CI diff 作为 REST 契约基线。
-- 明确只支持单进程运行，给生成任务和 SSE 增加 generation id、心跳和断线恢复语义。
+- **已完成**：明确只支持单进程运行（ADR-005）；SSE 心跳、队列有界化、断线恢复语义
+  （`/sync` 快照 + seq 水位线 + 先订阅后对齐）。未做 generation id——同一房间至多一次
+  生成已由 `GenerationManager` 保证，尚无需要它的场景。
+- **已完成**：定义 SSE 协议版本（`/api/health` 握手）与幂等语义（`stream`/`log`/`sync`
+  三分类各自的重放与去重规则）。
+- **已完成**：联机安全基线的可做部分——局域网默认关闭、管理端点仅限本机（ADR-007）、
+  房间码强度与限流、房间级 AI 配额、token 按主机隔离。TLS 与账号体系仍未做，
+  故公网暴露仍不被支持。
 - 给 `world_state` 建立 Pydantic 子模型、版本迁移入口和写入审计日志。
-- 补齐稳定 REST 响应的 `response_model`，并定义 SSE 协议版本、游标和幂等语义。
+- 补齐稳定 REST 响应的 `response_model`（SSE 部分已完成，见上）。
 
 ### 阶段 B：单体内部解耦
 
