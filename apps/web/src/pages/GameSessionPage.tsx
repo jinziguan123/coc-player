@@ -6,6 +6,16 @@ import { toast } from 'sonner'
 import { api, connectSSE, getServerUrl } from '../api/client'
 import { runLiveSession } from '@/lib/liveSession'
 import {
+  buildPartyByName,
+  fmtTime,
+  npcHue,
+  resolveActorKind,
+  selectCombatLog,
+  selectCombatResult,
+  splitOOC,
+  stripCommandTags,
+} from '@/features/game-session/derive'
+import {
   assertAllLogHandled,
   assertAllNonLogHandled,
   categoryOf,
@@ -19,12 +29,13 @@ import { PartyRoster } from '../components/game/PartyRoster'
 import { SeatIcon, type SeatKind } from '../components/game/SeatIcon'
 import { DiceRoller, type DiceRollerHandle, type DiceSpec } from '../components/game/DiceRoller'
 import {
-  CheckResultCard, hasCheckReadout, diceAccent, outcomeLabel,
+  CheckResultCard, hasCheckReadout, diceAccent,
   type CheckResultMeta,
 } from '../components/game/CheckResultCard'
 import { OnboardingCoach, hasSeenCoach } from '../components/game/OnboardingCoach'
 import { buildCheckCaption } from '../components/game/diceNotation'
-import { normalizeOpposedData, type OpposedData, type OpposedSide } from '../components/game/opposedDice'
+import { normalizeOpposedData } from '../components/game/opposedDice'
+import { BurstCard, OpposedCard, type BurstData } from '../components/game/DiceContestCards'
 import { ContextUsageBadge } from '../components/game/ContextUsageBadge'
 import { RecapModal } from '../components/game/RecapModal'
 import { GrowthModal } from '../components/game/GrowthModal'
@@ -35,7 +46,7 @@ import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntr
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { Modal } from '../components/ui/modal'
-import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiLaurelCrown, GiAncientRuins, GiMagnifyingGlass } from 'react-icons/gi'
+import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
@@ -58,13 +69,10 @@ interface SearchHit { id: string; sequence_num: number; event_type: string; acto
 const BOTTOM_SLACK = 120
 
 // [MOVE]/[MAP_MARK] 地图功能已下线，但旧事件文本里可能残留标签 → 保留在剔除名单里
-const CMD_TAG_RE = /\[(DICE_CHECK|NPC_ACT|SCENE_CHANGE|SAY|GROUP|MOVE|MAP_MARK|HANDOUT)[^\]]*\]|\[\/SAY\]/g
-const OOC_RE = /（[^（）]*）|\([^()]*\)/g
 
 // KP 偶尔会在叙述里夹带 HTML 标签（如 <b>…</b>）。叙述用 ReactMarkdown 渲染但未开 rehype-raw
 // （刻意不渲染 LLM 产出的原始 HTML，防 XSS），故这些标签会原样显示。这里把常见格式化标签剥掉，
 // 保留标签内的正文（需要强调时 KP 应改用 markdown，如 **加粗**）。
-const HTML_TAG_RE = /<\/?(?:b|i|u|s|em|strong|br|p|span|div|h[1-6]|ul|ol|li|code|pre|blockquote|hr|a)\b[^>]*>/gi
 
 // 手书（Handout）卡片：按 metadata.handout_kind 选矢量图标与中文标签（缺省 GiScrollUnfurled/文书）
 const HANDOUT_ICONS: Record<string, typeof GiScrollUnfurled> = {
@@ -166,20 +174,6 @@ const ILLUST_LABELS: Record<string, string> = {
 }
 
 // NPC 气泡按角色名派生一个稳定色相（写入 --npc-hue），同一 NPC 颜色一致、不同 NPC 微有区分
-function npcHue(name?: string): number {
-  let h = 0
-  for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) % 360
-  return h
-}
-
-function stripCommandTags(text: string): string {
-  return text
-    .replace(CMD_TAG_RE, '')
-    .replace(HTML_TAG_RE, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
-
 // 行内 markdown：把加粗/斜体等渲染出来，但 p 退化为 span 以贴合气泡（不换行、不留段距）。
 function InlineMd({ text }: { text: string }) {
   return (
@@ -192,99 +186,8 @@ function InlineMd({ text }: { text: string }) {
   )
 }
 
-/** 拆出正式行动与 OOC（小括号场外）内容，与后端 split_ooc 对齐。 */
-function splitOOC(text: string): { inChar: string; ooc: string } {
-  const parts = text.match(OOC_RE) || []
-  const inChar = text.replace(OOC_RE, '').trim()
-  const ooc = parts.map((p) => p.slice(1, -1).trim()).filter(Boolean).join(' ')
-  return { inChar, ooc }
-}
-
-function fmtTime(ts?: number): string {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
 // diceAccent / outcomeLabel 已移到 CheckResultCard 同文件，供结果卡与对抗卡/连射卡共用。
 
-/** 对抗判定卡：攻守两方并排 + 中央 VS + 高亮胜方（参考博得之门3的对抗结算呈现）。
- *  远程无守方检定时降级为单侧命中卡。 */
-function OpposedCard({ data, fresh, ts }: { data: OpposedData; fresh: boolean; ts?: string }) {
-  const resultAccent = data.result === '命中' || data.result === '反击得手'
-    ? 'var(--color-danger)'                       // 有人吃伤害 → 血色
-    : data.result === '被闪开/防住'
-      ? 'var(--color-success)'                     // 守方全身而退 → 绿
-      : 'var(--color-text-secondary)'              // 未命中（无守方）→ 中性
-
-  const Side = ({ s, won }: { s: OpposedSide; won: boolean }) => {
-    const accent = diceAccent(s.outcome)
-    return (
-      <div className="flex flex-col items-center px-3 py-1.5 rounded-md transition-all"
-        style={{
-          minWidth: '5.5rem',
-          background: won ? 'color-mix(in srgb, var(--color-bg-tertiary) 60%, transparent)' : 'transparent',
-          border: won ? `1px solid ${accent}` : '1px solid transparent',
-          boxShadow: won ? `0 0 10px -2px ${accent}` : 'none',
-          opacity: won || data.winner === null ? 1 : 0.6,
-        }}>
-        <div className="flex items-center gap-1 max-w-[7rem]">
-          {won && <GiLaurelCrown style={{ color: accent, fontSize: '0.8rem', flexShrink: 0 }} />}
-          <span className="text-xs font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>{s.name}</span>
-        </div>
-        {/* 与聊天流结果卡、战斗结算回显共用同一套读数样式 */}
-        <div className="dice-readout-roll my-0.5" style={{ color: accent }}>{s.roll}</div>
-        <div style={{ fontSize: '0.6rem', color: 'var(--color-text-secondary)' }}>{s.skill} / {s.target}</div>
-        <span className="dice-outcome-chip mt-0.5" style={{ color: accent, borderColor: accent }}>{outcomeLabel(s.outcome)}</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="chat-msg py-1">
-      <div className={`dice-card rounded-md px-3 py-2 ${fresh ? 'dice-enter' : ''}`}
-        style={{ borderLeft: `3px solid ${resultAccent}`, width: 'fit-content', maxWidth: '100%' }}>
-        <div className="flex items-center gap-1.5 mb-1" style={{ color: 'var(--color-text-secondary)', fontSize: '0.65rem' }}>
-          <GiCrossedSwords style={{ fontSize: '0.8rem' }} />
-          <span>对抗判定</span>
-        </div>
-        <div className="flex items-stretch gap-1">
-          <Side s={data.attacker} won={data.winner === 'attacker'} />
-          {data.defender && (
-            <>
-              <div className="flex items-center px-1">
-                <span className="font-bold italic" style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', opacity: 0.7 }}>VS</span>
-              </div>
-              <Side s={data.defender} won={data.winner === 'defender'} />
-            </>
-          )}
-        </div>
-        <div className="text-center mt-1 font-semibold" style={{ fontSize: '0.8rem', color: resultAccent }}>
-          {data.result}
-          {ts && <span className="ml-2" style={{ fontSize: '0.6rem', opacity: 0.5, color: 'var(--color-text-secondary)' }}>{ts}</span>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface BurstShot {
-  target: string
-  roll?: number
-  target_val?: number
-  outcome?: string
-  hit: boolean
-  penalty: number
-  damage?: number | null
-  flags?: string[]
-  gone?: boolean
-}
-interface BurstData {
-  weapon: string
-  shots: BurstShot[]
-}
-
-/** 结束模组投票的公开态（与后端 end_vote_public 对齐，不含 token）。 */
 interface EndVoteState {
   open: boolean
   voters: { character_id: string; name: string; agreed: boolean }[]
@@ -293,46 +196,6 @@ interface EndVoteState {
 }
 
 /** 连射结果卡：一轮多枪逐发列出（命中/伤害/换目标惩罚骰），整体一次性展示（不逐发 3D 骰）。 */
-function BurstCard({ data, fresh, ts }: { data: BurstData; fresh: boolean; ts?: string }) {
-  const hits = data.shots.filter((s) => s.hit).length
-  const totalDmg = data.shots.reduce((sum, s) => sum + (s.damage || 0), 0)
-  return (
-    <div className="chat-msg py-1">
-      <div className={`dice-card rounded-md px-3 py-2 ${fresh ? 'dice-enter' : ''}`}
-        style={{ borderLeft: '3px solid var(--color-danger)', width: 'fit-content', maxWidth: '100%', minWidth: '15rem' }}>
-        <div className="flex items-center gap-1.5 mb-1" style={{ color: 'var(--color-text-secondary)', fontSize: '0.65rem' }}>
-          <GiRollingDices style={{ fontSize: '0.85rem' }} />
-          <span>连射 · {data.weapon}</span>
-          <span className="ml-auto" style={{ color: 'var(--color-text-primary)' }}>
-            {data.shots.length}发 · 命中{hits}{totalDmg > 0 ? ` · 合计${totalDmg}伤` : ''}
-          </span>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          {data.shots.map((s, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs" style={{ opacity: s.hit ? 1 : 0.6 }}>
-              <span className="flex-shrink-0" style={{ color: 'var(--color-text-secondary)', width: '2.6rem' }}>第{i + 1}发</span>
-              <span className="truncate" style={{ color: 'var(--color-text-primary)', minWidth: '4rem' }}>{s.target}</span>
-              {s.gone ? (
-                <span style={{ color: 'var(--color-text-secondary)' }}>目标已倒下</span>
-              ) : (
-                <>
-                  <span className="font-mono" style={{ color: diceAccent(s.outcome || '') }}>{s.roll}/{s.target_val}</span>
-                  <span className="font-semibold" style={{ color: s.hit ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>
-                    {s.hit ? '命中' : '未命中'}
-                  </span>
-                  {s.hit && s.damage != null && <span style={{ color: 'var(--color-danger)' }}>{s.damage}伤</span>}
-                  {(s.flags || []).includes('贯穿') && <span className="font-semibold" style={{ color: 'var(--color-dice-gold)' }}>贯穿!</span>}
-                  {s.penalty > 0 && <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.6rem' }}>换目标 -{s.penalty}</span>}
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        {ts && <div className="text-right mt-1" style={{ fontSize: '0.6rem', opacity: 0.5, color: 'var(--color-text-secondary)' }}>{ts}</div>}
-      </div>
-    </div>
-  )
-}
 
 interface Character {
   id: string
@@ -366,6 +229,7 @@ interface SyncSnapshot {
     turn?: { confirmed_ids: string[]; total: number; ready: boolean }
   }
 }
+
 
 export function GameSessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
@@ -583,50 +447,30 @@ export function GameSessionPage() {
   useEffect(() => { prevSceneId.current = undefined; setSceneVeil(false) }, [sessionId])
 
   // 角色名 → 归属（用于消息前的身份图标：我 / AI 队友 / 其他真人 / NPC）
-  const partyByName = useMemo(() => {
-    const m: Record<string, { isMine: boolean; role: string }> = {}
-    for (const p of currentSession?.participants || []) {
-      if (p.character_name) m[p.character_name] = { isMine: p.is_mine, role: p.role }
-    }
-    return m
-  }, [currentSession?.participants])
-  const actorKind = (name?: string, isPlayer?: boolean): SeatKind => {
-    if (isPlayer) return 'me'
-    const p = name ? partyByName[name] : undefined
-    if (p?.isMine) return 'me'
-    if (p?.role === 'ai') return 'ai'
-    if (p?.role === 'human') return 'human'
-    return 'npc'
-  }
+  const partyByName = useMemo(
+    () => buildPartyByName(currentSession?.participants),
+    [currentSession?.participants],
+  )
+  const actorKind = (name?: string, isPlayer?: boolean): SeatKind =>
+    resolveActorKind(partyByName, name, isPlayer)
 
   // 战斗日志抽屉内容：从消息流里筛出带 combat_log 标记的机械结算行（dice/system），
   // 按 combatLogSince 下限只留本场（重连时 since=null → 全收，与落库历史一致）。
   // 派生自 messages，故实时/历史/重连三路统一，无需单独维护日志数组。
-  const combatLog = useMemo<CombatLogEntry[]>(() => {
-    const out: CombatLogEntry[] = []
-    for (const m of messages) {
-      if (m.metadata?.combat_log !== true) continue
-      if (combatLogSince != null && m.sequence_num != null && m.sequence_num <= combatLogSince) continue
-      if (!m.id) continue
-      out.push({ id: m.id, kind: m.type === 'dice' ? 'dice' : 'system', content: m.content })
-    }
-    return out
-  }, [messages, combatLogSince])
+  const combatLog = useMemo<CombatLogEntry[]>(
+    () => selectCombatLog(messages, combatLogSince),
+    [messages, combatLogSince],
+  )
 
   // 战斗态下「本场最近一次掷骰结算」：钉在战斗面板顶，玩家无需收起面板即可看到本次成败/对抗双方数值。
   // 从后往前找最近一条已揭示的 dice（对抗有 metadata.opposed；命中有 combat_log/hit；也含战斗中的普通检定）；
   // 3D 投掷未落定的先跳过（避免结果先于动画蹦出）；越过本场起点（seq≤combatLogSince）即停，不显示上一场/开战前的旧结果。
-  const combatResult = useMemo<CombatResultView | null>(() => {
-    if (!combat) return null
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]
-      if (combatLogSince != null && m.sequence_num != null && m.sequence_num <= combatLogSince) break
-      if (m.type !== 'dice' || !m.metadata) continue
-      if (m.id && diceAnimating.has(m.id) && !revealedDice.has(m.id)) continue   // 动画未落定，先看更早的
-      return { content: m.content, metadata: m.metadata as Record<string, unknown> }
-    }
-    return null
-  }, [combat, messages, combatLogSince, diceAnimating, revealedDice])
+  const combatResult = useMemo<CombatResultView | null>(
+    () => selectCombatResult({
+      combat, messages, since: combatLogSince, diceAnimating, revealedDice,
+    }),
+    [combat, messages, combatLogSince, diceAnimating, revealedDice],
+  )
 
   // —— 沉浸战斗布局 ——
   // 战斗激活 + 宽视口 + 用户未切回经典时，页面主体从单列聊天切成「战场（左，约 2/3）+ 聊天侧栏（右，约 1/3）」。
