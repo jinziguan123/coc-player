@@ -16,24 +16,55 @@ export function getApiBase(): string {
   return s ? `${s}/api` : '/api'
 }
 
-/** 轻量玩家身份：localStorage 生成并持久化 UUID，作为 X-Player-Token 带上。 */
-export function getPlayerToken(): string {
-  let t = localStorage.getItem('trpg_player_token')
+const LOCAL_TOKEN_KEY = 'trpg_player_token'
+
+function randomToken(): string {
+  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+/**
+ * 轻量玩家身份：localStorage 持久化的随机串，作为 X-Player-Token 带上。
+ *
+ * **按主机隔离。** 此前只有一个全局 token，发给你连过的每一台主机——而 token 就明晃晃
+ * 存在对方库里的 `session_participants.owner_token`，等于把「你在别处的身份」交给了
+ * 每一位房主。现在每台远程主机各持一个互不相干的 token。
+ *
+ * 这不能让 token 变成身份认证：它仍是明文 bearer，同一台主机内谁拿到谁就是你。
+ * 那需要 TLS 与账号体系，见 ADR-007 的未决项。这里只是把「泄露面」从「所有主机」
+ * 收敛成「泄露给谁就只影响谁」。
+ */
+export function getPlayerToken(serverUrl: string = getServerUrl()): string {
+  if (!serverUrl) {
+    let t = localStorage.getItem(LOCAL_TOKEN_KEY)
+    if (!t) { t = randomToken(); localStorage.setItem(LOCAL_TOKEN_KEY, t) }
+    return t
+  }
+  const key = `${LOCAL_TOKEN_KEY}::${serverUrl}`
+  let t = localStorage.getItem(key)
   if (!t) {
-    t = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    localStorage.setItem('trpg_player_token', t)
+    // 升级迁移：当前正连着的这台主机沿用旧的全局 token，避免把已入座的席位弄丢
+    // （它本来就已经拿到过这个 token，沿用不新增泄露）。其余主机一律新发。
+    const isCurrentHost = serverUrl === getServerUrl()
+    const legacy = isCurrentHost ? localStorage.getItem(LOCAL_TOKEN_KEY) : null
+    t = legacy || randomToken()
+    localStorage.setItem(key, t)
   }
   return t
 }
 
-function authHeaders(extra?: HeadersInit): HeadersInit {
-  return { 'X-Player-Token': getPlayerToken(), ...(extra || {}) }
+/** 从 API base 反推主机地址：`/api` = 本机，`<host>/api` = 远程房主。 */
+function serverUrlForBase(base: string): string {
+  return base.startsWith('/') ? '' : base.replace(/\/api$/, '')
+}
+
+function authHeaders(base: string, extra?: HeadersInit): HeadersInit {
+  return { 'X-Player-Token': getPlayerToken(serverUrlForBase(base)), ...(extra || {}) }
 }
 
 async function requestAt<T>(base: string, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     ...init,
-    headers: authHeaders({ 'Content-Type': 'application/json', ...(init?.headers || {}) }),
+    headers: authHeaders(base, { 'Content-Type': 'application/json', ...(init?.headers || {}) }),
   })
   if (!res.ok) {
     const body = await res.text()
@@ -56,7 +87,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
   const res = await fetch(`${getApiBase()}${path}`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: authHeaders(getApiBase()),
     body: form,
   })
   if (!res.ok) {
@@ -126,7 +157,7 @@ async function* parseSSEStream(res: Response) {
 export async function* streamSSE(path: string, body?: unknown) {
   const res = await fetch(`${getApiBase()}${path}`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: authHeaders(getApiBase(), { 'Content-Type': 'application/json' }),
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok || !res.body) throw new Error(`SSE error: ${res.status}`)
@@ -134,7 +165,7 @@ export async function* streamSSE(path: string, body?: unknown) {
 }
 
 export async function* connectSSE(path: string, signal?: AbortSignal) {
-  const res = await fetch(`${getApiBase()}${path}`, { signal, headers: authHeaders() })
+  const res = await fetch(`${getApiBase()}${path}`, { signal, headers: authHeaders(getApiBase()) })
   if (res.status === 204 || !res.body) return
   if (!res.ok) throw new Error(`SSE error: ${res.status}`)
   yield* parseSSEStream(res)
