@@ -195,6 +195,12 @@ export function SettingsPage() {
 
 /* ---------- 联机面板 ---------- */
 
+interface AIQuotaPolicy {
+  enabled: boolean
+  /** `limits` 库写法，如 "100/hour"、"20/minute"。 */
+  limit: string
+}
+
 interface NetStatus {
   lan_enabled: boolean
   listening_on_lan: boolean
@@ -206,10 +212,26 @@ interface NetStatus {
 function NetworkSettingsPanel() {
   const [status, setStatus] = useState<NetStatus | null>(null)
   const [saving, setSaving] = useState(false)
+  const [quota, setQuota] = useState<AIQuotaPolicy | null>(null)
+  const [quotaSaving, setQuotaSaving] = useState(false)
 
   useEffect(() => {
     localApi.get<NetStatus>('/net').then(setStatus).catch(() => setStatus(null))
+    localApi.get<AIQuotaPolicy>('/settings/ai/quota').then(setQuota).catch(() => setQuota(null))
   }, [])
+
+  const saveQuota = async (next: Partial<AIQuotaPolicy>) => {
+    if (!quota) return
+    setQuotaSaving(true)
+    try {
+      setQuota(await localApi.put<AIQuotaPolicy>('/settings/ai/quota', { ...quota, ...next }))
+      toast.success('AI 配额设置已保存')
+    } catch {
+      toast.error('保存失败')
+    } finally {
+      setQuotaSaving(false)
+    }
+  }
 
   const toggle = async (enabled: boolean) => {
     setSaving(true)
@@ -293,6 +315,52 @@ function NetworkSettingsPanel() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="card">
+        <h3 className="card-title">房间 AI 配额</h3>
+        <p
+          className="text-xs"
+          style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
+        >
+          房内玩家的正常动作（发言、投骰、推进回合）都会驱动 AI，烧的是你配置的额度。
+          打开后，每个房间在时间窗内能触发的生成次数会被限制，超出时该房间暂时无法推进。
+          默认关闭——自己单机玩不该被限。
+        </p>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => saveQuota({ enabled: !quota?.enabled })}
+            disabled={quotaSaving || quota === null}
+            className="btn"
+            style={{
+              border: `1px solid ${quota?.enabled ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
+              background: quota?.enabled ? 'rgba(212, 162, 78, 0.08)' : 'var(--color-input-bg)',
+            }}
+          >
+            {quota?.enabled ? '已启用 · 点击关闭' : '未启用 · 点击开启'}
+          </button>
+
+          {quota?.enabled && (
+            <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              上限{' '}
+              <input
+                defaultValue={quota.limit}
+                onBlur={(e) => {
+                  const v = e.target.value.trim()
+                  if (v && v !== quota.limit) void saveQuota({ limit: v })
+                }}
+                disabled={quotaSaving}
+                style={{
+                  width: '7rem', padding: '0.2rem 0.4rem', borderRadius: '3px',
+                  border: '1px solid var(--color-border-strong)',
+                  background: 'var(--color-input-bg)', color: 'var(--color-text-primary)',
+                }}
+              />
+              {' '}（如 100/hour、20/minute）
+            </label>
+          )}
+        </div>
       </div>
 
       <div className="card">
@@ -1160,7 +1228,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
                     </SelectContent>
                   </Select>
                   <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    KP 发手书（信件/报纸/照片等）时据此配图。改完**保存**，再到下方配置卡点「测试生图」确认能否生成。
+                    KP 发手书（信件/报纸/照片等）时据此配图。改完保存，再到下方配置卡点「测试生图」确认能否生成。
                   </p>
                   {form.image_backend === 'comfyui' ? (
                     <div className="mt-2 flex flex-col gap-2">

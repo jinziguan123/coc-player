@@ -374,6 +374,48 @@
         "title": "AIProfileUpdate",
         "type": "object"
       },
+      "AIQuotaPolicy": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "limit"
+        ],
+        "title": "AIQuotaPolicy",
+        "type": "object"
+      },
+      "AIQuotaUpdate": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "AIQuotaUpdate",
+        "type": "object"
+      },
       "AIStatus": {
         "properties": {
           "configured": {
@@ -7596,6 +7638,66 @@
           }
         },
         "summary": "Test Profile Image",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ai/quota": {
+      "get": {
+        "operationId": "get_ai_quota_api_settings_ai_quota_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIQuotaPolicy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ai Quota",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_ai_quota_api_settings_ai_quota_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIQuotaUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIQuotaPolicy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Ai Quota",
         "tags": [
           "settings"
         ]

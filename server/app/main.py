@@ -11,6 +11,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.router import api_router
+from app.services.ai_quota import QuotaExceeded
 from app.services.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,15 @@ app = FastAPI(title="TRPG Player", version="0.1.0", lifespan=lifespan)
 # 操作，房主本机豁免；见 app/services/rate_limit.py。
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(QuotaExceeded)
+async def _quota_exceeded_handler(_request: Request, exc: QuotaExceeded) -> JSONResponse:
+    """房间 AI 配额用尽 → 429。在这里统一映射，生成入口的九个调用点不必各自处理。"""
+    return JSONResponse(
+        {"detail": f"本房间的 AI 配额已用尽（上限 {exc.limit_spec}），请稍后再试或在设置里调整。"},
+        status_code=429,
+    )
 
 # 本进程实际绑在哪：默认按回环记，``run_desktop.py`` 启动时按开关与实挑端口改写。
 # 设置页据此判断「改了开关但还没重启」，并给出客人要填的完整地址。

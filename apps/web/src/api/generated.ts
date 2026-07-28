@@ -1950,6 +1950,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/ai/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Quota */
+        get: operations["get_ai_quota_api_settings_ai_quota_get"];
+        /** Update Ai Quota */
+        put: operations["update_ai_quota_api_settings_ai_quota_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/ai/status": {
         parameters: {
             query?: never;
@@ -2208,6 +2226,20 @@ export interface components {
             use_tool_calls?: boolean | null;
             /** Vision */
             vision?: boolean | null;
+        };
+        /** AIQuotaPolicy */
+        AIQuotaPolicy: {
+            /** Enabled */
+            enabled: boolean;
+            /** Limit */
+            limit: string;
+        };
+        /** AIQuotaUpdate */
+        AIQuotaUpdate: {
+            /** Enabled */
+            enabled: boolean;
+            /** Limit */
+            limit?: string | null;
         };
         /** AIStatus */
         AIStatus: {
@@ -6569,6 +6601,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_quota_api_settings_ai_quota_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIQuotaPolicy"];
+                };
+            };
+        };
+    };
+    update_ai_quota_api_settings_ai_quota_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIQuotaUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIQuotaPolicy"];
                 };
             };
             /** @description Validation Error */

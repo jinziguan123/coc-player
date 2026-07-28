@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.api.deps import require_local_client
 from app.config import settings
+from app.services import ai_quota
 
 # 配置文件与数据库同目录：dev 下是 server/ai_settings.json（行为不变）；打包运行时落到用户
 # 可写的 app-data（跟随 settings.db_path），否则会写进 PyInstaller 临时目录（sys._MEIPASS，
@@ -564,3 +565,29 @@ async def _test_anthropic(client: httpx.AsyncClient, profile: AIProfile) -> str:
     data = resp.json()
     content = data["content"][0]["text"]
     return f"连接成功: {content.strip()}"
+
+
+# ── 房间级 AI 配额 ──────────────────────────────────────────────────────────
+# 挂在 /api/settings 下，因此自动继承本路由的「仅限房主本机」（ADR-007）——
+# 配额是保护房主钱包的策略，当然只能房主自己改。
+
+
+class AIQuotaPolicy(BaseModel):
+    enabled: bool
+    limit: str
+    """`limits` 库的写法，如 "100/hour"、"20/minute"。"""
+
+
+class AIQuotaUpdate(BaseModel):
+    enabled: bool
+    limit: str | None = None
+
+
+@router.get("/ai/quota", response_model=AIQuotaPolicy)
+def get_ai_quota() -> AIQuotaPolicy:
+    return AIQuotaPolicy(**ai_quota.policy())
+
+
+@router.put("/ai/quota", response_model=AIQuotaPolicy)
+def update_ai_quota(data: AIQuotaUpdate) -> AIQuotaPolicy:
+    return AIQuotaPolicy(**ai_quota.set_policy(data.enabled, data.limit))

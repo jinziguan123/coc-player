@@ -26,8 +26,9 @@ server/evals/results/
 .env
 # 含 AI 密钥，不入库（密钥应从 .env / 设置页注入）
 ai_settings.json
-# 本机的「允许局域网加入」开关，属于个人环境设置，不入库
+# 本机的联机策略（局域网开关、房间 AI 配额），属于个人环境设置，不入库
 net_settings.json
+ai_quota.json
 .DS_Store
 target/
 .claude/

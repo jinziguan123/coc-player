@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from app.ai import usage_tracker
+from app.services import ai_quota
 from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,19 @@ class GenerationManager:
         return task is not None and not task.done()
 
     def start(self, room_id: str, coro, prelude: list[str] | None = None) -> asyncio.Task:
+        # 任何一条拒绝路径都要先把传进来的协程关掉：它已经被创建但不会被 await，
+        # 否则每次拒绝都留下一条 "coroutine was never awaited" 告警，日志里全是噪音。
         if self.is_generating(room_id):
+            coro.close()
             raise ValueError("该房间正在生成中")
+        # 房间级 AI 配额（默认关闭）。放在这里是因为本方法是全应用唯一的生成入口——
+        # 真人发言、AI 队友回合、战斗续跑、开场都汇到这一处。超额抛 QuotaExceeded，
+        # 由 main.py 的异常处理器映射成 429，调用点无需各自处理。
+        try:
+            ai_quota.check_and_consume(room_id)
+        except ai_quota.QuotaExceeded:
+            coro.close()
+            raise
         room_hub.begin_generation(room_id)
         # prelude（如玩家本轮行动事件 + generating）在 begin_generation 之后广播，
         # 从而进入 in-flight buffer：断线重连时可被重放，避免玩家消息「被吞」。
