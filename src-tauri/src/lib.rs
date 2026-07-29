@@ -1,3 +1,5 @@
+mod netlink;
+
 use std::sync::Mutex;
 
 use tauri::{Manager, State};
@@ -22,7 +24,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(Backend::default())
-        .invoke_handler(tauri::generate_handler![backend_port])
+        .manage(netlink::Netlink::new())
+        .invoke_handler(tauri::generate_handler![
+            backend_port,
+            netlink::netlink_start,
+            netlink::netlink_stop,
+            netlink::netlink_connect,
+            netlink::netlink_disconnect,
+            netlink::netlink_status,
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -49,9 +59,15 @@ pub fn run() {
                     let _ = std::fs::set_permissions(&exe, perm);
                 }
             }
+            // 隧道密钥随进程启动随机生成，经环境变量交给后端。后端据此把「经隧道
+            // 进来的远端客人」和「房主本人」区分开——两者的源 IP 都是回环，不给
+            // 它这个凭据就分不出来，客人会拿到房主的 AI 配置与限速豁免。
+            // 见 server/app/services/net_access.py 的 peer_kind。
+            let secret = handle.state::<netlink::Netlink>().secret().to_string();
             let (mut rx, child) = app
                 .shell()
                 .command(exe.to_string_lossy().to_string())
+                .env(netlink::SECRET_ENV, secret)
                 .spawn()?;
             handle
                 .state::<Backend>()

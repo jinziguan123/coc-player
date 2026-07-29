@@ -55,6 +55,22 @@ def _request(host: str, headers: dict[str, str] | None = None) -> Request:
     )
 
 
+# --- 跨进程契约 ---------------------------------------------------------
+
+
+def test_wire_names_match_the_tunnel_side():
+    """这三个名字是与 Rust 隧道的**跨进程约定**，不是内部实现细节。
+
+    对应 `src-tauri/src/netlink/mod.rs` 的 `SECRET_ENV` 与
+    `src-tauri/src/netlink/rewrite.rs` 的 `SECRET_HEADER` / `PEER_HEADER`。
+    单改一侧不会报错，只会让隧道标记静默失效——于是所有远端客人被判成
+    房主本机，安全边界无声消失。改名必须两侧一起改。
+    """
+    assert net_access.NETLINK_SECRET_ENV == "TRPG_NETLINK_SECRET"
+    assert net_access.NETLINK_SECRET_HEADER == "x-netlink-secret"
+    assert net_access.NETLINK_PEER_HEADER == "x-netlink-peer"
+
+
 # --- 三态判定本身 -------------------------------------------------------
 
 

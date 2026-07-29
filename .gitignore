@@ -39,5 +39,9 @@ config/
 # Tauri 打包：Rust 产物、生成的 schema、以及按平台构建的后端产物（由脚本重建）
 src-tauri/gen/
 src-tauri/binaries/
-src-tauri/resources/
+# resources/ 的内容由打包流程生成，但目录本身必须留一个文件在库里：
+# Tauri 的 bundle.resources glob 匹配不到任何文件就直接报错，开发态会连
+# cargo check / cargo test 都跑不起来。原因写在那个 README 里。
+src-tauri/resources/*
+!src-tauri/resources/README.md
 server/trpg.db.bak-*

@@ -6,7 +6,7 @@ authors = ["you"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.91"  # iroh 1.0 要求；见 docs/plans/2026-07-29-内置直连组网-design.md
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,3 +24,12 @@ log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
+iroh = "1"
+hyper = { version = "1.11.0", features = ["server", "client", "http1"] }
+hyper-util = { version = "0.1.20", features = ["tokio", "client-legacy", "http1", "server"] }
+http-body-util = "0.1.4"
+rand = "0.9.5"
+tokio = { version = "1.53.1", features = ["net", "io-util", "rt", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "io-util", "net", "sync"] }
