@@ -299,7 +299,11 @@ function NetworkSettingsPanel() {
   const enabled = status?.lan_enabled ?? false
   // 桌面版端口是后端启动时挑的，由 /net 给出；开发态后端不知道自己被绑在哪个端口，
   // 回落到当前页面的端口（同源托管时二者一致）。
-  const port = status?.port ?? (Number(window.location.port) || null)
+  //
+  // 但 `pnpm tauri dev` 下页面是 vite（5173）、后端在 8000，两者不同源——此时回落到
+  // 页面端口会让内置直连反代到 vite 而不是后端。dev 固定走 8000，见 vite.config.ts 的代理。
+  const port =
+    status?.port ?? (import.meta.env.DEV ? 8000 : Number(window.location.port) || null)
   const urlFor = (addr: string) => (port ? `http://${addr}:${port}` : `http://${addr}`)
   const statusText = statusLoadFailed
     ? '读取失败'
