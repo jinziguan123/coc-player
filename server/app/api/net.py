@@ -51,9 +51,10 @@ def set_lan(data: LanToggle, request: Request) -> NetStatus:
     """开关局域网加入。
 
     只有本机才能改：这个开关决定别人能不能连进来，不能让已经连进来的客人自己放宽它。
+    内置直连隧道的客人虽然源 IP 是回环，同样不算本机，见 ``net_access.peer_kind``。
     """
     client = request.client.host if request.client else None
-    if not net_access.is_local_request(client):
+    if net_access.peer_kind(client, request.headers) != "local":
         raise HTTPException(403, "只有房主本机可以修改联机设置")
     net_access.set_lan_enabled(data.enabled)
     return _status(request)

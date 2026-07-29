@@ -39,9 +39,12 @@ def require_local_client(request: Request) -> None:
 
     按**来源**而不是按 token 判定：token 是客户端自造的明文串、可以随便伪造，
     而请求来自不来自回环是传输层的事实。
+
+    判定走 ``net_access.peer_kind`` 而不是「源 IP 是回环」：内置直连隧道会把远端
+    客人的请求以 ``127.0.0.1`` 反代进来，只看 IP 的话他们会原地变成房主。
     """
     client = request.client.host if request.client else None
-    if not net_access.is_local_request(client):
+    if net_access.peer_kind(client, request.headers) != "local":
         raise HTTPException(403, "此操作只能在房主本机进行")
 
 

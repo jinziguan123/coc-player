@@ -30,6 +30,15 @@ AI_TRIGGER_LIMIT = "10/minute"
 
 
 def _key(request: Request) -> str:
+    """计数桶。
+
+    隧道客人不能按 IP 计数：他们经内置直连反代进来，源 IP 全是 ``127.0.0.1``，
+    按 IP 算会让所有远端玩家共用一个桶——一个人触顶，全场被限。改用对端公钥。
+    """
+    client = request.client.host if request.client else None
+    if net_access.peer_kind(client, request.headers) == "netlink":
+        peer = net_access.netlink_peer_id(request.headers) or "unknown"
+        return f"netlink:{peer}"
     return get_remote_address(request) or "unknown"
 
 
@@ -39,9 +48,12 @@ def exempt_local(request: Request) -> bool:
     他在自己机器上操作自己的东西，限速只会碍事；而且桌面版前端与后端同源，
     正常使用本来就会有突发请求。参数名必须是 ``request``——slowapi 据此判断
     是否要把请求对象传进来（见 wrappers.py 的 ``_exempt_when_takes_request``）。
+
+    **只豁免真·本机。** 内置直连隧道的客人源 IP 也是回环，若照旧只看 IP，
+    他们会连房间码枚举限速一起豁免掉——那正是这个模块要防的事。
     """
     client = request.client.host if request.client else None
-    return net_access.is_local_request(client)
+    return net_access.peer_kind(client, request.headers) == "local"
 
 
 limiter = Limiter(

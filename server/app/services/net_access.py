@@ -13,6 +13,12 @@
 
 第 2 道是第 1 道的补充而非替代——安全边界始终是 socket，中间件只负责
 「关掉立刻生效」和「防误暴露」。
+
+**第三种来源：内置直连隧道（P-Net-4）。** Tauri 外壳里的 iroh 隧道把远端客人的
+请求反代到本机 FastAPI，于是这些请求的源 IP 是 ``127.0.0.1``——而本模块此前把
+「来自回环」直接等同于「房主本人」。不加区分的话，隧道客人会顺带拿到房主的
+AI 配置（明文 API key）与限速豁免。``peer_kind`` 就是为此把来源从二值升级为三态，
+见它的文档字符串。
 """
 
 from __future__ import annotations
@@ -20,7 +26,11 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import os
+import secrets
 import socket
+from collections.abc import Mapping
+from typing import Literal
 
 from app.config import settings
 
@@ -105,13 +115,69 @@ def is_trusted_peer(host: str | None) -> bool:
 
 
 def is_local_request(host: str | None) -> bool:
-    """来源是否是房主本机。改联机设置这类「决定谁能连进来」的操作只允许本机做。"""
+    """来源 IP 是否是回环。
+
+    **做授权判断请用 ``peer_kind``，不要直接用这个。** 内置直连隧道接入后，
+    「来自回环」不再等价于「房主本人」：隧道客人的源 IP 同样是 ``127.0.0.1``。
+    本函数只回答 IP 这一层的事实，是 ``peer_kind`` 的组成部分。
+    """
     if not host:
         return True
     try:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return True
+
+
+PeerKind = Literal["local", "lan", "netlink"]
+
+# 隧道标记。密钥由 Tauri 外壳在 spawn 后端 sidecar 时经环境变量传入，两端各持一份、
+# 不落盘；每次启动重新随机。局域网上的人即便直连后端并伪造头，也出示不了它。
+NETLINK_SECRET_ENV = "TRPG_NETLINK_SECRET"
+NETLINK_SECRET_HEADER = "x-netlink-secret"
+NETLINK_PEER_HEADER = "x-netlink-peer"
+
+
+def peer_kind(host: str | None, headers: Mapping[str, str] | None = None) -> PeerKind:
+    """请求来源的三态判定，授权决策的唯一真源。
+
+    - ``local``：房主本人的界面（回环，且没有隧道标记）；
+    - ``netlink``：经内置直连隧道进来的远端客人（回环 + 有效隧道标记）；
+    - ``lan``：局域网或覆盖网络来的客人。
+
+    **安全性依赖隧道侧的一条契约：反代必须先无条件剥离客户端自带的所有
+    ``X-Netlink-*`` 头，再注入自己的。** 否则客人只要不发这个头就会被判成
+    ``local``，反而升权成房主。后端这一侧无法自行验证这件事——它看到的
+    回环请求，房主前端与隧道客人长得一模一样——所以剥离动作是隧道模块的
+    不可省责任，那里有对应的测试盯着。
+
+    没有设置密钥环境变量时（隧道未启用，含全部开发态与旧版本），任何头都不会
+    被认作隧道标记，行为与三态改造前完全一致。
+    """
+    if headers is not None and is_local_request(host) and _has_netlink_mark(headers):
+        return "netlink"
+    return "local" if is_local_request(host) else "lan"
+
+
+def _has_netlink_mark(headers: Mapping[str, str]) -> bool:
+    expected = os.environ.get(NETLINK_SECRET_ENV)
+    if not expected:
+        return False
+    presented = headers.get(NETLINK_SECRET_HEADER)
+    if presented is None:
+        return False
+    return secrets.compare_digest(presented, expected)
+
+
+def netlink_peer_id(headers: Mapping[str, str] | None) -> str | None:
+    """隧道客人的对端公钥，仅在 ``peer_kind`` 已判定为 ``netlink`` 时有意义。
+
+    限速要按它计数：隧道客人的源 IP 全是 ``127.0.0.1``，按 IP 计数会让所有远端
+    玩家共用一个桶，一个人触顶全体被限。
+    """
+    if headers is None:
+        return None
+    return headers.get(NETLINK_PEER_HEADER)
 
 
 # 探测本机地址用的 UDP 目标：分别指向常见私有网段与 tailnet。只用来问内核会选哪个
