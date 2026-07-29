@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { AlertTriangle, Copy, Eye, EyeOff, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Check, Copy, Eye, EyeOff, RefreshCw, UserPlus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, localApi } from '../api/client'
 import { Modal } from '../components/ui/modal'
@@ -11,6 +11,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  netlinkApprove,
+  netlinkAvailable,
+  netlinkInvite,
+  netlinkReject,
+  netlinkRevoke,
+  netlinkStart,
+  netlinkStatus,
+  netlinkStop,
+  shortPeerId,
+  type NetlinkStatus,
+} from '@/api/netlink'
 import { THEMES, getTheme, setTheme, type Theme } from '@/lib/theme'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getOnboardingReturnTo } from '@/features/onboarding/navigation'
@@ -387,6 +399,9 @@ function NetworkSettingsPanel() {
         )}
       </div>
 
+      {/* 内置直连 */}
+      <NetlinkPanel backendPort={port} onCopy={copyAddr} />
+
       {/* 房间 AI 配额 */}
       <div className={`card ${quota?.enabled ? 'active-rail' : ''}`}>
         <div className="setting-head">
@@ -485,11 +500,240 @@ function NetworkSettingsPanel() {
             但这只是兜底，不是可以依赖的防护。
           </li>
           <li>
-            想和不在同一网络的朋友一起玩，用 Tailscale 这类覆盖网络把双方接进同一个虚拟内网，
-            而不是暴露端口——它们的地址段本应用已经放行。
+            想和不在同一网络的朋友一起玩，优先用上面的「内置直连」；也可以用 Tailscale
+            这类覆盖网络把双方接进同一个虚拟内网，而不是暴露端口——它们的地址段本应用已经放行。
           </li>
         </ul>
       </div>
+    </div>
+  )
+}
+
+/* ---------- 内置直连面板 ---------- */
+
+/** 门口有人等着时刷得勤一些，否则房主会觉得「点了没反应」。 */
+const NETLINK_POLL_MS = 2000
+
+function NetlinkPanel({
+  backendPort,
+  onCopy,
+}: {
+  backendPort: number | null
+  onCopy: (text: string) => void | Promise<void>
+}) {
+  const available = netlinkAvailable()
+  const [status, setStatus] = useState<NetlinkStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [roomCode, setRoomCode] = useState('')
+  const [invite, setInvite] = useState('')
+
+  const refresh = useCallback(async () => {
+    if (!available) return
+    try {
+      setStatus(await netlinkStatus())
+    } catch {
+      // 轮询失败不打扰用户：下一轮会再试，真出事时开关操作会报错。
+    }
+  }, [available])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  // 只在开着的时候轮询——待批准请求是唯一会「自己冒出来」的状态。
+  useEffect(() => {
+    if (!available || !status?.hosting) return
+    const timer = setInterval(() => void refresh(), NETLINK_POLL_MS)
+    return () => clearInterval(timer)
+  }, [available, status?.hosting, refresh])
+
+  const hosting = status?.hosting ?? false
+
+  const toggle = async (next: boolean) => {
+    if (next && !backendPort) {
+      toast.error('还不知道后端端口，稍后再试')
+      return
+    }
+    setBusy(true)
+    try {
+      if (next) {
+        await netlinkStart(backendPort as number)
+        toast.success('内置直连已开启')
+      } else {
+        await netlinkStop()
+        setInvite('')
+        toast.success('内置直连已关闭')
+      }
+      await refresh()
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : '操作失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const makeInvite = async () => {
+    try {
+      const code = await netlinkInvite(roomCode.trim().toUpperCase())
+      setInvite(code)
+      void onCopy(code)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : '生成邀请码失败')
+    }
+  }
+
+  const decide = async (peerId: string, approve: boolean) => {
+    try {
+      if (approve) await netlinkApprove(peerId)
+      else await netlinkReject(peerId)
+      toast.success(approve ? '已同意加入' : '已拒绝')
+      await refresh()
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : '操作失败')
+    }
+  }
+
+  const revoke = async (peerId: string) => {
+    try {
+      await netlinkRevoke(peerId)
+      toast.success('已移出名单；对方断线重连后将被挡住')
+      await refresh()
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : '操作失败')
+    }
+  }
+
+  if (!available) {
+    return (
+      <div className="card">
+        <h3 className="card-title" style={{ margin: 0 }}>
+          内置直连
+        </h3>
+        <p className="setting-description">
+          让不在同一网络的朋友直接连进来，双方都不需要安装 Tailscale 之类的工具。
+          此功能只在桌面版可用，浏览器里打开的开发页面用不了。
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`card ${hosting ? 'active-rail' : ''}`}>
+      <div className="setting-head">
+        <h3 className="card-title" style={{ margin: 0 }}>
+          内置直连
+        </h3>
+        <Switch
+          label="内置直连"
+          checked={hosting}
+          disabled={busy || status === null}
+          onChange={toggle}
+          onText={hosting ? '已开启' : '已关闭'}
+          offText={hosting ? '已开启' : '已关闭'}
+        />
+      </div>
+      <p className="setting-description">
+        让不在同一网络的朋友直接连进来，双方都不需要装 Tailscale。开关即时生效，不必重启，
+        也不需要打开上面的「允许局域网加入」。朋友第一次连入时你要在这里点同意。
+      </p>
+
+      {hosting && (
+        <>
+          <div style={{ marginTop: '0.75rem' }}>
+            <div
+              className="text-xs"
+              style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
+            >
+              把邀请码发给朋友（填上房间码，对方就不用再问一次）：
+            </div>
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                style={{ maxWidth: '10rem' }}
+                placeholder="房间码（可留空）"
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value)}
+                aria-label="房间码"
+              />
+              <button type="button" className="btn" onClick={() => void makeInvite()}>
+                生成并复制邀请码
+              </button>
+            </div>
+            {invite && (
+              <button
+                type="button"
+                onClick={() => void onCopy(invite)}
+                className="copy-line"
+                style={{ marginTop: '0.4rem', wordBreak: 'break-all' }}
+                title="点击复制"
+                aria-label={`复制邀请码 ${invite}`}
+              >
+                {invite}
+                <Copy size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+
+          {(status?.pending.length ?? 0) > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <div className="notice" role="alert">
+                <UserPlus size={12} style={{ flexShrink: 0 }} aria-hidden="true" />
+                <span>有人想加入，同意后对方才能进来。认不出的标识就拒绝掉。</span>
+              </div>
+              {status?.pending.map((peer) => (
+                <div key={peer} className="setting-head" style={{ marginTop: '0.4rem' }}>
+                  <code className="text-xs">{shortPeerId(peer)}</code>
+                  <div style={{ display: 'flex', gap: '0.3rem' }}>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => void decide(peer, true)}
+                      title="同意加入"
+                      aria-label={`同意 ${shortPeerId(peer)} 加入`}
+                    >
+                      <Check size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => void decide(peer, false)}
+                      title="拒绝"
+                      aria-label={`拒绝 ${shortPeerId(peer)}`}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {(status?.approved.length ?? 0) > 0 && (
+        <div style={{ marginTop: '0.75rem' }}>
+          <div
+            className="text-xs"
+            style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
+          >
+            已允许的朋友（下次直接进，不用再同意）：
+          </div>
+          {status?.approved.map((peer) => (
+            <div key={peer.id} className="setting-head" style={{ marginTop: '0.3rem' }}>
+              <span className="text-xs">{peer.label}</span>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => void revoke(peer.id)}
+                title="移出名单"
+                aria-label={`移出 ${peer.label}`}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

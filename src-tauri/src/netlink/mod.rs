@@ -13,13 +13,16 @@
 //!
 //! 设计见 `docs/plans/2026-07-29-内置直连组网-design.md`。
 
+mod invite;
 mod rewrite;
+mod roster;
 
 #[cfg(test)]
 mod proxy_tests;
 
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty};
@@ -52,6 +55,8 @@ type ProxyBody = BoxBody<Bytes, hyper::Error>;
 struct Hosting {
     endpoint: Endpoint,
     id: String,
+    /// 不带房间码的邀请码，开启时算一次。带房间码的由 `netlink_invite` 现拼。
+    invite: String,
     task: JoinHandle<()>,
 }
 
@@ -69,17 +74,21 @@ pub struct Netlink {
     /// 隧道标记密钥：进程启动时随机一次，同时经环境变量交给后端 sidecar。
     /// 两端各持一份、不落盘；局域网上的人伪造头也出示不了它。
     secret: String,
+    /// 准入名册。跨重启保留，所以朋友只需被批准一次。
+    roster: Arc<roster::Roster>,
     hosting: Mutex<Option<Hosting>>,
     guesting: Mutex<Option<Guesting>>,
 }
 
 impl Netlink {
-    pub fn new() -> Self {
+    /// `data_dir` 是应用可写目录，名册落在它下面。
+    pub fn new(data_dir: PathBuf) -> Self {
         // 32 个十六进制字符（128 bit）。用于相等比较而非派生密钥，够了。
         let bytes: [u8; 16] = rand::rng().random();
         let secret = bytes.iter().map(|b| format!("{b:02x}")).collect();
         Self {
             secret,
+            roster: Arc::new(roster::Roster::load(data_dir.join("netlink_roster.json"))),
             hosting: Mutex::new(None),
             guesting: Mutex::new(None),
         }
@@ -90,20 +99,20 @@ impl Netlink {
     }
 }
 
-impl Default for Netlink {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Serialize)]
 pub struct NetlinkStatus {
     /// 房主侧是否已开启，以及要发给朋友的那串公钥。
     hosting: bool,
     endpoint_id: Option<String>,
+    /// 直接可发出去的邀请码（含房间码时由前端另行拼接）。
+    invite: Option<String>,
     /// 客人侧连着谁、前端该打哪个本地端口。
     connected_to: Option<String>,
     local_port: Option<u16>,
+    /// 正在门口等房主表态的对端公钥。
+    pending: Vec<String>,
+    /// 已批准的名册。
+    approved: Vec<roster::ApprovedPeer>,
 }
 
 // --- 房主侧 -------------------------------------------------------------
@@ -129,12 +138,14 @@ pub async fn netlink_start(
     let id = endpoint.id().to_string();
 
     let secret = state.secret.clone();
+    let roster = state.roster.clone();
     let accepting = endpoint.clone();
     let task = tauri::async_runtime::spawn(async move {
-        accept_loop(accepting, backend_port, secret).await;
+        accept_loop(accepting, backend_port, secret, roster).await;
     });
 
     state.hosting.lock().unwrap().replace(Hosting {
+        invite: invite::Invite::encode(&endpoint.id(), None),
         endpoint,
         id: id.clone(),
         task,
@@ -152,9 +163,15 @@ pub async fn netlink_stop(state: State<'_, Netlink>) -> Result<(), String> {
     Ok(())
 }
 
-async fn accept_loop(endpoint: Endpoint, backend_port: u16, secret: String) {
+async fn accept_loop(
+    endpoint: Endpoint,
+    backend_port: u16,
+    secret: String,
+    roster: Arc<roster::Roster>,
+) {
     while let Some(incoming) = endpoint.accept().await {
         let secret = secret.clone();
+        let roster = roster.clone();
         tauri::async_runtime::spawn(async move {
             let conn = match incoming.await {
                 Ok(conn) => conn,
@@ -163,9 +180,12 @@ async fn accept_loop(endpoint: Endpoint, backend_port: u16, secret: String) {
                     return;
                 }
             };
-            // P-Net-4c 会在这里插入白名单与房主批准；当前阶段任何拿到
-            // EndpointId 的人都能连上，等同于把公钥当作邀请凭证。
             let peer = conn.remote_id().to_string();
+            if !admit(&roster, &peer).await {
+                // 明确关掉而不是静默丢弃，客人侧才能拿到「被拒绝」而不是干等。
+                conn.close(1u8.into(), b"not approved by host");
+                return;
+            }
             let Some(stamp) = rewrite::Stamp::new(&secret, &peer) else {
                 log::error!("无法为对端 {peer} 构造隧道标记，拒绝转发");
                 return;
@@ -174,6 +194,28 @@ async fn accept_loop(endpoint: Endpoint, backend_port: u16, secret: String) {
             serve_connection(conn, backend_port, stamp).await;
             log::info!("直连客人断开：{peer}");
         });
+    }
+}
+
+/// 准入判定：名册里有就直接放行，陌生人挂起等房主表态。
+///
+/// 挂起期间连接是保持着的——客人那侧表现为「正在等待房主同意」而不是失败，
+/// 这样房主点了同意，对方不必重连就能进来。
+async fn admit(roster: &roster::Roster, peer: &str) -> bool {
+    if roster.is_approved(peer) {
+        return true;
+    }
+    log::info!("陌生对端请求接入，等待房主批准：{peer}");
+    match roster.wait_for_decision(peer).await {
+        roster::Verdict::Approved => true,
+        roster::Verdict::Rejected => {
+            log::info!("房主拒绝了接入请求：{peer}");
+            false
+        }
+        roster::Verdict::TimedOut => {
+            log::info!("接入请求超时无人处理：{peer}");
+            false
+        }
     }
 }
 
@@ -258,6 +300,15 @@ fn bad_gateway(reason: &str) -> Response<ProxyBody> {
 
 // --- 客人侧 -------------------------------------------------------------
 
+/// 连上房主之后，前端需要知道的两件事。
+#[derive(Serialize)]
+pub struct GuestLink {
+    /// 前端该打的本机端口。
+    local_port: u16,
+    /// 邀请码里带来的房间码，省得房主再口述一遍。
+    room_code: Option<String>,
+}
+
 /// 连上房主，返回前端该打的本地端口。
 ///
 /// 本地监听固定绑回环：这个端口是「通往房主的入口」，绝不能暴露给局域网，
@@ -265,18 +316,29 @@ fn bad_gateway(reason: &str) -> Response<ProxyBody> {
 #[tauri::command]
 pub async fn netlink_connect(
     state: State<'_, Netlink>,
-    endpoint_id: String,
-) -> Result<u16, String> {
+    invite_code: String,
+) -> Result<GuestLink, String> {
+    // 兼容两种输入：完整邀请码，以及直接粘一串裸公钥（4b 时期的用法）。
+    let parsed = invite::Invite::parse(&invite_code);
+    let (host_id, room_code) = match parsed {
+        Ok(invite) => (invite.host, invite.room_code),
+        Err(invite_err) => match invite_code.trim().parse::<EndpointId>() {
+            Ok(id) => (id, None),
+            // 报邀请码的错：绝大多数人粘的是邀请码，那句话更有指向性。
+            Err(_) => return Err(invite_err),
+        },
+    };
+    let endpoint_id = host_id.to_string();
+
     if let Some(existing) = state.guesting.lock().unwrap().as_ref() {
         if existing.host_id == endpoint_id {
-            return Ok(existing.local_port);
+            return Ok(GuestLink {
+                local_port: existing.local_port,
+                room_code,
+            });
         }
     }
     disconnect(&state).await;
-
-    let host_id: EndpointId = endpoint_id
-        .parse()
-        .map_err(|_| "这串房主标识格式不对，请检查是否复制完整".to_string())?;
 
     let endpoint = Endpoint::bind(presets::N0)
         .await
@@ -305,7 +367,10 @@ pub async fn netlink_connect(
         local_port,
         task,
     });
-    Ok(local_port)
+    Ok(GuestLink {
+        local_port,
+        room_code,
+    })
 }
 
 #[tauri::command]
@@ -362,7 +427,54 @@ pub fn netlink_status(state: State<'_, Netlink>) -> NetlinkStatus {
     NetlinkStatus {
         hosting: hosting.is_some(),
         endpoint_id: hosting.as_ref().map(|h| h.id.clone()),
+        invite: hosting.as_ref().map(|h| h.invite.clone()),
         connected_to: guesting.as_ref().map(|g| g.host_id.clone()),
         local_port: guesting.as_ref().map(|g| g.local_port),
+        pending: state.roster.pending_list(),
+        approved: state.roster.approved_list(),
     }
+}
+
+// --- 准入名册 -----------------------------------------------------------
+
+/// 批准一个正在门口等的对端，并记进名册（下次直接放行）。
+#[tauri::command]
+pub fn netlink_approve(
+    state: State<'_, Netlink>,
+    peer_id: String,
+    label: Option<String>,
+) -> Result<(), String> {
+    state.roster.approve(&peer_id, label);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn netlink_reject(state: State<'_, Netlink>, peer_id: String) -> Result<(), String> {
+    state.roster.reject(&peer_id);
+    Ok(())
+}
+
+/// 吊销。已建立的连接**不会**被立即切断，见下方说明。
+#[tauri::command]
+pub fn netlink_revoke(state: State<'_, Netlink>, peer_id: String) -> Result<(), String> {
+    state.roster.revoke(&peer_id);
+    // 名册只在建立连接时查一次，所以吊销对当前还连着的人不生效——他要断线重连
+    // 才会被挡住。真正的「踢人下线」需要连接层保留句柄并主动 close，留给后续。
+    log::info!("已吊销 {peer_id}；若对方仍连着，重连后才会被挡住");
+    Ok(())
+}
+
+/// 生成邀请码。房间码可选——房主可能还没建房就想先把码发出去。
+#[tauri::command]
+pub fn netlink_invite(
+    state: State<'_, Netlink>,
+    room_code: Option<String>,
+) -> Result<String, String> {
+    let hosting = state.hosting.lock().unwrap();
+    let hosting = hosting.as_ref().ok_or("尚未开启内置直连")?;
+    let host: EndpointId = hosting
+        .id
+        .parse()
+        .map_err(|_| "本机端点标识异常".to_string())?;
+    Ok(invite::Invite::encode(&host, room_code.as_deref()))
 }

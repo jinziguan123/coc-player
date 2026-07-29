@@ -24,7 +24,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(Backend::default())
-        .manage(netlink::Netlink::new())
         .invoke_handler(tauri::generate_handler![
             backend_port,
             netlink::netlink_start,
@@ -32,6 +31,10 @@ pub fn run() {
             netlink::netlink_connect,
             netlink::netlink_disconnect,
             netlink::netlink_status,
+            netlink::netlink_approve,
+            netlink::netlink_reject,
+            netlink::netlink_revoke,
+            netlink::netlink_invite,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -42,8 +45,12 @@ pub fn run() {
                 )?;
             }
 
-            // 拉起打包进来的后端（PyInstaller onedir，放在 resources/trpg-server/）。
+            // 准入名册要落在用户可写目录，所以 Netlink 得等 setup 拿到路径才能建。
             let handle = app.handle().clone();
+            let data_dir = handle.path().app_data_dir()?;
+            handle.manage(netlink::Netlink::new(data_dir));
+
+            // 拉起打包进来的后端（PyInstaller onedir，放在 resources/trpg-server/）。
             let resource_dir = handle.path().resource_dir()?;
             let exe = resource_dir
                 .join("resources")

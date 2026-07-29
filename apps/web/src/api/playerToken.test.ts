@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { getPlayerToken, setServerUrl } from './client'
+import { getPlayerToken, setServerIdentity, setServerUrl } from './client'
 
 /**
  * token 按主机隔离（ADR-007 未决项之一）。
@@ -51,5 +51,40 @@ describe('玩家 token 按主机隔离', () => {
     expect(getPlayerToken()).toBe(getPlayerToken('http://192.168.1.5:8756'))
     setServerUrl('')
     expect(getPlayerToken()).toBe(getPlayerToken(''))
+  })
+})
+
+/**
+ * 内置直连的本地端口每次连接都重新分配，但房主是同一个。token 若按地址归属，
+ * 朋友每次重连都会换一个新 token，表现就是**每次进来都掉席位**。
+ */
+describe('玩家 token 按稳定身份归属', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setServerUrl('')
+  })
+
+  it('同一房主换了本地端口仍是同一个 token', () => {
+    const host = 'netlink:xu4vpubkey'
+    setServerIdentity('http://127.0.0.1:54321', host)
+    const first = getPlayerToken('http://127.0.0.1:54321')
+
+    // 重开应用，隧道分到了另一个端口
+    setServerIdentity('http://127.0.0.1:61000', host)
+    expect(getPlayerToken('http://127.0.0.1:61000')).toBe(first)
+  })
+
+  it('不同房主即便复用同一个本地端口也不共用 token', () => {
+    setServerIdentity('http://127.0.0.1:54321', 'netlink:host-a')
+    const a = getPlayerToken('http://127.0.0.1:54321')
+
+    setServerIdentity('http://127.0.0.1:54321', 'netlink:host-b')
+    expect(getPlayerToken('http://127.0.0.1:54321')).not.toBe(a)
+  })
+
+  it('没登记身份的地址沿用原有行为', () => {
+    // 局域网直连不受影响：键仍是地址本身，老存档的席位不动。
+    localStorage.setItem('trpg_player_token::http://192.168.1.5:8756', 'existing')
+    expect(getPlayerToken('http://192.168.1.5:8756')).toBe('existing')
   })
 })

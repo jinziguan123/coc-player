@@ -17,6 +17,25 @@ export function getApiBase(): string {
 }
 
 const LOCAL_TOKEN_KEY = 'trpg_player_token'
+const IDENTITY_PREFIX = 'trpg_server_identity::'
+
+/**
+ * 记录某个主机地址背后的**稳定身份**，token 按它归属而不是按地址归属。
+ *
+ * 内置直连（netlink）连上房主后，前端打的是 `http://127.0.0.1:<临时端口>`——
+ * 端口每次连接都重新分配，按地址存 token 的话，每次重连都会换一个新 token、
+ * 于是每次都掉席位。传入 `netlink:<房主公钥>` 这类稳定标识即可跟着房主走。
+ *
+ * 没有登记过映射的地址（局域网直连）沿用地址本身，行为与此前完全一致。
+ */
+export function setServerIdentity(serverUrl: string, identity: string) {
+  if (serverUrl) localStorage.setItem(IDENTITY_PREFIX + serverUrl, identity)
+}
+
+function identityFor(serverUrl: string): string {
+  if (!serverUrl) return serverUrl
+  return localStorage.getItem(IDENTITY_PREFIX + serverUrl) || serverUrl
+}
 
 function randomToken(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -32,6 +51,9 @@ function randomToken(): string {
  * 这不能让 token 变成身份认证：它仍是明文 bearer，同一台主机内谁拿到谁就是你。
  * 那需要 TLS 与账号体系，见 ADR-007 的未决项。这里只是把「泄露面」从「所有主机」
  * 收敛成「泄露给谁就只影响谁」。
+ *
+ * 归属键是主机的**稳定身份**而非地址，见 `setServerIdentity`——内置直连的本地
+ * 端口每次都变，按地址存会让人每次重连都掉席位。
  */
 export function getPlayerToken(serverUrl: string = getServerUrl()): string {
   if (!serverUrl) {
@@ -39,7 +61,7 @@ export function getPlayerToken(serverUrl: string = getServerUrl()): string {
     if (!t) { t = randomToken(); localStorage.setItem(LOCAL_TOKEN_KEY, t) }
     return t
   }
-  const key = `${LOCAL_TOKEN_KEY}::${serverUrl}`
+  const key = `${LOCAL_TOKEN_KEY}::${identityFor(serverUrl)}`
   let t = localStorage.getItem(key)
   if (!t) {
     // 升级迁移：当前正连着的这台主机沿用旧的全局 token，避免把已入座的席位弄丢

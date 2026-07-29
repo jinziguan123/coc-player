@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api, getServerUrl, setServerUrl } from '@/api/client'
+import { api, getServerUrl, setServerIdentity, setServerUrl } from '@/api/client'
+import { netlinkConnect } from '@/api/netlink'
 import { PROTOCOL_VERSION } from '@/lib/roomEvents'
 import { useModuleStore } from '@/stores/moduleStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -142,13 +143,48 @@ export function useGameSetup() {
   }
 
   const joinRoom = async () => {
-    const code = joinCode.trim().toUpperCase()
-    if (!code) return
     setError('')
-    let host = hostAddr.trim()
+    const typed = hostAddr.trim()
+
+    // 邀请码（trpg:…）走内置直连：先把隧道建起来，再照常连本机那一头。
+    // 房间码可以由邀请码带来，所以这一步要在「房间码必填」的检查之前。
+    let code = joinCode.trim().toUpperCase()
+    if (typed.toLowerCase().startsWith('trpg:')) {
+      try {
+        const link = await netlinkConnect(typed)
+        const host = `http://127.0.0.1:${link.local_port}`
+        setServerUrl(host)
+        // 本地端口每次连接都变，token 必须跟着房主走，否则每次重连都掉席位。
+        setServerIdentity(host, `netlink:${typed.split(':')[1] ?? typed}`)
+        if (link.room_code) {
+          code = link.room_code.toUpperCase()
+          setJoinCode(code)
+        }
+      } catch (reason: unknown) {
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : '按邀请码连接失败，请确认房主已开启内置直连',
+        )
+        return
+      }
+      if (!code) {
+        setError('已连上房主，还需要填房间码')
+        return
+      }
+      return await enterRoom(code)
+    }
+
+    if (!code) return
+    let host = typed
     if (host && !/^https?:\/\//.test(host)) host = `http://${host}`
     if (host && !/:\d+$/.test(host)) host = `${host}:8000`
     setServerUrl(host)
+    return await enterRoom(code)
+  }
+
+  /** 握手协议版本并进房。地址已经设好，这里只管「进得去进不去」。 */
+  const enterRoom = async (code: string) => {
     try {
       // 先握手协议版本：房主与客人版本不一致时，有些事件类型对方根本不认，
       // 连进去只会表现成「界面莫名其妙不更新」。明说比半坏好。

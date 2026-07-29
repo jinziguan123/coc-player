@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "netlink",
+  "description": "允许后端同源托管的前端页面调用内置直连（netlink）命令。应用启动后窗口会从 loader 跳转到 http://127.0.0.1:<后端端口>，那之后属于 remote origin，默认拿不到 IPC——隧道的开关、邀请码与准入批准都在设置页里，必须放行。端口是后端启动时挑的，故用通配。不追加任何 core 权限：这条 capability 只为让页面能调应用自身的 netlink_* 命令。",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  },
+  "permissions": []
+}
