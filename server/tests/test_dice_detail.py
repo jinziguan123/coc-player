@@ -236,6 +236,15 @@ def test_opposed_each_side_has_check_detail(db_factory, monkeypatch):
 def test_san_loss_pool_detail(db_factory, monkeypatch):
     db = db_factory()
     module, hero, teammates, session = _seed(db)
+    db.add(SessionParticipant(
+        session_id=session.id,
+        character_id=hero.id,
+        role="ai",
+        is_primary=True,
+        claimed=True,
+        ready=True,
+    ))
+    db.commit()
     d = _dice(_run(db, module, hero, teammates, session,
                    "[SAN_CHECK: success_loss=0, failure_loss=1d6, chars=主角, source=腐尸]",
                    monkeypatch))[0]

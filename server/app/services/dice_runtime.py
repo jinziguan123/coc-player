@@ -34,6 +34,57 @@ _OUTCOME_RANK = {
     "fumble": 0,
 }
 
+# 场景 SAN 机制需要稳定来源键。模型可能把同一来源写成「报纸新闻」「未来报纸」或
+# 「阅读报纸时」；这些自由文本不能直接承担幂等主键，否则后来获知信息的队友补检时，
+# 已检定角色会因来源名字不同而被重复结算。
+_SAN_SOURCE_TERMS = (
+    "报纸", "日记", "信件", "便签", "手稿", "书籍", "档案", "文件", "照片", "录像", "录音",
+    "尸体", "尸骸", "腐尸", "肢体", "血腥", "鲜血", "大嘴", "怪物", "生物", "触手",
+    "头颅", "残骸", "肉块", "鬼魂", "幽灵", "邪神", "异形", "尖牙", "眼球",
+)
+
+
+def _san_mechanism_source_key(scene_id: str, mechanism_index: int) -> str:
+    """场景内 SAN 机制的稳定幂等键；事件顺序来自模组结构化数据。"""
+    return f"scene:{scene_id}:san:{mechanism_index}"
+
+
+def _canonical_san_source(
+    module: Module | None,
+    scene_id: str | None,
+    source: str,
+) -> str:
+    """把模型自由命名的 SAN 来源归一到当前场景的结构化机制键。
+
+    只在恰好一个机制与来源共享明确实体词时归一；零个或多个候选均保留原文本，避免同一
+    场景有多个相似恐怖源时误合并。
+    """
+    source = (source or "").strip()
+    if not module or not scene_id or not source:
+        return source
+    scene = next(
+        (item for item in module.scenes or [] if str(item.get("id") or "") == str(scene_id)),
+        None,
+    )
+    mechanisms = [
+        (index, event)
+        for index, event in enumerate((scene or {}).get("events", []) or [])
+        if isinstance(event, dict) and event.get("kind") == "san_check"
+    ]
+    source_terms = {term for term in _SAN_SOURCE_TERMS if term in source}
+    matches: list[int] = []
+    for index, event in mechanisms:
+        trigger = str(event.get("trigger") or "").strip()
+        if trigger and (trigger in source or source in trigger):
+            matches.append(index)
+            continue
+        trigger_terms = {term for term in _SAN_SOURCE_TERMS if term in trigger}
+        if source_terms and source_terms & trigger_terms:
+            matches.append(index)
+    if len(set(matches)) == 1:
+        return _san_mechanism_source_key(str(scene_id), matches[0])
+    return source
+
 def _check_prompt_text(actor_name: str, skill: str, difficulty: str) -> str:
     """req 1：系统主动给出的检定提示语。"""
     diff = DIFFICULTY_LABEL.get(difficulty, "")

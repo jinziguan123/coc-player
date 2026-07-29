@@ -155,19 +155,24 @@ def build_backstage_messages(
 def parse_backstage_events(raw: Any, valid_npc_ids: set[str]) -> list[dict] | None:
     """解析幕后推演输出。
 
-    坏 JSON → None（调用方视为本次失败：游标不动、不落库）；
+    坏 JSON → None（调用方可据此尝试一次结构修复）；
     合法 JSON 但无有效事件 → []（推演过了、无事发生，游标照常推进）。
     npc_id 不在模组内 / action 为空的条目视为幻觉丢弃；最多保留 2 条。
     """
-    data = _extract_json_object(raw)
+    data = raw if isinstance(raw, list) else _extract_json_object(raw)
     if data is None:
         return None
-    items = data.get("events")
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        items = data.get("events")
+    else:
+        return None
     if isinstance(items, dict):
         items = [items]
     if items is None:
         # 模型直接输出了单条事件对象（无 events 包裹）也宽容接受
-        items = [data] if data.get("npc_id") else []
+        items = [data] if isinstance(data, dict) and data.get("npc_id") else []
     if not isinstance(items, list):
         return None
     out: list[dict] = []
@@ -195,7 +200,7 @@ def parse_backstage_events(raw: Any, valid_npc_ids: set[str]) -> list[dict] | No
 
 
 class BackstageAgent(BaseAgent):
-    """低温（0.2）JSON 推演器：产出幕后事件列表，失败返回 None（fail-open）。"""
+    """低温 JSON 推演器：调用失败返回 None；格式失败修复一次，仍失败按空事件收口。"""
 
     def __init__(self, llm: LLMProvider):
         super().__init__(llm, temperature=0.2)
@@ -213,6 +218,35 @@ class BackstageAgent(BaseAgent):
             logger.exception("幕后推演调用失败（忽略，游标不动）")
             return None
         events = parse_backstage_events(raw, valid_npc_ids)
+        if events is not None:
+            return events
+
+        logger.info("幕后推演首次输出不是有效 JSON，尝试修复：%r", str(raw)[:200])
+        repair_messages = [{
+            "role": "system",
+            "content": (
+                "把用户提供的幕后推演原始输出修复为一个 JSON object。"
+                "只能输出 {\"events\":[...]}，不要解释、不要 Markdown；无法恢复时输出 "
+                "{\"events\":[]}。"
+            ),
+        }, {
+            "role": "user",
+            "content": str(raw)[:6000],
+        }]
+        try:
+            repaired = await self.llm.complete(
+                repair_messages,
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+        except Exception:
+            logger.warning("幕后推演 JSON 修复调用失败，本批按空事件处理", exc_info=True)
+            return []
+        events = parse_backstage_events(repaired, valid_npc_ids)
         if events is None:
-            logger.warning("幕后推演输出无法解析为 JSON（忽略，游标不动）：%s", str(raw)[:200])
+            logger.warning(
+                "幕后推演连续两次无法解析为 JSON，本批按空事件处理并推进游标：%r",
+                str(repaired)[:200],
+            )
+            return []
         return events

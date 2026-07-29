@@ -13,6 +13,7 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    dice_runtime,
     inventory_service,
     kp_actions,
     session_service,
@@ -44,7 +45,15 @@ _ENTRY_MARKERS = ("进入", "走进", "抵达", "到达", "来到", "踏入")
 _TERROR_MARKERS = (
     "尸体", "尸骸", "腐尸", "血腥", "鲜血", "怪物", "生物", "畸形", "触手",
     "大嘴", "超自然", "非人的", "肢体", "头颅", "残骸", "肉块", "鬼魂", "幽灵",
-    "邪神", "异形", "尖牙", "眼球", "面孔裂",
+    "邪神", "异形", "尖牙", "眼球", "面孔裂", "未来的日期", "明天的日期",
+    "日期不对", "时间异常", "尚未发生", "预言成真", "不该存在",
+)
+_READ_TRIGGER_WORDS = ("阅读", "翻看", "查看", "读", "传阅")
+_READ_EVIDENCE_WORDS = (
+    "阅读", "翻看", "查看", "看看", "看完", "读", "扫读", "扫完", "接过", "传阅", "递给",
+)
+_READABLE_SOURCE_TERMS = (
+    "报纸", "日记", "信件", "便签", "手稿", "书籍", "档案", "文件", "照片", "录像", "录音",
 )
 
 
@@ -143,6 +152,15 @@ def _trigger_matches(trigger: str, text: str) -> bool:
         return False
     if trigger in text:
         return True
+    # 「阅读报纸时」这类机制不能只做整句包含匹配。玩家常说“接过报纸扫完标题和日期”或
+    # “递给队友看看”；要求同一可读实体与阅读动作在近距离内同时出现，避免仅看见物品就触发。
+    readable_terms = [term for term in _READABLE_SOURCE_TERMS if term in trigger]
+    if readable_terms and any(word in trigger for word in _READ_TRIGGER_WORDS):
+        action = "|".join(map(re.escape, _READ_EVIDENCE_WORDS))
+        for term in readable_terms:
+            obj = re.escape(term)
+            if re.search(rf"(?:{action}).{{0,24}}{obj}|{obj}.{{0,24}}(?:{action})", text):
+                return True
     fragments = re.findall(r"[\u4e00-\u9fff]{2,}", trigger)
     if not fragments:
         return trigger.casefold() in text.casefold()
@@ -164,23 +182,38 @@ def _scene_sanity_mechanism(
         None,
     )
     mechanisms = [
-        event for event in (scene or {}).get("events", []) or []
+        (index, event)
+        for index, event in enumerate((scene or {}).get("events", []) or [])
         if isinstance(event, dict) and event.get("kind") == "san_check"
     ]
     if not mechanisms:
         return None
-    for event in mechanisms:
+    for index, event in mechanisms:
         if _trigger_matches(str(event.get("trigger") or ""), evidence_text):
-            return event
+            matched = dict(event)
+            matched["_source_key"] = dice_runtime._san_mechanism_source_key(
+                str(scene_id), index,
+            )
+            return matched
     if entered:
         entry = [
-            event for event in mechanisms
+            (index, event) for index, event in mechanisms
             if any(marker in str(event.get("trigger") or "") for marker in _ENTRY_MARKERS)
         ]
         if len(entry) == 1:
-            return entry[0]
+            index, event = entry[0]
+            matched = dict(event)
+            matched["_source_key"] = dice_runtime._san_mechanism_source_key(
+                str(scene_id), index,
+            )
+            return matched
         if len(mechanisms) == 1:
-            return mechanisms[0]
+            index, event = mechanisms[0]
+            matched = dict(event)
+            matched["_source_key"] = dice_runtime._san_mechanism_source_key(
+                str(scene_id), index,
+            )
+            return matched
     return None
 
 
@@ -193,7 +226,12 @@ def _apply_scene_sanity_mechanism(plan: turn_planner.TurnPlan, mechanism: dict) 
     plan.sanity.trigger = True
     plan.sanity.success_loss = parts[0].strip()
     plan.sanity.failure_loss = parts[1].strip()
-    plan.sanity.source = str(mechanism.get("trigger") or plan.sanity.source or "场景机制").strip()
+    plan.sanity.source = str(
+        mechanism.get("_source_key")
+        or mechanism.get("trigger")
+        or plan.sanity.source
+        or "场景机制"
+    ).strip()
     return True
 
 
@@ -334,13 +372,19 @@ async def _ensure_planned_combat(
         yield chunk
 
 def _san_rolled_this_turn(db: Session, session_id: str, pre_gen_seq: int) -> bool:
-    """本轮生成里是否已产生过 SAN 骰点事件（seq > 生成前基线且 metadata.skill=='SAN'）——
-    用于让确定性 SAN 守卫在 KP 已自行掷过 SAN 时幂等跳过，不重复扣。"""
+    """本轮是否已结算或发起过 SAN；防止确定性守卫重复发检定。"""
     for ev in session_service.get_session_events(db, session_id):
+        meta = ev.metadata_ or {}
         if (
             (ev.sequence_num or 0) > pre_gen_seq
-            and ev.event_type == "dice"
-            and (ev.metadata_ or {}).get("skill") == "SAN"
+            and (
+                (ev.event_type == "dice" and meta.get("skill") == "SAN")
+                or (
+                    ev.event_type == "system"
+                    and meta.get("check_request")
+                    and meta.get("kind") == "san_check"
+                )
+            )
         ):
             return True
     return False
@@ -359,13 +403,10 @@ async def _ensure_planned_sanity(
     """确保规划器裁定的『目睹恐怖』一定落成理智检定，补偿 KP 漏发 SAN_CHECK。
 
     模型仍负责识别本轮是否目睹恐怖及其强度；一旦结构化计划肯定裁定，SAN 检定就由后端确定性
-    发出（系统自动掷、结算损失与疯狂）。若 KP 本轮已自行掷过 SAN（任意恐怖源），本守卫幂等跳过；
+    发出（真人挂待投请求，AI 角色自动结算）。若 KP 本轮已自行发起 SAN（任意恐怖源），本守卫幂等跳过；
     同一角色对同一恐怖源的去重仍由 _exec_san_check（world_state.san_checked）保证。
     """
-    if plan is None:
-        return
-    if _san_rolled_this_turn(db, session_id, pre_gen_seq):
-        return
+    plan = plan or turn_planner.TurnPlan()
     if not _sanity_has_evidence(
         db, session_id, game_session, module, player_char, plan, pre_gen_seq,
     ):
@@ -374,13 +415,20 @@ async def _ensure_planned_sanity(
             session_id, plan.sanity.source,
         )
         return
+    # 结构化场景机制使用稳定 source_key，_exec_san_check 可逐角色跳过已结算/待投项并补齐遗漏者；
+    # 非结构化来源仍保留旧的整轮守卫，避免 KP 与 planner 对同一恐怖使用不同自由文本时重复扣。
+    if (
+        _san_rolled_this_turn(db, session_id, pre_gen_seq)
+        and not plan.sanity.source.startswith("scene:")
+    ):
+        return
     kv = {
         "success_loss": plan.sanity.success_loss or "0",
         "failure_loss": plan.sanity.failure_loss or "1d6",
         "source": (plan.sanity.source or "本轮目睹的恐怖").strip(),
         "chars": "/".join(plan.sanity.witnesses) if plan.sanity.witnesses else "",
     }
-    chunks, _descs = await _exec_san_check(
+    chunks, _descs, _pending = await _exec_san_check(
         db, session_id, game_session, kv, player_char, teammates,
     )
     for chunk in chunks:

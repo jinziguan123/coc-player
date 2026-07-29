@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { AlertTriangle, Copy, Eye, EyeOff } from 'lucide-react'
+import { AlertTriangle, Copy, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, localApi } from '../api/client'
 import { Modal } from '../components/ui/modal'
+import { Switch } from '../components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -212,21 +213,49 @@ interface NetStatus {
 function NetworkSettingsPanel() {
   const [status, setStatus] = useState<NetStatus | null>(null)
   const [saving, setSaving] = useState(false)
+  const [statusLoadFailed, setStatusLoadFailed] = useState(false)
   const [quota, setQuota] = useState<AIQuotaPolicy | null>(null)
   const [quotaSaving, setQuotaSaving] = useState(false)
+  const [quotaLoadFailed, setQuotaLoadFailed] = useState(false)
+  const [quotaLimitDraft, setQuotaLimitDraft] = useState('')
+
+  const loadStatus = useCallback(async () => {
+    setStatusLoadFailed(false)
+    setStatus(null)
+    try {
+      setStatus(await localApi.get<NetStatus>('/net'))
+    } catch {
+      setStatusLoadFailed(true)
+    }
+  }, [])
+
+  const loadQuota = useCallback(async () => {
+    setQuotaLoadFailed(false)
+    setQuota(null)
+    try {
+      const next = await localApi.get<AIQuotaPolicy>('/settings/ai/quota')
+      setQuota(next)
+      setQuotaLimitDraft(next.limit)
+    } catch {
+      setQuotaLoadFailed(true)
+    }
+  }, [])
 
   useEffect(() => {
-    localApi.get<NetStatus>('/net').then(setStatus).catch(() => setStatus(null))
-    localApi.get<AIQuotaPolicy>('/settings/ai/quota').then(setQuota).catch(() => setQuota(null))
-  }, [])
+    void loadStatus()
+    void loadQuota()
+  }, [loadQuota, loadStatus])
 
   const saveQuota = async (next: Partial<AIQuotaPolicy>) => {
     if (!quota) return
     setQuotaSaving(true)
     try {
-      setQuota(await localApi.put<AIQuotaPolicy>('/settings/ai/quota', { ...quota, ...next }))
+      const saved = await localApi.put<AIQuotaPolicy>('/settings/ai/quota', { ...quota, ...next })
+      setQuota(saved)
+      setQuotaLimitDraft(saved.limit)
       toast.success('AI 配额设置已保存')
     } catch {
+      if (next.limit !== undefined) setQuotaLimitDraft(quota.limit)
       toast.error('保存失败')
     } finally {
       setQuotaSaving(false)
@@ -245,9 +274,14 @@ function NetworkSettingsPanel() {
     }
   }
 
-  const copyAddr = (url: string) => {
-    navigator.clipboard?.writeText(url)
-    toast.success('地址已复制')
+  const copyAddr = async (url: string) => {
+    try {
+      if (!navigator.clipboard) throw new Error('clipboard unavailable')
+      await navigator.clipboard.writeText(url)
+      toast.success('地址已复制')
+    } catch {
+      toast.error('复制失败，请手动选择地址')
+    }
   }
 
   const enabled = status?.lan_enabled ?? false
@@ -255,122 +289,191 @@ function NetworkSettingsPanel() {
   // 回落到当前页面的端口（同源托管时二者一致）。
   const port = status?.port ?? (Number(window.location.port) || null)
   const urlFor = (addr: string) => (port ? `http://${addr}:${port}` : `http://${addr}`)
+  const statusText = statusLoadFailed
+    ? '读取失败'
+    : status === null
+      ? '读取中'
+      : enabled
+        ? '已开启'
+        : '已关闭'
+  const quotaText = quotaLoadFailed
+    ? '读取失败'
+    : quota === null
+      ? '读取中'
+      : quota.enabled
+        ? '已启用'
+        : '未启用'
 
   return (
-    <div>
+    <div className="network-settings">
       <h2 className="page-title">联机</h2>
 
-      <div className="card">
-        <h3 className="card-title">允许局域网加入</h3>
-        <p
-          className="text-xs"
-          style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
-        >
+      {/* 允许局域网加入 */}
+      <div className={`card ${enabled ? 'active-rail' : ''}`}>
+        <div className="setting-head">
+          <h3 className="card-title" style={{ margin: 0 }}>
+            允许局域网加入
+          </h3>
+          <Switch
+            label="允许局域网加入"
+            checked={enabled}
+            disabled={saving || status === null}
+            onChange={toggle}
+            onText={statusText}
+            offText={statusText}
+          />
+        </div>
+        <p className="setting-description">
           关闭时后端只监听本机，同一网络内的其他设备也连不上——这是默认状态。
           打开后其他玩家可以在「加入房间」处填你的地址进来。
         </p>
 
-        <button
-          onClick={() => toggle(!enabled)}
-          disabled={saving || status === null}
-          className="btn"
-          style={{
-            border: `1px solid ${enabled ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
-            background: enabled ? 'rgba(212, 162, 78, 0.08)' : 'var(--color-input-bg)',
-          }}
-        >
-          {enabled ? '已允许 · 点击关闭' : '未允许 · 点击开启'}
-        </button>
+        {statusLoadFailed && (
+          <div className="notice notice--danger setting-retry" role="alert">
+            <AlertTriangle size={13} aria-hidden="true" />
+            <span>读取联机状态失败，当前无法确认是否允许其他设备加入。</span>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => void loadStatus()}
+              title="重新读取联机状态"
+              aria-label="重新读取联机状态"
+            >
+              <RefreshCw size={13} />
+            </button>
+          </div>
+        )}
 
         {status?.restart_required && (
-          <p
-            className="text-xs"
-            style={{ color: 'var(--color-text-accent)', marginTop: '0.75rem' }}
-          >
-            设置已保存，但监听地址要重启应用才会改变——
-            {enabled ? '重启后其他玩家才能连进来。' : '重启前本机之外的请求已经被拒绝。'}
-          </p>
+          <div className="notice" style={{ marginTop: '0.75rem' }}>
+            <RefreshCw
+              size={12}
+              style={{ flexShrink: 0, marginTop: '0.15rem' }}
+              aria-hidden="true"
+            />
+            <span>
+              设置已保存，但监听地址在应用启动时确定——
+              {enabled ? '需重启应用，其他玩家才能连进来。' : '重启前，本机之外的请求已经被拒绝。'}
+            </span>
+          </div>
         )}
 
         {status?.lan_enabled && (
-          <div style={{ marginTop: '0.85rem' }}>
+          <div style={{ marginTop: '0.75rem' }}>
             <div
               className="text-xs"
               style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
             >
               {status.addresses.length > 0
-                ? '把下面的地址连同房间码发给其他玩家：'
+                ? '把地址连同房间码发给其他玩家（点击复制）：'
                 : '没有找到可用的局域网地址——本机可能没连上网，或只连着会接管路由的 VPN。'}
             </div>
-            {status.addresses.map((addr) => (
-              <button
-                key={addr}
-                onClick={() => copyAddr(urlFor(addr))}
-                className="badge inline-flex items-center gap-1"
-                style={{ marginRight: '0.4rem' }}
-                title="点击复制"
-              >
-                {urlFor(addr)} <Copy size={11} />
-              </button>
-            ))}
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              {status.addresses.map((addr) => (
+                <button
+                  key={addr}
+                  type="button"
+                  onClick={() => void copyAddr(urlFor(addr))}
+                  className="copy-line"
+                  title="点击复制"
+                  aria-label={`复制联机地址 ${urlFor(addr)}`}
+                >
+                  {urlFor(addr)}
+                  <Copy size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      <div className="card">
-        <h3 className="card-title">房间 AI 配额</h3>
-        <p
-          className="text-xs"
-          style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
-        >
+      {/* 房间 AI 配额 */}
+      <div className={`card ${quota?.enabled ? 'active-rail' : ''}`}>
+        <div className="setting-head">
+          <h3 className="card-title" style={{ margin: 0 }}>
+            房间 AI 配额
+          </h3>
+          <Switch
+            label="房间 AI 配额"
+            checked={!!quota?.enabled}
+            disabled={quotaSaving || quota === null}
+            onChange={(next) => saveQuota({ enabled: next })}
+            onText={quotaText}
+            offText={quotaText}
+          />
+        </div>
+        <p className="setting-description">
           房内玩家的正常动作（发言、投骰、推进回合）都会驱动 AI，烧的是你配置的额度。
-          打开后，每个房间在时间窗内能触发的生成次数会被限制，超出时该房间暂时无法推进。
+          启用后每个房间在时间窗内能触发的生成次数受限，超出时该房间暂时无法推进。
           默认关闭——自己单机玩不该被限。
         </p>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => saveQuota({ enabled: !quota?.enabled })}
-            disabled={quotaSaving || quota === null}
-            className="btn"
-            style={{
-              border: `1px solid ${quota?.enabled ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
-              background: quota?.enabled ? 'rgba(212, 162, 78, 0.08)' : 'var(--color-input-bg)',
-            }}
-          >
-            {quota?.enabled ? '已启用 · 点击关闭' : '未启用 · 点击开启'}
-          </button>
+        {quotaLoadFailed && (
+          <div className="notice notice--danger setting-retry" role="alert">
+            <AlertTriangle size={13} aria-hidden="true" />
+            <span>读取 AI 配额失败，限制策略暂不可编辑。</span>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => void loadQuota()}
+              title="重新读取 AI 配额"
+              aria-label="重新读取 AI 配额"
+            >
+              <RefreshCw size={13} />
+            </button>
+          </div>
+        )}
 
-          {quota?.enabled && (
-            <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              上限{' '}
-              <input
-                defaultValue={quota.limit}
-                onBlur={(e) => {
-                  const v = e.target.value.trim()
-                  if (v && v !== quota.limit) void saveQuota({ limit: v })
-                }}
-                disabled={quotaSaving}
-                style={{
-                  width: '7rem', padding: '0.2rem 0.4rem', borderRadius: '3px',
-                  border: '1px solid var(--color-border-strong)',
-                  background: 'var(--color-input-bg)', color: 'var(--color-text-primary)',
-                }}
-              />
-              {' '}（如 100/hour、20/minute）
-            </label>
-          )}
-        </div>
+        {quota?.enabled && (
+          <label className="quota-editor">
+            <span>每房间上限</span>
+            <input
+              className="input"
+              aria-label="每房间 AI 配额上限"
+              value={quotaLimitDraft}
+              onChange={(event) => setQuotaLimitDraft(event.target.value)}
+              onBlur={() => {
+                const value = quotaLimitDraft.trim()
+                if (!value) {
+                  setQuotaLimitDraft(quota.limit)
+                } else if (value !== quota.limit) {
+                  void saveQuota({ limit: value })
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+                if (event.key === 'Escape') {
+                  setQuotaLimitDraft(quota.limit)
+                  event.currentTarget.blur()
+                }
+              }}
+              disabled={quotaSaving}
+            />
+            <span className="quota-hint">如 100/hour、20/minute</span>
+          </label>
+        )}
       </div>
 
-      <div className="card">
-        <h3 className="card-title">
-          <AlertTriangle size={13} style={{ display: 'inline', marginRight: '0.3rem' }} />
+      {/* 风险提示：用血色左带与正常设置卡区分开 */}
+      <div className="card setting-risk-card">
+        <h3
+          className="card-title"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.35rem',
+            color: 'var(--color-danger)',
+          }}
+        >
+          <AlertTriangle size={13} aria-hidden="true" />
           开启前请确认
         </h3>
         <ul
           className="text-xs"
-          style={{ color: 'var(--color-text-secondary)', lineHeight: 1.8, paddingLeft: '1.1rem' }}
+          style={{
+            color: 'var(--color-text-secondary)', lineHeight: 1.8,
+            paddingLeft: '1.1rem', margin: 0,
+          }}
         >
           <li>
             本应用没有账号体系，也没有传输加密。同一网络里任何人只要知道你的地址和房间码，

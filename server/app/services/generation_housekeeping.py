@@ -176,7 +176,7 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
         valid_ids = {n.get("id") for n in (module.npcs or []) if n.get("id")}
         bevents = await agent.infer(messages, valid_ids)
         if bevents is None:
-            return  # 调用/解析失败：游标不动、不落库（fail-open，下轮重试）
+            return  # 首次调用本身失败：游标不动、不落库（网络恢复后重试）
 
         npc_names = {
             n.get("id"): n.get("name") or n.get("id")

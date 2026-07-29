@@ -843,6 +843,87 @@ def find_pending_check(
     return None
 
 
+def find_pending_san_check(
+    db: Session, session_id: str, char_id: str, source: str,
+) -> dict | None:
+    """查找同一角色、同一恐怖源尚未完成的 SAN 检定。"""
+    session = db.get(GameSession, session_id)
+    if not session:
+        return None
+    pending = (session.world_state or {}).get("pending_checks") or {}
+    for check in pending.values():
+        if (
+            isinstance(check, dict)
+            and check.get("kind") == "san_check"
+            and check.get("char_id") == char_id
+            and (check.get("source") or "") == (source or "")
+        ):
+            return dict(check)
+    return None
+
+
+def append_pending_batch_result(
+    db: Session, session_id: str, batch_id: str, description: str,
+) -> int:
+    """把已完成结果追加到同批剩余待投项，返回仍待投的人数。"""
+    session = db.get(GameSession, session_id)
+    if not session:
+        return 0
+    ws = dict(session.world_state or {})
+    pending = dict(ws.get("pending_checks") or {})
+    remaining = 0
+    for check_id, raw in list(pending.items()):
+        if not isinstance(raw, dict) or raw.get("san_batch_id") != batch_id:
+            continue
+        check = dict(raw)
+        results = list(check.get("san_results") or [])
+        results.append(description)
+        check["san_results"] = results
+        pending[check_id] = check
+        remaining += 1
+    if remaining:
+        ws["pending_checks"] = pending
+        session.world_state = ws
+        db.add(session)
+        db.commit()
+    return remaining
+
+
+def append_pending_group_check_result(
+    db: Session,
+    session_id: str,
+    batch_id: str,
+    description: str,
+    *,
+    succeeded: bool,
+    fumbled: bool,
+) -> int:
+    """把一名真人的公开群检结果追加到同批剩余待投项，并合并批次结果标志。"""
+    session = db.get(GameSession, session_id)
+    if not session:
+        return 0
+    ws = dict(session.world_state or {})
+    pending = dict(ws.get("pending_checks") or {})
+    remaining = 0
+    for check_id, raw in list(pending.items()):
+        if not isinstance(raw, dict) or raw.get("check_batch_id") != batch_id:
+            continue
+        check = dict(raw)
+        results = list(check.get("check_results") or [])
+        results.append(description)
+        check["check_results"] = results
+        check["check_any_success"] = bool(check.get("check_any_success")) or succeeded
+        check["check_any_fumble"] = bool(check.get("check_any_fumble")) or fumbled
+        pending[check_id] = check
+        remaining += 1
+    if remaining:
+        ws["pending_checks"] = pending
+        session.world_state = ws
+        db.add(session)
+        db.commit()
+    return remaining
+
+
 def pop_pending_check(db: Session, session_id: str, check_id: str) -> dict | None:
     """取出并移除一个待定检定；不存在返回 None。"""
     session = db.get(GameSession, session_id)

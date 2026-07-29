@@ -151,9 +151,11 @@ async def execute_human_kp_action(
         return chunks, "HP 已结算"
 
     if action == "san_check":
-        chunks, descs = await _exec_san_check(
+        chunks, descs, pending = await _exec_san_check(
             db, session_id, game_session, payload, player_char, teammates,
         )
+        if pending:
+            return chunks, "已向真人目睹者发出理智检定请求"
         return chunks, "；".join(descs) if descs else "本次理智检定无需重复结算"
 
     if action == "start_combat":

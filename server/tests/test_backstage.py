@@ -28,17 +28,26 @@ from app.services import chat_service, session_service
 class _StubLLM:
     """记录调用的桩 provider：payload 为返回值，exc 给定则抛出。"""
 
-    def __init__(self, payload: str = "", exc: Exception | None = None):
+    def __init__(
+        self,
+        payload: str = "",
+        exc: Exception | None = None,
+        responses: list[str] | None = None,
+    ):
         self.calls = 0
         self.messages: list[list[dict]] = []
         self.payload = payload
         self.exc = exc
+        self.responses = list(responses or [])
 
     async def complete(self, messages, **kw):
         self.calls += 1
         self.messages.append(messages)
         if self.exc:
             raise self.exc
+        if self.responses:
+            index = min(self.calls - 1, len(self.responses) - 1)
+            return self.responses[index]
         return self.payload
 
 
@@ -232,7 +241,7 @@ def test_llm_exception_fail_open(db_factory):
     assert session.world_state["backstage"]["last_run_seq"] == 0  # 游标不动
 
 
-def test_bad_json_fail_open(db_factory):
+def test_bad_json_repair_success(db_factory):
     db = db_factory()
     session, module, player = _seed(db)
     session.world_state = {
@@ -241,11 +250,39 @@ def test_bad_json_fail_open(db_factory):
     }
     db.commit()
     _add_player_turns(db, session, player, 6)
+    llm = _StubLLM(responses=["这不是 JSON {{{", _GOOD_JSON])
+    _run(db, session, llm)
+    assert llm.calls == 2
+    assert len(_kp_events(db, session)) == 1
+
+
+def test_bad_json_after_repair_advances_as_empty(db_factory):
+    db = db_factory()
+    session, module, player = _seed(db)
+    session.world_state = {
+        "flags": ["flag_old"],
+        "backstage": {"last_run_seq": 0, "last_scene_id": "scene_hall"},
+    }
+    db.commit()
+    _add_player_turns(db, session, player, 6)
+    last_seq = session_service.get_session_events(db, session.id)[-1].sequence_num
     llm = _StubLLM("这不是 JSON {{{")
     _run(db, session, llm)
+    assert llm.calls == 2
     assert _kp_events(db, session) == []
     db.refresh(session)
-    assert session.world_state["backstage"]["last_run_seq"] == 0
+    assert session.world_state["backstage"]["last_run_seq"] == last_seq
+
+
+def test_top_level_event_array_is_accepted(db_factory):
+    db = db_factory()
+    session, module, player = _seed(db)
+    _add_player_turns(db, session, player, 6)
+    event = json.loads(_GOOD_JSON)["events"][0]
+    llm = _StubLLM(json.dumps([event], ensure_ascii=False))
+    _run(db, session, llm)
+    assert llm.calls == 1
+    assert len(_kp_events(db, session)) == 1
 
 
 def test_empty_events_still_advances_cursor(db_factory):

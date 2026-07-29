@@ -35,6 +35,7 @@ _check_dice_detail = dice_runtime._check_dice_detail
 _pool_dice_detail = dice_runtime._pool_dice_detail
 _scene_requires_group_check = dice_runtime._scene_requires_group_check
 _resolve_san_targets = dice_runtime._resolve_san_targets
+_canonical_san_source = dice_runtime._canonical_san_source
 _resolve_dice_group_targets = dice_runtime._resolve_dice_group_targets
 _ALL_TOKENS = dice_runtime._ALL_TOKENS
 _resolve_scene_ref = turn_context._resolve_scene_ref
@@ -140,99 +141,178 @@ def _tick_madness_recovery(
 async def _exec_san_check(
     db: Session, session_id: str, game_session: GameSession, kv: dict,
     player_char: Character, teammates: list[Character] | None,
-) -> tuple[list[str], list[str]]:
-    """执行一条理智检定：目睹者各自结算（同一角色对同一恐怖源只检定一次）。
+) -> tuple[list[str], list[str], bool]:
+    """执行一条理智检定：真人挂待投请求，AI 角色自动结算。
 
-    返回 (chunks, 回灌 KP 的结果描述列表)。
+    返回 (chunks, 已结算结果描述, 是否存在待玩家投骰)。同一角色对同一恐怖源只检定一次。
     """
-    from app.rules.coc.checks import san_check
-
     chunks: list[str] = []
     descs: list[str] = []
     success_loss = (kv.get("success_loss") or "0").strip()
     failure_loss = (kv.get("failure_loss") or "1d6").strip()
     source = (kv.get("source") or "").strip()
+    module = db.get(Module, game_session.module_id)
+    source = _canonical_san_source(module, game_session.current_scene_id, source)
     targets = _resolve_san_targets(kv.get("chars"), player_char, teammates)
 
     # 同一角色对同一恐怖源只检定一次：用 world_state.san_checked 记 "source|char_id"。
     ws = dict(game_session.world_state or {})
     san_checked = set(ws.get("san_checked") or [])
-    san_dirty = False
+    canonical_checked: set[str] = set()
+    for item in san_checked:
+        stored_source, separator, stored_char_id = str(item).rpartition("|")
+        if not separator:
+            canonical_checked.add(str(item))
+            continue
+        canonical_checked.add(
+            f"{_canonical_san_source(module, game_session.current_scene_id, stored_source)}"
+            f"|{stored_char_id}"
+        )
+    human_targets: list[Character] = []
 
     for tchar in targets:
         key = f"{source}|{tchar.id}" if source else None
-        if key and key in san_checked:
+        if key and key in canonical_checked:
             continue  # 该角色已对此恐怖源检定过，不重复
-
-        char_data = {
-            "base_attributes": tchar.base_attributes,
-            "skills": tchar.skills,
-            "system_data": tchar.system_data,
-        }
-        result = san_check(char_data, success_loss, failure_loss)
-        check = result["check"]
-        _update_character_stat(db, tchar, "sanity.current", result["new_san"])
-
-        outcome_text = "成功" if check.outcome in (
-            "critical_success", "hard_success", "success") else "失败"
-        dice_content = (
-            f"{tchar.name}｜理智检定：{check.description}\n"
-            f"SAN 损失：{result['san_loss']}（{result['old_san']} → {result['new_san']}）"
+        if session_service.find_pending_san_check(db, session_id, tchar.id, source):
+            continue
+        if session_service.is_human_controlled(db, session_id, tchar.id):
+            human_targets.append(tchar)
+            continue
+        auto_chunks, auto_desc = _settle_san_target(
+            db, session_id, game_session, tchar, success_loss, failure_loss, source,
         )
-        # 疯狂状态落库（确定性，不依赖 KP 自觉）：SAN 归零→永久疯狂；一次损失≥当前SAN/5→临时疯狂。
-        # 不覆盖更严重的既有状态（死亡/昏迷/永久疯狂不被降级）。
-        madness = _apply_madness_status(db, tchar, result["new_san"], result["went_insane"])
-        if madness == "permanent_insanity":
-            dice_content += "\n永久疯狂！SAN 归零，调查员就此永远失常。"
-        elif madness == "temporary_insanity":
-            bout = (tchar.system_data or {}).get("madness") or {}
-            sym = f"：【{bout.get('label')}】{bout.get('manifest')}" if bout else ""
-            dice_content += f"\n临时疯狂发作{sym}（约 {bout.get('turns_left', '?')} 回合内影响其检定与言行）"
-
-        dice_meta = {
-            "skill": "SAN",
-            "actor": tchar.name,
-            "skill_value": result["old_san"],
-            "roll": check.roll,
-            "target": check.target,
-            "outcome": outcome_text,
-            "san_loss": result["san_loss"],
-            "new_san": result["new_san"],
-            "went_insane": result["went_insane"],
-        }
-        # SAN 检定明骰：先落 SAN 判定本身的 d100 明细（check），再落损失骰池（pool）。
-        # 前端据 dice 播 SAN 判定动画，据 loss_dice 播损失骰动画。
-        dice_meta["check_dice"] = _check_dice_detail(check)
-        loss_roll = result.get("loss_roll")
-        if loss_roll is not None:
-            dice_meta["dice"] = _pool_dice_detail(loss_roll)
-        else:
-            # 固定损失（如成功 0）：无骰池，明细直给定值，前端不必播骰。
-            dice_meta["dice"] = {
-                "kind": "pool", "notation": "0", "dice": [],
-                "modifier": result["san_loss"], "total": result["san_loss"],
-            }
-        ev = session_service.add_event(
-            db, session_id, "dice", dice_content,
-            actor_name="系统", metadata=dice_meta,
-        )
-        chunks.append(_make_chunk("dice", dice_content, metadata=dice_meta, event_id=ev.id))
-        # 通知前端刷新角色卡（SAN/疯狂状态已变）——与 inventory_update 同一套刷新机制。
-        chunks.append(_make_chunk("character_update", metadata={"char_id": tchar.id}))
-        descs.append(
-            f"{tchar.name} 理智检定（{outcome_text}）：损失 {result['san_loss']} SAN"
-            f"（{result['old_san']}→{result['new_san']}）"
-        )
+        chunks.extend(auto_chunks)
+        descs.append(auto_desc)
         if key:
-            san_checked.add(key)
-            san_dirty = True
+            canonical_checked.add(key)
 
-    if san_dirty:
-        ws["san_checked"] = sorted(san_checked)
-        game_session.world_state = ws
-        db.add(game_session)
-        db.commit()
-    return chunks, descs
+    if not human_targets:
+        return chunks, descs, False
+
+    batch_id = uuid.uuid4().hex
+    for tchar in human_targets:
+        check_id = uuid.uuid4().hex
+        pending = {
+            "id": check_id,
+            "kind": "san_check",
+            "skill": "SAN",
+            "difficulty": "normal",
+            "char_ref": tchar.name,
+            "char_id": tchar.id,
+            "actor_name": tchar.name,
+            "source": source,
+            "success_loss": success_loss,
+            "failure_loss": failure_loss,
+            "san_batch_id": batch_id,
+            "san_results": list(descs),
+        }
+        session_service.add_pending_check(db, session_id, pending)
+        prompt_text = _check_prompt_text(tchar.name, "理智", "normal")
+        meta = {"check_request": True, **pending}
+        ev = session_service.add_event(
+            db, session_id, "system", prompt_text, actor_name="系统", metadata=meta,
+        )
+        chunks.append(_make_chunk(
+            "check_request", prompt_text, metadata=meta,
+            event_id=ev.id, actor_id=tchar.id,
+        ))
+    return chunks, descs, True
+
+
+def _mark_san_checked(
+    db: Session, game_session: GameSession, source: str, char_id: str,
+) -> None:
+    """在结算完成后记录恐怖源幂等键；待投路径须在 housekeeping 收尾后调用。"""
+    if not source:
+        return
+    db.refresh(game_session)
+    ws = dict(game_session.world_state or {})
+    checked = set(ws.get("san_checked") or [])
+    checked.add(f"{source}|{char_id}")
+    ws["san_checked"] = sorted(checked)
+    game_session.world_state = ws
+    db.add(game_session)
+    db.commit()
+
+
+def _settle_san_target(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    tchar: Character,
+    success_loss: str,
+    failure_loss: str,
+    source: str,
+    *,
+    mark_checked: bool = True,
+) -> tuple[list[str], str]:
+    """掷出并结算单个角色的 SAN；自动路径与玩家点击后的路径共用。"""
+    from app.rules.coc.checks import san_check
+
+    char_data = {
+        "base_attributes": tchar.base_attributes,
+        "skills": tchar.skills,
+        "system_data": tchar.system_data,
+    }
+    result = san_check(char_data, success_loss, failure_loss)
+    check = result["check"]
+    _update_character_stat(db, tchar, "sanity.current", result["new_san"])
+
+    outcome_text = "成功" if check.outcome in (
+        "critical_success", "hard_success", "success",
+    ) else "失败"
+    dice_content = (
+        f"{tchar.name}｜理智检定：{check.description}\n"
+        f"SAN 损失：{result['san_loss']}（{result['old_san']} → {result['new_san']}）"
+    )
+    madness = _apply_madness_status(db, tchar, result["new_san"], result["went_insane"])
+    if madness == "permanent_insanity":
+        dice_content += "\n永久疯狂！SAN 归零，调查员就此永远失常。"
+    elif madness == "temporary_insanity":
+        bout = (tchar.system_data or {}).get("madness") or {}
+        symptom = f"：【{bout.get('label')}】{bout.get('manifest')}" if bout else ""
+        dice_content += (
+            f"\n临时疯狂发作{symptom}"
+            f"（约 {bout.get('turns_left', '?')} 回合内影响其检定与言行）"
+        )
+
+    dice_meta = {
+        "skill": "SAN",
+        "actor": tchar.name,
+        "skill_value": result["old_san"],
+        "old_san": result["old_san"],
+        "roll": check.roll,
+        "target": check.target,
+        "outcome": outcome_text,
+        "san_loss": result["san_loss"],
+        "new_san": result["new_san"],
+        "went_insane": result["went_insane"],
+        "check_dice": _check_dice_detail(check),
+    }
+    loss_roll = result.get("loss_roll")
+    if loss_roll is not None:
+        dice_meta["dice"] = _pool_dice_detail(loss_roll)
+    else:
+        dice_meta["dice"] = {
+            "kind": "pool", "notation": "0", "dice": [],
+            "modifier": result["san_loss"], "total": result["san_loss"],
+        }
+    ev = session_service.add_event(
+        db, session_id, "dice", dice_content,
+        actor_name="系统", metadata=dice_meta,
+    )
+    chunks = [
+        _make_chunk("dice", dice_content, metadata=dice_meta, event_id=ev.id),
+        _make_chunk("character_update", metadata={"char_id": tchar.id}),
+    ]
+    desc = (
+        f"{tchar.name} 理智检定（{outcome_text}）：损失 {result['san_loss']} SAN"
+        f"（{result['old_san']}→{result['new_san']}）"
+    )
+    if mark_checked:
+        _mark_san_checked(db, game_session, source, tchar.id)
+    return chunks, desc
 
 
 def _resolve_hp_target(
@@ -470,27 +550,77 @@ async def _exec_dice_check(
     source = (kv.get("source") or "").strip()
     bonus, penalty = _parse_bonus_penalty(kv)
 
-    # 群检：公共/被动感知事件（一声响、一个可触发灵感的线索——在场人人都可能注意到），
-    # char=在场/全体 或 chars=<名单> → 在场每个玩家角色各自检定。被动性质天然自动掷，
-    # 不逐人挂「待玩家投骰」（否则每有环境声响就要每个真人各点一次投骰，极其累赘）。
+    # 群检：char=在场/全体 或 chars=<名单> → 在场成员各自检定。公开骰遵守控制权：
+    # AI 席立即自动投，真人席逐人挂待投；暗投仍全部自动结算，避免无人可见却卡住流程。
     group_ref = (kv.get("chars") or "").strip()
     if char_ref in _ALL_TOKENS or group_ref:
         targets = _resolve_dice_group_targets(
             char_ref, group_ref, game_session, player_char, teammates,
         )
+        human_targets = [
+            c for c in targets
+            if not blind and session_service.is_human_controlled(db, session_id, c.id)
+        ]
+        # 同一群检已挂过待投时整批视为重复，不让 AI 成员再次自动掷一遍。
+        if any(
+            session_service.find_pending_check(
+                db, session_id, c.id, skill_name, difficulty,
+            )
+            for c in human_targets
+        ):
+            return chunks, descs, True
+
+        group_any_success = False
+        group_any_fumble = False
         for c in targets:
+            if c in human_targets:
+                continue
             cdata = {
                 "base_attributes": c.base_attributes,
                 "skills": c.skills,
                 "system_data": c.system_data,
             }
-            rc, rd = await _auto_roll_check(
+            rc, rd, succeeded, fumbled = await _auto_roll_check(
                 db, session_id, game_session, module, cdata, c.name, False,
                 skill_name, difficulty, blind, source, bonus, penalty,
             )
             chunks += rc
             descs += rd
-        return chunks, descs, False
+            group_any_success = group_any_success or succeeded
+            group_any_fumble = group_any_fumble or fumbled
+        if not human_targets:
+            return chunks, descs, False
+
+        batch_id = uuid.uuid4().hex
+        for c in human_targets:
+            check_id = uuid.uuid4().hex
+            pending = {
+                "id": check_id,
+                "kind": "group_check",
+                "skill": skill_name,
+                "difficulty": difficulty,
+                "char_ref": f"character:{c.id}",
+                "char_id": c.id,
+                "actor_name": c.name,
+                "source": source,
+                "bonus": bonus,
+                "penalty": penalty,
+                "check_batch_id": batch_id,
+                "check_results": list(descs),
+                "check_any_success": group_any_success,
+                "check_any_fumble": group_any_fumble,
+            }
+            session_service.add_pending_check(db, session_id, pending)
+            prompt_text = _check_prompt_text(c.name, skill_name, difficulty)
+            meta = {"check_request": True, **pending}
+            ev = session_service.add_event(
+                db, session_id, "system", prompt_text, actor_name="系统", metadata=meta,
+            )
+            chunks.append(_make_chunk(
+                "check_request", prompt_text, metadata=meta,
+                event_id=ev.id, actor_id=c.id,
+            ))
+        return chunks, descs, True
 
     char_data, disp_name, is_npc, char_id = _resolve_check_actor(
         char_ref, skill_name, player_char, teammates, module,
@@ -534,7 +664,7 @@ async def _exec_dice_check(
         ))
         return chunks, descs, True  # 等玩家 /roll，本轮不掷、不续写
 
-    rc, rd = await _auto_roll_check(
+    rc, rd, _succeeded, _fumbled = await _auto_roll_check(
         db, session_id, game_session, module, char_data, disp_name, is_npc,
         skill_name, difficulty, blind, source, bonus, penalty,
     )
@@ -546,10 +676,11 @@ async def _auto_roll_check(
     char_data: dict, disp_name: str, is_npc: bool,
     skill_name: str, difficulty: str, blind: bool, source: str,
     bonus: int, penalty: int,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], bool, bool]:
     """系统自动掷一次检定并落库（不挂 pending）。单人自动路径与群检各成员共用。
 
-    返回 (chunks, 回灌 KP 的结果描述)。暗投不落 dice 明细（会反推成败）。
+    返回 (chunks, 回灌 KP 的结果描述, 是否成功, 是否大失败)。
+    暗投不落 dice 明细（会反推成败）。
     """
     chunks: list[str] = []
     descs: list[str] = []
@@ -607,7 +738,12 @@ async def _auto_roll_check(
                     f"被 {disp_name} 用{skill_name}{verdict}",
                 ),
             )
-    return chunks, descs
+    return (
+        chunks,
+        descs,
+        result.outcome not in ("failure", "fumble"),
+        result.outcome == "fumble",
+    )
 
 
 async def _exec_scene_change(

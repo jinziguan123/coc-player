@@ -1021,6 +1021,71 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
             db, session_id, exclude_id=game_session.player_character_id,
         )
 
+        if check.get("kind") == "san_check":
+            char_id = str(check.get("char_id") or "")
+            target_char = db.get(Character, char_id)
+            if target_char is None:
+                await _drain_housekeeping(session_id)
+                db.expire_all()
+                session_service.pop_pending_check(db, session_id, check_id)
+                room_hub.broadcast(session_id, _make_chunk("system", "理智检定角色不存在，已取消"))
+                room_hub.broadcast(session_id, _make_chunk("done"))
+                return
+
+            source = str(check.get("source") or "")
+            san_chunks, san_desc = turn_effects._settle_san_target(
+                db,
+                session_id,
+                game_session,
+                target_char,
+                str(check.get("success_loss") or "0"),
+                str(check.get("failure_loss") or "1d6"),
+                source,
+                mark_checked=False,
+            )
+            for chunk in san_chunks:
+                room_hub.broadcast(session_id, chunk)
+
+            # 与普通待投检定相同：骰子先广播，再等上一轮 housekeeping，最后才写 world_state。
+            await _drain_housekeeping(session_id)
+            db.expire_all()
+            session_service.pop_pending_check(db, session_id, check_id)
+            game_session = db.get(GameSession, session_id)
+            turn_effects._mark_san_checked(db, game_session, source, char_id)
+
+            batch_id = str(check.get("san_batch_id") or "")
+            remaining = session_service.append_pending_batch_result(
+                db, session_id, batch_id, san_desc,
+            ) if batch_id else 0
+            if remaining:
+                room_hub.broadcast(session_id, _make_chunk("done"))
+                return
+
+            san_results = [str(item) for item in (check.get("san_results") or [])]
+            san_results.append(san_desc)
+            desc = "\n".join(san_results)
+            if game_session.kp_mode == "human":
+                room_hub.broadcast(
+                    session_id,
+                    _make_chunk(
+                        "kp_roll_ready",
+                        "理智检定已结算，等待真人 KP 处理后果",
+                        metadata={"description": desc},
+                    ),
+                )
+                room_hub.broadcast(session_id, _make_chunk("done"))
+                return
+            await _run_kp_turn(
+                db,
+                session_id,
+                game_session,
+                module,
+                player_char,
+                party_others,
+                KP_DICE_CONTINUATION_PROMPT.format(dice_results=desc),
+            )
+            return
+
         skill = check["skill"]
         difficulty = check.get("difficulty", "normal")
         source = check.get("source", "")
@@ -1076,23 +1141,47 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
             + (f"（针对：{source}）" if source else "")
             + f"：{result.description}{heal_note}"
         )
+        succeeded = result.outcome not in ("failure", "fumble")
+        fumbled = result.outcome == "fumble"
+        batch_id = str(check.get("check_batch_id") or "")
+        if batch_id:
+            remaining = session_service.append_pending_group_check_result(
+                db,
+                session_id,
+                batch_id,
+                desc,
+                succeeded=succeeded,
+                fumbled=fumbled,
+            )
+            if remaining:
+                room_hub.broadcast(session_id, _make_chunk("done"))
+                return
+            batch_results = [str(item) for item in (check.get("check_results") or [])]
+            batch_results.append(desc)
+            desc = "\n".join(batch_results)
+            succeeded = bool(check.get("check_any_success")) or succeeded
+            fumbled = bool(check.get("check_any_fumble")) or fumbled
         if game_session.kp_mode == "human":
             # 真人 KP 模式下掷骰只完成确定性结算，不自动生成后续叙事；KP 可据结果手动发布。
             room_hub.broadcast(
                 session_id,
-                _make_chunk("kp_roll_ready", "检定已结算，等待真人 KP 处理后果", metadata={"description": desc}),
+                _make_chunk(
+                    "kp_roll_ready",
+                    "群体检定已结算，等待真人 KP 处理后果" if batch_id
+                    else "检定已结算，等待真人 KP 处理后果",
+                    metadata={"description": desc},
+                ),
             )
             room_hub.broadcast(session_id, _make_chunk("done"))
             return
         # 恐怖多在**检定成功**时才被揭示（看清那具尸体…）；仅成功时才在叙事后补跑 planner
         # 判理智（失败不多花这次调用）。失败若也揭示了恐怖，仍可由 KP 自发 [SAN_CHECK] 兜底。
         # 大失败则可能有**身体反噬**（踢燃烧瓶被烧等）→ 开 mishap 守卫，叙事后据 planner 确定性扣血。
-        succeeded = result.outcome not in ("failure", "fumble")
         await _run_kp_turn(
             db, session_id, game_session, module, player_char, party_others,
             KP_DICE_CONTINUATION_PROMPT.format(dice_results=desc),
             sanity_guard=succeeded,
-            mishap_guard=(result.outcome == "fumble"),
+            mishap_guard=fumbled,
         )
     except asyncio.CancelledError:
         logger.info("投骰生成被取消: session=%s", session_id)

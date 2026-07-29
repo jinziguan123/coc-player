@@ -7,9 +7,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.ai.turn_planner import SanityPolicy, TurnPlan
-from app.models import Base, Character, GameSession, Module  # noqa: F401
+from app.models import Base, Character, GameSession, Module, SessionParticipant  # noqa: F401
 from app.services import chat_service as cs
-from app.services import session_service
+from app.services import dice_runtime, session_service
 
 
 @pytest.fixture
@@ -60,16 +60,18 @@ def test_build_message_carries_sanity():
 
 def test_guard_fires_san_when_planner_triggers(db_factory, monkeypatch):
     db = db_factory(); sid, pc = _seed(db)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)  # 检定失败 → 扣满损失
     pre = session_service.get_next_sequence_num(db, sid) - 1
     session_service.add_event(db, sid, "narration", "手电照出一具腐尸。", actor_name="KP")
     plan = TurnPlan(sanity=SanityPolicy(trigger=True, source="墓室腐尸", success_loss="0", failure_loss="1d6"))
     chunks = _run(cs._ensure_planned_sanity(db, sid, db.get(GameSession, sid), pc, [], plan, pre))
-    assert chunks                                   # 补发了 SAN
+    assert chunks                                   # 补发了 SAN 待投请求
     db.refresh(pc)
-    assert pc.system_data["sanity"]["current"] < 60  # 确定性扣了 SAN
+    assert pc.system_data["sanity"]["current"] == 60  # 玩家投骰前不扣 SAN
     evs = session_service.get_session_events(db, sid)
-    assert any(e.event_type == "dice" and (e.metadata_ or {}).get("skill") == "SAN" for e in evs)
+    assert any(
+        e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check"
+        for e in evs
+    )
 
 
 def test_guard_skips_when_san_already_rolled_this_turn(db_factory):
@@ -137,17 +139,132 @@ def test_scene_mechanism_overrides_generic_sanity_loss(db_factory, monkeypatch):
     session_service.add_event(
         db, session.id, "action", "（前往：七号车厢）", actor_id=pc.id, actor_name=pc.name,
     )
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
     plan = TurnPlan(sanity=SanityPolicy(trigger=True, source="七号车厢", failure_loss="1d6"))
     chunks = _run(cs._ensure_planned_sanity(
         db, session.id, db.get(GameSession, session.id), pc, [], plan, pre, module=module,
     ))
     assert chunks
-    san_event = next(
+    san_request = next(
         e for e in session_service.get_session_events(db, session.id)
-        if e.event_type == "dice" and (e.metadata_ or {}).get("skill") == "SAN"
+        if e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check"
     )
-    assert (san_event.metadata_["dice"] or {}).get("notation") == "1d4"
+    assert san_request.metadata_["success_loss"] == "1"
+    assert san_request.metadata_["failure_loss"] == "1d4"
+
+
+def test_scene_san_source_alias_resolves_to_stable_key():
+    module = Module(
+        title="常暗之箱", rule_system="coc", npcs=[],
+        scenes=[{
+            "id": "scene_5",
+            "events": [{
+                "trigger": "阅读报纸时", "kind": "san_check", "san_loss": "0/1",
+            }],
+        }],
+    )
+    assert dice_runtime._canonical_san_source(
+        module, "scene_5", "报纸新闻",
+    ) == "scene:scene_5:san:0"
+
+
+def test_scene_san_reaches_teammates_who_read_source_later(db_factory, monkeypatch):
+    """同一恐怖信息稍后传给队友时，只补检尚未接触过该来源的角色。"""
+    db = db_factory()
+    module = Module(
+        title="常暗之箱", rule_system="coc", npcs=[],
+        scenes=[{
+            "id": "scene_5",
+            "title": "5号车厢",
+            "events": [{
+                "trigger": "阅读报纸时", "kind": "san_check", "san_loss": "0/1",
+            }],
+        }],
+    )
+    hero = Character(
+        name="江户川龙牙", rule_system="coc", is_player=True,
+        system_data={"sanity": {"current": 42, "max": 99}},
+    )
+    ally_a = Character(
+        name="林知微", rule_system="coc", is_player=True,
+        system_data={"sanity": {"current": 74, "max": 99}},
+    )
+    ally_b = Character(
+        name="相马直树", rule_system="coc", is_player=True,
+        system_data={"sanity": {"current": 56, "max": 99}},
+    )
+    db.add_all([module, hero, ally_a, ally_b]); db.flush()
+    source_key = "scene:scene_5:san:0"
+    session = GameSession(
+        module_id=module.id,
+        player_character_id=hero.id,
+        status="active",
+        current_scene_id="scene_5",
+        # 旧存档仍保存模型自由命名的来源；运行时只做兼容比较，不迁移存档。
+        world_state={"san_checked": [f"报纸新闻|{hero.id}"]},
+    )
+    db.add(session); db.flush()
+    db.add_all([
+        SessionParticipant(
+            session_id=session.id, character_id=hero.id, role="human",
+            is_primary=True, claimed=True, ready=True,
+        ),
+        SessionParticipant(
+            session_id=session.id, character_id=ally_a.id, role="ai",
+            seat_order=1, claimed=True, ready=True,
+        ),
+        SessionParticipant(
+            session_id=session.id, character_id=ally_b.id, role="ai",
+            seat_order=2, claimed=True, ready=True,
+        ),
+    ])
+    db.commit()
+    session_service.add_event(db, session.id, "narration", "报纸暂时收在龙牙手中。", actor_name="KP")
+    pre = session_service.get_next_sequence_num(db, session.id) - 1
+    session_service.add_event(
+        db, session.id, "action", "我把报纸递给另外二人，让他们看看。",
+        actor_id=hero.id, actor_name=hero.name,
+    )
+    session_service.add_event(
+        db, session.id, "dialogue", "我接过报纸，读完标题和日期。",
+        actor_id=ally_a.id, actor_name=ally_a.name,
+    )
+    session_service.add_event(
+        db, session.id, "dialogue", "明天的报纸？这个日期根本不对。",
+        actor_id=ally_b.id, actor_name=ally_b.name,
+    )
+    # 模拟 KP 已先替主角结算：结构化守卫不能因为本轮已有一张 SAN 卡就整体退出，
+    # 仍须依靠稳定来源键补齐遗漏队友。
+    already_settled = session_service.add_event(
+        db, session.id, "dice", "江户川龙牙｜理智检定",
+        actor_name="系统", metadata={"skill": "SAN", "actor": hero.name},
+    )
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 1)
+
+    chunks = _run(cs._ensure_planned_sanity(
+        db,
+        session.id,
+        db.get(GameSession, session.id),
+        hero,
+        [ally_a, ally_b],
+        None,
+        pre,
+        module=module,
+    ))
+
+    assert chunks
+    san_events = [
+        event for event in session_service.get_session_events(db, session.id)
+        if event.event_type == "dice" and (event.metadata_ or {}).get("skill") == "SAN"
+        and (event.sequence_num or 0) > (already_settled.sequence_num or 0)
+    ]
+    assert {event.metadata_["actor"] for event in san_events} == {"林知微", "相马直树"}
+    db.refresh(session)
+    checked = set((session.world_state or {}).get("san_checked") or [])
+    assert checked == {
+        f"报纸新闻|{hero.id}",
+        f"{source_key}|{ally_a.id}",
+        f"{source_key}|{ally_b.id}",
+    }
 
 
 def test_check_continuation_fires_san_via_run_kp_turn(db_factory, monkeypatch):
@@ -159,8 +276,6 @@ def test_check_continuation_fires_san_via_run_kp_turn(db_factory, monkeypatch):
     db = db_factory(); sid, pc = _seed(db)
     gs = db.get(GameSession, sid)
     module = db.get(Module, gs.module_id)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)   # SAN 失败 → 扣损失
-
     async def _fake_stream(kp, messages, res, **kw):
         res[0] = "手电照亮了那具扭曲的尸体，面部中央裂开一道缝……"   # 恐怖描写，但**不发 [SAN_CHECK]**
         res[1] = res[0]
@@ -186,9 +301,12 @@ def test_check_continuation_fires_san_via_run_kp_turn(db_factory, monkeypatch):
     asyncio.run(cs._run_kp_turn(db, sid, gs, module, pc, [], "续写", sanity_guard=True))
 
     evs = session_service.get_session_events(db, sid)
-    assert any(e.event_type == "dice" and (e.metadata_ or {}).get("skill") == "SAN" for e in evs)
+    assert any(
+        e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check"
+        for e in evs
+    )
     db.refresh(pc)
-    assert pc.system_data["sanity"]["current"] < 60   # 确定性扣了 SAN
+    assert pc.system_data["sanity"]["current"] == 60  # 等玩家投骰后再扣
 
 
 def test_check_continuation_no_guard_when_flag_off(db_factory, monkeypatch):

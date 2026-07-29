@@ -125,6 +125,30 @@ def test_ai_teammate_check_auto_rolls(db_factory, monkeypatch):
     )
 
 
+def test_player_san_check_pends_for_manual_roll(db_factory, monkeypatch):
+    """真人角色的 SAN_CHECK 必须挂待投请求，不能由系统替玩家掷。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    hero.system_data = {"sanity": {"current": 50, "max": 99}}
+    db.commit()
+
+    chunks = _run(
+        db, module, hero, teammates, session,
+        "[SAN_CHECK: success_loss=0, failure_loss=1d4, chars=主角, source=腐尸]",
+        monkeypatch,
+    )
+
+    assert _dice(chunks) == []
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 1
+    assert requests[0]["metadata"]["kind"] == "san_check"
+    assert requests[0]["metadata"]["char_id"] == hero.id
+    assert "理智" in requests[0]["content"]
+    db.expire_all()
+    pending = (db.get(GameSession, session.id).world_state or {}).get("pending_checks") or {}
+    assert any(check.get("kind") == "san_check" for check in pending.values())
+
+
 def test_check_prompt_phrasing():
     """req 1：普通难度不带难度词；困难/极难带难度词。"""
     assert chat_service._check_prompt_text("张三", "侦查", "normal") == "请 张三 进行一次「侦查」检定"
@@ -193,6 +217,126 @@ def test_roll_generation_rolls_pending_check(db_factory, monkeypatch):
     assert "chk1" not in pending
 
 
+def test_roll_generation_settles_pending_san_check(db_factory, monkeypatch):
+    """玩家点击 SAN 投骰后才扣 SAN、广播公开减值，并消费待投状态。"""
+    import app.database as database
+    from app.services import turn_orchestrator
+    from app.services.room_hub import room_hub
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    hero.system_data = {"sanity": {"current": 50, "max": 99}}
+    session.kp_mode = "human"
+    db.commit()
+    chunks = _run(
+        db, module, hero, teammates, session,
+        "[SAN_CHECK: success_loss=0, failure_loss=2, chars=主角, source=腐尸]",
+        monkeypatch,
+    )
+    request = _of_type(chunks, "check_request")[0]
+    check_id = request["metadata"]["id"]
+
+    monkeypatch.setattr(database, "SessionLocal", db_factory)
+
+    async def no_housekeeping(_session_id):
+        return None
+
+    broadcast: list[dict] = []
+    monkeypatch.setattr(turn_orchestrator, "_drain_housekeeping", no_housekeeping)
+    monkeypatch.setattr(
+        room_hub,
+        "broadcast",
+        lambda _session_id, chunk, *args, **kwargs: broadcast.append(chunk.as_wire()),
+    )
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
+
+    asyncio.run(chat_service.run_roll_generation(session.id, check_id))
+
+    fresh = db_factory()
+    updated = fresh.get(Character, hero.id)
+    assert updated.system_data["sanity"]["current"] == 48
+    dice = [chunk for chunk in broadcast if chunk["type"] == "dice"]
+    assert len(dice) == 1
+    assert dice[0]["metadata"]["san_loss"] == 2
+    assert dice[0]["metadata"]["old_san"] == 50
+    assert dice[0]["metadata"]["new_san"] == 48
+    state = fresh.get(GameSession, session.id).world_state or {}
+    assert check_id not in (state.get("pending_checks") or {})
+    assert f"腐尸|{hero.id}" in (state.get("san_checked") or [])
+
+
+def test_group_san_waits_until_all_human_players_roll(db_factory, monkeypatch):
+    """多人 SAN 要逐席等待，最后一名真人投完后才把整批结果交给 KP。"""
+    import app.database as database
+    from app.services import turn_orchestrator
+    from app.services.room_hub import room_hub
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    ally = teammates[0]
+    hero.system_data = {"sanity": {"current": 50, "max": 99}}
+    ally.system_data = {"sanity": {"current": 45, "max": 99}}
+    session.kp_mode = "human"
+    db.add_all([
+        SessionParticipant(
+            session_id=session.id,
+            character_id=hero.id,
+            role="human",
+            is_primary=True,
+            claimed=True,
+            ready=True,
+        ),
+        SessionParticipant(
+            session_id=session.id,
+            character_id=ally.id,
+            role="human",
+            is_primary=False,
+            claimed=True,
+            ready=True,
+            seat_order=1,
+        ),
+    ])
+    db.commit()
+
+    chunks = _run(
+        db, module, hero, teammates, session,
+        "[SAN_CHECK: success_loss=0, failure_loss=1, chars=主角/阿尔法, source=尸体]",
+        monkeypatch,
+    )
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 2
+
+    monkeypatch.setattr(database, "SessionLocal", db_factory)
+
+    async def no_housekeeping(_session_id):
+        return None
+
+    broadcast: list[dict] = []
+    monkeypatch.setattr(turn_orchestrator, "_drain_housekeeping", no_housekeeping)
+    monkeypatch.setattr(
+        room_hub,
+        "broadcast",
+        lambda _session_id, chunk, *args, **kwargs: broadcast.append(chunk.as_wire()),
+    )
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
+
+    asyncio.run(chat_service.run_roll_generation(session.id, requests[0]["metadata"]["id"]))
+    midway = db_factory().get(GameSession, session.id).world_state or {}
+    assert len(midway.get("pending_checks") or {}) == 1
+    assert not any(chunk["type"] == "kp_roll_ready" for chunk in broadcast)
+
+    asyncio.run(chat_service.run_roll_generation(session.id, requests[1]["metadata"]["id"]))
+    final_db = db_factory()
+    final_state = final_db.get(GameSession, session.id).world_state or {}
+    assert (final_state.get("pending_checks") or {}) == {}
+    dice_events = [
+        event for event in session_service.get_session_events(final_db, session.id)
+        if event.event_type == "dice" and (event.metadata_ or {}).get("skill") == "SAN"
+    ]
+    assert {event.metadata_["actor"] for event in dice_events} == {"主角", "阿尔法"}
+    assert sum(chunk["type"] == "kp_roll_ready" for chunk in broadcast) == 1
+
+
 def test_dice_continuation_sanity_guard_only_on_success(db_factory, monkeypatch):
     """SAN 守卫成本收窄：检定**成功**续写才补跑 planner 判理智；**失败**不多跑（省调用）。"""
     import asyncio as _asyncio
@@ -243,7 +387,7 @@ def test_dice_continuation_sanity_guard_only_on_success(db_factory, monkeypatch)
 
 
 def test_dice_continuation_fires_followup_san_check(db_factory, monkeypatch):
-    """检定续写里 KP 追加的 [SAN_CHECK]（如读懂禁忌知识）应被处理、落 SAN 检定事件。"""
+    """检定续写里 KP 追加的 SAN_CHECK 应被处理，并向真人发出待投请求。"""
     db = db_factory()
     module, hero, teammates, session = _seed(db)
     hero.system_data = {"sanity": {"current": 50, "max": 99}}
@@ -275,8 +419,11 @@ def test_dice_continuation_fires_followup_san_check(db_factory, monkeypatch):
     asyncio.run(go())
 
     events = session_service.get_session_events(db, session.id)
-    san_dice = [e for e in events if e.event_type == "dice" and e.metadata_.get("skill") == "SAN"]
-    assert len(san_dice) >= 1, "续写里的 SAN_CHECK 应被处理并落 SAN 检定事件"
+    requests = [
+        e for e in events
+        if e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check"
+    ]
+    assert len(requests) >= 1, "续写里的 SAN_CHECK 应向真人发出待投请求"
 
 
 def test_san_per_character_and_once_per_source(db_factory, monkeypatch):
@@ -286,6 +433,14 @@ def test_san_per_character_and_once_per_source(db_factory, monkeypatch):
     ally = teammates[0]
     hero.system_data = {"sanity": {"current": 60, "max": 99}}
     ally.system_data = {"sanity": {"current": 55, "max": 99}}
+    db.add(SessionParticipant(
+        session_id=session.id,
+        character_id=hero.id,
+        role="ai",
+        is_primary=True,
+        claimed=True,
+        ready=True,
+    ))
     db.commit()
 
     async def fake_stream(kp, messages, result, npcs=None):
@@ -344,8 +499,8 @@ def test_invalid_ai_opposed_check_does_not_abort_command_processing(db_factory, 
     assert _dice(chunks) == []
 
 
-def test_group_check_all_present_auto_roll(db_factory, monkeypatch):
-    """char=在场：公共/被动感知 → 在场每个玩家角色各自自动掷（不挂 pending）。"""
+def test_group_check_all_present_waits_for_human_and_auto_rolls_ai(db_factory, monkeypatch):
+    """公开群检：真人主角待投，AI 队友自动投。"""
     db = db_factory()
     module, hero, teammates, session = _seed(db)
     chunks = _run(
@@ -353,9 +508,10 @@ def test_group_check_all_present_auto_roll(db_factory, monkeypatch):
         "一声闷响从墙内传来。\n[DICE_CHECK: skill=聆听, char=在场]", monkeypatch,
     )
     dice = _dice(chunks)
-    actors = sorted(d["metadata"]["actor"] for d in dice)
-    assert actors == ["主角", "阿尔法"]                 # 在场两人都掷了
-    assert _of_type(chunks, "check_request") == []      # 群检不挂 pending
+    assert [d["metadata"]["actor"] for d in dice] == ["阿尔法"]
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 1
+    assert requests[0]["metadata"]["char_id"] == hero.id
 
 
 def test_legacy_scene_event_expands_explicit_all_party_check(db_factory, monkeypatch):
@@ -379,8 +535,10 @@ def test_legacy_scene_event_expands_explicit_all_party_check(db_factory, monkeyp
         db, module, hero, teammates, session,
         "[DICE_CHECK: skill=幸运]", monkeypatch,
     )
-    assert sorted(d["metadata"]["actor"] for d in _dice(chunks)) == ["主角", "阿尔法"]
-    assert _of_type(chunks, "check_request") == []
+    assert [d["metadata"]["actor"] for d in _dice(chunks)] == ["阿尔法"]
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 1
+    assert requests[0]["metadata"]["skill"] == "幸运"
 
 
 def test_group_check_named_list(db_factory, monkeypatch):
@@ -391,8 +549,10 @@ def test_group_check_named_list(db_factory, monkeypatch):
         db, module, hero, teammates, session,
         "[DICE_CHECK: skill=侦查, chars=主角]", monkeypatch,
     )
-    dice = _dice(chunks)
-    assert [d["metadata"]["actor"] for d in dice] == ["主角"]
+    assert _dice(chunks) == []
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 1
+    assert requests[0]["metadata"]["actor_name"] == "主角"
 
 
 def test_group_check_scene_filtered(db_factory, monkeypatch):
@@ -408,8 +568,113 @@ def test_group_check_scene_filtered(db_factory, monkeypatch):
         db, module, hero, teammates, session,
         "[DICE_CHECK: skill=聆听, char=在场]", monkeypatch,
     )
-    actors = [d["metadata"]["actor"] for d in _dice(chunks)]
-    assert actors == ["主角"]        # 只有同场景的主角检定，别处的阿尔法不掷
+    assert _dice(chunks) == []
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 1
+    assert requests[0]["metadata"]["actor_name"] == "主角"
+
+
+def test_group_check_waits_until_all_human_players_roll(db_factory, monkeypatch):
+    """多人公开群检要等最后一名真人投完，才把完整批次交给 KP。"""
+    import app.database as database
+    from app.services import turn_orchestrator
+    from app.services.room_hub import room_hub
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    ally = teammates[0]
+    ally.skills = {"侦查": 55}
+    session.kp_mode = "human"
+    db.add_all([
+        SessionParticipant(
+            session_id=session.id, character_id=hero.id, role="human",
+            is_primary=True, claimed=True, ready=True,
+        ),
+        SessionParticipant(
+            session_id=session.id, character_id=ally.id, role="human",
+            seat_order=1, claimed=True, ready=True,
+        ),
+    ])
+    db.commit()
+
+    chunks = _run(
+        db, module, hero, teammates, session,
+        "[DICE_CHECK: skill=侦查, char=在场]", monkeypatch,
+    )
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 2
+    assert _dice(chunks) == []
+
+    monkeypatch.setattr(database, "SessionLocal", db_factory)
+
+    async def no_housekeeping(_session_id):
+        return None
+
+    broadcast: list[dict] = []
+    monkeypatch.setattr(turn_orchestrator, "_drain_housekeeping", no_housekeeping)
+    monkeypatch.setattr(
+        room_hub,
+        "broadcast",
+        lambda _session_id, chunk, *args, **kwargs: broadcast.append(chunk.as_wire()),
+    )
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 10)
+
+    asyncio.run(chat_service.run_roll_generation(session.id, requests[0]["metadata"]["id"]))
+    midway = db_factory().get(GameSession, session.id).world_state or {}
+    assert len(midway.get("pending_checks") or {}) == 1
+    assert not any(chunk["type"] == "kp_roll_ready" for chunk in broadcast)
+
+    asyncio.run(chat_service.run_roll_generation(session.id, requests[1]["metadata"]["id"]))
+    final_state = db_factory().get(GameSession, session.id).world_state or {}
+    assert (final_state.get("pending_checks") or {}) == {}
+    ready = [chunk for chunk in broadcast if chunk["type"] == "kp_roll_ready"]
+    assert len(ready) == 1
+    assert "主角" in ready[0]["metadata"]["description"]
+    assert "阿尔法" in ready[0]["metadata"]["description"]
+
+
+def test_mixed_group_check_keeps_ai_result_until_human_rolls(db_factory, monkeypatch):
+    """真人 + AI 群检：AI 先自动投，真人投完后把双方完整结果一次性交给 KP。"""
+    import app.database as database
+    from app.services import turn_orchestrator
+    from app.services.room_hub import room_hub
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    ally = teammates[0]
+    ally.skills = {"侦查": 55}
+    session.kp_mode = "human"
+    db.commit()
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 10)
+
+    chunks = _run(
+        db, module, hero, teammates, session,
+        "[DICE_CHECK: skill=侦查, char=在场]", monkeypatch,
+    )
+    requests = _of_type(chunks, "check_request")
+    assert len(requests) == 1
+    assert [d["metadata"]["actor"] for d in _dice(chunks)] == ["阿尔法"]
+    assert requests[0]["metadata"]["check_any_success"] is True
+
+    monkeypatch.setattr(database, "SessionLocal", db_factory)
+
+    async def no_housekeeping(_session_id):
+        return None
+
+    broadcast: list[dict] = []
+    monkeypatch.setattr(turn_orchestrator, "_drain_housekeeping", no_housekeeping)
+    monkeypatch.setattr(
+        room_hub,
+        "broadcast",
+        lambda _session_id, chunk, *args, **kwargs: broadcast.append(chunk.as_wire()),
+    )
+
+    asyncio.run(chat_service.run_roll_generation(session.id, requests[0]["metadata"]["id"]))
+
+    ready = [chunk for chunk in broadcast if chunk["type"] == "kp_roll_ready"]
+    assert len(ready) == 1
+    assert "主角" in ready[0]["metadata"]["description"]
+    assert "阿尔法" in ready[0]["metadata"]["description"]
 
 
 def test_dice_is_broadcast_before_waiting_on_housekeeping(db_factory, monkeypatch):

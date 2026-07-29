@@ -599,6 +599,166 @@ body {
   box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 60%, transparent);
 }
 
+/* ===== 开关 =====
+   给「一个布尔设置」用：形态表示状态，点击表示动作。轨道在关闭时是下沉的暗槽，
+   开启时点亮为琥珀，与全站「当前生效」的语言一致（见 .active-rail / .toggle-chip）。 */
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-input-bg);
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.switch:hover:not(:disabled) { border-color: var(--color-accent); }
+.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+.switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+.switch--on {
+  background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent));
+  border-color: var(--color-accent);
+}
+.switch-knob {
+  position: absolute;
+  top: 50%;
+  left: 0.13rem;
+  width: 0.82rem;
+  height: 0.82rem;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+  transform: translateY(-50%);
+  transition: left 0.18s ease, background 0.18s ease;
+}
+.switch--on .switch-knob {
+  left: calc(100% - 0.95rem);
+  background: var(--color-on-accent);
+}
+.switch-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.switch-state {
+  min-width: 3rem;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch, .switch-knob { transition: none; }
+}
+
+/* 设置卡的标题行：左标题、右控件。 */
+.network-settings {
+  width: min(100%, 52rem);
+}
+.network-settings > .card + .card { margin-top: 0.75rem; }
+.setting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+.setting-head > :first-child { flex: 1; min-width: 0; }
+.setting-description {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.7;
+}
+
+/* 提示条：比正文重、比警告轻，用于「已保存但要重启才生效」这类过程态说明。 */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-input-bg);
+  color: var(--color-text-accent);
+  font-size: var(--text-2xs);
+  line-height: 1.65;
+}
+.notice--danger { border-color: var(--color-danger); color: var(--color-danger); }
+.setting-retry {
+  align-items: center;
+  margin-top: 0.75rem;
+}
+.setting-retry > span { flex: 1; min-width: 0; }
+.setting-retry .icon-btn {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex-shrink: 0;
+}
+
+.quota-editor {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+.quota-editor > span:first-child { flex-shrink: 0; }
+.quota-editor .input {
+  width: 8rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.quota-hint { opacity: 0.75; }
+
+.setting-risk-card {
+  border-color: color-mix(in srgb, var(--color-danger) 70%, var(--color-border));
+  box-shadow:
+    0 2px 8px var(--shadow-color),
+    inset 3px 0 0 color-mix(in srgb, var(--color-danger) 75%, transparent),
+    inset 0 0 42px var(--card-inset);
+}
+
+/* 可复制的地址行：等宽体，避免 .badge 的 uppercase 把 http 变成 HTTP。 */
+.copy-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.copy-line:hover { border-color: var(--color-accent); color: var(--color-text-accent); }
+.copy-line:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+@media (max-width: 520px) {
+  .setting-head { align-items: flex-start; }
+  .setting-head .switch-state { display: none; }
+  .quota-editor { align-items: flex-start; flex-wrap: wrap; }
+  .quota-editor .input { width: min(100%, 10rem); }
+  .quota-hint { flex-basis: 100%; }
+  .copy-line {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+}
+
 /* ===== 悬浮窗 ===== */
 /* 遮罩：压暗 + 轻虚化，把注意力从背后的列表拉到窗体上；入场淡入一次 */
 .modal-backdrop {
@@ -653,6 +813,33 @@ body {
 }
 .dice-fumble .dice-readout-roll {
   text-shadow: 0 0 14px color-mix(in srgb, var(--color-dice-fumble) 75%, transparent);
+}
+.san-loss-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--surface-sunken));
+  color: var(--color-danger);
+  font-variant-numeric: tabular-nums;
+}
+.san-loss-label {
+  font-family: var(--font-title);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+}
+.san-loss-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: 1;
+}
+.san-loss-transition {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 /* ===== 模组详情/编辑：吸顶工具条 =====

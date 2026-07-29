@@ -240,9 +240,15 @@ def _build_kp_tool_executor(
         )
 
     async def _h_san_check(name, kv):
-        chunks, descs = await _exec_san_check(
+        chunks, descs, pending = await _exec_san_check(
             db, session_id, game_session, kv, player_char, teammates,
         )
+        if pending:
+            return kp_tools.ToolOutcome(
+                "已向真人目睹者发出理智检定请求，等待其亲自掷骰。本轮叙述就此收束。",
+                chunks=chunks,
+                suspend=True,
+            )
         if not descs:
             return kp_tools.ToolOutcome(
                 "本次理智检定无需结算（目睹者均已对该恐怖源检定过）。", chunks=chunks,
@@ -577,15 +583,21 @@ async def _process_commands(
             return
 
     dice_descriptions: list[str] = []
+    san_pending = False
+    dice_pending = False
 
     for match in SAN_CHECK_RE.finditer(kp_text):
         kv = _parse_tag_kv(match.group(1))
-        san_chunks, san_descs = await _exec_san_check(
+        san_chunks, san_descs, pending = await _exec_san_check(
             db, session_id, game_session, kv, player_char, teammates,
         )
         for chunk in san_chunks:
             yield chunk
         dice_descriptions.extend(san_descs)
+        san_pending = san_pending or pending
+
+    if san_pending:
+        return
 
     for match in HP_CHANGE_RE.finditer(kp_text):
         hp_chunks = await _exec_hp_change(
@@ -600,12 +612,16 @@ async def _process_commands(
 
     for match in DICE_CHECK_RE.finditer(kp_text):
         kv = _parse_tag_kv(match.group(1))
-        dice_chunks, dice_descs, _pending = await _exec_dice_check(
+        dice_chunks, dice_descs, pending = await _exec_dice_check(
             db, session_id, game_session, module, kv, player_char, teammates,
         )
         for chunk in dice_chunks:
             yield chunk
         dice_descriptions.extend(dice_descs)
+        dice_pending = dice_pending or pending
+
+    if dice_pending:
+        return
 
     for match in OPPOSED_CHECK_RE.finditer(kp_text):
         try:

@@ -536,9 +536,10 @@ def test_reorder_turn_events_interleaves_by_broadcast_offset(db_factory):
     ]
 
 
-def test_tool_loop_end_to_end_interleaves_dice_and_narration(db_factory, monkeypatch):
-    """全链路：tool-loop 里「旁白 + 群检(自动掷、loop 内落库) + 旁白」，收尾重排后落库顺序
-    为 旁白→骰子→旁白（此前骰子会被甩到旁白前面/成堆）。"""
+def test_tool_loop_group_check_suspends_after_narration_for_human_roll(
+    db_factory, monkeypatch,
+):
+    """公开群检遇到真人时，先保留已生成旁白，再发待投请求并暂停后续叙事。"""
     import app.api.ai_settings as ai_settings
 
     llm = _FakeToolLLM([
@@ -555,10 +556,15 @@ def test_tool_loop_end_to_end_interleaves_dice_and_narration(db_factory, monkeyp
 
     asyncio.run(chat_service._run_generation(db, session_id, session, module, hero, events))
 
-    types = [e.event_type for e in session_service.get_session_events(db_factory(), session_id)
-             if e.event_type in ("narration", "dice")]
-    # 交错：旁白 → 骰子 → 旁白（骰子夹在两段旁白之间，而非抢到最前）
-    assert types == ["narration", "dice", "narration"]
+    saved = session_service.get_session_events(db_factory(), session_id)
+    assert [e.event_type for e in saved if e.event_type == "narration"] == ["narration"]
+    requests = [
+        e for e in saved
+        if e.event_type == "system" and (e.metadata_ or {}).get("kind") == "group_check"
+    ]
+    assert len(requests) == 1
+    assert requests[0].metadata_["skill"] == "聆听"
+    assert len(llm.calls) == 1
 
 
 async def _collect_loop(llm, result, execute) -> list[str]:

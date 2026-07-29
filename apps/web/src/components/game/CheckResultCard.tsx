@@ -54,10 +54,14 @@ export interface CheckResultMeta {
   actor?: string
   skill?: string
   skill_value?: number
+  old_san?: number
   roll?: number
   target?: number
   outcome?: string
   tier?: string
+  san_loss?: number
+  new_san?: number
+  went_insane?: boolean
 }
 
 /** 元数据是否够画结构化读数——差一样就整体回落散文，不做半截卡。 */
@@ -89,10 +93,16 @@ export function CheckResultCard({
   const tierNote = outcomeFailed && tierIsSuccess ? TIER_LABEL[String(meta.tier)] : ''
   const diff = difficultyLabel(meta.skill_value, meta.target)
   const subject = [meta.actor, meta.skill].filter(Boolean).join(' · ')
+  const hasSanLoss = typeof meta.san_loss === 'number' && typeof meta.new_san === 'number'
+  const oldSan = meta.old_san ?? meta.skill_value
+  const sanLossText = meta.san_loss === 0 ? '0' : `-${meta.san_loss}`
+  const sanLossLabel = typeof oldSan === 'number'
+    ? `SAN 减少 ${meta.san_loss}，由 ${oldSan} 变为 ${meta.new_san}`
+    : `SAN 减少 ${meta.san_loss}，剩余 ${meta.new_san}`
 
   return (
     <div
-      className={`dice-card dice-readout rounded-md px-3 py-2 flex items-center gap-3 ${animClass}`}
+      className={`dice-card dice-readout rounded-md px-3 py-2 flex flex-wrap items-center gap-3 ${animClass}`}
       style={{ borderLeft: `3px solid ${accent}`, width: 'fit-content', maxWidth: '100%' }}
     >
       <GiRollingDices style={{ color: accent, fontSize: '1.15rem', flexShrink: 0 }} />
@@ -145,6 +155,24 @@ export function CheckResultCard({
         )}
         {chips}
       </div>
+
+      {hasSanLoss && (
+        <div
+          className="san-loss-readout"
+          aria-label={sanLossLabel}
+        >
+          <span className="san-loss-label">SAN</span>
+          <strong className="san-loss-value">{sanLossText}</strong>
+          {typeof oldSan === 'number' && (
+            <span className="san-loss-transition">
+              {oldSan} → {meta.new_san}
+            </span>
+          )}
+          {meta.went_insane && (
+            <span className="chip chip--danger">疯狂</span>
+          )}
+        </div>
+      )}
 
       {ts && (
         <span
