@@ -56,6 +56,20 @@ pub fn run() {
                 .join("resources")
                 .join("trpg-server")
                 .join("trpg-server");
+
+            // `pnpm tauri dev` 下没有这个二进制——它是打包产物，开发时后端由
+            // `pnpm dev` 单独跑在 8000（窗口也直接加载 vite 的 5173，不走 loader）。
+            // 不跳过的话 spawn 会以一句没头没脑的 os error 2 让整个 setup 崩掉。
+            // 打包版缺了它则是真出问题，必须照旧报错，不能静默降级。
+            if !exe.exists() {
+                if cfg!(debug_assertions) {
+                    log::info!(
+                        "开发模式：未找到后端 sidecar，跳过启动。请另开终端跑 pnpm dev（后端 8000）"
+                    );
+                    return Ok(());
+                }
+                return Err(format!("后端未随包分发，缺少：{}", exe.display()).into());
+            }
             // 资源拷贝后可能丢掉可执行位，补上，否则 spawn 会失败。
             #[cfg(unix)]
             {
