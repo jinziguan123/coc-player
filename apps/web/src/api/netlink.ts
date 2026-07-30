@@ -29,6 +29,8 @@ export interface NetlinkStatus {
   local_port: number | null
   pending: PendingPeer[]
   approved: ApprovedPeer[]
+  /** 上次退出时直连是开着的——据此自动恢复，见 SettingsPage 的 NetlinkPanel。 */
+  wanted: boolean
 }
 
 export interface GuestLink {

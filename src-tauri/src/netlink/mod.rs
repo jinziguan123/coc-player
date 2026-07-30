@@ -14,6 +14,7 @@
 //! 设计见 `docs/plans/2026-07-29-内置直连组网-design.md`。
 
 mod handshake;
+mod identity;
 mod invite;
 mod rewrite;
 mod roster;
@@ -79,6 +80,12 @@ pub struct Netlink {
     secret: String,
     /// 准入名册。跨重启保留，所以朋友只需被批准一次。
     roster: Arc<roster::Roster>,
+    /// 本机在直连网络里的长期身份。**必须跨重启稳定**，否则邀请码作废、
+    /// 名册失配，见 `identity` 模块。
+    secret_key: iroh::SecretKey,
+    /// 「上次退出时直连是开着的」这个意图。endpoint 本身是运行时对象、没法存盘，
+    /// 但房主的意愿可以——否则每次重开应用他都得想起来再打开一次开关。
+    wanted_flag: PathBuf,
     hosting: Mutex<Option<Hosting>>,
     guesting: Mutex<Option<Guesting>>,
 }
@@ -92,6 +99,8 @@ impl Netlink {
         Self {
             secret,
             roster: Arc::new(roster::Roster::load(data_dir.join("netlink_roster.json"))),
+            secret_key: identity::Identity::at(data_dir.join("netlink_key")).load_or_create(),
+            wanted_flag: data_dir.join("netlink_wanted"),
             hosting: Mutex::new(None),
             guesting: Mutex::new(None),
         }
@@ -99,6 +108,22 @@ impl Netlink {
 
     pub fn secret(&self) -> &str {
         &self.secret
+    }
+
+    /// 房主上次是否把直连开着。前端据此在后端端口就绪后自动恢复。
+    fn wanted(&self) -> bool {
+        self.wanted_flag.exists()
+    }
+
+    fn set_wanted(&self, on: bool) {
+        if on {
+            if let Some(dir) = self.wanted_flag.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&self.wanted_flag, b"1");
+        } else {
+            let _ = std::fs::remove_file(&self.wanted_flag);
+        }
     }
 }
 
@@ -116,6 +141,9 @@ pub struct NetlinkStatus {
     pending: Vec<roster::PendingPeer>,
     /// 已批准的名册。
     approved: Vec<roster::ApprovedPeer>,
+    /// 上次退出时直连是开着的。前端拿到后端端口后据此自动恢复，
+    /// 免得房主每次重开应用都要想起来再打开一次。
+    wanted: bool,
 }
 
 // --- 房主侧 -------------------------------------------------------------
@@ -135,6 +163,7 @@ pub async fn netlink_start(
     }
 
     let endpoint = Endpoint::builder(presets::N0)
+        .secret_key(state.secret_key.clone())
         .alpns(vec![ALPN.to_vec()])
         .bind()
         .await
@@ -154,11 +183,14 @@ pub async fn netlink_start(
         id: id.clone(),
         task,
     });
+    state.set_wanted(true);
     Ok(id)
 }
 
 #[tauri::command]
 pub async fn netlink_stop(state: State<'_, Netlink>) -> Result<(), String> {
+    // 显式关掉才算「不想开」——进程被杀不会走到这里，所以下次启动仍会自动恢复。
+    state.set_wanted(false);
     let running = state.hosting.lock().unwrap().take();
     if let Some(running) = running {
         running.task.abort();
@@ -398,7 +430,10 @@ pub async fn netlink_connect(
     }
     disconnect(&state).await;
 
-    let endpoint = Endpoint::bind(presets::N0)
+    // 与房主侧同一把身份：房主名册里记的就是这个公钥，换了就得重新被批准。
+    let endpoint = Endpoint::builder(presets::N0)
+        .secret_key(state.secret_key.clone())
+        .bind()
         .await
         .map_err(|e| format!("无法启动直连端点：{e}"))?;
     // 只给公钥，具体地址交给 discovery 与 relay 去找。
@@ -545,6 +580,7 @@ pub fn netlink_status(state: State<'_, Netlink>) -> NetlinkStatus {
         local_port: guesting.as_ref().map(|g| g.local_port),
         pending: state.roster.pending_list(),
         approved: state.roster.approved_list(),
+        wanted: state.wanted(),
     }
 }
 

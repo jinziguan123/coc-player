@@ -43,6 +43,7 @@ const idle: netlink.NetlinkStatus = {
   local_port: null,
   pending: [],
   approved: [],
+  wanted: false,
 }
 
 function hosting(extra: Partial<netlink.NetlinkStatus> = {}): netlink.NetlinkStatus {
@@ -185,5 +186,26 @@ describe('设置页内置直连面板', () => {
   it('关着的时候不显示邀请码入口', async () => {
     await openNetworkTab()
     expect(screen.queryByRole('button', { name: '生成邀请码' })).toBeNull()
+  })
+
+  it('上次开着就自动恢复——endpoint 随进程消失，但房主的意愿存了盘', async () => {
+    // 否则每次重开应用房主都得想起来再拨一次开关，而邀请码早发给朋友了。
+    mockStatus.mockResolvedValue({ ...idle, wanted: true })
+    vi.mocked(netlink.netlinkStart).mockResolvedValue('xu4vabc')
+
+    await openNetworkTab()
+    await waitFor(() => expect(netlink.netlinkStart).toHaveBeenCalledWith(8123))
+  })
+
+  it('上次是显式关掉的就不自动开', async () => {
+    mockStatus.mockResolvedValue({ ...idle, wanted: false })
+    await openNetworkTab()
+    expect(netlink.netlinkStart).not.toHaveBeenCalled()
+  })
+
+  it('已经开着时不重复调用启动', async () => {
+    mockStatus.mockResolvedValue({ ...hosting(), wanted: true })
+    await openNetworkTab()
+    expect(netlink.netlinkStart).not.toHaveBeenCalled()
   })
 })
