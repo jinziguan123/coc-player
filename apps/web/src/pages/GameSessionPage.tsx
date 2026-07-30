@@ -28,6 +28,7 @@ import { CharacterPanel } from '../components/character/CharacterPanel'
 import { PartyRoster } from '../components/game/PartyRoster'
 import { SeatIcon, type SeatKind } from '../components/game/SeatIcon'
 import { DiceRoller, type DiceRollerHandle, type DiceSpec } from '../components/game/DiceRoller'
+import { diceSpecsOf } from '../components/game/diceNotation'
 import {
   CheckResultCard, hasCheckReadout, diceAccent,
   type CheckResultMeta,
@@ -418,18 +419,18 @@ export function GameSessionPage() {
   // 暗投（blind）/无 metadata.dice（旧事件）/reduced-motion/无 WebGL：不播动画，直接显示结果卡。
   // 用 useLayoutEffect + state：paint 前同步把需播动画的骰子标进 diceAnimating，结果卡首帧即隐藏、不闪现。
   useLayoutEffect(() => {
-    const toAnimate: { id: string; spec: DiceSpec }[] = []
+    const toAnimate: { id: string; specs: DiceSpec[] }[] = []
     for (const m of messages) {
       if (!m.id || m.type !== 'dice') continue
       if (animatedDiceIds.current.has(m.id)) continue      // 已处理过，防重播
       if (!enterIds.has(m.id)) continue                    // 非本轮新到达（历史/重连）→ 直接显示
       animatedDiceIds.current.add(m.id)
-      const spec = m.metadata?.dice as DiceSpec | undefined
+      const specs = diceSpecsOf(m.metadata)
       const blind = !!m.metadata?.blind
       // 暗投 / 无骰子数据 / reduced-motion / 无 WebGL / 组件未就绪：不动画，直接显示（不进 diceAnimating）。
       const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-      if (blind || !spec || reduced || !diceRollerRef.current) continue
-      toAnimate.push({ id: m.id, spec })
+      if (blind || !specs.length || reduced || !diceRollerRef.current) continue
+      toAnimate.push({ id: m.id, specs })
     }
     if (toAnimate.length === 0) return
     // 同步隐藏这些结果卡（state 更新在 paint 前生效）。
@@ -437,7 +438,10 @@ export function GameSessionPage() {
     // 逐条播动画（覆盖层同一时刻只播一个，队列串行；落定后放行对应结果卡）。
     void (async () => {
       for (const t of toAnimate) {
-        try { await diceRollerRef.current?.roll(t.spec) } catch { /* 降级：直接放行 */ }
+        // 一条事件可能有多段骰（理智检定＝先判成败、再掷损失），依次播完才放行结果卡。
+        for (const spec of t.specs) {
+          try { await diceRollerRef.current?.roll(spec) } catch { /* 降级：直接放行 */ }
+        }
         setRevealedDice((prev) => new Set(prev).add(t.id))
       }
     })()

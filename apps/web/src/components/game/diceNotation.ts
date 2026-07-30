@@ -91,3 +91,31 @@ export function specToNotation(spec: DiceSpec): string {
   }
   return `${diceParts.join('+')}@${values.join(',')}`
 }
+
+/**
+ * 从一条 dice 事件的 metadata 里取出**按顺序要播的每一段骰**。
+ *
+ * 多数检定只有一段（`metadata.dice`）。理智检定是两段：先掷 d100 判成败
+ * （明细在 `metadata.check_dice`），再按结果掷 SAN 损失（`metadata.dice`）。
+ *
+ * 此前动画只读 `dice`，于是理智检定**从来没播过 d100 判定那一段**——玩家看到的
+ * 是一颗六面骰（损失骰），而判成败的那次投掷凭空消失了。更容易让人误会的是：
+ * 检定成功且损失是固定值（如 SAN −1）时，`dice` 是个空骰池，那次连骰子都没有，
+ * 于是同一批检定里成功的人和失败的人看到的动画完全不同。
+ */
+export function diceSpecsOf(metadata: Record<string, unknown> | undefined): DiceSpec[] {
+  if (!metadata) return []
+  const out: DiceSpec[] = []
+  const check = metadata.check_dice as DiceSpec | undefined
+  if (hasDiceToRoll(check)) out.push(check as DiceSpec)
+  const main = metadata.dice as DiceSpec | undefined
+  // 固定损失（不掷骰）落成一个空骰池，别为它播一次空动画。
+  if (hasDiceToRoll(main)) out.push(main as DiceSpec)
+  return out
+}
+
+function hasDiceToRoll(spec: DiceSpec | undefined): boolean {
+  if (!spec) return false
+  if (spec.kind === 'pool') return (spec.dice?.length ?? 0) > 0
+  return true
+}

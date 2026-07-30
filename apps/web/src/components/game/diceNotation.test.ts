@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCheckCaption, specToNotation, type DiceCheck } from './diceNotation'
+import { buildCheckCaption, diceSpecsOf, specToNotation, type DiceCheck, type DiceSpec } from './diceNotation'
 
 // 基础 check 骰规格工厂（无奖惩，单十位）。
 function check(over: Partial<DiceCheck>): DiceCheck {
@@ -44,5 +44,48 @@ describe('specToNotation（奖惩骰多十位一并投掷）', () => {
   it('奖励骰把多颗十位与个位串成单个 @ 列表', () => {
     // tens=[30,70] → 2d100+1d10@30,70,5
     expect(specToNotation(check({ bonus: 1, tens: [30, 70], units: 5 }))).toBe('2d100+1d10@30,70,5')
+  })
+})
+
+describe('diceSpecsOf：一条事件要播哪几段骰', () => {
+  const d100: DiceSpec = {
+    kind: 'check', result: 73, tens: [70], tens_kept: 70, units: 3, bonus: 0, penalty: 0,
+  }
+  const pool = (values: number[]): DiceSpec => ({
+    kind: 'pool',
+    notation: `${values.length}d6`,
+    dice: values.map((value) => ({ sides: 6, value })),
+    modifier: 0,
+    total: values.reduce((a, b) => a + b, 0),
+  })
+
+  it('理智检定失败：先播 d100 判成败，再播损失骰', () => {
+    // 此前只播后者，判成败那次投掷凭空消失
+    const specs = diceSpecsOf({ check_dice: d100, dice: pool([6]) })
+    expect(specs.map((s) => s.kind)).toEqual(['check', 'pool'])
+  })
+
+  it('理智检定成功且固定损失：只播 d100，不为空骰池播一次空动画', () => {
+    // 固定损失（SAN −1）落成一个空骰池。此前这里没有任何东西可播，
+    // 于是同一批检定里成功的人干脆看不到动画、失败的人只看到六面骰。
+    const specs = diceSpecsOf({
+      check_dice: d100,
+      dice: { kind: 'pool', notation: '0', dice: [], modifier: 1, total: 1 },
+    })
+    expect(specs.map((s) => s.kind)).toEqual(['check'])
+  })
+
+  it('普通技能检定只有一段', () => {
+    expect(diceSpecsOf({ dice: d100 }).map((s) => s.kind)).toEqual(['check'])
+  })
+
+  it('KP 自定义骰池只有一段', () => {
+    expect(diceSpecsOf({ dice: pool([4, 5]) }).map((s) => s.kind)).toEqual(['pool'])
+  })
+
+  it('没有骰子数据时不播（旧事件、暗投）', () => {
+    expect(diceSpecsOf(undefined)).toEqual([])
+    expect(diceSpecsOf({})).toEqual([])
+    expect(diceSpecsOf({ blind: true })).toEqual([])
   })
 })
