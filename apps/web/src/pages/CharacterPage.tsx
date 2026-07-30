@@ -134,7 +134,7 @@ export function CharacterPage() {
       } else if (failed) {
         toast.error('取回失败，请确认与房主的连接是否正常')
       } else {
-        toast.success('没有需要同步的参战记录')
+        toast.success('没有需要同步的内容')
       }
     } finally {
       setPulling(false)
@@ -800,7 +800,7 @@ export function CharacterPage() {
                     onClick={() => void pullBackFromHost()}
                     disabled={pulling}
                     className="btn-secondary flex items-center gap-1 text-sm"
-                    title="把本局在房主机器上产生的 HP/理智/成长/物品写回你自己的角色卡"
+                    title="把本局的 HP、理智、成长与物品变化写回你自己的角色卡"
                   >
                     <RefreshCw size={13} /> {pulling ? '同步中…' : '从房主处取回本局结果'}
                   </button>

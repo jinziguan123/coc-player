@@ -70,7 +70,7 @@ async def _maintenance_gate(request: Request, call_next):
             "<h1>数据库升级未完成</h1>"
             "<p>本次启动的自动迁移失败，为保护你的存档，应用已暂停运行。</p>"
             f"<pre style='color:#98a2ad;white-space:pre-wrap'>{_MIGRATION_ERROR}</pre>"
-            "<p>迁移前的自动备份位于数据目录下的 <code>trpg.db.bak-*</code>；"
+            "<p>升级前的自动备份位于数据目录下的 <code>trpg.db.bak-*</code>；"
             "可升级到匹配的程序版本后重试，或从备份恢复。</p>"
             "</body></html>",
             status_code=503,

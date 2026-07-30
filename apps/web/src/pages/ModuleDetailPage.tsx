@@ -743,7 +743,7 @@ export function ModuleDetailPage() {
               <CharacterGuidanceCard guidance={data.character_guidance} />
             ) : (
               <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                —（本功能上线前导入的模组没有这段，点下面的按钮补生成）
+                还没有车卡建议。点下面的按钮，让 AI 按这个本子的设定写一份。
               </p>
             )}
             {!isNew && (
@@ -767,7 +767,7 @@ export function ModuleDetailPage() {
             placeholder="整个事件的来龙去脉：真凶、动机、时间线——KP 专属参考，玩家永不可见" />
         ) : (
           <p className="whitespace-pre-wrap text-sm" style={{ color: 'var(--color-danger)' }}>
-            {data.truth || '—（旧模组无此段，重新导入可解析出）'}
+            {data.truth || '这个模组还没有记录幕后真相。重新导入原文可以让 AI 再解析一次。'}
           </p>
         )}
       </Section>

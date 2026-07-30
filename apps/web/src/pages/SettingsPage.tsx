@@ -650,8 +650,8 @@ function NetlinkPanel({ backendPort }: { backendPort: number | null }) {
         />
       </div>
       <p className="setting-description">
-        让不在同一网络的朋友直接连进来，双方都不需要装 Tailscale。开关即时生效，不必重启，
-        也不需要打开上面的「允许局域网加入」。朋友第一次连入时你要在这里点同意。
+        让不在同一网络的朋友直接连进来，双方都不需要额外安装联网工具。打开即可用，
+        不用重启应用。朋友第一次连入时你要在这里点同意。
       </p>
 
       {hosting && (
@@ -1223,7 +1223,7 @@ function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
   const handleToggleFast = async (id: string) => {
     try {
       const res = await localApi.post<{ is_fast: boolean }>(`/settings/ai/profiles/${id}/set-fast`)
-      toast.success(res.is_fast ? '已设为快模型（裁定/队友/摘要将走它）' : '已取消快模型，副任务回落主模型')
+      toast.success(res.is_fast ? '已设为快模型（裁定/队友/摘要将走它）' : '已取消快模型，这些任务改用主模型')
       await fetchProfiles()
     } catch {
       toast.error('设置快模型失败')

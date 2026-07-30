@@ -224,7 +224,7 @@ export function RoomLobbyPage() {
       const claimError = await claimWithChar(imported.id, false)
       if (claimError) {
         setMyChars((prev) => prev.some((c) => c.id === imported.id) ? prev : [...prev, imported])
-        toast.error(`参战副本已同步，但入座失败：${claimError}。可在上方角色列表里重试`)
+        toast.error(`角色已同步给房主，但入座失败：${claimError}。可在上方角色列表里重试`)
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '同步角色到房主失败')
@@ -503,7 +503,7 @@ export function RoomLobbyPage() {
                     <button onClick={claimKp} disabled={busy} className="btn-primary !px-2.5 !py-1 text-sm">
                       以真人 KP 身份加入
                     </button>
-                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>占用 KP 席后，本 token 不能再占玩家席</span>
+                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>以 KP 身份加入后，就不再占用玩家席位</span>
                   </div>
                 )}
                 <p className="text-sm mb-2" style={{ color: 'var(--color-text-secondary)' }}>或选择玩家角色入座空席：</p>
@@ -525,7 +525,7 @@ export function RoomLobbyPage() {
                   ))}
                   {localChars.length > 0 && (
                     <span className="basis-full text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      本机角色（入座时自动同步一份参战副本给房主，原件仍在你自己的库里）
+                      本机角色（入座时会把角色同步给房主，你自己这份不受影响）
                     </span>
                   )}
                   {localChars.map((c) => (
