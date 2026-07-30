@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { toast } from 'sonner'
 
 import {
+  EVENT_DISCONNECTED,
   EVENT_PENDING,
   EVENT_SETTLED,
   listenNetlink,
@@ -72,6 +73,15 @@ export function useKnockNotices() {
         toast.dismiss(id)
         toasts.delete(peerId)
       }
+    }).then(register)
+
+    // 客人侧：房主退出应用或关掉直连时，隧道就死了。不提示的话页面只会莫名
+    // 卡住——每个请求都在一条死连接上超时，而用户不知道发生了什么。
+    void listenNetlink<string>(EVENT_DISCONNECTED, () => {
+      toast.error('与房主的连接已断开', {
+        description: '对方可能退出了应用或关闭了内置直连。重新用邀请码加入即可。',
+        duration: 10000,
+      })
     }).then(register)
 
     return () => {

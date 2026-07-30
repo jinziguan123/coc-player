@@ -82,6 +82,33 @@ describe('玩家 token 按稳定身份归属', () => {
     expect(getPlayerToken('http://127.0.0.1:54321')).not.toBe(a)
   })
 
+  it('升级迁移：把按临时端口存过的 token 挪到房主名下，不丢席位', () => {
+    // identity 机制上线前，隧道 token 是按 127.0.0.1:<临时端口> 存的。升级后
+    // 第一次重连若不继承，后端会把人当成另一个玩家——席位和历史全看不见。
+    localStorage.setItem('trpg_player_token::http://127.0.0.1:54321', 'old-seat')
+
+    setServerIdentity('http://127.0.0.1:61000', 'netlink:host-a')
+    expect(getPlayerToken('http://127.0.0.1:61000')).toBe('old-seat')
+  })
+
+  it('连过多位房主时不猜——挑错等于顶替别人的身份', () => {
+    localStorage.setItem('trpg_player_token::http://127.0.0.1:54321', 'seat-a')
+    localStorage.setItem('trpg_player_token::http://127.0.0.1:54322', 'seat-b')
+
+    setServerIdentity('http://127.0.0.1:61000', 'netlink:host-a')
+    const fresh = getPlayerToken('http://127.0.0.1:61000')
+    expect(fresh).not.toBe('seat-a')
+    expect(fresh).not.toBe('seat-b')
+  })
+
+  it('identity 名下已有 token 时不被旧值覆盖', () => {
+    localStorage.setItem('trpg_player_token::netlink:host-a', 'current')
+    localStorage.setItem('trpg_player_token::http://127.0.0.1:54321', 'stale')
+
+    setServerIdentity('http://127.0.0.1:61000', 'netlink:host-a')
+    expect(getPlayerToken('http://127.0.0.1:61000')).toBe('current')
+  })
+
   it('没登记身份的地址沿用原有行为', () => {
     // 局域网直连不受影响：键仍是地址本身，老存档的席位不动。
     localStorage.setItem('trpg_player_token::http://192.168.1.5:8756', 'existing')

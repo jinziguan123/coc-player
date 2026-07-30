@@ -131,6 +131,8 @@ export function peerDisplayName(peer: PendingPeer): string {
 export const EVENT_PENDING = 'netlink://pending'
 /** 门口那位已被处理（同意/拒绝/超时），据此收掉提示。 */
 export const EVENT_SETTLED = 'netlink://settled'
+/** 与房主的连接断了（对方退出应用、关掉直连或网络中断）。 */
+export const EVENT_DISCONNECTED = 'netlink://disconnected'
 
 export interface PendingEvent {
   peer_id: string

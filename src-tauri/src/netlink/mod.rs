@@ -40,7 +40,7 @@ use iroh::{Endpoint, EndpointAddr, EndpointId};
 use rand::Rng;
 use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::net::TcpListener;
 
 /// 隧道密钥交给后端 sidecar 的通道。必须与
@@ -67,6 +67,8 @@ struct Guesting {
     host_id: String,
     local_port: u16,
     task: JoinHandle<()>,
+    /// 盯着连接何时死掉，好清理状态并通知前端，见 `netlink_connect`。
+    watchdog: JoinHandle<()>,
 }
 
 /// 隧道的全部运行时状态。房主与客人两侧互不相干，可以同时存在
@@ -222,6 +224,8 @@ async fn accept_loop(
 pub const EVENT_PENDING: &str = "netlink://pending";
 /// 事件名：门口那位已被处理（同意/拒绝/超时），前端据此收掉提示。
 pub const EVENT_SETTLED: &str = "netlink://settled";
+/// 事件名：客人侧与房主的连接断了（房主退出应用、关掉直连或网络中断）。
+pub const EVENT_DISCONNECTED: &str = "netlink://disconnected";
 
 #[derive(Clone, Serialize)]
 struct PendingEvent {
@@ -367,6 +371,7 @@ pub struct GuestLink {
 /// 见 `handshake` 模块。首次加入需房主手动同意，本调用可能卡上一两分钟。
 #[tauri::command]
 pub async fn netlink_connect(
+    app: AppHandle,
     state: State<'_, Netlink>,
     invite_code: String,
     label: Option<String>,
@@ -432,15 +437,47 @@ pub async fn netlink_connect(
         .map_err(|e| format!("无法读取本机端口：{e}"))?
         .port();
 
-    let task = tauri::async_runtime::spawn(async move {
-        pump_loop(listener, conn).await;
-    });
+    let task = {
+        let conn = conn.clone();
+        tauri::async_runtime::spawn(async move {
+            pump_loop(listener, conn).await;
+        })
+    };
+
+    // 看门狗：房主那侧的进程一旦退出（或网络断掉），这条 QUIC 连接就死了。
+    // 不盯着的话，客人侧会一直攥着死连接，前端每发一个请求就在上面开一次流、
+    // 超时、再记一行日志——表现成「界面卡住 + 日志爆炸」，而没人告诉用户断了。
+    let watchdog = {
+        let app = app.clone();
+        let host = endpoint_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let reason = conn.closed().await;
+            log::warn!("与房主 {host} 的直连已断开：{reason}");
+            // 清掉状态，前端下次问 status 就知道没连着了。
+            let netlink = app.state::<Netlink>();
+            let stale = {
+                let mut guard = netlink.guesting.lock().unwrap();
+                // 只清理「还是这一条」的情况：用户可能已经手动重连到别处了。
+                if guard.as_ref().is_some_and(|g| g.host_id == host) {
+                    guard.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(stale) = stale {
+                stale.task.abort();
+                stale.endpoint.close().await;
+                let _ = app.emit(EVENT_DISCONNECTED, host);
+            }
+        })
+    };
 
     state.guesting.lock().unwrap().replace(Guesting {
         endpoint,
         host_id: endpoint_id,
         local_port,
         task,
+        watchdog,
     });
     Ok(GuestLink {
         local_port,
@@ -458,6 +495,7 @@ async fn disconnect(state: &State<'_, Netlink>) {
     let previous = state.guesting.lock().unwrap().take();
     if let Some(previous) = previous {
         previous.task.abort();
+        previous.watchdog.abort();
         previous.endpoint.close().await;
     }
 }

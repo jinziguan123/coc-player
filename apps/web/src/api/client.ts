@@ -29,7 +29,34 @@ const IDENTITY_PREFIX = 'trpg_server_identity::'
  * 没有登记过映射的地址（局域网直连）沿用地址本身，行为与此前完全一致。
  */
 export function setServerIdentity(serverUrl: string, identity: string) {
-  if (serverUrl) localStorage.setItem(IDENTITY_PREFIX + serverUrl, identity)
+  if (!serverUrl) return
+  localStorage.setItem(IDENTITY_PREFIX + serverUrl, identity)
+  adoptTokenFromLoopbackUrl(identity)
+}
+
+/**
+ * 迁移：把此前按「回环地址」存的 token 挪到 identity 名下。
+ *
+ * 隧道的本地端口每次连接都变。identity 机制上线之前，token 是按那个临时地址
+ * 存的；升级后第一次重连会换用 identity 键，找不到旧 token 就新发一个——后端
+ * 于是把你当成**另一个玩家**，之前的席位与历史全都看不见了。
+ *
+ * 只在「identity 名下还没有 token」且「恰好只有一个回环地址存过 token」时迁移。
+ * 有多个就不猜：连过多位房主时挑错等于顶替了别人的身份，比丢席位更糟。
+ */
+function adoptTokenFromLoopbackUrl(identity: string) {
+  const identityKey = `${LOCAL_TOKEN_KEY}::${identity}`
+  if (localStorage.getItem(identityKey)) return
+
+  const loopbackKeys: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (key?.startsWith(`${LOCAL_TOKEN_KEY}::http://127.0.0.1:`)) loopbackKeys.push(key)
+  }
+  if (loopbackKeys.length !== 1) return
+
+  const inherited = localStorage.getItem(loopbackKeys[0])
+  if (inherited) localStorage.setItem(identityKey, inherited)
 }
 
 function identityFor(serverUrl: string): string {
