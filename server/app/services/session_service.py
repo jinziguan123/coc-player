@@ -327,14 +327,13 @@ def claim_seat(
         raise ValueError("席位不存在")
     if seat.role not in ("human", "kp"):
         raise ValueError("只能认领真人或 KP 席位")
-    reserved_by_me = bool(
-        seat.role == "human"
-        and seat.claimed
-        and seat.owner_token == token
-        and not seat.character_id
-    )
+    # 自己的席位可以再动：还没选角色时是「补选」，已选了则是「换人」。
+    # 换人只在开局前允许——开局后消息、骰点与战斗状态都绑着角色，中途换掉会留下
+    # 一堆指向旧角色的记录，那不是换角色而是把存档搞坏。
+    mine = seat.role == "human" and seat.claimed and seat.owner_token == token
+    reserved_by_me = bool(mine and (not seat.character_id or session.status == "setup"))
     if seat.claimed and not reserved_by_me:
-        raise ValueError("该席位已被认领")
+        raise ValueError("已开局，无法更换角色" if mine else "该席位已被认领")
 
     strict_identity = session.host_token is not None or seat.identity_version >= 2
     if strict_identity:
@@ -382,6 +381,9 @@ def claim_seat(
     seat.character_id = character_id
     seat.owner_token = token
     seat.claimed = True
+    # 换了角色就得重新确认准备——否则会带着「已准备」的状态换成另一个人。
+    # 首次认领时它本来就是 False，这里无副作用。
+    seat.ready = False
     if strict_identity:
         seat.identity_version = 2
     char.owner_token = token

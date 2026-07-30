@@ -1960,8 +1960,10 @@ export function GameSessionPage() {
             </button>
           </div>
         )}
-        {/* KP 控制台已移到右侧独立栏（见布局末尾），不再内联挤占叙事流的竖向空间 */}
-        {!streaming && (
+        {/* KP 控制台已移到右侧独立栏（见布局末尾），不再内联挤占叙事流的竖向空间。
+            真人 KP 不扮演角色：下面这整块（提交行动、重新生成 AI 叙事）与再往下的
+            发言框都是玩家侧操作，他走右侧工作台推进，不该同时看到两套入口。 */}
+        {!isKp && !streaming && (
           <div className="px-3 pb-1 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <button
@@ -2039,6 +2041,11 @@ export function GameSessionPage() {
             {hasNewBelow ? '有新内容' : '最新'}
           </button>
         )}
+        {isKp ? (
+          <div className="chat-input-bar chat-input-bar--kp">
+            用右侧 KP 工作台推进本回合。你是 KP，不占玩家席，因此没有发言框。
+          </div>
+        ) : (
         <div className="chat-input-bar">
           <textarea
             ref={inputRef}
@@ -2074,6 +2081,7 @@ export function GameSessionPage() {
             发送
           </button>
         </div>
+        )}
       </div>
 
       {/* 角色卡侧栏：沉浸战斗布局下暂时隐藏（参战卡已带 HP/状态，屏幕让给战场与聊天）。

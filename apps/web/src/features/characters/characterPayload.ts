@@ -12,6 +12,7 @@ export interface WeaponItem {
 
 interface CharacterPayloadInput {
   name: string
+  /** 可留空：角色卡不必属于某个模组，见 server/app/schemas/character.py 的说明。 */
   moduleId: string
   age: number
   baseAttributes: Record<string, number>
@@ -48,7 +49,8 @@ export function buildCharacterPayload(input: CharacterPayloadInput) {
 
   return {
     name: input.name,
-    module_id: input.moduleId,
+    // 空串要转成 null，否则会在库里留下一个指不到任何模组的空字符串。
+    module_id: input.moduleId || null,
     rule_system: 'coc',
     age: input.age,
     base_attributes: input.baseAttributes,

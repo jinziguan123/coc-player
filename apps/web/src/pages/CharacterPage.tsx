@@ -386,7 +386,13 @@ export function CharacterPage() {
 
   // ---- 评估 + 创建 ----
   const evaluateAndCreate = async () => {
-    if (!name || !effectiveAttrs || !moduleId) return
+    if (!name || !effectiveAttrs) return
+    // 没指定模组就没有可对照的背景，跳过 AI 适配性评估直接建卡——不该因为
+    // 「评估不了」而把没有模组的人挡在建卡之外。
+    if (!moduleId) {
+      await doCreate()
+      return
+    }
     setEvaluating(true)
     setEvalResult(null)
     try {
@@ -409,7 +415,9 @@ export function CharacterPage() {
   }
 
   const doCreate = async () => {
-    if (!name || !effectiveAttrs || !moduleId) return
+    // 模组可留空：联机时客人的卡存在自己库里，而模组在房主库里，跨库引用没意义。
+    // 强制选模组会让本地没有该模组的客人根本建不了卡。
+    if (!name || !effectiveAttrs) return
     setCreating(true)
     try {
       let finalSkills: Record<string, number>
@@ -820,10 +828,12 @@ export function CharacterPage() {
             {step === '基本信息' && (
               <div>
                 <div className="mb-3">
-                  <label className="block text-sm mb-1" style={{ color: 'var(--color-text-secondary)' }}>所属模组</label>
+                  <label className="block text-sm mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    所属模组（可选）
+                  </label>
                   <Select value={moduleId} onValueChange={setModuleId}>
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="— 选择模组 —" />
+                      <SelectValue placeholder="— 不指定 —" />
                     </SelectTrigger>
                     <SelectContent>
                       {modules.map((m) => (
@@ -834,6 +844,10 @@ export function CharacterPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    只用于归类，留空也能建卡与入座。
+                    {modules.length === 0 && '本机还没有模组，直接往下填就行。'}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 mb-3 p-2 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
                   <GiUpCard className="text-lg flex-shrink-0" style={{ color: 'var(--color-text-accent)' }} />
@@ -904,7 +918,8 @@ export function CharacterPage() {
                     注意：年龄 {age} 岁，移动力将减少 {age >= 80 ? 5 : age >= 70 ? 4 : age >= 60 ? 3 : age >= 50 ? 2 : 1} 点
                   </div>
                 )}
-                <button onClick={() => setStep('属性设定')} disabled={!name || !moduleId} className="btn-primary">
+                {/* 模组不再是必填：联机时客人的卡存在自己库里、模组在房主库里。 */}
+                <button onClick={() => setStep('属性设定')} disabled={!name} className="btn-primary">
                   下一步
                 </button>
               </div>

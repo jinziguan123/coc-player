@@ -69,6 +69,9 @@ export function RoomLobbyPage() {
 
   const mySeat = myPlayerSeat
   const needsCharacter = !!mySeat && mySeat.role === 'human' && !mySeat.character_id
+  // 已入座的人点「更换角色」后，重新展开下面那套角色选择区。开局后不再允许换：
+  // 消息与战斗状态都绑着角色，后端也会拒绝。
+  const [changingChar, setChangingChar] = useState(false)
   // 旧 human-KP 房间可能让同一 token 同时拥有 KP/玩家席，保留玩家操作区，避免升级后失去权限。
   const strictKpIdentity = !!myKpSeat && (room?.identity_version ?? 1) >= 2
   const amHost = !!room?.participants.some((p) => p.is_host && p.is_mine)
@@ -174,7 +177,9 @@ export function RoomLobbyPage() {
 
   const claimWithChar = async (charId: string, notify = true): Promise<string | null> => {
     if (!room) return '房间状态尚未加载'
-    const seat = (mySeat && mySeat.role === 'human' && !mySeat.character_id)
+    // 已经有自己的玩家席就用它——无论是补选角色还是换个角色。此前这里要求
+    // `!mySeat.character_id`，于是选过一次之后就只会去找空席，坐满了就再也换不了。
+    const seat = (mySeat && mySeat.role === 'human')
       ? mySeat
       : room.participants.find((p) => p.role === 'human' && !p.character_id && !p.claimed)
     if (!seat) {
@@ -187,6 +192,7 @@ export function RoomLobbyPage() {
     try {
       await api.post(`/sessions/${room.id}/claim`, { seat_order: seat.seat_order, character_id: charId })
       await refreshRoom()
+      setChangingChar(false)
       return null
     } catch (e) {
       const message = e instanceof Error ? e.message : '入座失败'
@@ -471,8 +477,21 @@ export function RoomLobbyPage() {
                 <span className="text-sm" style={{ color: 'var(--color-text-accent)' }}>你已作为真人 KP 加入</span>
                 {myKpSeat.is_host && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>房主权限独立于玩家席</span>}
               </div>
-            ) : !mySeat || needsCharacter ? (
+            ) : !mySeat || needsCharacter || changingChar ? (
               <div>
+                {changingChar && (
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                      选一张新的角色卡替换「{mySeat?.character_name}」：
+                    </span>
+                    <button
+                      onClick={() => setChangingChar(false)}
+                      className="btn-secondary !px-2 !py-0.5 text-xs"
+                    >
+                      取消
+                    </button>
+                  </div>
+                )}
                 {openKpSeat && (
                   <div className="mb-3 flex items-center gap-2">
                     <button onClick={claimKp} disabled={busy} className="btn-primary !px-2.5 !py-1 text-sm">
@@ -523,6 +542,13 @@ export function RoomLobbyPage() {
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   你已入座为「{mySeat.character_name}」
                 </span>
+                <button
+                  onClick={() => setChangingChar(true)}
+                  className="btn-secondary !px-2 !py-0.5 text-xs"
+                  title="开局前可以换一张角色卡"
+                >
+                  更换角色
+                </button>
               </div>
             )}
           </div>

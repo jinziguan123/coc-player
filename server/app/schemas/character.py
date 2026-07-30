@@ -7,7 +7,12 @@ from pydantic import BaseModel
 
 class CharacterCreate(BaseModel):
     name: str
-    module_id: str
+    # 可留空：角色卡不必属于某个模组。
+    #
+    # 联机时客人的角色卡存在**他自己**的库里（ADR-007：素材库的写操作只允许本机），
+    # 而模组在房主库里——跨库引用没有意义。此前这里必填，于是本地没有对应模组的
+    # 客人根本建不了卡。模型层与 CharacterRead 一直是可空的，只有这里卡着。
+    module_id: str | None = None
     rule_system: str
     is_player: bool = True
     age: int = 25

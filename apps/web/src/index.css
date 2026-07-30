@@ -1747,6 +1747,13 @@ body {
   padding-top: 0.75rem;
   border-top: 1px solid var(--color-border);
 }
+/* 真人 KP 没有发言框（他不占玩家席），这里放一句说明，免得底部空一块让人以为坏了。 */
+.chat-input-bar--kp {
+  justify-content: center;
+  padding-bottom: 0.75rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
 
 .dot-pulse {
   position: relative;
