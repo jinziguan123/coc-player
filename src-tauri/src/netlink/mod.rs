@@ -185,6 +185,9 @@ async fn accept_loop(
                 }
             };
             let peer = conn.remote_id().to_string();
+            // 连接建立就留痕：排查时要能区分「压根没连上」「连上但握手卡住」
+            // 「握手过了但准入没放行」这三种，否则只能盲猜。
+            log::info!("直连连接已建立，等待握手：{peer}");
 
             // 第一条流是控制流：读对方自报的名字，把裁决写回去。之后的流才是 HTTP。
             let (mut ctrl_send, mut ctrl_recv) = match conn.accept_bi().await {
@@ -195,6 +198,7 @@ async fn accept_loop(
                 }
             };
             let hello = handshake::read_hello(&mut ctrl_recv).await;
+            log::info!("收到握手，对方自称「{}」：{peer}", hello.label);
             let verdict = admit(&roster, &peer, &hello.label, &app).await;
             let _ = handshake::write_verdict(&mut ctrl_send, &verdict).await;
             let _ = ctrl_send.finish();

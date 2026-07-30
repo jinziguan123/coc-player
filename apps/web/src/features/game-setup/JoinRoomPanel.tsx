@@ -1,5 +1,13 @@
 import type { GameSetupState } from './useGameSetup'
 
+/** 邀请码形如 `trpg:<公钥>[:<房间码>]`，第三段是房间码。 */
+function roomCodeFromInvite(raw: string): string | null {
+  const cleaned = raw.trim().replace(/^["'「<]+|["'」>]+$/g, '')
+  if (!cleaned.toLowerCase().startsWith('trpg:')) return null
+  const code = cleaned.split(':')[2]
+  return code ? code.toUpperCase() : null
+}
+
 export function JoinRoomPanel({ setup }: { setup: GameSetupState }) {
   const {
     connectedHost,
@@ -16,6 +24,18 @@ export function JoinRoomPanel({ setup }: { setup: GameSetupState }) {
 
   // 邀请码走内置直连，房间码可由它带来，界面提示与按钮禁用条件都要跟着变。
   const isInvite = hostAddr.trim().toLowerCase().startsWith('trpg:')
+
+  /**
+   * 粘进来就地拆解：邀请码自带房间码时立刻填到下面那栏。
+   *
+   * 连上房主后也会从握手结果里拿到房间码，但那要等几秒到几分钟（首次加入需
+   * 对方点同意）。粘贴当下就填好，用户才看得见「这码里已经有房间号了」。
+   */
+  const onHostAddrChange = (next: string) => {
+    setHostAddr(next)
+    const code = roomCodeFromInvite(next)
+    if (code) setJoinCode(code)
+  }
 
   return (
     <div className="card mb-6">
@@ -41,7 +61,7 @@ export function JoinRoomPanel({ setup }: { setup: GameSetupState }) {
       )}
       <input
         value={hostAddr}
-        onChange={(event) => setHostAddr(event.target.value)}
+        onChange={(event) => onHostAddrChange(event.target.value)}
         placeholder="邀请码（trpg:…）或主机地址（如 192.168.1.5）；留空 = 本机房间"
         className="input mb-2 w-full"
       />

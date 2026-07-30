@@ -72,6 +72,48 @@ describe('加入房间面板', () => {
     expect(screen.getByRole('button', { name: '等待中…' })).toBeDisabled()
   })
 
+  it('粘贴带房间码的邀请码时立刻拆出房间码填进去', async () => {
+    // 连上房主后也会从握手拿到房间码，但那要等对方点同意；粘贴当下就填好，
+    // 用户才看得见「这码里已经带了房间号」。
+    const setJoinCode = vi.fn()
+    const user = userEvent.setup()
+    render(<JoinRoomPanel setup={setupWith({ setJoinCode })} />)
+
+    await user.click(screen.getByPlaceholderText(/邀请码/))
+    await user.paste('trpg:xu4vabcdefg:k7m9pq2r')
+    expect(setJoinCode).toHaveBeenCalledWith('K7M9PQ2R')
+  })
+
+  it('邀请码没带房间码时不动房间码栏', async () => {
+    const setJoinCode = vi.fn()
+    const user = userEvent.setup()
+    render(<JoinRoomPanel setup={setupWith({ setJoinCode })} />)
+
+    await user.click(screen.getByPlaceholderText(/邀请码/))
+    await user.paste('trpg:xu4vabcdefg')
+    expect(setJoinCode).not.toHaveBeenCalled()
+  })
+
+  it('容忍聊天软件带来的引号', async () => {
+    const setJoinCode = vi.fn()
+    const user = userEvent.setup()
+    render(<JoinRoomPanel setup={setupWith({ setJoinCode })} />)
+
+    await user.click(screen.getByPlaceholderText(/邀请码/))
+    await user.paste('「trpg:xu4vabcdefg:K7M9PQ2R」')
+    expect(setJoinCode).toHaveBeenCalledWith('K7M9PQ2R')
+  })
+
+  it('普通主机地址不会被当成邀请码拆解', async () => {
+    const setJoinCode = vi.fn()
+    const user = userEvent.setup()
+    render(<JoinRoomPanel setup={setupWith({ setJoinCode })} />)
+
+    await user.click(screen.getByPlaceholderText(/邀请码/))
+    await user.paste('192.168.1.5:8756')
+    expect(setJoinCode).not.toHaveBeenCalled()
+  })
+
   it('点加入会触发 joinRoom', async () => {
     const joinRoom = vi.fn()
     const user = userEvent.setup()
