@@ -154,6 +154,27 @@ export const DiceRoller = forwardRef<DiceRollerHandle, Record<never, never>>(fun
 
   useImperativeHandle(ref, () => ({ roll }), [roll])
 
+  // 空闲预热：把 dice-box 提前初始化好。
+  //
+  // 不预热的话，**本局第一次投骰**要当场干等一整套冷启动——动态 import 那个 500KB+
+  // 的模块、建 WebGL 上下文、加载 3D 资源与物理引擎。而 roll() 是在动画队列里被
+  // await 的，于是骰子结果早已广播、旁观者动画都播完了，投骰的人自己还在等，
+  // 实测能等到近十秒。开发态更慢（资源逐个请求、不打包）。
+  //
+  // 放在 requestIdleCallback 里，不与首屏渲染抢主线程；失败静默（roll 时会再试一次，
+  // 且已有「初始化不了就直接显示结果卡」的降级）。
+  useEffect(() => {
+    const warm = () => { void ensureBox() }
+    const idle = window.requestIdleCallback
+    if (typeof idle === 'function') {
+      const handle = idle(warm, { timeout: 3000 })
+      return () => window.cancelIdleCallback?.(handle)
+    }
+    // Safari 没有 requestIdleCallback：退一步用定时器，让首屏先画完。
+    const timer = setTimeout(warm, 1200)
+    return () => clearTimeout(timer)
+  }, [ensureBox])
+
   // 卸载/切会话：dispose 释放 WebGL 上下文，防泄漏。
   useEffect(() => {
     const container = containerRef.current
