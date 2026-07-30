@@ -12,6 +12,10 @@ _CHARACTERISTIC_ALIAS = {
     "力量": "STR", "体质": "CON", "体型": "SIZ", "敏捷": "DEX",
     "外貌": "APP", "智力": "INT", "意志": "POW", "教育": "EDU",
     "灵感": "INT", "知识": "EDU",  # CoC 7e：灵感=INT 直接判定，知识=EDU
+    # 幸运也是一条属性别名。它落在哪儿取决于卡是怎么建的：手动建卡写
+    # system_data.luck，AI 生成与 Excel 导入写 base_attributes.LUCK。
+    # 两处都要能取到，否则「幸运」检定会以 0 结算、必失败。
+    "幸运": "LUCK", "运气": "LUCK",
 }
 
 # 理智检定的写法：SAN 不在技能表也不在属性表，需单独回落到 system_data.sanity.current
@@ -67,8 +71,10 @@ def resolve_skill_check(
     # 技能表/同名属性都没命中时，按属性骰别名回落到英文属性键（如 灵感→INT、智力→INT）
     if not skill_value and skill_name in _CHARACTERISTIC_ALIAS:
         skill_value = attrs.get(_CHARACTERISTIC_ALIAS[skill_name], 0)
-    # 幸运骰：幸运不在 base_attributes（存于 system_data.luck），单独回落，
-    # 否则 KP 按手册发起「幸运」检定会以 0 结算（必失败）。
+    # 幸运骰的两种存法：手动建卡写 system_data.luck，AI 生成与 Excel 导入写
+    # base_attributes.LUCK（上面的属性别名已覆盖后者）。这里补前者。
+    # 漏掉任一处都会让「幸运」检定以 0 结算 —— 必失败，且提示写着「(34 > 0)」，
+    # 玩家完全看不出是数据取错了位置。
     if not skill_value and skill_name in ("幸运", "运气"):
         skill_value = (character_data.get("system_data") or {}).get("luck") or 0
     # 理智骰同理：SAN 存于 system_data.sanity.current，既不在技能表也不在属性表。

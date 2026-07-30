@@ -261,6 +261,20 @@ class TestCharacteristicRolls:
         # 没有 system_data 时不抛错、按 0 结算
         assert resolve_skill_check({"skills": {}}, "幸运").skill_value == 0
 
+    def test_luck_roll_also_reads_base_attributes(self):
+        """幸运还有第二种存法：base_attributes.LUCK。
+
+        实测踩过的坑：一张 AI 生成/Excel 导入的卡把幸运写在 base_attributes.LUCK，
+        而回落只查 system_data.luck → 目标值 0 → 提示「失败 (34 > 0)」，玩家完全
+        看不出是数据取错了位置，只觉得幸运检定必失败。
+        """
+        cd = {"skills": {}, "base_attributes": {"INT": 70, "LUCK": 55}, "system_data": {}}
+        assert resolve_skill_check(cd, "幸运").skill_value == 55
+        assert resolve_skill_check(cd, "运气").skill_value == 55
+        # 困难/极难仍按半值与五分之一算，别名不该影响难度换算
+        assert resolve_skill_check(cd, "幸运", difficulty="hard").target == 27
+        assert resolve_skill_check(cd, "幸运", difficulty="extreme").target == 11
+
     def test_sanity_roll_uses_system_data(self):
         """理智同理：SAN 存于 system_data.sanity.current，既不在技能表也不在属性表。
 

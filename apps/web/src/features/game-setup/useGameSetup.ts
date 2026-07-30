@@ -31,6 +31,8 @@ const GUEST_LABEL_KEY = 'trpg_guest_label'
  * 断线重连就只是点一下「加入」，不必再去找他要一遍。
  */
 const LAST_INVITE_KEY = 'trpg_last_invite'
+/** 上次进过的房间码。断线后连同邀请码一起回填，重连就不必再问房主要一遍。 */
+const LAST_ROOM_KEY = 'trpg_last_room_code'
 
 export function useGameSetup() {
   const { createSession, fetchSessions, sessions } = useSessionStore()
@@ -44,7 +46,10 @@ export function useGameSetup() {
   const [seatHints, setSeatHints] = useState<Record<number, string>>({})
   const [generatingSeat, setGeneratingSeat] = useState<number | null>(null)
   const [error, setError] = useState('')
-  const [joinCode, setJoinCode] = useState('')
+  // 断线后回填上次的房间码，配合回填的邀请码，重连就只是点一下「加入」。
+  const [joinCode, setJoinCode] = useState(
+    () => (getServerUrl() ? '' : localStorage.getItem(LAST_ROOM_KEY) || ''),
+  )
   // 已连着就显示当前主机；否则回填上次的邀请码，好让断线后一键重连。
   const [hostAddr, setHostAddr] = useState(
     () => getServerUrl() || localStorage.getItem(LAST_INVITE_KEY) || '',
@@ -223,6 +228,9 @@ export function useGameSetup() {
         return
       }
       const room = await api.get<RoomInfo>(`/sessions/by-code/${code}`)
+      // 记住进过哪个房间：房主重启后这个码依然有效，断线重连时回填即可，
+      // 不必再去问他要一遍。
+      localStorage.setItem(LAST_ROOM_KEY, code)
       navigate(`/room/${room.id}`)
     } catch (reason: unknown) {
       setError(

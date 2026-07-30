@@ -51,6 +51,27 @@ pub const SECRET_ENV: &str = "TRPG_NETLINK_SECRET";
 /// 应用协议标识。跨版本改动它等于切断与旧客户端的连接，属于破坏性变更。
 const ALPN: &[u8] = b"trpg/1";
 
+/// 心跳间隔与判死时限。
+///
+/// QUIC 的默认 idle timeout 是几十秒，于是房主一退出，客人要愣上半分钟才知道
+/// 断了——这段时间里界面只是莫名卡住。跑团是低频交互，心跳的开销可以忽略，
+/// 换来的是几秒内就能给出提示。
+///
+/// 两者要拉开差距：idle 必须显著大于 keep-alive，否则一个心跳包偶然丢掉就会
+/// 误判掉线。2 秒心跳 / 6 秒判死意味着要连丢两个心跳才判死。
+const KEEP_ALIVE: std::time::Duration = std::time::Duration::from_secs(2);
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// 房主与客人两侧共用：任一侧不设，判死都会退回对端的默认时限。
+fn transport_config() -> iroh::endpoint::QuicTransportConfig {
+    let builder = iroh::endpoint::QuicTransportConfig::builder().keep_alive_interval(KEEP_ALIVE);
+    match IDLE_TIMEOUT.try_into() {
+        Ok(idle) => builder.max_idle_timeout(Some(idle)).build(),
+        // 时限转不成协议里的表示就只设心跳：判死退回默认时限，慢但不至于不通。
+        Err(_) => builder.build(),
+    }
+}
+
 type ProxyBody = BoxBody<Bytes, hyper::Error>;
 
 /// 房主侧：正在接受客人接入。
@@ -164,6 +185,7 @@ pub async fn netlink_start(
 
     let endpoint = Endpoint::builder(presets::N0)
         .secret_key(state.secret_key.clone())
+        .transport_config(transport_config())
         .alpns(vec![ALPN.to_vec()])
         .bind()
         .await
@@ -433,6 +455,7 @@ pub async fn netlink_connect(
     // 与房主侧同一把身份：房主名册里记的就是这个公钥，换了就得重新被批准。
     let endpoint = Endpoint::builder(presets::N0)
         .secret_key(state.secret_key.clone())
+        .transport_config(transport_config())
         .bind()
         .await
         .map_err(|e| format!("无法启动直连端点：{e}"))?;
