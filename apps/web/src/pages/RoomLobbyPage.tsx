@@ -218,10 +218,10 @@ export function RoomLobbyPage() {
       const claimError = await claimWithChar(imported.id, false)
       if (claimError) {
         setMyChars((prev) => prev.some((c) => c.id === imported.id) ? prev : [...prev, imported])
-        toast.error(`角色已导入房主主机，但入座失败：${claimError}。可从房主角色列表重试`)
+        toast.error(`参战副本已同步，但入座失败：${claimError}。可在上方角色列表里重试`)
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '导入角色失败')
+      toast.error(e instanceof Error ? e.message : '同步角色到房主失败')
     } finally { setBusy(false) }
   }
 
@@ -519,14 +519,15 @@ export function RoomLobbyPage() {
                   ))}
                   {localChars.length > 0 && (
                     <span className="basis-full text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      本机角色（导入到房主主机）
+                      本机角色（入座时自动同步一份参战副本给房主，原件仍在你自己的库里）
                     </span>
                   )}
                   {localChars.map((c) => (
                     <button key={`local-${c.id}`} onClick={() => void importAndClaim(c)} disabled={busy}
-                      className="btn-secondary !px-2.5 !py-1 text-xs"
-                      title="复制到房主主机并入座">
-                      {c.name} · 导入
+                      className="px-2.5 py-1 rounded-full text-xs border"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                      title="选它入座。房主的规则引擎要读写角色数据才跑得动，所以会同步一份副本过去；它不会进入房主的角色库">
+                      {c.name}
                     </button>
                   ))}
                   <button onClick={generateAndClaim} disabled={busy} className="btn-secondary !px-2 !py-1 text-xs inline-flex items-center gap-1">

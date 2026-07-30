@@ -229,6 +229,17 @@ def list_characters(
     token: str | None = Depends(player_token),
 ):
     chars = character_service.list_characters(db, module_id)
+    # 别人的角色卡不出现在你的库里。
+    #
+    # 客人入座时会在房主机器上留一份参战副本——房主的规则引擎要读写它才跑得动
+    # （检定读技能值、HP_CHANGE 改血、物品与成长都落在角色记录上），而
+    # SessionParticipant.character_id 是指向本地 characters 表的外键。但那是
+    # **会话资产**，不是房主的藏品：此前房主打开「角色」页会看到一堆队友的卡，
+    # 还能删改它们。
+    #
+    # 无主的卡（AI 队友、identity 机制之前的旧数据）仍然可见，否则房主会突然
+    # 看不到自己以前建的角色。
+    chars = [c for c in chars if not c.owner_token or c.owner_token == token]
     if is_player is not None:
         chars = [c for c in chars if c.is_player == is_player]
     if mine:
