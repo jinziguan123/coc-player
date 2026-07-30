@@ -110,7 +110,7 @@ describe('设置页内置直连面板', () => {
     vi.mocked(netlink.netlinkInvite).mockResolvedValue('trpg:xu4vabc:K7M9PQ2R')
 
     await user.type(screen.getByLabelText('房间码'), 'k7m9pq2r')
-    await user.click(screen.getByRole('button', { name: '生成并复制邀请码' }))
+    await user.click(screen.getByRole('button', { name: '生成邀请码' }))
 
     // 房间码统一大写，和后端的 8 位 base32 对齐。
     await waitFor(() => expect(netlink.netlinkInvite).toHaveBeenCalledWith('K7M9PQ2R'))
@@ -155,6 +155,6 @@ describe('设置页内置直连面板', () => {
 
   it('关着的时候不显示邀请码入口', async () => {
     await openNetworkTab()
-    expect(screen.queryByRole('button', { name: '生成并复制邀请码' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '生成邀请码' })).toBeNull()
   })
 })

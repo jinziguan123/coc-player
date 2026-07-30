@@ -404,7 +404,7 @@ function NetworkSettingsPanel() {
       </div>
 
       {/* 内置直连 */}
-      <NetlinkPanel backendPort={port} onCopy={copyAddr} />
+      <NetlinkPanel backendPort={port} />
 
       {/* 房间 AI 配额 */}
       <div className={`card ${quota?.enabled ? 'active-rail' : ''}`}>
@@ -518,13 +518,7 @@ function NetworkSettingsPanel() {
 /** 门口有人等着时刷得勤一些，否则房主会觉得「点了没反应」。 */
 const NETLINK_POLL_MS = 2000
 
-function NetlinkPanel({
-  backendPort,
-  onCopy,
-}: {
-  backendPort: number | null
-  onCopy: (text: string) => void | Promise<void>
-}) {
+function NetlinkPanel({ backendPort }: { backendPort: number | null }) {
   const available = netlinkAvailable()
   const [status, setStatus] = useState<NetlinkStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -576,11 +570,22 @@ function NetlinkPanel({
     }
   }
 
+  /** 生成即复制——多数情况下下一步就是粘给朋友。 */
+  const copyInvite = async (code: string) => {
+    try {
+      if (!navigator.clipboard) throw new Error('clipboard unavailable')
+      await navigator.clipboard.writeText(code)
+      toast.success('邀请码已复制')
+    } catch {
+      toast.error('复制失败，请手动选中邀请码')
+    }
+  }
+
   const makeInvite = async () => {
     try {
       const code = await netlinkInvite(roomCode.trim().toUpperCase())
       setInvite(code)
-      void onCopy(code)
+      void copyInvite(code)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : '生成邀请码失败')
     }
@@ -643,51 +648,53 @@ function NetlinkPanel({
 
       {hosting && (
         <>
-          <div style={{ marginTop: '0.75rem' }}>
-            <div
-              className="text-xs"
-              style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
-            >
+          <div className="netlink-block">
+            <div className="netlink-block__label">
               把邀请码发给朋友（填上房间码，对方就不用再问一次）：
             </div>
-            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <div className="netlink-invite">
               <input
                 className="input"
-                style={{ maxWidth: '10rem' }}
-                placeholder="房间码（可留空）"
+                placeholder="房间码"
                 value={roomCode}
                 onChange={(e) => setRoomCode(e.target.value)}
+                maxLength={8}
                 aria-label="房间码"
               />
-              <button type="button" className="btn" onClick={() => void makeInvite()}>
-                生成并复制邀请码
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => void makeInvite()}
+              >
+                生成邀请码
               </button>
             </div>
             {invite && (
               <button
                 type="button"
-                onClick={() => void onCopy(invite)}
-                className="copy-line"
-                style={{ marginTop: '0.4rem', wordBreak: 'break-all' }}
+                onClick={() => void copyInvite(invite)}
+                className="copy-line netlink-code"
                 title="点击复制"
                 aria-label={`复制邀请码 ${invite}`}
               >
-                {invite}
+                <span>{invite}</span>
                 <Copy size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
               </button>
             )}
           </div>
 
           {(status?.pending.length ?? 0) > 0 && (
-            <div style={{ marginTop: '0.75rem' }}>
+            <div className="netlink-block">
               <div className="notice" role="alert">
                 <UserPlus size={12} style={{ flexShrink: 0 }} aria-hidden="true" />
                 <span>有人想加入，同意后对方才能进来。认不出的标识就拒绝掉。</span>
               </div>
               {status?.pending.map((peer) => (
-                <div key={peer} className="setting-head" style={{ marginTop: '0.4rem' }}>
-                  <code className="text-xs">{shortPeerId(peer)}</code>
-                  <div style={{ display: 'flex', gap: '0.3rem' }}>
+                <div key={peer} className="netlink-peer netlink-peer--pending">
+                  <span className="netlink-peer__name netlink-peer__name--id">
+                    {shortPeerId(peer)}
+                  </span>
+                  <div className="netlink-peer__actions">
                     <button
                       type="button"
                       className="icon-btn"
@@ -699,7 +706,7 @@ function NetlinkPanel({
                     </button>
                     <button
                       type="button"
-                      className="icon-btn"
+                      className="icon-btn icon-btn--danger"
                       onClick={() => void decide(peer, false)}
                       title="拒绝"
                       aria-label={`拒绝 ${shortPeerId(peer)}`}
@@ -715,19 +722,16 @@ function NetlinkPanel({
       )}
 
       {(status?.approved.length ?? 0) > 0 && (
-        <div style={{ marginTop: '0.75rem' }}>
-          <div
-            className="text-xs"
-            style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
-          >
+        <div className="netlink-block">
+          <div className="netlink-block__label">
             已允许的朋友（下次直接进，不用再同意）：
           </div>
           {status?.approved.map((peer) => (
-            <div key={peer.id} className="setting-head" style={{ marginTop: '0.3rem' }}>
-              <span className="text-xs">{peer.label}</span>
+            <div key={peer.id} className="netlink-peer">
+              <span className="netlink-peer__name">{peer.label}</span>
               <button
                 type="button"
-                className="icon-btn"
+                className="icon-btn icon-btn--danger"
                 onClick={() => void revoke(peer.id)}
                 title="移出名单"
                 aria-label={`移出 ${peer.label}`}

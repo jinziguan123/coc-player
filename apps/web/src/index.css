@@ -746,6 +746,108 @@ body {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
 
+/* 图标按钮：卡片内的小型操作（刷新、同意、移出）。
+   此前只有 `.setting-retry .icon-btn` 设过尺寸，基础样式一直缺失，
+   于是各处 className="icon-btn" 都渲染成浏览器默认按钮。 */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.icon-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-text-accent);
+}
+.icon-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+.icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 拒绝、移出这类不可逆动作：悬停转危险色，手滑前有一次视觉提醒。 */
+.icon-btn--danger:hover:not(:disabled) {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+/* 内置直连：邀请码生成与准入名册 */
+.netlink-block { margin-top: 0.9rem; }
+.netlink-block__label {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin-bottom: 0.45rem;
+}
+.netlink-invite {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.netlink-invite .input {
+  width: 9rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* 邀请码整串很长，允许任意处折行，别把卡片撑破。限宽是为了别在宽屏上把
+   复制图标甩到几百像素之外——那看着像两个不相干的东西。 */
+.netlink-code {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 34rem;
+  margin-top: 0.5rem;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+/* 名册与待批准的一行：短名在左、操作贴右。同样限宽——一行只有十来个字符，
+   铺满整张卡片会让操作按钮离得莫名其妙地远。 */
+.netlink-peer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 22rem;
+  margin-top: 0.35rem;
+  padding: 0.32rem 0.4rem 0.32rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+.netlink-peer--pending {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+}
+/* 与邀请码行同宽，让说明与条目共用一条视觉基准线，不至于宽窄参差。 */
+.netlink-block .notice { max-width: 34rem; }
+.netlink-peer__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.netlink-peer__name--id {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+.netlink-peer__actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
 @media (max-width: 520px) {
   .setting-head { align-items: flex-start; }
   .setting-head .switch-state { display: none; }
@@ -757,6 +859,9 @@ body {
     overflow-wrap: anywhere;
     text-align: left;
   }
+  /* 窄屏下房间码与生成按钮各占一行，别挤成两个小方块。 */
+  .netlink-invite .input,
+  .netlink-invite .btn-secondary { width: 100%; }
 }
 
 /* ===== 悬浮窗 ===== */
