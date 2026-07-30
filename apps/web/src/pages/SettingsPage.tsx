@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { AlertTriangle, Check, Copy, Eye, EyeOff, RefreshCw, UserPlus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, localApi } from '../api/client'
@@ -541,20 +541,8 @@ function NetlinkPanel({ backendPort }: { backendPort: number | null }) {
     void refresh()
   }, [refresh])
 
-  // 自动恢复：endpoint 是运行时对象、进程一重启就没了，但房主的意愿存了盘。
-  // 上次开着就替他开回来，免得每次重开应用都得想起来再拨一次开关——他多半
-  // 已经把邀请码发给朋友了，而那串码在身份持久化之后是长期有效的。
-  const autoStarted = useRef(false)
-  useEffect(() => {
-    if (autoStarted.current || !status?.wanted || status.hosting || !backendPort) return
-    autoStarted.current = true
-    void netlinkStart(backendPort)
-      .then(() => refresh())
-      .catch(() => {
-        // 自动恢复失败不弹错：房主没主动操作，不该被一个他没点过的动作打扰。
-        // 面板上开关仍是关着的，他可以自己再试。
-      })
-  }, [status?.wanted, status?.hosting, backendPort, refresh])
+  // 自动恢复不在这里——它挂在 AppShell 的 useNetlinkAutoStart。放在本组件里的
+  // 后果是隧道要等房主恰好翻到「设置 → 联机」才启动，客人在那之前怎么都进不来。
 
   // 只在开着的时候轮询——待批准请求是唯一会「自己冒出来」的状态。
   useEffect(() => {
