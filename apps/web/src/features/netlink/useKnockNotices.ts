@@ -1,5 +1,8 @@
 import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+
+import { getServerUrl, setServerUrl } from '@/api/client'
 
 import {
   EVENT_DISCONNECTED,
@@ -23,6 +26,8 @@ import {
  * 仍在「设置 → 联机」里。
  */
 export function useKnockNotices() {
+  const navigate = useNavigate()
+
   useEffect(() => {
     // 记住每位敲门者对应的 toast，房主在别处处理掉之后好收掉它
     // （例如他自己开着设置页点了同意，这条提示就该消失）。
@@ -75,13 +80,25 @@ export function useKnockNotices() {
       }
     }).then(register)
 
-    // 客人侧：房主退出应用或关掉直连时，隧道就死了。不提示的话页面只会莫名
-    // 卡住——每个请求都在一条死连接上超时，而用户不知道发生了什么。
+    // 客人侧：房主退出应用或关掉直连时，隧道就死了。
+    //
+    // 光提示不够——必须把主机地址切回本机。隧道一死，那个 127.0.0.1:<临时端口>
+    // 就没人监听了，而前端还对着它发请求：会话列表拉不到就显示为空（看着像
+    // 「存档没了」，其实数据在房主库里好好的），「加入房间」也是往死地址发。
+    //
+    // 房主的存档与你的席位都还在：他重开应用后邀请码不变（身份已持久化），
+    // 重新粘一次就能回去。
     void listenNetlink<string>(EVENT_DISCONNECTED, () => {
+      const wasRemote = !!getServerUrl()
+      if (wasRemote) setServerUrl('')
       toast.error('与房主的连接已断开', {
-        description: '对方可能退出了应用或关闭了内置直连。重新用邀请码加入即可。',
-        duration: 10000,
+        description: wasRemote
+          ? '已切回本机。房主重开应用后，用同一个邀请码即可回到原来的房间与席位。'
+          : '对方可能退出了应用或关闭了内置直连。',
+        duration: 12000,
       })
+      // 当前页面上的数据都来自房主，留在原地只会满屏报错；送回加入房间的入口。
+      if (wasRemote) navigate('/game')
     }).then(register)
 
     return () => {
@@ -89,5 +106,5 @@ export function useKnockNotices() {
       unlisteners.forEach((off) => off())
       toasts.forEach((id) => toast.dismiss(id))
     }
-  }, [])
+  }, [navigate])
 }

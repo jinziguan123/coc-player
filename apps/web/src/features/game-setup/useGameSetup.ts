@@ -26,6 +26,11 @@ interface RoomInfo {
 
 /** 自报名记在本地：每次加入都重填一遍太烦。 */
 const GUEST_LABEL_KEY = 'trpg_guest_label'
+/**
+ * 上次用过的邀请码。房主重开应用后邀请码不变（身份已持久化），记住它，
+ * 断线重连就只是点一下「加入」，不必再去找他要一遍。
+ */
+const LAST_INVITE_KEY = 'trpg_last_invite'
 
 export function useGameSetup() {
   const { createSession, fetchSessions, sessions } = useSessionStore()
@@ -40,7 +45,10 @@ export function useGameSetup() {
   const [generatingSeat, setGeneratingSeat] = useState<number | null>(null)
   const [error, setError] = useState('')
   const [joinCode, setJoinCode] = useState('')
-  const [hostAddr, setHostAddr] = useState(getServerUrl())
+  // 已连着就显示当前主机；否则回填上次的邀请码，好让断线后一键重连。
+  const [hostAddr, setHostAddr] = useState(
+    () => getServerUrl() || localStorage.getItem(LAST_INVITE_KEY) || '',
+  )
   // 自报给房主看的名字。记在本地，下次不用重填——房主那边看到的是一串公钥，
   // 有个名字他才认得出是谁。
   const [guestLabel, setGuestLabel] = useState(
@@ -165,6 +173,8 @@ export function useGameSetup() {
         const link = await netlinkConnect(typed, guestLabel.trim())
         const host = `http://127.0.0.1:${link.local_port}`
         setServerUrl(host)
+        // 记住它：房主重开应用后这串码依然有效，断线后就能一键重连。
+        localStorage.setItem(LAST_INVITE_KEY, typed)
         // 本地端口每次连接都变，token 必须跟着房主走，否则每次重连都掉席位。
         setServerIdentity(host, `netlink:${typed.split(':')[1] ?? typed}`)
         if (link.room_code) {
