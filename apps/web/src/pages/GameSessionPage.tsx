@@ -353,6 +353,9 @@ export function GameSessionPage() {
   const [diceAnimating, setDiceAnimating] = useState<Set<string>>(new Set())
   const [revealedDice, setRevealedDice] = useState<Set<string>>(new Set())
   const animatedDiceIds = useRef<Set<string>>(new Set())   // 已处理过（播过或跳过）的 dice id，防重播
+  // 从 /live 实时收到过的事件 id。骰子动画据此判定「是否本轮新到达」——
+  // 不能靠 sequence_num 比较，见 handleLiveChunk 里的说明。
+  const liveArrivedIds = useRef<Set<string>>(new Set())
   // 本轮「新到达」的 id 集合——纯派生，供渲染函数读取决定是否加 class。
   const enterIds = useMemo(() => {
     if (!firstBatchDone.current) return new Set<string>()   // 首屏整批不播入场
@@ -361,7 +364,15 @@ export function GameSessionPage() {
       if (!m.id || m.id.startsWith('stream-') || renderedIds.current.has(m.id)) continue
       // 往前翻页 prepend 的历史事件：seq 不高于「本批之前的最大 seq」→ 不是实时新到达，
       // 不播入场/骰子动画（无 seq 的乐观/流式消息一律视为实时，照常播）。
-      if (m.sequence_num != null && m.sequence_num <= maxSeqSeen.current) continue
+      //
+      // 例外：**确实从 /live 收到过**的事件一律算新到达。resyncHistory 与 SSE 是两条
+      // 独立请求，谁先到不确定（联机走隧道时 resync 常常更快）；resync 先到就会把
+      // maxSeqSeen 抬过这颗骰子，随后到达的它被误判成历史、动画被跳过。
+      if (
+        m.sequence_num != null
+        && m.sequence_num <= maxSeqSeen.current
+        && !liveArrivedIds.current.has(m.id)
+      ) continue
       fresh.add(m.id)
     }
     return fresh
@@ -397,6 +408,7 @@ export function GameSessionPage() {
     firstBatchDone.current = false
     maxSeqSeen.current = -1
     animatedDiceIds.current = new Set()
+    liveArrivedIds.current = new Set()
     setDiceAnimating(new Set())
     setRevealedDice(new Set())
   }, [sessionId])
@@ -733,6 +745,11 @@ export function GameSessionPage() {
 
   const handleLiveChunk = useCallback((chunk: ChunkPayload) => {
     const t = chunk.type
+    // 记下「这条是从 /live 实时收到的」。骰子动画据此判断该不该播，而不是靠比较
+    // sequence_num——`done` 会触发 resyncHistory，而 resync 是另开一条请求，可能
+    // 比长连接上的推送先到（联机走隧道时尤其明显）。那时整批历史已经把
+    // maxSeqSeen 抬过了这颗骰子，它就被误判成「历史事件」，动画被跳过、直接出结果。
+    if (chunk.id) liveArrivedIds.current.add(chunk.id)
     if (categoryOf(t) === 'log') { handleLogChunk(chunk, t as LogEventType); return }
     handleNonLogChunk(chunk, t as NonLogEventType)
   }, [handleLogChunk, handleNonLogChunk])
