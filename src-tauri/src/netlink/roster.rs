@@ -35,8 +35,18 @@ struct RosterFile {
 
 /// 一次等待批准的接入请求（仅存在于内存）。
 struct Pending {
+    /// 对方**自称**的备注名，可能为空。不可信，仅供房主辨认，见 `handshake`。
+    claimed_label: String,
     /// 批准/拒绝的结果由这里送回给正卡着的连接。
     decision: oneshot::Sender<bool>,
+}
+
+/// 门口等着的一位。
+#[derive(Clone, Serialize, Debug, PartialEq, Eq)]
+pub struct PendingPeer {
+    pub id: String,
+    /// 对方自称的名字（可能为空）。界面必须表述成「自称」——谁都能这么叫自己。
+    pub claimed_label: String,
 }
 
 pub struct Roster {
@@ -78,17 +88,30 @@ impl Roster {
     }
 
     /// 门口正在等的人。
-    pub fn pending_list(&self) -> Vec<String> {
-        self.pending.lock().unwrap().keys().cloned().collect()
-    }
-
-    /// 登记一个陌生对端并等房主表态。调用方（连接处理）会卡在这里。
-    pub async fn wait_for_decision(&self, id: &str) -> Verdict {
-        let (tx, rx) = oneshot::channel();
+    pub fn pending_list(&self) -> Vec<PendingPeer> {
         self.pending
             .lock()
             .unwrap()
-            .insert(id.to_string(), Pending { decision: tx });
+            .iter()
+            .map(|(id, pending)| PendingPeer {
+                id: id.clone(),
+                claimed_label: pending.claimed_label.clone(),
+            })
+            .collect()
+    }
+
+    /// 登记一个陌生对端并等房主表态。调用方（连接处理）会卡在这里。
+    ///
+    /// `claimed_label` 是对方握手时自报的名字，只用于让房主认人。
+    pub async fn wait_for_decision(&self, id: &str, claimed_label: &str) -> Verdict {
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(
+            id.to_string(),
+            Pending {
+                claimed_label: claimed_label.to_string(),
+                decision: tx,
+            },
+        );
 
         let verdict = match tokio::time::timeout(PENDING_TIMEOUT, rx).await {
             Ok(Ok(true)) => Verdict::Approved,
@@ -101,10 +124,21 @@ impl Roster {
         verdict
     }
 
-    /// 房主批准。`label` 是备注名，留空则用公钥前缀凑合。
+    /// 房主批准。备注名的取用顺序：房主填的 → 对方自称的 → 公钥短名。
+    ///
+    /// 房主填的优先，因为自称不可信；但多数时候房主懒得填，采用对方自称
+    /// 已经比一串公钥好认得多。
     pub fn approve(&self, id: &str, label: Option<String>) {
         let label = label
             .filter(|l| !l.trim().is_empty())
+            .or_else(|| {
+                self.pending
+                    .lock()
+                    .unwrap()
+                    .get(id)
+                    .map(|p| p.claimed_label.clone())
+                    .filter(|l| !l.is_empty())
+            })
             .unwrap_or_else(|| short_id(id));
         {
             let mut approved = self.approved.lock().unwrap();
@@ -218,6 +252,56 @@ mod tests {
         assert_eq!(roster.approved_list()[0].label, "abcdef…wxyz");
     }
 
+    #[tokio::test]
+    async fn adopts_claimed_label_when_host_types_nothing() {
+        // 多数时候房主懒得填备注，采用对方自称已经比一串公钥好认得多。
+        let (roster, _dir) = roster();
+        let roster = std::sync::Arc::new(roster);
+        let waiting = {
+            let roster = roster.clone();
+            tokio::spawn(async move { roster.wait_for_decision("peer-a", "阿强").await })
+        };
+        while roster.pending_list().is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        roster.approve("peer-a", None);
+        let _ = waiting.await;
+        assert_eq!(roster.approved_list()[0].label, "阿强");
+    }
+
+    #[tokio::test]
+    async fn host_label_wins_over_claimed_one() {
+        // 自称不可信，房主填了就以房主的为准。
+        let (roster, _dir) = roster();
+        let roster = std::sync::Arc::new(roster);
+        let waiting = {
+            let roster = roster.clone();
+            tokio::spawn(async move { roster.wait_for_decision("peer-a", "自称管理员").await })
+        };
+        while roster.pending_list().is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        roster.approve("peer-a", Some("老王".into()));
+        let _ = waiting.await;
+        assert_eq!(roster.approved_list()[0].label, "老王");
+    }
+
+    #[tokio::test]
+    async fn pending_list_carries_the_claimed_label() {
+        let (roster, _dir) = roster();
+        let roster = std::sync::Arc::new(roster);
+        let _waiting = {
+            let roster = roster.clone();
+            tokio::spawn(async move { roster.wait_for_decision("peer-a", "阿强").await })
+        };
+        while roster.pending_list().is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(roster.pending_list()[0].claimed_label, "阿强");
+    }
+
     #[test]
     fn re_approving_updates_label_without_duplicating() {
         let (roster, _dir) = roster();
@@ -242,13 +326,16 @@ mod tests {
 
         let waiter = {
             let roster = roster.clone();
-            tokio::spawn(async move { roster.wait_for_decision("peer-a").await })
+            tokio::spawn(async move { roster.wait_for_decision("peer-a", "").await })
         };
         // 等对方确实站到门口了再批准。
         while roster.pending_list().is_empty() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-        assert_eq!(roster.pending_list(), vec!["peer-a".to_string()]);
+        assert_eq!(
+            roster.pending_list().iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["peer-a"]
+        );
 
         roster.approve("peer-a", None);
         assert!(matches!(waiter.await.unwrap(), Verdict::Approved));
@@ -262,7 +349,7 @@ mod tests {
 
         let waiter = {
             let roster = roster.clone();
-            tokio::spawn(async move { roster.wait_for_decision("peer-a").await })
+            tokio::spawn(async move { roster.wait_for_decision("peer-a", "").await })
         };
         while roster.pending_list().is_empty() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -278,7 +365,7 @@ mod tests {
     async fn unattended_request_times_out() {
         // 房主不在电脑前时，敲门的人不该无限期占着连接。
         let (roster, _dir) = roster();
-        let verdict = roster.wait_for_decision("peer-a").await;
+        let verdict = roster.wait_for_decision("peer-a", "").await;
         assert!(matches!(verdict, Verdict::TimedOut));
         assert!(roster.pending_list().is_empty());
     }

@@ -841,6 +841,29 @@ body {
 .netlink-peer__name--id {
   font-family: var(--font-mono);
   font-size: 0.76rem;
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+}
+/* 待批准那行要放「自称 + 公钥 + 备注输入 + 两个按钮」，比名册行宽。 */
+.netlink-peer--pending { max-width: 34rem; }
+.netlink-peer__who {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.netlink-peer__who > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.netlink-peer__label {
+  width: 7.5rem;
+  min-width: 0;
+  flex-shrink: 0;
+  font-size: 0.78rem;
 }
 .netlink-peer__actions {
   display: flex;

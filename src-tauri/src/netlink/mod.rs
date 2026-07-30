@@ -13,6 +13,7 @@
 //!
 //! 设计见 `docs/plans/2026-07-29-内置直连组网-design.md`。
 
+mod handshake;
 mod invite;
 mod rewrite;
 mod roster;
@@ -39,7 +40,7 @@ use iroh::{Endpoint, EndpointAddr, EndpointId};
 use rand::Rng;
 use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::net::TcpListener;
 
 /// 隧道密钥交给后端 sidecar 的通道。必须与
@@ -109,8 +110,8 @@ pub struct NetlinkStatus {
     /// 客人侧连着谁、前端该打哪个本地端口。
     connected_to: Option<String>,
     local_port: Option<u16>,
-    /// 正在门口等房主表态的对端公钥。
-    pending: Vec<String>,
+    /// 正在门口等房主表态的人（含各自的自称名）。
+    pending: Vec<roster::PendingPeer>,
     /// 已批准的名册。
     approved: Vec<roster::ApprovedPeer>,
 }
@@ -123,6 +124,7 @@ pub struct NetlinkStatus {
 /// 这也意味着**本开关自己就是准入闸**，关掉即不可达，见 ADR-001 与设计文档第二节。
 #[tauri::command]
 pub async fn netlink_start(
+    app: AppHandle,
     state: State<'_, Netlink>,
     backend_port: u16,
 ) -> Result<String, String> {
@@ -141,7 +143,7 @@ pub async fn netlink_start(
     let roster = state.roster.clone();
     let accepting = endpoint.clone();
     let task = tauri::async_runtime::spawn(async move {
-        accept_loop(accepting, backend_port, secret, roster).await;
+        accept_loop(accepting, backend_port, secret, roster, app).await;
     });
 
     state.hosting.lock().unwrap().replace(Hosting {
@@ -168,10 +170,12 @@ async fn accept_loop(
     backend_port: u16,
     secret: String,
     roster: Arc<roster::Roster>,
+    app: AppHandle,
 ) {
     while let Some(incoming) = endpoint.accept().await {
         let secret = secret.clone();
         let roster = roster.clone();
+        let app = app.clone();
         tauri::async_runtime::spawn(async move {
             let conn = match incoming.await {
                 Ok(conn) => conn,
@@ -181,7 +185,20 @@ async fn accept_loop(
                 }
             };
             let peer = conn.remote_id().to_string();
-            if !admit(&roster, &peer).await {
+
+            // 第一条流是控制流：读对方自报的名字，把裁决写回去。之后的流才是 HTTP。
+            let (mut ctrl_send, mut ctrl_recv) = match conn.accept_bi().await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    log::warn!("对端 {peer} 未开握手流：{e}");
+                    return;
+                }
+            };
+            let hello = handshake::read_hello(&mut ctrl_recv).await;
+            let verdict = admit(&roster, &peer, &hello.label, &app).await;
+            let _ = handshake::write_verdict(&mut ctrl_send, &verdict).await;
+            let _ = ctrl_send.finish();
+            if verdict != handshake::Verdict::Approved {
                 // 明确关掉而不是静默丢弃，客人侧才能拿到「被拒绝」而不是干等。
                 conn.close(1u8.into(), b"not approved by host");
                 return;
@@ -197,26 +214,54 @@ async fn accept_loop(
     }
 }
 
+/// 事件名：有陌生人在门口等着。房主可能不在设置页，得让前端能全局提示。
+pub const EVENT_PENDING: &str = "netlink://pending";
+/// 事件名：门口那位已被处理（同意/拒绝/超时），前端据此收掉提示。
+pub const EVENT_SETTLED: &str = "netlink://settled";
+
+#[derive(Clone, Serialize)]
+struct PendingEvent {
+    peer_id: String,
+    claimed_label: String,
+}
+
 /// 准入判定：名册里有就直接放行，陌生人挂起等房主表态。
 ///
-/// 挂起期间连接是保持着的——客人那侧表现为「正在等待房主同意」而不是失败，
-/// 这样房主点了同意，对方不必重连就能进来。
-async fn admit(roster: &roster::Roster, peer: &str) -> bool {
+/// 挂起期间连接是保持着的——客人那侧卡在握手的裁决上，表现为「正在等待房主同意」
+/// 而不是失败，这样房主点了同意，对方不必重连就能进来。
+async fn admit(
+    roster: &roster::Roster,
+    peer: &str,
+    claimed_label: &str,
+    app: &AppHandle,
+) -> handshake::Verdict {
     if roster.is_approved(peer) {
-        return true;
+        return handshake::Verdict::Approved;
     }
-    log::info!("陌生对端请求接入，等待房主批准：{peer}");
-    match roster.wait_for_decision(peer).await {
-        roster::Verdict::Approved => true,
+    log::info!("陌生对端请求接入，等待房主批准：{peer}（自称「{claimed_label}」）");
+    // 房主多半不在设置页，靠轮询他根本不知道有人在敲门。
+    let _ = app.emit(
+        EVENT_PENDING,
+        PendingEvent {
+            peer_id: peer.to_string(),
+            claimed_label: claimed_label.to_string(),
+        },
+    );
+
+    let verdict = match roster.wait_for_decision(peer, claimed_label).await {
+        roster::Verdict::Approved => handshake::Verdict::Approved,
         roster::Verdict::Rejected => {
             log::info!("房主拒绝了接入请求：{peer}");
-            false
+            handshake::Verdict::Rejected
         }
         roster::Verdict::TimedOut => {
             log::info!("接入请求超时无人处理：{peer}");
-            false
+            handshake::Verdict::TimedOut
         }
-    }
+    };
+    // 无论结果如何都要通知前端，否则那条「有人敲门」的提示会一直挂着。
+    let _ = app.emit(EVENT_SETTLED, peer.to_string());
+    verdict
 }
 
 /// 一条 QUIC 连接上可以有多条流（前端的并发请求 + 一条长期的 SSE）。
@@ -313,10 +358,14 @@ pub struct GuestLink {
 ///
 /// 本地监听固定绑回环：这个端口是「通往房主的入口」，绝不能暴露给局域网，
 /// 否则等于替房主开了一个他没同意的公网门。
+///
+/// `label` 是自报给房主看的备注名，可空。它**不可信**，只是让房主认人，
+/// 见 `handshake` 模块。首次加入需房主手动同意，本调用可能卡上一两分钟。
 #[tauri::command]
 pub async fn netlink_connect(
     state: State<'_, Netlink>,
     invite_code: String,
+    label: Option<String>,
 ) -> Result<GuestLink, String> {
     // 兼容两种输入：完整邀请码，以及直接粘一串裸公钥（4b 时期的用法）。
     let parsed = invite::Invite::parse(&invite_code);
@@ -348,6 +397,28 @@ pub async fn netlink_connect(
         .connect(EndpointAddr::from(host_id), ALPN)
         .await
         .map_err(|e| format!("连不上房主：{e}"))?;
+
+    // 握手：自报名字，然后等房主的裁决。首次加入时房主要手动点同意，
+    // 这一步可能卡上一两分钟——前端需要在此期间显示「等待房主同意」。
+    let (mut ctrl_send, mut ctrl_recv) = conn
+        .open_bi()
+        .await
+        .map_err(|e| format!("无法与房主握手：{e}"))?;
+    handshake::write_hello(&mut ctrl_send, &label.unwrap_or_default())
+        .await
+        .map_err(|e| format!("无法与房主握手：{e}"))?;
+    let _ = ctrl_send.finish();
+    match handshake::read_verdict(&mut ctrl_recv).await {
+        handshake::Verdict::Approved => {}
+        handshake::Verdict::Rejected => {
+            endpoint.close().await;
+            return Err("房主拒绝了你的加入请求".into());
+        }
+        handshake::Verdict::TimedOut => {
+            endpoint.close().await;
+            return Err("房主一直没有回应，请稍后再试".into());
+        }
+    }
 
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .await

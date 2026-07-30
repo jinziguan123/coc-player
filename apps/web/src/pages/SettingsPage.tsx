@@ -20,6 +20,7 @@ import {
   netlinkStart,
   netlinkStatus,
   netlinkStop,
+  peerDisplayName,
   shortPeerId,
   type NetlinkStatus,
 } from '@/api/netlink'
@@ -524,6 +525,8 @@ function NetlinkPanel({ backendPort }: { backendPort: number | null }) {
   const [busy, setBusy] = useState(false)
   const [roomCode, setRoomCode] = useState('')
   const [invite, setInvite] = useState('')
+  // 房主给门口那位起的备注，按公钥暂存；批准时提交，之后即丢弃。
+  const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({})
 
   const refresh = useCallback(async () => {
     if (!available) return
@@ -593,8 +596,10 @@ function NetlinkPanel({ backendPort }: { backendPort: number | null }) {
 
   const decide = async (peerId: string, approve: boolean) => {
     try {
-      if (approve) await netlinkApprove(peerId)
+      // 房主填了备注就用他的；没填则 Rust 侧回落到对方自称、再回落到公钥短名。
+      if (approve) await netlinkApprove(peerId, labelDrafts[peerId]?.trim() || undefined)
       else await netlinkReject(peerId)
+      setLabelDrafts(({ [peerId]: _dropped, ...rest }) => rest)
       toast.success(approve ? '已同意加入' : '已拒绝')
       await refresh()
     } catch (reason) {
@@ -689,33 +694,50 @@ function NetlinkPanel({ backendPort }: { backendPort: number | null }) {
                 <UserPlus size={12} style={{ flexShrink: 0 }} aria-hidden="true" />
                 <span>有人想加入，同意后对方才能进来。认不出的标识就拒绝掉。</span>
               </div>
-              {status?.pending.map((peer) => (
-                <div key={peer} className="netlink-peer netlink-peer--pending">
-                  <span className="netlink-peer__name netlink-peer__name--id">
-                    {shortPeerId(peer)}
-                  </span>
-                  <div className="netlink-peer__actions">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => void decide(peer, true)}
-                      title="同意加入"
-                      aria-label={`同意 ${shortPeerId(peer)} 加入`}
-                    >
-                      <Check size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn icon-btn--danger"
-                      onClick={() => void decide(peer, false)}
-                      title="拒绝"
-                      aria-label={`拒绝 ${shortPeerId(peer)}`}
-                    >
-                      <X size={13} />
-                    </button>
+              {status?.pending.map((peer) => {
+                const who = peerDisplayName(peer)
+                return (
+                  <div key={peer.id} className="netlink-peer netlink-peer--pending">
+                    <div className="netlink-peer__who">
+                      {/* 自称不可信，措辞必须让房主意识到这只是对方填的。 */}
+                      <span className="netlink-peer__name">
+                        {peer.claimed_label ? `自称「${peer.claimed_label}」` : '未填名字'}
+                      </span>
+                      <span className="netlink-peer__name--id">{shortPeerId(peer.id)}</span>
+                    </div>
+                    <input
+                      className="input netlink-peer__label"
+                      placeholder="备注（可选）"
+                      value={labelDrafts[peer.id] ?? ''}
+                      onChange={(e) =>
+                        setLabelDrafts((prev) => ({ ...prev, [peer.id]: e.target.value }))
+                      }
+                      maxLength={24}
+                      aria-label={`给 ${who} 起备注`}
+                    />
+                    <div className="netlink-peer__actions">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => void decide(peer.id, true)}
+                        title="同意加入"
+                        aria-label={`同意 ${who} 加入`}
+                      >
+                        <Check size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn icon-btn--danger"
+                        onClick={() => void decide(peer.id, false)}
+                        title="拒绝"
+                        aria-label={`拒绝 ${who}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </>

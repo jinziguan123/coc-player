@@ -1,7 +1,11 @@
 import { Outlet, useLocation } from 'react-router-dom'
+import { useKnockNotices } from '@/features/netlink/useKnockNotices'
 import { Sidebar } from './Sidebar'
 
 export function AppShell() {
+  // 内置直连的敲门提示挂在这里：房主多半正在跑团而不是待在设置页，
+  // 不全局提示的话，朋友会在门外干等到超时而他全程不知情。
+  useKnockNotices()
   // 路由切换整页淡入（150ms）：用 pathname 作 key，切页即重挂载触发 route-fade。
   const { pathname } = useLocation()
   const gameSession = pathname.startsWith('/game/')

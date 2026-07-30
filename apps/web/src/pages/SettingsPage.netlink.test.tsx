@@ -118,25 +118,54 @@ describe('设置页内置直连面板', () => {
   })
 
   it('有人敲门时列出来，同意后放行', async () => {
-    mockStatus.mockResolvedValue(hosting({ pending: ['xu4vstrangerkey9999'] }))
+    mockStatus.mockResolvedValue(
+      hosting({ pending: [{ id: 'xu4vstrangerkey9999', claimed_label: '阿强' }] }),
+    )
     const user = await openNetworkTab()
 
-    // 公钥太长，界面显示短名
-    const short = netlink.shortPeerId('xu4vstrangerkey9999')
-    expect(await screen.findByText(short)).toBeInTheDocument()
+    // 自称不可信，措辞必须让房主意识到这只是对方填的；公钥仍要露出来供核对。
+    expect(await screen.findByText(/自称「阿强」/)).toBeInTheDocument()
+    expect(screen.getByText(netlink.shortPeerId('xu4vstrangerkey9999'))).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: `同意 ${short} 加入` }))
+    await user.click(screen.getByRole('button', { name: '同意 阿强 加入' }))
     await waitFor(() =>
-      expect(netlink.netlinkApprove).toHaveBeenCalledWith('xu4vstrangerkey9999'),
+      expect(netlink.netlinkApprove).toHaveBeenCalledWith('xu4vstrangerkey9999', undefined),
+    )
+  })
+
+  it('没自报名字时退回显示公钥短名', async () => {
+    mockStatus.mockResolvedValue(
+      hosting({ pending: [{ id: 'xu4vstrangerkey9999', claimed_label: '' }] }),
+    )
+    await openNetworkTab()
+    expect(await screen.findByText('未填名字')).toBeInTheDocument()
+    // 认不出是谁时，按钮的可访问名也得能指认对象
+    expect(
+      screen.getByRole('button', {
+        name: `同意 ${netlink.shortPeerId('xu4vstrangerkey9999')} 加入`,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('房主填的备注优先于对方自称', async () => {
+    mockStatus.mockResolvedValue(
+      hosting({ pending: [{ id: 'xu4vstrangerkey9999', claimed_label: '自称管理员' }] }),
+    )
+    const user = await openNetworkTab()
+
+    await user.type(await screen.findByLabelText('给 自称管理员 起备注'), '老王')
+    await user.click(screen.getByRole('button', { name: '同意 自称管理员 加入' }))
+    await waitFor(() =>
+      expect(netlink.netlinkApprove).toHaveBeenCalledWith('xu4vstrangerkey9999', '老王'),
     )
   })
 
   it('拒绝不会把人写进名单', async () => {
-    mockStatus.mockResolvedValue(hosting({ pending: ['xu4vstrangerkey9999'] }))
+    mockStatus.mockResolvedValue(hosting({ pending: [{ id: 'xu4vstrangerkey9999', claimed_label: '阿强' }] }))
     const user = await openNetworkTab()
-    const short = netlink.shortPeerId('xu4vstrangerkey9999')
+    const who = '阿强'
 
-    await user.click(await screen.findByRole('button', { name: `拒绝 ${short}` }))
+    await user.click(await screen.findByRole('button', { name: `拒绝 ${who}` }))
     await waitFor(() =>
       expect(netlink.netlinkReject).toHaveBeenCalledWith('xu4vstrangerkey9999'),
     )

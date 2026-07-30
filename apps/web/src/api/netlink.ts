@@ -15,13 +15,19 @@ export interface ApprovedPeer {
   label: string
 }
 
+/** 门口等着的一位。`claimed_label` 是对方**自称**的名字，谁都能这么叫自己。 */
+export interface PendingPeer {
+  id: string
+  claimed_label: string
+}
+
 export interface NetlinkStatus {
   hosting: boolean
   endpoint_id: string | null
   invite: string | null
   connected_to: string | null
   local_port: number | null
-  pending: string[]
+  pending: PendingPeer[]
   approved: ApprovedPeer[]
 }
 
@@ -39,6 +45,12 @@ export class NetlinkUnavailableError extends Error {
 
 type TauriGlobal = {
   core?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> }
+  event?: {
+    listen?: <T>(
+      event: string,
+      handler: (message: { payload: T }) => void,
+    ) => Promise<() => void>
+  }
 }
 
 function tauri(): TauriGlobal | undefined {
@@ -74,9 +86,15 @@ export function netlinkInvite(roomCode?: string): Promise<string> {
   return invoke<string>('netlink_invite', { roomCode: roomCode || null })
 }
 
-/** 客人侧：用邀请码连上房主。 */
-export function netlinkConnect(inviteCode: string): Promise<GuestLink> {
-  return invoke<GuestLink>('netlink_connect', { inviteCode })
+/**
+ * 客人侧：用邀请码连上房主。
+ *
+ * `label` 是自报给房主看的名字，让他知道敲门的是谁；可空。首次加入需房主手动
+ * 同意，**这个 Promise 会一直挂着直到对方表态或超时（约两分钟）**，调用方要在
+ * 此期间显示等待提示。被拒绝会以 reject 返回明确原因。
+ */
+export function netlinkConnect(inviteCode: string, label?: string): Promise<GuestLink> {
+  return invoke<GuestLink>('netlink_connect', { inviteCode, label: label || null })
 }
 
 export function netlinkDisconnect(): Promise<void> {
@@ -98,4 +116,41 @@ export function netlinkRevoke(peerId: string): Promise<void> {
 /** 公钥太长，界面上显示头尾即可（与 Rust 侧 `short_id` 同一规则）。 */
 export function shortPeerId(id: string): string {
   return id.length <= 12 ? id : `${id.slice(0, 6)}…${id.slice(-4)}`
+}
+
+/** 门口有人等着时房主该看到的称呼：有自称就用它，否则退回公钥短名。 */
+export function peerDisplayName(peer: PendingPeer): string {
+  return peer.claimed_label || shortPeerId(peer.id)
+}
+
+// --- 事件 ---------------------------------------------------------------
+//
+// 房主多半不在设置页，靠轮询他根本不知道有人在敲门，所以 Rust 侧会主动推事件。
+
+/** 有陌生人在门口等着。 */
+export const EVENT_PENDING = 'netlink://pending'
+/** 门口那位已被处理（同意/拒绝/超时），据此收掉提示。 */
+export const EVENT_SETTLED = 'netlink://settled'
+
+export interface PendingEvent {
+  peer_id: string
+  claimed_label: string
+}
+
+/**
+ * 订阅一个 netlink 事件，返回取消订阅的函数。
+ *
+ * 非桌面环境下静默返回空操作——不该让浏览器里打开的页面因为没有 Tauri 就报错。
+ */
+export async function listenNetlink<T>(
+  event: string,
+  handler: (payload: T) => void,
+): Promise<() => void> {
+  const listen = tauri()?.event?.listen
+  if (!listen) return () => {}
+  try {
+    return await listen<T>(event, (message) => handler(message.payload))
+  } catch {
+    return () => {}
+  }
 }

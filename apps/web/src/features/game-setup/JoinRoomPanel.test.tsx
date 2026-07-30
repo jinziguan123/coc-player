@@ -15,6 +15,9 @@ function setupWith(overrides: Partial<GameSetupState> = {}): GameSetupState {
     joinCode: '',
     setJoinCode: vi.fn(),
     joinRoom: vi.fn(),
+    guestLabel: '',
+    setGuestLabel: vi.fn(),
+    joinWaiting: false,
     ...overrides,
   } as unknown as GameSetupState
 }
@@ -46,6 +49,27 @@ describe('加入房间面板', () => {
     render(<JoinRoomPanel setup={setupWith({ hostAddr: '192.168.1.5' })} />)
     expect(screen.queryByText(/内置直连/)).toBeNull()
     expect(screen.getByRole('button', { name: '加入' })).toBeDisabled()
+  })
+
+  it('粘了邀请码才要求填自己的名字——房主那边只看得到一串公钥', () => {
+    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'trpg:xu4vabc' })} />)
+    expect(screen.getByLabelText('你的名字')).toBeInTheDocument()
+  })
+
+  it('普通主机地址不问名字（局域网加入不经过批准）', () => {
+    render(<JoinRoomPanel setup={setupWith({ hostAddr: '192.168.1.5' })} />)
+    expect(screen.queryByLabelText('你的名字')).toBeNull()
+  })
+
+  it('等待房主同意时说明在等什么，并禁掉重复点击', () => {
+    // 首次加入可能卡一两分钟，不说清楚会被当成卡死。
+    render(
+      <JoinRoomPanel
+        setup={setupWith({ hostAddr: 'trpg:xu4vabc:K7M9PQ2R', joinWaiting: true })}
+      />,
+    )
+    expect(screen.getByText(/正在等房主同意/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '等待中…' })).toBeDisabled()
   })
 
   it('点加入会触发 joinRoom', async () => {

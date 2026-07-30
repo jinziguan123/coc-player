@@ -24,6 +24,9 @@ interface RoomInfo {
   id: string
 }
 
+/** 自报名记在本地：每次加入都重填一遍太烦。 */
+const GUEST_LABEL_KEY = 'trpg_guest_label'
+
 export function useGameSetup() {
   const { createSession, fetchSessions, sessions } = useSessionStore()
   const { modules, fetchModules } = useModuleStore()
@@ -38,6 +41,12 @@ export function useGameSetup() {
   const [error, setError] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [hostAddr, setHostAddr] = useState(getServerUrl())
+  // 自报给房主看的名字。记在本地，下次不用重填——房主那边看到的是一串公钥，
+  // 有个名字他才认得出是谁。
+  const [guestLabel, setGuestLabel] = useState(
+    () => localStorage.getItem(GUEST_LABEL_KEY) || '',
+  )
+  const [joinWaiting, setJoinWaiting] = useState(false)
   const [filters, setFilters] = useState<ModuleFilters>(createEmptyModuleFilters)
 
   const filteredModules = useMemo(
@@ -150,8 +159,10 @@ export function useGameSetup() {
     // 房间码可以由邀请码带来，所以这一步要在「房间码必填」的检查之前。
     let code = joinCode.trim().toUpperCase()
     if (typed.toLowerCase().startsWith('trpg:')) {
+      // 首次加入要房主手动点同意，这一步可能卡上一两分钟，得让人知道在等什么。
+      setJoinWaiting(true)
       try {
-        const link = await netlinkConnect(typed)
+        const link = await netlinkConnect(typed, guestLabel.trim())
         const host = `http://127.0.0.1:${link.local_port}`
         setServerUrl(host)
         // 本地端口每次连接都变，token 必须跟着房主走，否则每次重连都掉席位。
@@ -161,12 +172,15 @@ export function useGameSetup() {
           setJoinCode(code)
         }
       } catch (reason: unknown) {
+        // Rust 侧对「被拒绝」「房主没回应」给的是明确原因，直接透出。
         setError(
           reason instanceof Error
             ? reason.message
             : '按邀请码连接失败，请确认房主已开启内置直连',
         )
         return
+      } finally {
+        setJoinWaiting(false)
       }
       if (!code) {
         setError('已连上房主，还需要填房间码')
@@ -315,6 +329,12 @@ export function useGameSetup() {
     setJoinCode,
     hostAddr,
     setHostAddr,
+    guestLabel,
+    setGuestLabel: (next: string) => {
+      setGuestLabel(next)
+      localStorage.setItem(GUEST_LABEL_KEY, next)
+    },
+    joinWaiting,
     connectedHost: getServerUrl(),
     joinRoom,
     disconnectHost,
