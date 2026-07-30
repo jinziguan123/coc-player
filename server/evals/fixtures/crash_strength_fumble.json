@@ -2248,24 +2248,24 @@
       "event_type": "dice",
       "actor_id": null,
       "actor_name": "系统",
-      "content": "江户川龙牙｜力量 检定（hard）：极难成功（极难成功 (12 ≤ 16)）",
+      "content": "江户川龙牙｜力量 检定（hard）：大失败（大失败！掷出了 100）",
       "visibility": [],
       "metadata_": {
         "skill": "力量",
         "skill_value": 80,
-        "roll": 12,
+        "roll": 100,
         "target": 40,
-        "outcome": "hard_success",
-        "tier": "extreme",
+        "outcome": "fumble",
+        "tier": "fumble",
         "actor": "江户川龙牙",
         "dice": {
           "kind": "check",
-          "result": 12,
+          "result": 100,
           "tens": [
-            10
+            0
           ],
-          "tens_kept": 10,
-          "units": 2,
+          "tens_kept": 0,
+          "units": 0,
           "bonus": 0,
           "penalty": 0
         },
@@ -2278,7 +2278,7 @@
   ],
   "rules_lookup_enabled": true,
   "plan": null,
-  "continuation": "江户川龙牙 力量（hard），达成 大失败：大失败（97 > 16）",
+  "continuation": "江户川龙牙 力量（hard），达成 大失败：大失败！掷出了 100",
   "narration_expect": {
     "note": "出轨中抓握大失败=被甩飞撞击，续写须结算身体伤害 [HP_CHANGE] 负 delta",
     "any_of": [

@@ -1,5 +1,6 @@
 """评估回路的免费部分单测：确定性检查、fixture 重建、上下文构建（不调 LLM）。"""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -321,6 +322,43 @@ class TestContinuationSubjectFidelity:
         joined = "\n".join(m.get("content") or "" for m in messages)
         assert "伊芙琳·哈特" in joined and "亨利·卡特" in joined
         assert "智力" in joined and "侦查" in joined
+
+    def test_judge看得到续写回灌的骰点(self):
+        # 裁判若只看历史事件，就得靠猜本轮骰点；续写与旧骰点不一致时会误判
+        # plan_adherence/coherence。回灌串必须原样进裁判提示。
+        case = load_fixture(MULTI_ACTOR_CONT)
+        joined = "\n".join(
+            m["content"] for m in build_judge_messages(case, None, "旁白")
+        )
+        assert case.continuation in joined
+        assert "本轮投骰结果" in joined
+
+    def test_非续写fixture不塞骰点小节(self):
+        case = load_fixture(SYNTHETIC)
+        joined = "\n".join(
+            m["content"] for m in build_judge_messages(case, None, "旁白")
+        )
+        assert "本轮投骰结果" not in joined
+
+
+# ── 续写 fixture 自洽性：回灌骰点必须与事件流里的那颗骰子一致 ──
+
+
+class TestContinuationFixtureConsistency:
+    @pytest.mark.parametrize("path", sorted(FIXTURES.glob("*.json")), ids=lambda p: p.stem)
+    def test_回灌骰点与末条dice事件同一达成等级(self, path):
+        """事件流里写着「极难成功」、却回灌「大失败」的 fixture 会同时毒害 KP 与裁判：
+        KP 拿到自相矛盾的上下文，裁判则按旧骰点判续写不衔接。"""
+        case = load_fixture(path)
+        if not case.continuation:
+            pytest.skip("非续写 fixture")
+        dice_events = [e for e in case.events if e.event_type == "dice"]
+        assert dice_events, "续写 fixture 必须留有对应的 dice 事件"
+        # 事件正文形如「甲｜力量 检定（hard）：大失败（大失败！掷出了 100）」，冒号后即达成等级；
+        # 比对正文而非 metadata.tier——KP 与裁判读到的都是这行字。
+        m = re.search(r"检定（[^）]*）：([^（(]+)", dice_events[-1].content or "")
+        assert m, f"末条 dice 事件不是标准检定行：{dice_events[-1].content}"
+        assert m.group(1).strip() in case.continuation
 
 
 # ── NPC 感知边界（复现线上「隔墙有耳」bug）──

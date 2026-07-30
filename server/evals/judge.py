@@ -82,6 +82,14 @@ def build_judge_messages(
     plan_text = (
         json.dumps(plan.model_dump(), ensure_ascii=False) if plan else "（本轮无裁定计划）"
     )
+    # 「投骰后续写」重放：KP 拿到的是这串检定结果（run_case 回灌 KP_DICE_CONTINUATION_PROMPT）。
+    # 不喂给裁判，裁判就只能从历史事件里猜骰点——续写按大失败写、事件里却是旧的成功骰，
+    # 会被误判成 plan_adherence/coherence 不过。
+    dice_text = (
+        "本轮投骰结果（KP 被要求据此续写；与历史事件里的骰点不一致时以本节为准）：\n"
+        f"{case.continuation}\n\n"
+        if case.continuation else ""
+    )
     all_rubric = {**RUBRIC, **ADVISORY_RUBRIC}
     rubric_text = "\n".join(f"- {key}: {desc}" for key, desc in all_rubric.items())
     schema = ", ".join(f'"{k}": {{"pass": true, "reason": ""}}' for k in all_rubric)
@@ -100,6 +108,7 @@ def build_judge_messages(
             "content": (
                 f"玩家角色（KP 绝不可替他们行动/说话）：{', '.join(case.player_names)}\n\n"
                 f"本轮裁定计划（KP 应遵循的约束）：\n{plan_text}\n\n"
+                f"{dice_text}"
                 f"最近事件（旁白应与之衔接）：\n{_recent_events_text(case)}\n\n"
                 f"待评审的 KP 旁白：\n{narration}\n\n"
                 f"评分项定义：\n{rubric_text}\n\n"
