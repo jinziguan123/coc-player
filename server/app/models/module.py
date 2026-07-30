@@ -12,6 +12,12 @@ class Module(Base, UUIDMixin, TimestampMixin):
     description: Mapped[str] = mapped_column(Text, default="")
     theme: Mapped[str] = mapped_column(default="default")
     world_setting: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 车卡建议：玩家针对本模组建角色时该知道的取向与限制，形如
+    # {summary, recommended: [...], avoid: [...], notes: [...]}。
+    #
+    # 完全由模组设定派生、一次生成即长期可用，所以存在模组上而不是每次建卡现算。
+    # 房主可在模组详情页改写——AI 给的是初稿，KP 才是最终裁量。
+    character_guidance: Mapped[dict] = mapped_column(JSON, default=dict)
     raw_content: Mapped[str] = mapped_column(Text, default="")
     scenes: Mapped[list] = mapped_column(JSON, default=list)
     # 沙盘上的全部节点：场景节点通过 scene_id 关联 scenes，普通节点 scene_id 为空。

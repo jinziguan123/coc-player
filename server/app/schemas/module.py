@@ -18,6 +18,8 @@ class ModuleRead(BaseModel):
     description: str
     theme: str
     world_setting: dict
+    # 车卡建议：玩家针对本模组建角色时的取向与限制，见 module_service。
+    character_guidance: dict = {}
     scenes: list
     npcs: list
     clues: list
@@ -42,6 +44,8 @@ class ModuleWrite(BaseModel):
     rule_system: str = "coc"
     description: str = ""
     world_setting: dict = {}
+    # None = 本次编辑不动车卡建议（防旧前端把它清空，与 truth 同一处理）
+    character_guidance: dict | None = None
     scenes: list = []
     # None 表示旧客户端未提交地图节点，更新时保留服务端已有普通节点。
     map_nodes: list | None = None

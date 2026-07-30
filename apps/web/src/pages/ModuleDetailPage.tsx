@@ -13,6 +13,8 @@ import {
 import { ModuleGraph } from '../components/module/ModuleGraph'
 import { HexSandbox } from '../components/game/HexSandbox'
 import { ModuleImage, type ModuleImageKind } from '../components/module/ModuleImage'
+import { CharacterGuidanceCard } from '../components/module/CharacterGuidanceCard'
+import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { ModuleTimeline } from '../components/module/ModuleTimeline'
 import { BIOMES, BIOME_LABELS, BIOME_TEXTURES } from '../lib/biome'
 import { MODULE_DIFFICULTIES } from '../lib/module'
@@ -39,12 +41,15 @@ interface ModuleData {
   clues: Clue[]
   triggers: Trigger[]
   truth: string
+  /** 车卡建议：玩家建角色时看到的取向与限制，由 AI 出初稿、房主可改写。 */
+  character_guidance: CharacterGuidance
 }
 
 const BLANK: ModuleData = {
   title: '', rule_system: 'coc', description: '',
   world_setting: { era: '', location: '', tone: '', player_count: '', region: '', difficulty: '', tags: [], player_brief: '', intro: '' },
   scenes: [], map_nodes: [], npcs: [], clues: [], triggers: [], truth: '',
+  character_guidance: {},
 }
 
 const EVENT_KINDS: { value: string; label: string }[] = [
@@ -237,12 +242,48 @@ export function ModuleDetailPage() {
           ? m.map_nodes
           : scenes.filter((s) => s.kind !== 'chapter' && s.map && Number.isFinite(s.map.q) && Number.isFinite(s.map.r))
             .map((s) => ({ id: s.id, q: s.map!.q!, r: s.map!.r!, biome: s.map!.biome || 'plain', scene_id: s.id }))
-        setData({ ...BLANK, ...m, scenes, map_nodes: mapNodes, world_setting: { ...BLANK.world_setting, ...(m.world_setting || {}) } })
+        setData({
+          ...BLANK, ...m, scenes, map_nodes: mapNodes,
+          world_setting: { ...BLANK.world_setting, ...(m.world_setting || {}) },
+          // 后端可能回 null（旧模组未生成过）；不兜住的话下面取 .summary 会崩。
+          character_guidance: m.character_guidance || {},
+        })
         setEditSnapshot(null)
       })
       .catch(() => { toast.error('模组加载失败'); navigate('/modules') })
       .finally(() => setLoading(false))
   }, [id, isNew, navigate])
+
+  const [guidanceBusy, setGuidanceBusy] = useState(false)
+  const updateGuidance = (key: 'summary', value: string) =>
+    setData((d) => ({ ...d, character_guidance: { ...d.character_guidance, [key]: value } }))
+  /** 列表字段在界面上是一行文本，按分隔符拆回数组；空项丢掉。 */
+  const updateGuidanceList = (
+    key: 'recommended' | 'avoid' | 'notes',
+    value: string,
+    sep: string = '、',
+  ) =>
+    setData((d) => ({
+      ...d,
+      character_guidance: {
+        ...d.character_guidance,
+        [key]: value.split(sep).map((x) => x.trim()).filter(Boolean),
+      },
+    }))
+  const regenerateGuidance = async () => {
+    setGuidanceBusy(true)
+    try {
+      const updated = await api.post<{ character_guidance: CharacterGuidance }>(
+        `/modules/${id}/character-guidance`, {},
+      )
+      setData((d) => ({ ...d, character_guidance: updated.character_guidance || {} }))
+      toast.success('车卡建议已生成')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '生成失败')
+    } finally {
+      setGuidanceBusy(false)
+    }
+  }
 
   const updateWS = (k: string, v: unknown) => setData((d) => ({ ...d, world_setting: { ...d.world_setting, [k]: v } }))
   const updScene = useCallback((i: number, patch: Partial<Scene>) =>
@@ -312,6 +353,7 @@ export function ModuleDetailPage() {
         clues: data.clues,
         triggers: data.triggers,
         truth: data.truth,
+        character_guidance: data.character_guidance,
       }
       const saved = isNew
         ? await api.post<ModuleData>('/modules', payload)
@@ -658,6 +700,64 @@ export function ModuleDetailPage() {
         </RowGrid>
         <Row label="世界观导入">{edit ? <TextInput value={wsStr(data.world_setting, 'intro')} onChange={(v) => updateWS('intro', v)} multiline placeholder="开场朗读用的世界观/基调铺陈（年代、风物、是哪一类故事），无剧透，区别于开场钩子" /> : <span className="whitespace-pre-wrap">{wsStr(data.world_setting, 'intro') || '—'}</span>}</Row>
         <Row label="开场钩子">{edit ? <TextInput value={wsStr(data.world_setting, 'player_brief')} onChange={(v) => updateWS('player_brief', v)} multiline placeholder="玩家开场就合法知道的动机/处境（不含待发现的线索/真相）" /> : <span className="whitespace-pre-wrap">{wsStr(data.world_setting, 'player_brief') || '—'}</span>}</Row>
+      </Section>
+
+      {/* 车卡建议（玩家可见）：AI 按设定出初稿，房主可改写或重新生成。
+          放在幕后真相之前——玩家可见的内容不该夹在 KP 专属段落之后。 */}
+      <Section title="车卡建议（玩家建角色时可见）">
+        {edit ? (
+          <>
+            <Row label="一句话定调">
+              <TextInput
+                value={data.character_guidance.summary || ''}
+                onChange={(v) => updateGuidance('summary', v)}
+                placeholder="这个本子想要什么样的调查员"
+              />
+            </Row>
+            <Row label="适合">
+              <TextInput
+                value={(data.character_guidance.recommended || []).join('、')}
+                onChange={(v) => updateGuidanceList('recommended', v)}
+                placeholder="契合的职业或人物类型，用「、」分隔"
+              />
+            </Row>
+            <Row label="不建议">
+              <TextInput
+                value={(data.character_guidance.avoid || []).join('、')}
+                onChange={(v) => updateGuidanceList('avoid', v)}
+                placeholder="不契合的类型，各带半句原因，用「、」分隔"
+              />
+            </Row>
+            <Row label="要点">
+              <TextInput
+                value={(data.character_guidance.notes || []).join('\n')}
+                onChange={(v) => updateGuidanceList('notes', v, '\n')}
+                multiline
+                placeholder="会大量用到的技能、队伍需覆盖的能力、角色需要的动机——每行一条"
+              />
+            </Row>
+          </>
+        ) : (
+          <>
+            {hasGuidance(data.character_guidance) ? (
+              <CharacterGuidanceCard guidance={data.character_guidance} />
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                —（本功能上线前导入的模组没有这段，点下面的按钮补生成）
+              </p>
+            )}
+            {!isNew && (
+              <button
+                onClick={() => void regenerateGuidance()}
+                disabled={guidanceBusy}
+                className="btn-secondary !px-2.5 !py-1 text-xs inline-flex items-center gap-1"
+              >
+                <Sparkles size={12} />
+                {guidanceBusy ? '生成中…' : hasGuidance(data.character_guidance) ? '重新生成' : 'AI 生成车卡建议'}
+              </button>
+            )}
+          </>
+        )}
       </Section>
 
       {/* 幕后真相（守秘人资讯，KP 专属） */}

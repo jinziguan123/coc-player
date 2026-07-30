@@ -29,6 +29,8 @@ _upload_jobs: dict[str, dict] = {}
 _MAX_UPLOAD_JOBS = 20
 # 底图是装饰层，不值得让用户为它多等——超过这个时间就放弃，之后仍可在沙盘页手动点「AI 生成氛围底图」。
 _BACKDROP_TIMEOUT_S = 90
+# 车卡建议只喂设定摘要、输出很短，比底图快得多；超时即跳过，可在详情页手动补。
+_GUIDANCE_TIMEOUT_S = 60
 
 
 def _job_new() -> str:
@@ -277,6 +279,21 @@ async def _run_upload_job(
                 npcs_count=len(module.npcs), clues_count=len(module.clues),
             ).model_dump()
 
+            # 车卡建议：玩家建角色时要看的取向与限制。刻意不塞进主解析——那次输出
+            # 已长到需要断点续写，再加字段只会加剧截断（见 parse_module_text）。
+            # 与底图同样的兜底：失败只记日志，模组本身已经落库可用了。
+            _job_update(job_id, stage="生成车卡建议", percent=93)
+            try:
+                module.character_guidance = await asyncio.wait_for(
+                    module_service.generate_character_guidance(module),
+                    timeout=_GUIDANCE_TIMEOUT_S,
+                )
+                db.commit()
+            except asyncio.TimeoutError:
+                logger.warning("车卡建议生成超时，跳过：module=%s", module.id)
+            except Exception:  # noqa: BLE001 — 建议是附加物，绝不能让上传失败
+                logger.warning("车卡建议生成失败，跳过：module=%s", module.id, exc_info=True)
+
             # 沙盘氛围底图：纯装饰层，解析完顺手生成一张，省得用户再去点一次按钮。
             # 三重兜底——超时上限、异常吞掉、未配置文生图直接跳过：
             # 底图失败绝不能让整个模组解析失败，模组本身已经落库可用了。
@@ -450,6 +467,30 @@ async def enrich_map(module_id: str, db: Session = Depends(get_db)):
         return await module_map_service.enrich_module_map(db, module)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post(
+    "/{module_id}/character-guidance",
+    dependencies=[Depends(require_local_client)],
+    response_model=ModuleRead,
+)
+async def regenerate_character_guidance(module_id: str, db: Session = Depends(get_db)):
+    """（重新）生成本模组的车卡建议。
+
+    上传解析时会自动跑一次，这个端点用于两种情况：解析早于本功能上线的历史模组，
+    以及房主对生成结果不满意想重来。房主手改的内容走 PUT /modules/{id}。
+    """
+    module = module_service.get_module(db, module_id)
+    if not module:
+        raise HTTPException(404, "模组不存在")
+    try:
+        module.character_guidance = await module_service.generate_character_guidance(module)
+    except Exception as exc:  # noqa: BLE001 — AI 未配置/超时/输出坏掉都归到可读 400
+        logger.warning("车卡建议生成失败：module=%s err=%s", module_id, exc)
+        raise HTTPException(400, "车卡建议生成失败，请检查 AI 配置后重试") from exc
+    db.commit()
+    db.refresh(module)
+    return module
 
 
 @router.post("/{module_id}/map/backdrop", dependencies=[Depends(require_local_client)])

@@ -553,6 +553,8 @@ def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
     for key in ("player_count", "era", "region", "difficulty", "tags", "player_brief", "intro"):
         if key in data:
             world_setting[key] = data[key]
+    if "character_guidance" in data:
+        data["character_guidance"] = normalize_character_guidance(data["character_guidance"])
     # 难度归一到枚举：非法值置空，避免脏数据进入筛选维度
     if world_setting.get("difficulty") not in MODULE_DIFFICULTIES:
         world_setting["difficulty"] = ""
@@ -571,6 +573,7 @@ def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
         triggers=data.get("triggers", []),
         handouts=data.get("handouts", []),
         truth=str(data.get("truth") or ""),
+        character_guidance=data.get("character_guidance") or {},
     )
     db.add(module)
     db.commit()
@@ -610,6 +613,9 @@ def update_module(db: Session, module_id: str, data: dict) -> Module | None:
         module.handouts = data["handouts"]
     if "truth" in data and data["truth"] is not None:
         module.truth = str(data["truth"])
+    # 房主可以改写 AI 给的车卡建议——AI 出初稿，KP 才是最终裁量。
+    if "character_guidance" in data and data["character_guidance"] is not None:
+        module.character_guidance = normalize_character_guidance(data["character_guidance"])
     db.commit()
     db.refresh(module)
     return module
@@ -643,3 +649,91 @@ def delete_module(db: Session, module_id: str) -> bool:
     db.delete(module)
     db.commit()
     return True
+
+
+# --- 车卡建议 -----------------------------------------------------------
+
+# 结构刻意做浅：四个字段各自独立可读，房主改写时不必看懂嵌套。
+# 也不放「推荐属性数值」之类的硬指标——那属于规则书与建卡流程，不是模组的事。
+_GUIDANCE_PROMPT = """你在帮跑团玩家准备角色卡。下面是一个 {rule_system} 模组的设定，
+请给出**针对这个本子**的车卡建议。
+
+模组：{title}
+简介：{description}
+时代：{era}
+地域：{location}
+基调：{tone}
+难度：{difficulty}
+玩家人数：{player_count}
+玩家须知：{player_brief}
+
+要求：
+- 紧贴上面的时代与地域。1920 年代的本子不该出现电脑黑客，现代都市本不该要求驾驶马车。
+- `summary` 一句话说清这个本子想要什么样的调查员（不超过 60 字）。
+- `recommended` 给 3-6 个契合的职业或人物类型，用玩家看得懂的中文短语，不要解释。
+- `avoid` 给 1-4 个明显不契合的类型，并各用半句话说明为什么不合适。
+- `notes` 给 2-5 条具体建议：本子会大量用到的技能、队伍需要覆盖的能力、
+  角色需要有的动机或人物关系（例如「需要一个前往埃及的正当理由」）。
+  只写从上面设定能推出来的，**不要编造模组里没有的剧情或秘密**。
+- 全部用中文。不要泄露幕后真相或谜底——这份建议玩家会看到。
+
+只输出一个 JSON object：
+{{"summary": "", "recommended": [""], "avoid": [""], "notes": [""]}}"""
+
+
+async def generate_character_guidance(module: Module) -> dict:
+    """按模组设定生成车卡建议。
+
+    **刻意不塞进 parse_module_text**：那次调用的输出已经长到需要断点续写
+    （见其文档），再加字段只会加剧截断。这里只喂已解析出的设定摘要、不喂全文，
+    于是又快又稳，还能对历史模组单独补跑、失败也不拖累模组本身。
+    """
+    ws = module.world_setting or {}
+    prompt = _GUIDANCE_PROMPT.format(
+        rule_system=(module.rule_system or "coc").upper(),
+        title=module.title or "（无题）",
+        description=module.description or "（无简介）",
+        era=ws.get("era") or "（未标注）",
+        location=ws.get("location") or ws.get("region") or "（未标注）",
+        tone=ws.get("tone") or "（未标注）",
+        difficulty=ws.get("difficulty") or "（未标注）",
+        player_count=ws.get("player_count") or "（未标注）",
+        player_brief=ws.get("player_brief") or "（无）",
+    )
+    raw = await get_llm().complete(
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+        temperature=0.4,
+    )
+    return normalize_character_guidance(_extract_json(raw))
+
+
+def normalize_character_guidance(data: object) -> dict:
+    """把 AI 或房主给的内容收敛成稳定结构。
+
+    界面直接渲染这四个字段，所以宁可在入口处清干净：非字符串项丢掉、去空白、
+    限长限条数。免得一次跑偏的输出把角色创建页撑破。
+    """
+    if not isinstance(data, dict):
+        return {}
+
+    def _texts(key: str, limit: int) -> list[str]:
+        items = data.get(key)
+        if not isinstance(items, list):
+            return []
+        out = []
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            text = item.strip()[:200]
+            if text:
+                out.append(text)
+        return out[:limit]
+
+    summary = data.get("summary")
+    return {
+        "summary": summary.strip()[:200] if isinstance(summary, str) else "",
+        "recommended": _texts("recommended", 8),
+        "avoid": _texts("avoid", 6),
+        "notes": _texts("notes", 8),
+    }

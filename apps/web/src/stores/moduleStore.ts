@@ -1,12 +1,28 @@
 import { create } from 'zustand'
 import { api, uploadFile } from '../api/client'
 
-interface Module {
+/** 见 server/app/services/module_service.py 的 normalize_character_guidance。 */
+export interface CharacterGuidance {
+  summary?: string
+  recommended?: string[]
+  avoid?: string[]
+  notes?: string[]
+}
+
+/** 是否有内容可展示。四个字段各自独立——历史模组可能只补生成了一部分。 */
+export function hasGuidance(g?: CharacterGuidance | null): boolean {
+  if (!g) return false
+  return !!(g.summary?.trim() || g.recommended?.length || g.avoid?.length || g.notes?.length)
+}
+
+export interface Module {
   id: string
   title: string
   rule_system: string
   description: string
   world_setting: Record<string, unknown>
+  /** 车卡建议：玩家针对本模组建角色时的取向与限制（可能为空，历史模组未生成过）。 */
+  character_guidance?: CharacterGuidance
   scenes: Array<Record<string, unknown>>
   npcs: Array<Record<string, unknown>>
   clues: Array<Record<string, unknown>>

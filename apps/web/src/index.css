@@ -780,6 +780,68 @@ body {
   color: var(--color-danger);
 }
 
+/* 车卡建议卡片：玩家选中模组建角色时展示的取向与限制 */
+.guidance-card {
+  margin-bottom: 0.85rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: var(--color-bg-tertiary);
+}
+.guidance-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.45rem;
+  color: var(--color-text-accent);
+  font-family: var(--font-title);
+  font-size: 0.85rem;
+}
+.guidance-card__summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+}
+.guidance-card__block {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.guidance-card__label {
+  flex-shrink: 0;
+  width: 3.4rem;
+  padding-top: 0.1rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+.guidance-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.guidance-chip {
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: 0.74rem;
+}
+.guidance-card__list {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.78rem;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+.guidance-card__list > li { margin: 0; }
+
+@media (max-width: 520px) {
+  .guidance-card__block { flex-direction: column; gap: 0.2rem; }
+  .guidance-card__label { width: auto; }
+}
+
 /* 内置直连：邀请码生成与准入名册 */
 .netlink-block { margin-top: 0.9rem; }
 .netlink-block__label {

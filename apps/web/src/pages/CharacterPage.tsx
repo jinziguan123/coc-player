@@ -16,6 +16,8 @@ import {
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiDiceSixFacesSix, GiCharacter, GiReturnArrow, GiUpCard, GiPadlock, GiSave, GiScrollUnfurled } from 'react-icons/gi'
 import { ChevronRight, RefreshCw } from 'lucide-react'
+import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
+import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { CharacterList } from '@/features/characters/CharacterList'
 import {
   createCharacter,
@@ -144,6 +146,9 @@ export function CharacterPage() {
   // Step 1: 基本信息
   const [name, setName] = useState('')
   const [moduleId, setModuleId] = useState('')
+  // 选中的模组：车卡建议挂在它身上。必须放在 moduleId 声明之后——
+  // 提到前面会撞 TDZ，而 tsc 抓不到这种间接引用，只在浏览器里白屏。
+  const selectedModule = modules.find((m) => m.id === moduleId) ?? null
   const [age, setAge] = useState(25)
   const [gender, setGender] = useState('')
   const [residence, setResidence] = useState('')
@@ -879,10 +884,18 @@ export function CharacterPage() {
                     </SelectContent>
                   </Select>
                   <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    只用于归类，留空也能建卡与入座。
+                    只用于归类，留空也能建卡与入座。选定后会给出这个本子的车卡建议。
                     {modules.length === 0 && '本机还没有模组，直接往下填就行。'}
                   </p>
                 </div>
+                {/* 选中模组后给出车卡建议：内容由模组设定派生、存在模组上，房主可在
+                    模组详情页改写。不做成弹窗——建卡过程中要能反复回看。 */}
+                {selectedModule && hasGuidance(selectedModule.character_guidance) && (
+                  <CharacterGuidanceCard
+                    guidance={selectedModule.character_guidance as CharacterGuidance}
+                    moduleTitle={selectedModule.title}
+                  />
+                )}
                 <div className="flex items-center gap-2 mb-3 p-2 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
                   <GiUpCard className="text-lg flex-shrink-0" style={{ color: 'var(--color-text-accent)' }} />
                   <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>有现成角色卡？</span>
