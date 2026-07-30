@@ -985,20 +985,19 @@ export function GameSessionPage() {
 
   // 玩家「申请」检定：只报技能，难度交 KP 裁定（玩家不指定）；intent 是顺带说明的检定目标，
   // 场景里同时有多条线索/多个可疑点时，光报技能名 KP 猜不出玩家具体想查什么。
-  const rollCheck = async (skill: string, intent: string) => {
+  const rollCheck = (skill: string, intent: string) => {
     if (!currentSession || streaming) {
       if (streaming) toast.error('KP 正在叙事，请稍候')
       return
     }
-    try {
-      setStreaming(true)
-      await api.post(`/sessions/${currentSession.id}/check`, {
-        skill, intent, acting_character_id: myCharId,
-      })
-    } catch (e: unknown) {
+    setStreaming(true)
+    // 同 submitRoll：不 await，否则挂起的请求会挤到 SSE 前面，自己反而最后看到动画。
+    api.post(`/sessions/${currentSession.id}/check`, {
+      skill, intent, acting_character_id: myCharId,
+    }).catch((e: unknown) => {
       setStreaming(false)
       toast.error(e instanceof Error ? e.message : '检定申请失败')
-    }
+    })
   }
 
   // 重新生成最新一轮 KP：打断卡住的生成 → 回滚上一轮 KP 叙事 → 用玩家/队友的既有输入重跑
@@ -1146,18 +1145,23 @@ export function GameSessionPage() {
   }
 
   // 玩家点「投骰」：对一个待定检定掷骰。
-  const submitRoll = async (checkId: string) => {
+  const submitRoll = (checkId: string) => {
     if (!currentSession || streaming) {
       if (streaming) toast.error('KP 正在叙事，请稍候')
       return
     }
-    try {
-      setStreaming(true)
-      await api.post(`/sessions/${currentSession.id}/roll`, { check_id: checkId })
-    } catch (e: unknown) {
+    setStreaming(true)
+    // fire-and-forget（与 sendMessage 同一模式）：骰子结果经 /live 广播回来渲染，
+    // 不需要等这个响应。
+    //
+    // **不能 await**：后端广播骰子之后还要等上一轮 housekeeping 收尾才返回，等最后
+    // 一位玩家投完更要接着跑 KP 叙事。await 会让浏览器一直占着一条连接，SSE 推送
+    // 排在它后面——表现就是「自己点的骰子，自己这边过好几秒才出动画，别人那边却
+    // 立刻就播了」。
+    api.post(`/sessions/${currentSession.id}/roll`, { check_id: checkId }).catch((e: unknown) => {
       setStreaming(false)
       toast.error(e instanceof Error ? e.message : '投骰失败')
-    }
+    })
   }
 
   const sendMessage = async () => {
