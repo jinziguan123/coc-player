@@ -28,6 +28,7 @@ def create_character(db: Session, data: dict) -> Character:
     character = Character(
         name=data["name"],
         module_id=data.get("module_id"),
+        origin_character_id=data.get("origin_character_id"),
         rule_system=rule_system,
         is_player=data.get("is_player", True),
         owner_token=data.get("owner_token"),

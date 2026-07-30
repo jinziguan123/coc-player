@@ -51,6 +51,7 @@ import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, Panel
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
 import { useRepairableImage, type ModuleImageKind } from '../components/module/ModuleImage'
+import { useSyncBackOnVisit } from '../features/characters/useSyncBack'
 
 interface KnownLocation {
   id: string; name: string; current: boolean; visited: boolean
@@ -232,6 +233,8 @@ interface SyncSnapshot {
 
 
 export function GameSessionPage() {
+  // 参战结果写回本机角色卡：进入与离开各拉一次，见 features/characters/useSyncBack.ts。
+  useSyncBackOnVisit()
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
   const location = useLocation()

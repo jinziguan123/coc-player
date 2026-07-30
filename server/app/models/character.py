@@ -15,6 +15,11 @@ class Character(Base, UUIDMixin, TimestampMixin):
     is_player: Mapped[bool] = mapped_column(default=True)
     # 角色归属于某玩家 token（阶段 2 联机：带角色入场认领席位）；AI 角色为 None
     owner_token: Mapped[Optional[str]] = mapped_column(nullable=True, index=True)
+    # 参战副本指回客人库里的原件。有值即表示「这是一份副本」。
+    #
+    # **刻意不建外键**：原件在客人自己的库里，这个 id 在房主库里根本不存在——它是
+    # 跨库标识，不是引用完整性约束。客人据此把本局的 HP/SAN/成长/物品写回原件。
+    origin_character_id: Mapped[Optional[str]] = mapped_column(nullable=True, index=True)
     base_attributes: Mapped[dict] = mapped_column(JSON, default=dict)
     skills: Mapped[dict] = mapped_column(JSON, default=dict)
     system_data: Mapped[dict] = mapped_column(JSON, default=dict)

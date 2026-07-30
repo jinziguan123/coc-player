@@ -8,7 +8,8 @@ export interface GameModule {
 export interface SetupCharacter {
   id: string
   name: string
-  module_id: string
+  /** 可空：角色卡不必属于某个模组（客人本地未必有房主用的那个本子）。 */
+  module_id: string | null
   base_attributes: Record<string, number>
   skills: Record<string, number>
   system_data: Record<string, unknown>

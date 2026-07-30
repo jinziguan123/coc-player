@@ -3,7 +3,9 @@ import { api, localApi } from '@/api/client'
 export interface Character {
   id: string
   name: string
-  module_id: string
+  module_id: string | null
+  /** 有值即为参战副本，指回客人自己库里的原件；见 syncBack.ts。 */
+  origin_character_id?: string | null
   rule_system: string
   base_attributes: Record<string, number>
   skills: Record<string, number>

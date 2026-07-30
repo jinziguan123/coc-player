@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { useSyncBackOnVisit } from '@/features/characters/useSyncBack'
 import { api, connectSSE, getServerUrl, localApi } from '../api/client'
 import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
@@ -42,6 +43,8 @@ interface CharacterEvaluation {
 type Chunk = { type: string; id?: string; content?: string; actor_name?: string }
 
 export function RoomLobbyPage() {
+  // 补漏：上次可能是异常退出（关窗口/掉线/房主先退），来不及同步。
+  useSyncBackOnVisit()
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
   const [room, setRoom] = useState<RoomData | null>(null)
@@ -208,6 +211,9 @@ export function RoomLobbyPage() {
       const imported = await api.post<Character>('/characters', {
         name: character.name,
         module_id: room.module_id,
+        // 记住血缘：本局的 HP/SAN/成长/物品只落在这份副本上，客人靠这个 id
+        // 把结果写回自己库里的原件，见 features/characters/syncBack.ts。
+        origin_character_id: character.id,
         rule_system: character.rule_system || 'coc',
         is_player: true,
         base_attributes: character.base_attributes,

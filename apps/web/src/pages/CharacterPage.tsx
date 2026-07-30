@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api, uploadFile } from '../api/client'
+import { syncCharactersBackFromHost } from '@/features/characters/syncBack'
+import { api, getServerUrl, uploadFile } from '../api/client'
 import { useModuleStore } from '../stores/moduleStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { CharacterEditModal } from '../components/character/CharacterEditModal'
@@ -14,7 +15,7 @@ import {
 } from '../components/character/CharacterExtraEditors'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiDiceSixFacesSix, GiCharacter, GiReturnArrow, GiUpCard, GiPadlock, GiSave, GiScrollUnfurled } from 'react-icons/gi'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, RefreshCw } from 'lucide-react'
 import { CharacterList } from '@/features/characters/CharacterList'
 import {
   createCharacter,
@@ -118,6 +119,25 @@ export function CharacterPage() {
   const [editingChar, setEditingChar] = useState<Character | null>(null)
   // 默认只展示列表；点「创建角色」进入创建流程
   const [inCreateFlow, setInCreateFlow] = useState(false)
+  // 手动把参战结果取回本机（兜底；正常进出房间会自动同步，见 useSyncBack）。
+  const connectedToHost = !!getServerUrl()
+  const [pulling, setPulling] = useState(false)
+  const pullBackFromHost = async () => {
+    setPulling(true)
+    try {
+      const { synced, failed } = await syncCharactersBackFromHost()
+      if (synced.length) {
+        toast.success(`已取回本局结果：${synced.join('、')}`)
+        await loadCharacters()
+      } else if (failed) {
+        toast.error('取回失败，请确认与房主的连接是否正常')
+      } else {
+        toast.success('没有需要同步的参战记录')
+      }
+    } finally {
+      setPulling(false)
+    }
+  }
   // 草稿：localStorage 暂存的未完成创建。draftSavedAt 存在即显示恢复横幅
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null)
 
@@ -767,9 +787,23 @@ export function CharacterPage() {
                 <GiReturnArrow /> 返回列表
               </button>
             ) : (
-              <button onClick={() => { resetForm(); setInCreateFlow(true) }} className="ml-auto btn-primary flex items-center gap-1 text-sm">
-                <GiUpCard /> 创建角色
-              </button>
+              <div className="ml-auto flex items-center gap-2">
+                {/* 兜底：正常情况下进出房间会自动同步，这里给一个手动入口，
+                    应对异常退出（关窗口/掉线/房主先退）后想立刻把结果取回来。 */}
+                {connectedToHost && (
+                  <button
+                    onClick={() => void pullBackFromHost()}
+                    disabled={pulling}
+                    className="btn-secondary flex items-center gap-1 text-sm"
+                    title="把本局在房主机器上产生的 HP/理智/成长/物品写回你自己的角色卡"
+                  >
+                    <RefreshCw size={13} /> {pulling ? '同步中…' : '从房主处取回本局结果'}
+                  </button>
+                )}
+                <button onClick={() => { resetForm(); setInCreateFlow(true) }} className="btn-primary flex items-center gap-1 text-sm">
+                  <GiUpCard /> 创建角色
+                </button>
+              </div>
             )}
           </div>
 
