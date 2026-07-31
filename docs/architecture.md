@@ -1,9 +1,11 @@
 # TRPG Player 现状架构与架构评审
 
-> 文档版本：v1.1
-> 梳理日期：2026-07-19；2026-07-27 按「实时层与联机边界」一轮改动更新
+> 文档版本：v1.2
+> 梳理日期：2026-07-19；2026-07-27 按「实时层与联机边界」一轮改动更新；
+> 2026-07-31 按「单体拆分、内置直连与角色数据归属」一轮复核更新
 > 更新原则：**不重写评审结论**，只把已落地的条目就地标注现状（保留原始描述，
 > 以便看清当初为什么这么判断），并在 §8 开头加本轮小结。
+> 本轮同样标注**未落地甚至恶化**的条目——只记好消息的现状标注没有价值。
 > 适用范围：当前仓库代码、配置、测试、打包文档；不把设计稿中的规划能力当作已实现能力。
 
 本次梳理同时参考了代码知识图谱与仓库文件：当前项目索引约含 6,325 个节点、23,459 条关系，识别出 78 个路由节点；关键规模指标以源码行数为准，避免把图谱中的测试/fixture 节点误当成生产代码。
@@ -26,6 +28,12 @@ TRPG Player 当前是一个**桌面优先、单体后端、事件驱动交互、
 2. 再把生成编排、战斗状态机、世界状态写入从超大服务文件中拆出稳定端口。
 3. 最后再考虑 Redis/任务队列/独立服务等扩展，不建议当前阶段直接微服务化。
 
+> **现状（2026-07-31）**：第 1 条走完了「不需要账号体系就能做的部分」（局域网默认关闭、
+> 来源三态判定、管理端点仅限本机、房间码强度与限流、房间级配额、内置直连的公钥准入）；
+> 第 2 条完成了**生成编排**这一半（`chat_service` 拆分，2026-07-22），
+> **世界状态写入与会话服务未动**；第 3 条按 ADR-005 依旧不做。
+> 逐条对照见 [§8 的 2026-07-31 一轮复核](#2026-07-31-一轮复核单体拆分内置直连角色数据归属)。
+
 ## 2. 架构画像
 
 ### 2.1 架构风格
@@ -34,7 +42,7 @@ TRPG Player 当前是一个**桌面优先、单体后端、事件驱动交互、
 
 > **模块化单体（Modular Monolith） + 事件日志（Event Log） + 进程内实时广播（In-process Pub/Sub） + AI 编排管线（AI Orchestration Pipeline） + 桌面 sidecar 部署**
 
-它同时包含四种运行形态：
+它同时包含五种运行形态（末一种为 2026-07-29 新增）：
 
 | 形态 | 前端 | 后端 | 适用场景 |
 |---|---|---|---|
@@ -42,6 +50,7 @@ TRPG Player 当前是一个**桌面优先、单体后端、事件驱动交互、
 | 单机源码运行 | Vite 或后端静态托管 | Python 进程 + SQLite | 开发测试 |
 | Tauri 桌面模式 | Tauri 窗口 | Rust 启动 PyInstaller sidecar，FastAPI 同源托管 SPA | 首选游玩方式 |
 | 局域网客人模式 | 客户端 SPA | 客户端通过 `server_url` 访问房主 FastAPI | 可信局域网多人 |
+| 内置直连客人模式<br>**新增（2026-07-29）** | 客户端 SPA 指向 `127.0.0.1:<临时端口>` | 请求经 Tauri 外壳内的 iroh QUIC 隧道反代到房主 FastAPI | 不在同一网络的朋友 |
 
 ### 2.2 部署拓扑
 
@@ -62,6 +71,10 @@ flowchart LR
 
 桌面启动链路由 `src-tauri/src/lib.rs` 实现：启动 sidecar、读取 `TRPG_BACKEND_PORT`、等待后端健康检查，退出时杀掉子进程。后端在 `server/app/main.py` 中按需挂载 `apps/web/dist`，因此桌面模式是“一个窗口 + 一个本地服务进程”，不是把业务逻辑放进 Rust。
 
+> **现状（2026-07-31）**：外壳新增 `src-tauri/src/netlink/`（iroh QUIC 隧道 + 准入名册），
+> 这是**唯一**跑在 Rust 侧的运行时能力。它仍不承载业务逻辑——只做字节转发与准入，
+> 后端（Python）甚至不知道它存在。上面「不把业务逻辑放进 Rust」的判断依然成立。
+
 ## 3. 代码框架
 
 ### 3.1 顶层目录与职责
@@ -79,7 +92,9 @@ server/alembic/        数据库迁移
 server/tests/          后端单元测试、API 测试、状态机测试
 server/evals/          需要 fixture/模型评估的叙事与指令评测
 src-tauri/             Tauri 2 桌面外壳与 sidecar 管理
+src-tauri/src/netlink/ 内置直连组网：iroh 隧道、准入名册、邀请码、请求头改写（2026-07-29 新增）
 loader/                桌面启动加载页
+docs/adr/              架构决策记录（当前 ADR-001 ~ ADR-008）
 docs/                  设计、路线图、打包和架构文档
 ```
 
@@ -90,7 +105,7 @@ docs/                  设计、路线图、打包和架构文档
 | 应用入口 | `server/app/main.py` | FastAPI 生命周期、迁移、CORS、健康检查、SPA 静态托管 |
 | API 层 | `server/app/api/*.py` | 路由、参数校验、权限调用、触发异步生成 |
 | 会话域 | `session_service.py`、`models/session*.py` | 会话、席位、房主、事件分页、回合确认、场景位置 |
-| 聊天/生成域 | `chat_service.py` | 玩家行动、OOC、回合推进、KP 生成、文本指令、工具执行、持久化、收尾 |
+| 聊天/生成域 | ~~`chat_service.py`~~ → `turn_orchestrator.py` 等 12 个模块<br>**已拆分（2026-07-22）** | 玩家行动、OOC、回合推进、KP 生成、文本指令、工具执行、持久化、收尾。现按职责簇分布在 `turn_orchestrator`（用例编排）、`turn_context` / `turn_effects` / `planned_effects` / `turn_event_order`（取数、确定性副作用、计划落实、事件重排）、`kp_tool_loop`（工具循环与文本兼容路径）、`narration_protocol` / `command_protocol` / `event_protocol` / `chat_event_writer`（协议与落库）、`generation_manager` / `generation_lifecycle` / `generation_housekeeping`（生命周期）。详见 §8 本轮小结 |
 | 战斗/追逐域 | `combat_service.py`、`chase_service.py`、`rules/coc/combat.py` | 战斗/追逐状态机与规则结算 |
 | 模组/规则书域 | `module_service.py`、`rulebook_service.py`、`module_rag_service.py` | 上传、解析、结构化模组、规则书切块与 RAG |
 | AI 域 | `ai/context.py`、`ai/turn_planner.py`、`ai/agents/*` | 上下文构建、结构化裁定、叙事、NPC/队友/幕后代理 |
@@ -113,6 +128,16 @@ docs/                  设计、路线图、打包和架构文档
 | UI 基础设施 | `components/ui/*`、`index.css` | Radix UI 封装、主题、弹窗、提示、基础样式 |
 
 前端目前存在明显的页面级大组件：`GameSessionPage.tsx` 约 1,930 行、`CharacterPage.tsx` 约 1,495 行、`SettingsPage.tsx` 约 1,217 行。它们承担了较多 API 调用、交互状态和视图拼装职责。
+
+> **现状（2026-07-31）：这条不但没有改善，还在恶化。** `GameSessionPage.tsx` 2,197 行、
+> `SettingsPage.tsx` 1,772 行、`CharacterPage.tsx` 1,558 行，另新增 `HumanKpPanel.tsx` 1,425 行。
+> 与此同时，可测的**纯逻辑**确实在持续外移：`lib/liveSession.ts`（重连时序）、
+> `lib/roomEvents.ts`（事件分类分发）、`features/game-session/derive.ts`（页面派生）、
+> `features/netlink/*`（直连房间列表、敲门通知、自动启动）、`api/playerToken`、
+> `features/characters/syncBack`，前端测试文件已从个位数增至 27 个。
+>
+> 所以准确的描述是：**新功能仍在往大组件里加，但每加一块都会把可断言的逻辑抽出去测**。
+> 组件本身的 JSX 拆分依旧被判定为「纯 prop plumbing、收益低于风险」而刻意未做（见 §8 的 P1 表）。
 
 ## 4. 数据与领域模型
 
@@ -139,6 +164,16 @@ docs/                  设计、路线图、打包和架构文档
 `world_state` 当前包含或承载了战斗、追逐、已访问场景、角色位置、剧情 flags、线索台账、NPC 记忆、幕后游标、滚动摘要、RAG 统计、token 用量、战报等多类状态。`server/app/services/world_state.py` 已提供深拷贝读写适配器，并定义了 `SCHEMA_VERSION = 1`，但代码库仍存在大量直接 `dict(session.world_state)` 与整段回写的旧调用点。
 
 这说明 `GameSession` 实际上承担了“会话聚合根 + 多个子系统状态仓库 + 运行统计仓库”三种角色。
+
+> **现状（2026-07-31）**：
+>
+> - **一处结构性改善**：新增 `GameSession.kp_state` 列，把真人 KP 的私有工作区（笔记、
+>   自动队友偏好、待审配图队列）从 `world_state` 里分了出来，且**永不进入** `SessionRead`——
+>   这是第一次按「谁能看」而不是按「哪个子系统」切分状态，方向正确。
+> - **迁移进度依然很低**：走 `world_state.read/set_key/mutate` 新口径的调用点只有个位数，
+>   而直接 `dict(session.world_state)` + 整段回写的旧调用点仍有 27 处。适配器立起来了，
+>   但「唯一读写口径」尚未成为事实约束，仍靠人自觉。
+> - ADR-003 说的拆表（战斗、追逐、回合、用量）**一项都没做**。
 
 ## 5. 关键运行链路
 
@@ -175,7 +210,9 @@ sequenceDiagram
 
 - `server/app/api/chat.py:62` 接收正式行动，先写入带 `pending_turn` 的事件。
 - `server/app/api/chat.py:228` 的 `/advance` 在真人都确认后触发 `run_chat_generation`。
-- `server/app/services/chat_service.py:2568` 的 `_run_generation` 负责规划、上下文、分头行动、工具循环、校验与落库。
+- ~~`server/app/services/chat_service.py:2568`~~ → `server/app/services/turn_orchestrator.py` 的 `_run_generation`
+  负责规划、上下文、分头行动、工具循环、校验与落库（**2026-07-22 拆分后的新位置**；
+  API 层已直接依赖 `turn_orchestrator`，不再调用 `chat_service` 的内部函数）。
 - `server/app/ai/turn_planner.py` 负责低温结构化裁定。
 - `server/app/ai/agents/kp_agent.py` 负责 KP 流式叙事，并在检定轮做输出约束。
 - `server/app/services/room_hub.py:59` 将实时 chunk 广播给所有 SSE 订阅者。
@@ -196,6 +233,11 @@ sequenceDiagram
 ```
 
 该设计的优点是把“语义判断”和“规则执行”分开：LLM 提出意图，规则引擎和服务负责最终结算。代价是编排逻辑高度集中在 `chat_service.py`，AI、状态、广播、数据库事务互相穿透。
+
+> **现状（2026-07-31）**：后半句已不成立。编排现在是 `turn_orchestrator.py`（1,460 行）
+> 只做回合用例编排，确定性副作用、协议解析、工具执行、事件落库、生命周期各有独立模块。
+> 「AI、状态、广播、事务互相穿透」的问题**缩小但未消失**——`turn_orchestrator` 仍同时
+> 持有数据库会话、`room_hub` 广播和 LLM 调用，只是不再兼任实现者。
 
 ### 5.3 桌面启动链路
 
@@ -225,8 +267,10 @@ Tauri 窗口
 | 会话/大厅 | `/api/sessions`、认领席位、准备、开始、踢人 |
 | 游戏回合 | `/api/sessions/{id}/chat`、`advance`、`check`、`roll`、`travel` |
 | 战斗/追逐/道具 | `/api/sessions/{id}/combat/*`、`chase/*`、`inventory/*` |
-| AI 设置 | `/api/settings/ai/*` |
-| 实时 | `/api/sessions/{id}/live`（SSE） |
+| AI 设置 | `/api/settings/ai/*`（含 `/ai/quota` 房间级配额） |
+| 实时 | `/api/sessions/{id}/live`（SSE）、`/live/_schema`（仅为契约存在）、`/sync`（重连快照） |
+| 真人 KP（新增） | `/api/sessions/{id}/kp/workspace`、`kp/advisor/*`、`kp/images/*`、`kp/team-turn`、`kp/end-turn` |
+| 联机开关（新增） | `/api/net`、`/api/net/lan` |
 
 ### 6.2 前后端契约问题
 
@@ -255,6 +299,52 @@ Tauri 窗口
 ## 8. 架构不足与风险评审
 
 以下按“对系统性演进的影响”排序，而不是按代码风格排序。
+
+### 2026-07-31 一轮复核（单体拆分、内置直连、角色数据归属）
+
+本轮把 P1 的头号问题清掉了，也确认了两条评审条目**没有改善甚至在恶化**。
+
+**已完成：`chat_service` 上帝模块拆分（2026-07-22）。**
+上一轮更新（07-28）只改了实时层与联机边界的行，漏标了这件事——被拆的其实早于那次更新。
+现状：`chat_service.py` 退化为 9 行兼容垫片（`sys.modules[__name__] = turn_orchestrator`），
+职责按簇分布在 12 个模块共约 6,400 行，**API 层已不再调用其内部函数**（`api/chat.py`
+直接依赖 `turn_orchestrator`），达到了《拆分纪律》的「完成定义」。测试仍经垫片导入，
+按纪律第 3 条保留一个迭代周期。这条从 P1 清单移除。
+
+**已完成：内置直连组网（P-Net-4a/b/c，2026-07-29）。**
+朋友不必再装 Tailscale：Tauri 外壳内的 iroh QUIC 隧道把远端客人的 HTTP/SSE 反代到房主
+本机后端。三处设计值得记录，因为它们都是**安全边界**而非功能：
+
+- **来源判定从二值升级为三态**（`net_access.peer_kind`：`local` / `lan` / `netlink`）。
+  必须先做这一步：隧道会把客人的请求以 `127.0.0.1` 送进后端，而后端此前把「来自回环」
+  直接等同于「房主本人」——不加区分的话，客人会顺带拿到明文 API Key 与限速豁免。
+- **请求头改写是契约所在**（`src-tauri/src/netlink/rewrite.rs`）：转发前**无条件剥离**
+  客户端自带的所有 `X-Netlink-*` 再注入本次隧道的标记。HTTP 只在房主侧解析、客人侧是
+  纯字节泵，保证 keep-alive 连接上的每个请求都经过改写，不存在「只有首个请求带标记」的空档。
+- **准入靠房主批准而非持有地址**（`roster.rs` + `handshake.rs`）：EndpointId 是公钥，
+  QUIC 握手已证明对端持有私钥；客人自报的备注名**不可信**，界面上表述为「对方自称」。
+  身份持久化落盘，否则邀请码与名册每次重启作废。
+
+配套：玩家 token 改为按**主机稳定身份**归属（直连场景用 `netlink:<房主公钥>`），
+避免隧道临时端口每次变化导致重连即掉席位。
+
+**已完成：角色数据归属定型（[ADR-008](adr/ADR-008-角色数据归属与参战副本.md)，2026-07-30）。**
+明确「客人入座时在房主机器上留一份参战副本、原件留在客人库里」是房主权威架构的必然结果，
+不视为缺陷；副本用 `origin_character_id` 表达血缘且**刻意不建外键**（跨库标识，不是引用
+完整性约束）；`GET /characters` 默认排除属于别人的卡；回传方向是「客人拉」而不是「房主推」。
+
+**未改善的两条（本轮明确记为退步）：**
+
+- **`session_service.py` 从 1,171 行涨到 1,719 行。** 它仍同时处理席位、权限、事件仓库、
+  场景图、回合确认与世界状态写入。P1 那条建议一字未动，而新功能（KP 席位、结束投票、
+  参战副本过滤、沙盘可见节点）还在继续往里加。**它现在是最大的单文件。**
+- **页面级大组件继续变大**（`GameSessionPage` 1,930 → 2,197 行，另新增 1,425 行的
+  `HumanKpPanel`）。可测的纯逻辑确实在持续外移、前端测试增至 27 个文件，但组件本身没拆。
+  详细判断见 §3.3 的现状标注。
+
+**部分完成：** `world_state` 分出了 `kp_state`（按「谁能看」切分，方向正确），但读写口径
+迁移进度仍低、ADR-003 的拆表一项未做（见 §4.2 现状标注）；后台收尾提取出了显式的
+`HousekeepingManager`，但「先广播 `done` 再异步收尾」的时序语义未变。
 
 ### 2026-07-27 一轮落地（实时层与联机边界）
 
@@ -289,19 +379,19 @@ Tauri 窗口
 
 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|
-| 信任边界仍是 MVP 级别 | `server/app/api/deps.py` 只读取 `X-Player-Token`；前端 token 存 `localStorage`；`allow_origins=["*"]`；README 明确不支持公网 | token 可复制，跨网传输无 TLS，权限模型不适合不可信网络 | **部分完成（2026-07-27）**：局域网可达性默认关闭；管理端点仅限本机（ADR-007）；房间码加强 + 限流；房间级 AI 配额；token 按主机隔离，不再一个 token 走遍所有房主。**仍缺 TLS 与账号体系**——因此 ADR-001「不要暴露到公网」依然有效，跨网走覆盖网络（[文档](跨网联机-tailscale.md)） |
+| 信任边界仍是 MVP 级别 | `server/app/api/deps.py` 只读取 `X-Player-Token`；前端 token 存 `localStorage`；`allow_origins=["*"]`；README 明确不支持公网 | token 可复制，跨网传输无 TLS，权限模型不适合不可信网络 | **部分完成（2026-07-27）**：局域网可达性默认关闭；管理端点仅限本机（ADR-007）；房间码加强 + 限流；房间级 AI 配额；token 按主机隔离，不再一个 token 走遍所有房主。**仍缺 TLS 与账号体系**——因此 ADR-001「不要暴露到公网」依然有效，跨网走覆盖网络（[文档](跨网联机-tailscale.md)）。**追加（2026-07-31）**：内置直连上线后，跨网场景多了一条**认证强度更高**的路径——iroh 的 QUIC 握手用公钥认证对端机器，比明文 `X-Player-Token` 结实得多，且准入需房主逐个批准。但它认证的是「哪台机器连进来」，**不是「谁在玩」**：席位归属仍靠可伪造的 token，因此本条不降级 |
 | 实时与生成状态只存在进程内 | `RoomHub` 使用 `dict[str, list[asyncio.Queue]]`；`GenerationManager` 使用 `dict[str, asyncio.Task]` | 重启丢失连接和进行中的生成；多进程/多副本时广播与锁失效 | 结论不变：**刻意保持单进程**（见 ADR-005）。2026-07-27 补强的是单进程内的健壮性——队列有界 + 积压即终止该连接让其重连、SSE 心跳、重连按快照对齐。限流与配额也都基于单进程内存，桌面版不存在「加了 --workers 4 就悄悄失效」的路径 |
 
 ### P1：会阻碍持续演进的问题
 
 | 问题 | 证据 | 影响 | 建议 |
 |---|---|---|---|
-| `chat_service.py` 是事实上的“上帝模块” | 约 5,042 行，包含输入解析、AI 编排、工具执行、规则补偿、事件持久化、广播、RAG、后台收尾等职责；首批事件顺序逻辑已提取到 `turn_event_order.py` | 修改一个规则或提示链路容易影响实时、数据库和其他回合入口；难以建立稳定测试边界 | 按《chat_service 增量拆分纪律》逐簇拆为 `turn_orchestrator`、`narration_pipeline`、`tool_executor`、`event_writer`、`generation_hooks`；先保持同一进程和同一数据库 |
-| 会话服务边界过宽 | `session_service.py` 约 1,171 行，同时处理席位、权限、事件、场景图、回合确认、世界状态写入 | 领域模型、授权策略和持久化细节相互耦合 | 把“房间/席位”“事件仓库”“场景导航”“授权策略”拆为独立模块，统一由 application service 编排 |
-| `world_state` 过度承载异构状态 | `GameSession.world_state` JSON 同时存战斗、剧情、记忆、统计、战报等；适配器文档也承认旧调用点仍未迁移 | 难以校验、查询、迁移和做并发合并；任意键名变化都可能成为隐性兼容问题 | 将战斗、追逐、回合、用量、RAG 统计等高频/强一致状态拆成表；剧情记忆保留 JSON，但建立 Pydantic schema 与版本迁移 |
-| REST 契约已统一但强类型覆盖不完整 | OpenAPI 已生成；部分接口仍返回裸 `dict`、动态 metadata | 生成类型不能覆盖匿名响应，前端仍需手写部分 DTO | **SSE 部分已完成（2026-07-27）**：事件类型经 `_schema` 端点进入 OpenAPI，协议版本走 `/api/health` 握手，`/sync` 提供 seq 水位线。**仍待办**：为稳定 REST 响应补 `response_model`；按事件类型给 `metadata` 逐类建模 |
-| 页面和状态容器过大 | `GameSessionPage.tsx`、`CharacterPage.tsx`、`SettingsPage.tsx` 均超过千行 | UI 变更、API 调整、状态回放和测试耦合在同一文件 | **部分完成**：重连时序与纯派生逻辑已抽成可测模块（`lib/liveSession.ts`、`features/game-session/derive.ts`），事件分发按三分类切开并做穷尽检查。**刻意未做**：把剩余 JSX 拆成子组件——纯 prop plumbing、无可断言行为，而主链路无组件测试，风险大于收益。等需要为它写测试时再拆 |
-| 生成完成与后台收尾存在隐含时序 | `_finish_generation()` 先广播 `done`，再后台执行摘要/幕后推演；下一轮入口再 `_drain_housekeeping()` | 客户端看到 done 时，部分世界记忆可能尚未更新；异常恢复依赖进程内 task | 将生成状态、收尾状态、游标和失败原因显式化；对外返回 generation id 与阶段状态 |
+| ~~`chat_service.py` 是事实上的“上帝模块”~~ **已完成（2026-07-22）** | 约 5,042 行，包含输入解析、AI 编排、工具执行、规则补偿、事件持久化、广播、RAG、后台收尾等职责；首批事件顺序逻辑已提取到 `turn_event_order.py` | 修改一个规则或提示链路容易影响实时、数据库和其他回合入口；难以建立稳定测试边界 | **已按《拆分纪律》完成**：拆为 12 个模块（`turn_orchestrator` / `turn_context` / `turn_effects` / `planned_effects` / `kp_tool_loop` / `narration_protocol` / `chat_event_writer` / `generation_*` 等），`chat_service.py` 退化为 9 行兼容垫片，API 层不再调其内部函数。**残留**：`turn_orchestrator` 仍同时持有 DB 会话、广播与 LLM 调用，只是不再兼任实现者 |
+| 会话服务边界过宽 | `session_service.py` 约 1,171 行，同时处理席位、权限、事件、场景图、回合确认、世界状态写入 | 领域模型、授权策略和持久化细节相互耦合 | 把“房间/席位”“事件仓库”“场景导航”“授权策略”拆为独立模块，统一由 application service 编排。**现状（2026-07-31）：未动，且已涨到 1,719 行**，成为最大的单文件；KP 席位、结束投票、参战副本过滤、沙盘可见节点等新功能仍在往里加。**这是当前 P1 的头号问题** |
+| `world_state` 过度承载异构状态 | `GameSession.world_state` JSON 同时存战斗、剧情、记忆、统计、战报等；适配器文档也承认旧调用点仍未迁移 | 难以校验、查询、迁移和做并发合并；任意键名变化都可能成为隐性兼容问题 | 将战斗、追逐、回合、用量、RAG 统计等高频/强一致状态拆成表；剧情记忆保留 JSON，但建立 Pydantic schema 与版本迁移。**现状（2026-07-31）：部分**——新增 `kp_state` 列把 KP 私有工作区按「谁能看」分了出去；但拆表一项未做，新读写口径的调用点仍是个位数、旧的 `dict(...)` 整段回写还有 27 处 |
+| REST 契约已统一但强类型覆盖不完整 | OpenAPI 已生成；部分接口仍返回裸 `dict`、动态 metadata | 生成类型不能覆盖匿名响应，前端仍需手写部分 DTO | **SSE 部分已完成（2026-07-27）**：事件类型经 `_schema` 端点进入 OpenAPI，协议版本走 `/api/health` 握手，`/sync` 提供 seq 水位线。**仍待办**：为稳定 REST 响应补 `response_model`；按事件类型给 `metadata` 逐类建模。**现状（2026-07-31）：未推进**——113 条路由中只有 29 条声明了 `response_model`，会话域（历史、战斗、追逐、库存、`/sync`）几乎全是匿名 `dict` |
+| 页面和状态容器过大 | `GameSessionPage.tsx`、`CharacterPage.tsx`、`SettingsPage.tsx` 均超过千行 | UI 变更、API 调整、状态回放和测试耦合在同一文件 | **部分完成**：重连时序与纯派生逻辑已抽成可测模块（`lib/liveSession.ts`、`features/game-session/derive.ts`），事件分发按三分类切开并做穷尽检查。**刻意未做**：把剩余 JSX 拆成子组件——纯 prop plumbing、无可断言行为，而主链路无组件测试，风险大于收益。等需要为它写测试时再拆。**现状（2026-07-31）：组件继续变大**（`GameSessionPage` 2,197 行，新增 `HumanKpPanel` 1,425 行），但纯逻辑持续外移、前端测试增至 27 个文件。判断维持不变，需要复核的是「大组件是否已经开始产生 bug」而不是行数 |
+| 生成完成与后台收尾存在隐含时序 | `_finish_generation()` 先广播 `done`，再后台执行摘要/幕后推演；下一轮入口再 `_drain_housekeeping()` | 客户端看到 done 时，部分世界记忆可能尚未更新；异常恢复依赖进程内 task | 将生成状态、收尾状态、游标和失败原因显式化；对外返回 generation id 与阶段状态。**现状（2026-07-31）：部分**——收尾任务提取为显式的 `generation_lifecycle.HousekeepingManager`（每房间至多一个、下一轮前 drain），错误分类也独立成 `classify_llm_error`；但**时序语义未变**，`done` 仍先于收尾广播 |
 
 ### P2：影响质量与长期维护的问题
 
@@ -310,7 +400,7 @@ Tauri 窗口
 | 规则系统抽象已存在，但产品范围与实现不一致 | `RuleEngine` 支持注册多个规则系统，模型枚举允许 `dnd`，README 又明确 DnD 尚未完整实现 | 将“可选规则系统”“已实现规则系统”“仅数据兼容”分开建模，避免调用方误以为 DnD 可用 |
 | API 路由仍有历史兼容痕迹 | 同一领域同时存在 `/start`、`/api/onboarding/start`、前端多种访问路径；图谱中还有未绑定 handler 的 Route 节点 | 建立版本化 API 或兼容层清单，删除未使用旧路由，给每个公开端点定义 owner |
 | ~~SSE 协议缺少显式版本和游标语义~~ **已完成（2026-07-27）** | 曾以 JSON `type` 字符串为主，流式 token 与持久事件的 seq 语义混同 | `protocol_version` 走 `/api/health` 握手；事件类型收敛为字面量联合并按 `stream`/`log`/`sync` 分类，三类的幂等规则各自明确（流控最后一条为准、日志按 id 去重、状态后到者覆盖）；`/sync` 给出 seq 水位线。前端已改为按类型联合分发，不再按字符串分支。**未做** `generation_id`——目前「同一房间同时至多一次生成」由 `GenerationManager` 保证，尚未出现需要它的场景 |
-| 本地 RAG 以 SQLite BLOB 存向量，扩展性有限 | `RuleChunk`/`ModuleChunk` 直接存 `LargeBinary` embedding，检索在应用服务内完成 | 当前单机可接受；数据规模上升后抽象 `VectorStore`，预留 Qdrant/SQLite-vec 等后端 |
+| 本地 RAG 以 SQLite BLOB 存向量，扩展性有限 | `RuleChunk`/`ModuleChunk` 直接存 `LargeBinary` embedding，检索在应用服务内完成 | 当前单机可接受；数据规模上升后抽象 `VectorStore`，预留 Qdrant/SQLite-vec 等后端。**现状（2026-07-31）：结论不变**——两套 RAG 的余弦检索已收敛到共用件 `services/vector_search.py`（含场景加权），嵌入侧也有 `ai/embedding.Embedder` 抽象；但**存储侧仍无 `VectorStore` 抽象**，规模仍是千级块、暴力余弦够用，不提前引入向量库 |
 | 评估体系与线上观测还未完全闭环 | 有 `server/evals`、usage、RAG stats，但主要是离线 fixture 和本地统计 | 增加 generation trace、prompt/模型版本、工具调用耗时、失败原因、用户可见质量指标，形成可回放样本 |
 
 ## 9. 建议的目标架构
@@ -370,8 +460,10 @@ API Adapter
 
 ### 阶段 B：单体内部解耦
 
-- 从 `chat_service.py` 提取回合编排、工具执行、事件写入、旁白校验、后台收尾。
-- 从 `session_service.py` 提取房间/席位、事件仓库、场景导航、授权策略。
+- **已完成（2026-07-22）**：从 `chat_service.py` 提取回合编排、工具执行、事件写入、旁白校验、
+  后台收尾；`chat_service` 退化为兼容垫片，API 层直接依赖 `turn_orchestrator`。
+- **未开始，且已恶化到 1,719 行**：从 `session_service.py` 提取房间/席位、事件仓库、
+  场景导航、授权策略。**这是阶段 B 剩下的主要工作**，建议按同一份《拆分纪律》执行。
 - 将战斗和追逐的状态机输入输出定义为稳定的 command/result，而不是直接操作任意 JSON 键。
 - 前端按 feature 拆分数据获取、命令调用、状态投影和视图组件。
 - 每次只提取一个职责簇，遵守 [`docs/chat-service-split-discipline.md`](chat-service-split-discipline.md) 的兼容包装、测试门槛和禁止事项。
@@ -396,6 +488,9 @@ API Adapter
 5. [`ADR-005`](adr/ADR-005-进程内实时态与扩展触发条件.md)：何时从进程内 RoomHub/asyncio task 迁移到 Redis/任务队列。
 6. [`ADR-006`](adr/ADR-006-OpenAPI生成与兼容策略.md)：前后端 API 契约的生成方式与兼容策略。
 7. [`ADR-007`](adr/ADR-007-管理端点仅限本机.md)：管理本机资产（AI 配置、素材库增删改）的端点仅接受回环来源。
+8. [`ADR-008`](adr/ADR-008-角色数据归属与参战副本.md)（2026-07-30 新增）：角色数据的归属与参战副本——
+   房主机器上留副本是房主权威架构的必然结果，副本是会话资产而非房主藏品，血缘用
+   `origin_character_id` 表达且刻意不建外键，回传方向是「客人拉」。
 
 ## 12. 结论
 
@@ -410,3 +505,12 @@ API Adapter
 - 实时与生成状态要从进程内临时对象变成可观察、可恢复的生命周期。
 
 在完成这些收敛之前，继续堆叠新的 AI agent、多人玩法或跨平台分发，会放大已有复杂度，而不是线性增加产品能力。
+
+> **2026-07-31 复核**：上面五条里，「服务边界」已完成一半——生成链路收敛了，会话服务
+> 反而更大了。因此结论不改，只把矛头换个方向：**下一刀应该切 `session_service.py`**。
+> 至于「继续堆叠新玩法会放大复杂度」这句预警，这一轮的经验是它**部分应验、部分过虑**：
+> 内置直连与角色归属都是先立 ADR、先加安全契约再写功能，复杂度是可控的；
+> 而真人 KP 与沙盘编辑这类纯 UI 功能，代价确实全落在了本来就该拆的两个大文件上。
+>
+> 本文件的事实性描述（架构画像、模块边界、运行链路）另有一份不含评审意见的版本，
+> 见仓库根的 [`DESIGN.md`](../DESIGN.md) 第一部分。
