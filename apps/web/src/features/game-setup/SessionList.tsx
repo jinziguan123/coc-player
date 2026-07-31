@@ -19,12 +19,15 @@ function statusChipClass(status: string) {
 }
 
 export function SessionList({ setup }: { setup: GameSetupState }) {
-  const { activeSessions, openSession, deleteSession } = setup
+  const {
+    activeSessions, openSession, deleteSession,
+    remoteRooms, reconnecting, reconnectRemoteRoom, forgetRoom,
+  } = setup
 
   return (
     <section>
       <h3 className="section-head">我的房间</h3>
-      {activeSessions.length === 0 && (
+      {activeSessions.length === 0 && remoteRooms.length === 0 && (
         <p className="mb-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
           暂无进行中的房间。点右上角「新增游戏」开新局或加入房间。
         </p>
@@ -83,6 +86,64 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
           </div>
         ))}
       </div>
+
+      {/* 在别人那儿玩的房间：存在**房主的库**里，本机会话列表永远拉不到。
+          靠本地记录留在这儿，点一下重建隧道并直接进房——房主掉线过一次之后，
+          不该逼玩家再去翻聊天记录找邀请码。 */}
+      {remoteRooms.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            在朋友那儿的房间（点击连接房主并进入）
+          </div>
+          <div className="grid gap-2.5 lg:grid-cols-2">
+            {remoteRooms.map((room) => {
+              const busy = reconnecting === `${room.hostId}::${room.roomCode}`
+              return (
+                <div
+                  key={`${room.hostId}::${room.roomCode}`}
+                  onClick={() => { if (!busy) void reconnectRemoteRoom(room) }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !busy) void reconnectRemoteRoom(room)
+                  }}
+                  className="card entity-card w-full cursor-pointer text-left"
+                  style={busy ? { opacity: 0.6 } : undefined}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className="truncate font-semibold"
+                        style={{ color: 'var(--color-text-accent)', fontSize: 'var(--text-base)' }}
+                      >
+                        {room.title || '朋友的房间'}
+                      </div>
+                      <div
+                        className="mt-0.5 truncate"
+                        style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-xs)' }}
+                      >
+                        房间码 {room.roomCode} · {formatTime(room.lastSeenAt)}
+                      </div>
+                    </div>
+                    <div className="flex flex-shrink-0 items-center gap-1">
+                      <span className="chip">{busy ? '连接中…' : '需连接'}</span>
+                      <span className="entity-card-actions inline-flex">
+                        <button
+                          onClick={(event) => { event.stopPropagation(); forgetRoom(room) }}
+                          className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                          title="只从这个列表里移除，不影响房主那边的房间"
+                        >
+                          移除
+                        </button>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </section>
   )
 }

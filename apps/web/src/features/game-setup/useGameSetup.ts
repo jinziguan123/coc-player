@@ -3,6 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, getServerUrl, setServerIdentity, setServerUrl } from '@/api/client'
 import { netlinkConnect } from '@/api/netlink'
+import {
+  forgetRemoteRoom,
+  hostIdFromInvite,
+  listRemoteRooms,
+  rememberRemoteRoom,
+  type RemoteRoom,
+} from '@/features/netlink/remoteRooms'
 import { PROTOCOL_VERSION } from '@/lib/roomEvents'
 import { useModuleStore } from '@/stores/moduleStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -22,6 +29,7 @@ import type { ModuleFilters, SetupCharacter, SetupSeat } from './types'
 
 interface RoomInfo {
   id: string
+  module_title?: string
 }
 
 /** 自报名记在本地：每次加入都重填一遍太烦。 */
@@ -60,6 +68,9 @@ export function useGameSetup() {
     () => localStorage.getItem(GUEST_LABEL_KEY) || '',
   )
   const [joinWaiting, setJoinWaiting] = useState(false)
+  // 在别人那儿玩过的房间：房主掉线后本机拉不到它们，靠本地记录留在列表上。
+  const [remoteRooms, setRemoteRooms] = useState<RemoteRoom[]>(() => listRemoteRooms())
+  const [reconnecting, setReconnecting] = useState('')
   const [filters, setFilters] = useState<ModuleFilters>(createEmptyModuleFilters)
 
   const filteredModules = useMemo(
@@ -164,6 +175,29 @@ export function useGameSetup() {
     }
   }
 
+  /**
+   * 用邀请码建立到房主的隧道，并把本机的 API 指向他。
+   *
+   * joinRoom 与房间列表里的一键重连共用这一步。返回邀请码带来的房间码（可能没有）。
+   * 失败时抛出，由调用方决定怎么呈现。
+   */
+  const connectByInvite = async (invite: string): Promise<string | null> => {
+    // 首次加入要房主手动点同意，这一步可能卡上一两分钟，得让人知道在等什么。
+    setJoinWaiting(true)
+    try {
+      const link = await netlinkConnect(invite, guestLabel.trim())
+      const host = `http://127.0.0.1:${link.local_port}`
+      setServerUrl(host)
+      // 记住它：房主重开应用后这串码依然有效，断线后就能一键重连。
+      localStorage.setItem(LAST_INVITE_KEY, invite)
+      // 本地端口每次连接都变，token 必须跟着房主走，否则每次重连都掉席位。
+      setServerIdentity(host, `netlink:${hostIdFromInvite(invite) || invite}`)
+      return link.room_code ? link.room_code.toUpperCase() : null
+    } finally {
+      setJoinWaiting(false)
+    }
+  }
+
   const joinRoom = async () => {
     setError('')
     const typed = hostAddr.trim()
@@ -172,18 +206,10 @@ export function useGameSetup() {
     // 房间码可以由邀请码带来，所以这一步要在「房间码必填」的检查之前。
     let code = joinCode.trim().toUpperCase()
     if (typed.toLowerCase().startsWith('trpg:')) {
-      // 首次加入要房主手动点同意，这一步可能卡上一两分钟，得让人知道在等什么。
-      setJoinWaiting(true)
       try {
-        const link = await netlinkConnect(typed, guestLabel.trim())
-        const host = `http://127.0.0.1:${link.local_port}`
-        setServerUrl(host)
-        // 记住它：房主重开应用后这串码依然有效，断线后就能一键重连。
-        localStorage.setItem(LAST_INVITE_KEY, typed)
-        // 本地端口每次连接都变，token 必须跟着房主走，否则每次重连都掉席位。
-        setServerIdentity(host, `netlink:${typed.split(':')[1] ?? typed}`)
-        if (link.room_code) {
-          code = link.room_code.toUpperCase()
+        const fromInvite = await connectByInvite(typed)
+        if (fromInvite) {
+          code = fromInvite
           setJoinCode(code)
         }
       } catch (reason: unknown) {
@@ -194,8 +220,6 @@ export function useGameSetup() {
             : '按邀请码连接失败，请确认房主已开启内置直连',
         )
         return
-      } finally {
-        setJoinWaiting(false)
       }
       if (!code) {
         setError('已连上房主，还需要填房间码')
@@ -231,6 +255,17 @@ export function useGameSetup() {
       // 记住进过哪个房间：房主重启后这个码依然有效，断线重连时回填即可，
       // 不必再去问他要一遍。
       localStorage.setItem(LAST_ROOM_KEY, code)
+      // 别人的房间存在**房主的库**里，本机会话列表永远拉不到它。记在本地，
+      // 房主掉线后房间才不会从「我的房间」里凭空消失。
+      const invite = localStorage.getItem(LAST_INVITE_KEY) || ''
+      const hostId = hostIdFromInvite(invite)
+      if (hostId && getServerUrl()) {
+        rememberRemoteRoom({
+          invite, roomCode: code, hostId,
+          title: room.module_title || undefined,
+        })
+        setRemoteRooms(listRemoteRooms())
+      }
       navigate(`/room/${room.id}`)
     } catch (reason: unknown) {
       setError(
@@ -239,6 +274,37 @@ export function useGameSetup() {
           : '加入房间失败（检查主机地址与房间码、确认同一局域网）',
       )
     }
+  }
+
+  /**
+   * 从「我的房间」里点一个远程房间：重建到房主的隧道，然后照常进房。
+   *
+   * 与手动加入唯一的区别是邀请码和房间码都来自本地记录，用户不必再粘一次。
+   */
+  const reconnectRemoteRoom = async (room: RemoteRoom) => {
+    setError('')
+    setReconnecting(`${room.hostId}::${room.roomCode}`)
+    try {
+      await connectByInvite(room.invite)
+      setHostAddr(room.invite)
+      setJoinCode(room.roomCode)
+      await enterRoom(room.roomCode)
+    } catch (reason: unknown) {
+      const message = reason instanceof Error
+        ? reason.message
+        : '连不上房主，请确认对方已打开应用并开启内置直连'
+      setError(message)
+      // 必须用 toast：从房间列表点进来时，「新增游戏」表单是收起的，
+      // setError 的那块文字没有渲染出口——只写 error 的话，用户看到的是「点了没反应」。
+      toast.error(message)
+    } finally {
+      setReconnecting('')
+    }
+  }
+
+  const forgetRoom = (room: RemoteRoom) => {
+    forgetRemoteRoom(room)
+    setRemoteRooms(listRemoteRooms())
   }
 
   const disconnectHost = () => {
@@ -357,6 +423,10 @@ export function useGameSetup() {
     joinRoom,
     disconnectHost,
     activeSessions,
+    remoteRooms,
+    reconnecting,
+    reconnectRemoteRoom,
+    forgetRoom,
     openSession: (session: { id: string; status: string }) => navigate(
       session.status === 'setup' ? `/room/${session.id}` : `/game/${session.id}`,
     ),
