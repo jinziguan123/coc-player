@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 _current_turn_events = turn_context._current_turn_events
 _exec_start_combat = kp_actions._exec_start_combat
 _exec_san_check = turn_effects._exec_san_check
+_exec_dice_check = turn_effects._exec_dice_check
 _exec_hp_change = turn_effects._exec_hp_change
 _resolve_hp_target = turn_effects._resolve_hp_target
 _exec_scene_change = turn_effects._exec_scene_change
@@ -42,6 +43,10 @@ _MOVE_VERBS = (
     "走向", "移动到", "返回", "回到", "穿过", "去",
 )
 _ENTRY_MARKERS = ("进入", "走进", "抵达", "到达", "来到", "踏入")
+# 技能检定的进场机制点比 SAN 多认「前往/踏进」：模组常把「前往X时投灵感」写成预感式触发。
+_ENTRY_CHECK_MARKERS = (*_ENTRY_MARKERS, "前往", "踏进")
+# world_state 键：已发过的进场检定（逐角色逐机制点记一次，重开/重生成都不重复发）。
+_ENTRY_CHECK_STATE_KEY = "scene_entry_checks"
 _TERROR_MARKERS = (
     "尸体", "尸骸", "腐尸", "血腥", "鲜血", "怪物", "生物", "畸形", "触手",
     "大嘴", "超自然", "非人的", "肢体", "头颅", "残骸", "肉块", "鬼魂", "幽灵",
@@ -627,3 +632,96 @@ async def _ensure_planned_scene(
     )
     for chunk in chunks:
         yield chunk
+
+
+def _scene_entry_check_mechanisms(
+    module: Module | None, scene_id: str | None,
+) -> list[tuple[int, dict]]:
+    """该场景中「进入即触发」的技能检定机制点（模组明文，须带技能名）。
+
+    与 ``_scene_sanity_mechanism`` 的 entry 分支同源，只是那边筛 san_check、这边筛 dice_check。
+    不含进场标记的机制点（「搜寻丢失物品时」「悄悄通过时」）一律不在此列——那些要玩家先有行动。
+    """
+    if not module or not scene_id:
+        return []
+    scene = next(
+        (s for s in module.scenes or [] if str(s.get("id") or "") == str(scene_id)),
+        None,
+    )
+    found: list[tuple[int, dict]] = []
+    for index, event in enumerate((scene or {}).get("events", []) or []):
+        if not isinstance(event, dict) or event.get("kind") != "dice_check":
+            continue
+        if not str(event.get("skill") or "").strip():
+            continue
+        trigger = str(event.get("trigger") or "")
+        if any(marker in trigger for marker in _ENTRY_CHECK_MARKERS):
+            found.append((index, event))
+    return found
+
+
+def _entry_check_key(scene_id: str, index: int, char_id: str) -> str:
+    """进场检定的幂等键：同一角色对同一机制点只检一次。"""
+    return f"scene:{scene_id}:check:{index}:{char_id}"
+
+
+async def _ensure_scene_entry_checks(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module | None,
+    player_char: Character,
+    teammates: list[Character] | None,
+) -> AsyncIterator[str]:
+    """模组明文的『进入场景即检定』机制点 → 后端确定性发出，每角色每机制点只发一次。
+
+    补的是一个结构性缺口：这类机制常落在**开场那一刻**（起始场景就写着「进入时全员幸运」），
+    而开场既不跑规划器（``turn_context`` 里 ``plan is None and events`` 为假），提示词又明令
+    KP「不要触发任何检定指令」——两头一夹，整条机制此前只能默默漏掉。SAN 早有进场兜底
+    （``_scene_sanity_mechanism`` 的 entry 分支），技能检定一直没有对等实现。
+
+    判据只看「角色此刻在该场景、且这条机制对他还没检过」，不看本轮是否刚移动：分头行动的
+    后到者、以及开场就站在起始场景里的全员，都能各自补上一次。
+    """
+    if module is None:
+        return
+    db.refresh(game_session)
+    party = [player_char, *(teammates or [])]
+    locations = {c.id: session_service.get_char_location(game_session, c.id) for c in party}
+    done = set((game_session.world_state or {}).get(_ENTRY_CHECK_STATE_KEY) or [])
+    for scene_id in dict.fromkeys(locations.values()):
+        if not scene_id:
+            continue
+        here = [c for c in party if locations[c.id] == scene_id]
+        for index, mechanism in _scene_entry_check_mechanisms(module, scene_id):
+            targets = [c for c in here if _entry_check_key(scene_id, index, c.id) not in done]
+            if not targets:
+                continue
+            kv = {
+                "skill": str(mechanism.get("skill") or "").strip(),
+                # 逐人点名而非「在场」：目标已按幂等键滤过，避免把检过的人再拉进来。
+                "chars": "、".join(c.name for c in targets),
+                "source": str(mechanism.get("trigger") or "").strip() or "场景机制",
+            }
+            try:
+                chunks, _descs, _pending = await _exec_dice_check(
+                    db, session_id, game_session, module, kv, player_char, teammates,
+                )
+            except Exception:
+                logger.exception(
+                    "进场检定补发失败（忽略本条）：session=%s scene=%s skill=%s",
+                    session_id, scene_id, kv["skill"],
+                )
+                continue
+            # 先记账再吐 chunk：_exec_dice_check 内部已改过 world_state（pending_checks），
+            # 必须重新取一次再合并写回，否则会用旧快照把待投检定覆盖掉。
+            db.refresh(game_session)
+            ws = dict(game_session.world_state or {})
+            recorded = set(ws.get(_ENTRY_CHECK_STATE_KEY) or [])
+            recorded.update(_entry_check_key(scene_id, index, c.id) for c in targets)
+            ws[_ENTRY_CHECK_STATE_KEY] = sorted(recorded)
+            game_session.world_state = ws
+            db.commit()
+            done = recorded
+            for chunk in chunks:
+                yield chunk

@@ -279,6 +279,7 @@ _ensure_planned_mishap = planned_effects._ensure_planned_mishap
 _ensure_planned_items = planned_effects._ensure_planned_items
 _ensure_planned_combat_damage = planned_effects._ensure_planned_combat_damage
 _ensure_planned_scene = planned_effects._ensure_planned_scene
+_ensure_scene_entry_checks = planned_effects._ensure_scene_entry_checks
 
 
 
@@ -460,6 +461,13 @@ async def _run_generation(
     ):
         room_hub.broadcast(session_id, chunk)
 
+    # 确定性进场检定守卫：模组写明「进入本场景时投X」的机制点 → 后端补发（每角色一次）。
+    # 开场不跑规划器、又禁止 KP 发检定，起始场景的进场检定只能靠这里补。
+    async for chunk in _ensure_scene_entry_checks(
+        db, session_id, game_session, module, player_char, teammates,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
     # 确定性 SAN 守卫：计划裁定本轮目睹恐怖但 KP 漏发 SAN → 后端补发（幂等）。
     async for chunk in _ensure_planned_sanity(
         db, session_id, game_session, player_char, teammates, plan, pre_gen_seq,
@@ -615,6 +623,12 @@ async def _run_split_generation(
     async for chunk in _ensure_planned_scene(
         db, session_id, game_session, module, player_char, teammates, plan,
         pre_gen_seq=pre_gen_seq,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
+    # 分头行动同样补进场检定：各分组按自己所在场景各判各的（幂等键逐角色）。
+    async for chunk in _ensure_scene_entry_checks(
+        db, session_id, game_session, module, player_char, teammates,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -874,6 +888,12 @@ async def _run_kp_turn(
     async for chunk in _process_commands(
         db, session_id, res[1], module, player_char, game_session, llm,
         teammates=party_others,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
+    # 大地图『前往』走的就是这条路：抵达新场景后立刻补该场景的进场检定，不必等下一轮行动。
+    async for chunk in _ensure_scene_entry_checks(
+        db, session_id, game_session, module, player_char, party_others,
     ):
         room_hub.broadcast(session_id, chunk)
 
