@@ -61,7 +61,7 @@ const PROTOCOL_INFO: Record<string, { urlPlaceholder: string; modelPlaceholder: 
   anthropic: { urlPlaceholder: 'https://api.anthropic.com', modelPlaceholder: 'claude-sonnet-4-20250514' },
 }
 
-/** 推理档位只在 OpenAI 兼容协议下会真正下发——Anthropic 的 Provider 根本不接这个参数。 */
+/** 思考等级（reasoning_effort）只在 OpenAI 兼容协议下会真正下发——Anthropic 的 Provider 不接这个参数。 */
 const supportsReasoning = (protocol: string) => protocol === 'openai'
 
 export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void }) {
@@ -210,7 +210,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
   if (loading) return <p style={{ color: 'var(--color-text-secondary)' }}>加载中...</p>
 
   const info = PROTOCOL_INFO[form.protocol] || PROTOCOL_INFO.openai
-  // 切到 Anthropic 但推理档位还留着旧值：该值不会下发，必须说清楚，否则用户以为它还在起作用。
+  // 切到 Anthropic 但思考等级还留着旧值：该值不会下发，必须说清楚，否则用户以为它还在起作用。
   const staleReasoning = !supportsReasoning(form.protocol) && !!form.reasoning_effort
 
   return (
@@ -554,7 +554,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   </p>
                 </div>
 
-                {/* 推理档位只在 OpenAI 兼容协议下出现——Anthropic 的 Provider 不接这个参数，
+                {/* 思考等级只在 OpenAI 兼容协议下出现——Anthropic 的 Provider 不接这个参数，
                     摆在那里只会让人填一个永远不生效的值。 */}
                 {supportsReasoning(form.protocol) ? (
                   <div>
@@ -562,23 +562,20 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                       className="block text-sm font-semibold mb-1"
                       style={{ fontSize: '0.85rem' }}
                     >
-                      推理档位（reasoning effort）
+                      思考等级
                     </label>
-                    <select
+                    {/* 手填而非下拉：各家取值并不统一（有的只认 low/medium/high，有的还有
+                        minimal/xhigh，往后还会变），写死选项等于把能用的值挡在外面。 */}
+                    <input
+                      type="text"
                       className="input w-full"
+                      placeholder="留空即可；如需指定填 low、medium、high 等"
                       value={form.reasoning_effort}
                       onChange={(e) => setForm({ ...form, reasoning_effort: e.target.value })}
-                    >
-                      <option value="">默认（不下发，用模型默认档）</option>
-                      <option value="minimal">minimal</option>
-                      <option value="low">low</option>
-                      <option value="medium">medium</option>
-                      <option value="high">high</option>
-                      <option value="xhigh">xhigh</option>
-                    </select>
+                    />
                     <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      只对带推理能力的模型有用（如 gpt-5 系列）。档位越高思考越久、也越贵。
-                      普通模型请保持「默认」，否则有些服务会直接报错。
+                      只对带思考能力的模型有用（如 gpt-5 系列），等级越高想得越久、也越贵。
+                      具体能填哪些值请看你所用模型的文档；普通模型请留空，否则有些服务会直接报错。
                     </p>
                   </div>
                 ) : (
@@ -586,7 +583,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                     <div className="notice notice--danger" role="alert">
                       <AlertTriangle size={13} style={{ flexShrink: 0 }} aria-hidden="true" />
                       <span>
-                        这份配置里还留着推理档位「{form.reasoning_effort}」，但 Anthropic 的模型不支持这项设置，
+                        这份配置里还留着思考等级「{form.reasoning_effort}」，但 Anthropic 的模型不支持这项设置，
                         它不会起任何作用。
                       </span>
                       <button

@@ -118,17 +118,26 @@ describe('AI 配置面板', () => {
     expect(within(dialog).queryByText(/生图/)).not.toBeInTheDocument()
   })
 
-  it('推理档位只在 OpenAI 兼容协议下出现', async () => {
+  it('思考等级由用户手填，任意取值都原样保存', async () => {
     const user = userEvent.setup()
+    mockPut.mockResolvedValue(chatProfile)
     render(<AISettingsPanel />)
     await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
 
     const dialog = await findDialog('编辑配置')
     await user.click(within(dialog).getByRole('tab', { name: '能力' }))
-    expect(within(dialog).getByText(/推理档位/)).toBeInTheDocument()
+
+    // 是输入框而非下拉：各家取值不统一，写死选项会把能用的值挡在外面
+    const field = within(dialog).getByPlaceholderText(/如需指定填/)
+    expect(field.tagName).toBe('INPUT')
+    await user.type(field, 'ultra')
+
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    expect(mockPut.mock.calls[0][1]).toMatchObject({ reasoning_effort: 'ultra' })
   })
 
-  it('Anthropic 配置不显示推理档位，但残留值会被点名并可一键清除', async () => {
+  it('Anthropic 配置不显示思考等级，但残留值会被点名并可一键清除', async () => {
     const user = userEvent.setup()
     mockLists([claudeProfile], [imageProfile])
     mockPut.mockResolvedValue(claudeProfile)
@@ -138,8 +147,8 @@ describe('AI 配置面板', () => {
     const dialog = await findDialog('编辑配置')
     await user.click(within(dialog).getByRole('tab', { name: '能力' }))
 
-    // 选择器不出现——填了也不会下发，摆着只会误导
-    expect(within(dialog).queryByRole('combobox', { name: /推理档位/ })).not.toBeInTheDocument()
+    // 输入框不出现——填了也不会下发，摆着只会误导
+    expect(within(dialog).queryByPlaceholderText(/如需指定填/)).not.toBeInTheDocument()
     // 但旧值必须说清楚它已经失效，否则用户以为还在起作用
     expect(within(dialog).getByRole('alert')).toHaveTextContent(/不支持这项设置/)
 
