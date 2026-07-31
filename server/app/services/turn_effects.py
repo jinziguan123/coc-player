@@ -9,7 +9,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.ai.llm_factory import get_llm
+from app.ai.image_gen import get_image_llm
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
@@ -865,7 +865,7 @@ async def _exec_handout(
                 source_event_id=str(ev.id),
             )
             return chunks, f"手书 {hid} 已发放（配图已进入真人 KP 审核队列）。"
-        if get_llm().supports_image_gen():
+        if get_image_llm().supports_image_gen():
             asyncio.create_task(_illustrate_handout(
                 session_id, ev.id, title,
                 str(handout.get("kind") or ""), ev.content or "",

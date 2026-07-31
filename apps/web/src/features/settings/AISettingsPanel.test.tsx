@@ -1,0 +1,184 @@
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { localApi } from '@/api/client'
+import { AISettingsPanel } from './AISettingsPanel'
+
+vi.mock('@/api/client', () => ({
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  localApi: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+}))
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+
+/** Modal 是无 role 的 portal 容器，用弹窗标题回溯到面板本身作为查询范围。 */
+async function findDialog(title: string | RegExp): Promise<HTMLElement> {
+  const heading = await screen.findByRole('heading', { name: title })
+  return heading.closest('.modal-panel') as HTMLElement
+}
+
+const mockGet = vi.mocked(localApi.get)
+const mockPost = vi.mocked(localApi.post)
+const mockPut = vi.mocked(localApi.put)
+
+const chatProfile = {
+  id: 'c1',
+  name: 'deepseek 主力',
+  protocol: 'openai' as const,
+  base_url: 'https://api.deepseek.com',
+  model_name: 'deepseek-chat',
+  api_key: 'sk-1****4321',
+  is_active: true,
+  vision: false,
+  context_window: 0,
+  reasoning_effort: '',
+}
+
+const claudeProfile = {
+  ...chatProfile,
+  id: 'c2',
+  name: 'claude',
+  protocol: 'anthropic' as const,
+  model_name: 'claude-sonnet-4',
+  is_active: false,
+  reasoning_effort: 'high', // 历史遗留值：Anthropic 下不会下发
+}
+
+const imageProfile = {
+  id: 'i1',
+  name: 'ComfyUI（172.30.18.236）',
+  backend: 'comfyui' as const,
+  is_active: true,
+  model: '',
+  base_url: '',
+  api_key: '',
+  comfyui_base_url: 'http://172.30.18.236:8188',
+  comfyui_workflow: '',
+}
+
+function mockLists(chat: unknown[], image: unknown[]) {
+  mockGet.mockImplementation(async (path: string) => {
+    if (path === '/settings/ai/profiles') return chat
+    if (path === '/settings/ai/image-profiles') return image
+    throw new Error(`unexpected GET ${path}`)
+  })
+}
+
+describe('AI 配置面板', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockLists([chatProfile], [imageProfile])
+  })
+
+  it('对话模型与生图模型分成两个各自独立的区块', async () => {
+    render(<AISettingsPanel />)
+
+    expect(await screen.findByRole('heading', { name: '对话模型' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '生图模型' })).toBeInTheDocument()
+    // 生图配置有自己的列表项与「使用中」标记，不再寄生在对话配置的徽章上
+    expect(screen.getByText('ComfyUI（172.30.18.236）')).toBeInTheDocument()
+    expect(screen.getByText('http://172.30.18.236:8188')).toBeInTheDocument()
+  })
+
+  it('没有生图配置时明确说明「不出图但不影响跑团」', async () => {
+    mockLists([chatProfile], [])
+    render(<AISettingsPanel />)
+
+    expect(await screen.findByText(/尚未配置生图模型/)).toBeInTheDocument()
+  })
+
+  it('编辑弹窗把连接四件套收在同一页，密钥不再被高级配置隔开', async () => {
+    const user = userEvent.setup()
+    render(<AISettingsPanel />)
+    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+
+    const dialog = await findDialog('编辑配置')
+    // 「连接」是默认页：名称/协议/地址/模型/密钥同屏可见
+    expect(within(dialog).getByDisplayValue('deepseek 主力')).toBeInTheDocument()
+    expect(within(dialog).getByDisplayValue('https://api.deepseek.com')).toBeInTheDocument()
+    expect(within(dialog).getByDisplayValue('deepseek-chat')).toBeInTheDocument()
+    expect(within(dialog).getByDisplayValue('sk-1****4321')).toBeInTheDocument()
+    // 生图字段已经不在对话配置里了
+    expect(within(dialog).queryByText(/ComfyUI/)).not.toBeInTheDocument()
+  })
+
+  it('推理档位只在 OpenAI 兼容协议下出现', async () => {
+    const user = userEvent.setup()
+    render(<AISettingsPanel />)
+    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+
+    const dialog = await findDialog('编辑配置')
+    await user.click(within(dialog).getByRole('tab', { name: '能力' }))
+    expect(within(dialog).getByText(/推理档位/)).toBeInTheDocument()
+  })
+
+  it('Anthropic 配置不显示推理档位，但残留值会被点名并可一键清除', async () => {
+    const user = userEvent.setup()
+    mockLists([claudeProfile], [imageProfile])
+    mockPut.mockResolvedValue(claudeProfile)
+    render(<AISettingsPanel />)
+    await user.click(await screen.findByRole('button', { name: '编辑 claude' }))
+
+    const dialog = await findDialog('编辑配置')
+    await user.click(within(dialog).getByRole('tab', { name: '能力' }))
+
+    // 选择器不出现——填了也不会下发，摆着只会误导
+    expect(within(dialog).queryByRole('combobox', { name: /推理档位/ })).not.toBeInTheDocument()
+    // 但旧值必须说清楚它已经失效，否则用户以为还在起作用
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(/不接受该参数/)
+
+    await user.click(within(dialog).getByRole('button', { name: '清除' }))
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    expect(mockPut.mock.calls[0][1]).toMatchObject({ reasoning_effort: '' })
+  })
+
+  it('保存对话配置时不再夹带任何生图字段', async () => {
+    const user = userEvent.setup()
+    mockPut.mockResolvedValue(chatProfile)
+    render(<AISettingsPanel />)
+    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+
+    const dialog = await findDialog('编辑配置')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+
+    const body = mockPut.mock.calls[0][1] as Record<string, unknown>
+    for (const key of [
+      'image_model', 'image_backend', 'image_base_url', 'image_api_key',
+      'comfyui_base_url', 'comfyui_workflow',
+    ]) {
+      expect(body).not.toHaveProperty(key)
+    }
+  })
+
+  it('生图配置走自己的端点增删改与激活', async () => {
+    const user = userEvent.setup()
+    mockLists([chatProfile], [{ ...imageProfile, is_active: false }])
+    mockPost.mockResolvedValue({ status: 'ok' })
+    render(<AISettingsPanel />)
+
+    await user.click(await screen.findByRole('button', { name: /使用 ComfyUI（172.30.18.236） 出图/ }))
+    await waitFor(() =>
+      expect(mockPost).toHaveBeenCalledWith('/settings/ai/image-profiles/i1/activate'),
+    )
+
+    await user.click(screen.getByRole('button', { name: /测试生图 ComfyUI/ }))
+    await waitFor(() =>
+      expect(mockPost).toHaveBeenCalledWith('/settings/ai/image-profiles/i1/test'),
+    )
+  })
+
+  it('新增生图配置时按后端切换表单字段', async () => {
+    const user = userEvent.setup()
+    render(<AISettingsPanel />)
+    await user.click(await screen.findByRole('button', { name: '+ 新增生图配置' }))
+
+    const dialog = await findDialog('新增生图配置')
+    // 默认 OpenAI 后端：填模型名与密钥，不该出现 ComfyUI 工作流框
+    expect(within(dialog).getByPlaceholderText(/dall-e-3/)).toBeInTheDocument()
+    expect(within(dialog).queryByPlaceholderText(/PLACEHOLDER_POSITIVE/)).not.toBeInTheDocument()
+  })
+})

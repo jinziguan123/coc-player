@@ -52,7 +52,7 @@ def test_regenerate_missing_module_image_updates_json(tmp_path, monkeypatch):
             return _png_b64()
 
     monkeypatch.setattr(module_image_service, "get_fast_llm", lambda: PromptLLM())
-    monkeypatch.setattr(module_image_service, "get_llm", lambda: ImageLLM())
+    monkeypatch.setattr(module_image_service, "get_image_llm", lambda: ImageLLM())
     try:
         with TestClient(app) as client:
             db = testing_session()
@@ -97,7 +97,7 @@ def test_regenerate_reuses_existing_file(tmp_path, monkeypatch):
         def supports_image_gen(self):
             raise AssertionError("已有图片文件时不应调用模型")
 
-    monkeypatch.setattr(module_image_service, "get_llm", lambda: NoLLM())
+    monkeypatch.setattr(module_image_service, "get_image_llm", lambda: NoLLM())
     assert asyncio.run(module_image_service.regenerate_module_image(db, module, "scene", "s1")) == url
 
 
@@ -129,7 +129,7 @@ def test_encounter_image_uses_encounter_prompt(tmp_path, monkeypatch):
             return _png_b64()
 
     monkeypatch.setattr(module_image_service, "get_fast_llm", lambda: PromptLLM())
-    monkeypatch.setattr(module_image_service, "get_llm", lambda: ImageLLM())
+    monkeypatch.setattr(module_image_service, "get_image_llm", lambda: ImageLLM())
     url = asyncio.run(module_image_service.regenerate_module_image(db, module, "npc", "n1", "encounter_image"))
     assert url and db.get(Module, module.id).npcs[0]["encounter_image"] == url
 
@@ -160,7 +160,7 @@ def test_regenerate_scene_visual_variant_updates_variant_cache(tmp_path, monkeyp
             return _png_b64()
 
     monkeypatch.setattr(module_image_service, "get_fast_llm", lambda: PromptLLM())
-    monkeypatch.setattr(module_image_service, "get_llm", lambda: ImageLLM())
+    monkeypatch.setattr(module_image_service, "get_image_llm", lambda: ImageLLM())
     url = asyncio.run(module_image_service.regenerate_module_image(
         db, module, "scene", "s1", "image_variant", "flooded",
     ))

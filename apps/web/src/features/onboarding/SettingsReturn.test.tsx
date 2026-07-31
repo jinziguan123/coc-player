@@ -35,17 +35,21 @@ function renderSettings() {
 describe('设置页的新手团返回意图', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGet.mockResolvedValue([
-      {
-        id: 'profile-1',
-        name: '测试模型',
-        protocol: 'openai',
-        base_url: '',
-        model_name: 'test-model',
-        api_key: '****',
-        is_active: true,
-      },
-    ])
+    // 生图配置已是独立一套，面板会各自拉各自的列表
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/settings/ai/image-profiles') return []
+      return [
+        {
+          id: 'profile-1',
+          name: '测试模型',
+          protocol: 'openai',
+          base_url: '',
+          model_name: 'test-model',
+          api_key: '****',
+          is_active: true,
+        },
+      ]
+    })
   })
 
   it('连接测试成功后返回新手团', async () => {
@@ -53,7 +57,7 @@ describe('设置页的新手团返回意图', () => {
     mockPost.mockResolvedValue({ success: true, message: '连接成功', latency_ms: 12 })
     renderSettings()
 
-    await user.click(await screen.findByRole('button', { name: '测试' }))
+    await user.click(await screen.findByRole('button', { name: '测试 测试模型' }))
 
     await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/onboarding'))
   })
@@ -63,7 +67,7 @@ describe('设置页的新手团返回意图', () => {
     mockPost.mockResolvedValue({ success: false, message: '连接失败', latency_ms: 12 })
     renderSettings()
 
-    await user.click(await screen.findByRole('button', { name: '测试' }))
+    await user.click(await screen.findByRole('button', { name: '测试 测试模型' }))
 
     expect(screen.queryByTestId('pathname')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'AI 配置' })).toBeInTheDocument()

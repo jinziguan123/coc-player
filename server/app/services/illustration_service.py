@@ -10,7 +10,8 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.ai.context import _active_flags, _resolve_state
-from app.ai.llm_factory import get_fast_llm, get_llm
+from app.ai.image_gen import get_image_llm
+from app.ai.llm_factory import get_fast_llm
 from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
@@ -67,7 +68,7 @@ async def _illustrate_event(
         if not sd_prompt:
             return
         sd_prompt = f"{sd_prompt}, {_ILLUST_STYLE_SUFFIX}"
-        b64 = await get_llm().generate_image(sd_prompt)
+        b64 = await get_image_llm().generate_image(sd_prompt)
         if not b64:
             return
         url = save_image_b64(b64)
@@ -126,7 +127,7 @@ def _spawn_illustration(
     """
     spawned = False
     try:
-        if get_llm().supports_image_gen():
+        if get_image_llm().supports_image_gen():
 
             async def _run() -> None:
                 try:

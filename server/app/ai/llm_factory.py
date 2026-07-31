@@ -25,20 +25,8 @@ def _provider_from_profile(profile) -> LLMProvider:
             api_key=profile.api_key,
             vision=getattr(profile, "vision", False),
             reasoning_effort=getattr(profile, "reasoning_effort", ""),
-            image_model=getattr(profile, "image_model", ""),
-            image_base_url=getattr(profile, "image_base_url", ""),
-            image_api_key=getattr(profile, "image_api_key", ""),
         )
-    # 图片后端选 ComfyUI 时挂上客户端：任何协议的文本模型都获得文生图能力
-    if (
-        getattr(profile, "image_backend", "") == "comfyui"
-        and getattr(profile, "comfyui_base_url", "").strip()
-    ):
-        from app.ai.comfyui import ComfyUIClient
-        provider.set_comfyui(ComfyUIClient(
-            profile.comfyui_base_url.strip(),
-            getattr(profile, "comfyui_workflow", ""),
-        ))
+    # 生图不在这里装配——它有独立的配置与后端，见 app.ai.image_gen.get_image_llm()。
     return provider
 
 

@@ -326,9 +326,15 @@ def test_no_reasoning_effort_keeps_temperature(monkeypatch):
     assert captured["payload"]["temperature"] == 0.7
 
 
+def _image_gen(model="dall-e-3", base_url="", api_key="k"):
+    from app.ai.image_gen import OpenAIImageGenerator
+
+    return OpenAIImageGenerator(model, base_url, api_key)
+
+
 def test_generate_image_returns_b64(monkeypatch):
     """文生图：打 {base}/images/generations，解析 data[0].b64_json 返回 base64。"""
-    prov = OpenAICompatProvider(model="x", api_key="k", image_model="dall-e-3")
+    gen = _image_gen()
     captured = {}
 
     class _Resp:
@@ -342,19 +348,16 @@ def test_generate_image_returns_b64(monkeypatch):
         captured["url"] = url; captured["payload"] = json
         return _Resp()
 
-    monkeypatch.setattr(prov._client, "post", fake_post)
-    out = asyncio.run(prov.generate_image("a cat"))
+    monkeypatch.setattr(gen._client, "post", fake_post)
+    out = asyncio.run(gen.generate_image("a cat"))
     assert out == "AAAABBBB"
     assert captured["url"].endswith("/images/generations")
     assert captured["payload"]["model"] == "dall-e-3"
 
 
-def test_generate_image_uses_independent_base_and_key(monkeypatch):
-    """生图可独立走自己的 base_url/api_key，不强绑文本模型。"""
-    prov = OpenAICompatProvider(
-        model="x", base_url="https://chat.example/v1", api_key="chatkey",
-        image_model="dall-e-3", image_base_url="https://img.example/v1", image_api_key="imgkey",
-    )
+def test_generate_image_uses_its_own_base_and_key(monkeypatch):
+    """生图走自己配置里的地址与密钥——它已经与文本模型完全无关，不存在「回落文本 key」。"""
+    gen = _image_gen(base_url="https://img.example/v1", api_key="imgkey")
     captured = {}
 
     class _Resp:
@@ -368,28 +371,28 @@ def test_generate_image_uses_independent_base_and_key(monkeypatch):
         captured["url"] = url; captured["headers"] = headers
         return _Resp()
 
-    monkeypatch.setattr(prov._client, "post", fake_post)
-    asyncio.run(prov.generate_image("x"))
+    monkeypatch.setattr(gen._client, "post", fake_post)
+    asyncio.run(gen.generate_image("x"))
     assert captured["url"] == "https://img.example/v1/images/generations"
     assert captured["headers"]["Authorization"] == "Bearer imgkey"
 
 
 def test_generate_image_none_when_unconfigured():
-    """未填 image_model → supports_image_gen False、generate_image 返回 None（不打端点）。"""
-    prov = OpenAICompatProvider(model="x", api_key="k")
-    assert prov.supports_image_gen() is False
-    assert asyncio.run(prov.generate_image("x")) is None
+    """未填模型名 → supports_image_gen False、generate_image 返回 None（不打端点）。"""
+    gen = _image_gen(model="")
+    assert gen.supports_image_gen() is False
+    assert asyncio.run(gen.generate_image("x")) is None
 
 
 def test_generate_image_swallows_error(monkeypatch):
     """生图失败一律返回 None、绝不抛（配图是可选增强，不能中断游戏）。"""
-    prov = OpenAICompatProvider(model="x", api_key="k", image_model="dall-e-3")
+    gen = _image_gen()
 
     async def boom(*a, **k):
         raise RuntimeError("端点炸了")
 
-    monkeypatch.setattr(prov._client, "post", boom)
-    assert asyncio.run(prov.generate_image("x")) is None
+    monkeypatch.setattr(gen._client, "post", boom)
+    assert asyncio.run(gen.generate_image("x")) is None
 
 
 def test_stream_skips_empty_choices(monkeypatch):

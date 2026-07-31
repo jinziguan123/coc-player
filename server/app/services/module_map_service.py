@@ -317,12 +317,12 @@ async def generate_map_backdrop(db, module) -> dict:
     这是纯装饰层：六边形网格与全部游戏逻辑（方位、迷雾、旅行）都不依赖它，
     生成失败或未生成时沙盘照常工作，只是没有背景画。
     """
-    from app.ai.llm_factory import get_llm
+    from app.ai.image_gen import get_image_llm
     from app.services import image_store
 
-    image_llm = get_llm()
+    image_llm = get_image_llm()
     if not image_llm.supports_image_gen():
-        raise ValueError("当前 AI 配置不支持文生图，请在设置里填写图像模型")
+        raise ValueError("尚未配置生图模型：请到「设置 → AI 配置 → 生图模型」添加并激活一个")
 
     try:
         raw = await get_fast_llm().complete(

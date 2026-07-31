@@ -132,40 +132,10 @@
             "title": "Base Url",
             "type": "string"
           },
-          "comfyui_base_url": {
-            "default": "",
-            "title": "Comfyui Base Url",
-            "type": "string"
-          },
-          "comfyui_workflow": {
-            "default": "",
-            "title": "Comfyui Workflow",
-            "type": "string"
-          },
           "context_window": {
             "default": 0,
             "title": "Context Window",
             "type": "integer"
-          },
-          "image_api_key": {
-            "default": "",
-            "title": "Image Api Key",
-            "type": "string"
-          },
-          "image_backend": {
-            "default": "openai",
-            "title": "Image Backend",
-            "type": "string"
-          },
-          "image_base_url": {
-            "default": "",
-            "title": "Image Base Url",
-            "type": "string"
-          },
-          "image_model": {
-            "default": "",
-            "title": "Image Model",
-            "type": "string"
           },
           "model_name": {
             "default": "",
@@ -227,28 +197,6 @@
             ],
             "title": "Base Url"
           },
-          "comfyui_base_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comfyui Base Url"
-          },
-          "comfyui_workflow": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comfyui Workflow"
-          },
           "context_window": {
             "anyOf": [
               {
@@ -259,50 +207,6 @@
               }
             ],
             "title": "Context Window"
-          },
-          "image_api_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Api Key"
-          },
-          "image_backend": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Backend"
-          },
-          "image_base_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Base Url"
-          },
-          "image_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Image Model"
           },
           "model_name": {
             "anyOf": [
@@ -529,12 +433,30 @@
             "type": "boolean"
           },
           "module_id": {
-            "title": "Module Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module Id"
           },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "origin_character_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Character Id"
           },
           "rule_system": {
             "title": "Rule System",
@@ -557,7 +479,6 @@
         },
         "required": [
           "name",
-          "module_id",
           "rule_system"
         ],
         "title": "CharacterCreate",
@@ -601,6 +522,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "origin_character_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Character Id"
           },
           "rule_system": {
             "title": "Rule System",
@@ -984,6 +916,184 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImageProfile": {
+        "description": "生图配置：与文本模型完全解耦，独立增删改与激活。\n\n从前生图字段寄生在文本 AIProfile 上，后果有二：①同一台 ComfyUI 要在每个文本配置里\n重抄一遍；②`image_model` 只传给 OpenAICompatProvider，Anthropic 协议的配置填了也**静默\n失效**。拆开之后，用什么文本模型跑团与用什么后端出图互不相干。",
+        "properties": {
+          "api_key": {
+            "default": "",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "backend": {
+            "default": "openai",
+            "title": "Backend",
+            "type": "string"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "comfyui_base_url": {
+            "default": "",
+            "title": "Comfyui Base Url",
+            "type": "string"
+          },
+          "comfyui_workflow": {
+            "default": "",
+            "title": "Comfyui Workflow",
+            "type": "string"
+          },
+          "id": {
+            "default": "",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "default": false,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "ImageProfile",
+        "type": "object"
+      },
+      "ImageProfileCreate": {
+        "properties": {
+          "api_key": {
+            "default": "",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "backend": {
+            "default": "openai",
+            "title": "Backend",
+            "type": "string"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "comfyui_base_url": {
+            "default": "",
+            "title": "Comfyui Base Url",
+            "type": "string"
+          },
+          "comfyui_workflow": {
+            "default": "",
+            "title": "Comfyui Workflow",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ImageProfileCreate",
+        "type": "object"
+      },
+      "ImageProfileUpdate": {
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "comfyui_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comfyui Base Url"
+          },
+          "comfyui_workflow": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comfyui Workflow"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "ImageProfileUpdate",
         "type": "object"
       },
       "InventoryDropRequest": {
@@ -1388,6 +1498,12 @@
       },
       "ModuleRead": {
         "properties": {
+          "character_guidance": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Character Guidance",
+            "type": "object"
+          },
           "clues": {
             "items": {},
             "title": "Clues",
@@ -1486,6 +1602,18 @@
       "ModuleWrite": {
         "description": "手动新建/编辑模组的结构化内容。",
         "properties": {
+          "character_guidance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character Guidance"
+          },
           "clues": {
             "default": [],
             "items": {},
@@ -3157,6 +3285,49 @@
         ]
       }
     },
+    "/api/modules/{module_id}/character-guidance": {
+      "post": {
+        "description": "（重新）生成本模组的车卡建议。\n\n上传解析时会自动跑一次，这个端点用于两种情况：解析早于本功能上线的历史模组，\n以及房主对生成结果不满意想重来。房主手改的内容走 PUT /modules/{id}。",
+        "operationId": "regenerate_character_guidance_api_modules__module_id__character_guidance_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "module_id",
+            "required": true,
+            "schema": {
+              "title": "Module Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuleRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate Character Guidance",
+        "tags": [
+          "modules"
+        ]
+      }
+    },
     "/api/modules/{module_id}/images/regenerate": {
       "post": {
         "description": "图片文件缺失时重新生成，并回写 scenes/npcs/clues 中的图片 URL。",
@@ -3412,7 +3583,7 @@
     },
     "/api/net/lan": {
       "post": {
-        "description": "开关局域网加入。\n\n只有本机才能改：这个开关决定别人能不能连进来，不能让已经连进来的客人自己放宽它。",
+        "description": "开关局域网加入。\n\n只有本机才能改：这个开关决定别人能不能连进来，不能让已经连进来的客人自己放宽它。\n内置直连隧道的客人虽然源 IP 是回环，同样不算本机，见 ``net_access.peer_kind``。",
         "operationId": "set_lan_api_net_lan_post",
         "requestBody": {
           "content": {
@@ -7250,6 +7421,284 @@
         ]
       }
     },
+    "/api/settings/ai/image-profiles": {
+      "get": {
+        "operationId": "list_image_profiles_api_settings_ai_image_profiles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImageProfile"
+                  },
+                  "title": "Response List Image Profiles Api Settings Ai Image Profiles Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Image Profiles",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "create_image_profile_api_settings_ai_image_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageProfileCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Image Profile",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ai/image-profiles/{profile_id}": {
+      "delete": {
+        "operationId": "delete_image_profile_api_settings_ai_image_profiles__profile_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Image Profile",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_image_profile_api_settings_ai_image_profiles__profile_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Image Profile",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ai/image-profiles/{profile_id}/activate": {
+      "post": {
+        "operationId": "activate_image_profile_api_settings_ai_image_profiles__profile_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Image Profile",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ai/image-profiles/{profile_id}/key": {
+      "get": {
+        "description": "返回该生图配置的完整 API Key（明文），供设置页「显示/复制」用。与文本配置同理。",
+        "operationId": "reveal_image_profile_key_api_settings_ai_image_profiles__profile_id__key_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reveal Image Profile Key",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ai/image-profiles/{profile_id}/test": {
+      "post": {
+        "description": "真出一张图验证该生图配置——用的是运行时同一条装配路径（image_generator_from_profile），\n所以「测试通过」意味着跑团时也确实出得来图。",
+        "operationId": "test_image_profile_api_settings_ai_image_profiles__profile_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Image Profile",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/settings/ai/profiles": {
       "get": {
         "description": "列出所有配置（api_key 掩码处理）",
@@ -7612,49 +8061,6 @@
           }
         },
         "summary": "Test Profile",
-        "tags": [
-          "settings"
-        ]
-      }
-    },
-    "/api/settings/ai/profiles/{profile_id}/test-image": {
-      "post": {
-        "description": "测试文生图能力：填了 image_model 后，真打一次 images 端点看能否生图。",
-        "operationId": "test_profile_image_api_settings_ai_profiles__profile_id__test_image_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "profile_id",
-            "required": true,
-            "schema": {
-              "title": "Profile Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestResult"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Test Profile Image",
         "tags": [
           "settings"
         ]

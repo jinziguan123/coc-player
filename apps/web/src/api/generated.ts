@@ -255,6 +255,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/modules/{module_id}/character-guidance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Character Guidance
+         * @description （重新）生成本模组的车卡建议。
+         *
+         *     上传解析时会自动跑一次，这个端点用于两种情况：解析早于本功能上线的历史模组，
+         *     以及房主对生成结果不满意想重来。房主手改的内容走 PUT /modules/{id}。
+         */
+        post: operations["regenerate_character_guidance_api_modules__module_id__character_guidance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/modules/{module_id}/images/regenerate": {
         parameters: {
             query?: never;
@@ -398,6 +421,7 @@ export interface paths {
          * @description 开关局域网加入。
          *
          *     只有本机才能改：这个开关决定别人能不能连进来，不能让已经连进来的客人自己放宽它。
+         *     内置直连隧道的客人虽然源 IP 是回环，同样不算本机，见 ``net_access.peer_kind``。
          */
         post: operations["set_lan_api_net_lan_post"];
         delete?: never;
@@ -1786,6 +1810,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/ai/image-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Image Profiles */
+        get: operations["list_image_profiles_api_settings_ai_image_profiles_get"];
+        put?: never;
+        /** Create Image Profile */
+        post: operations["create_image_profile_api_settings_ai_image_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/ai/image-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Image Profile */
+        put: operations["update_image_profile_api_settings_ai_image_profiles__profile_id__put"];
+        post?: never;
+        /** Delete Image Profile */
+        delete: operations["delete_image_profile_api_settings_ai_image_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/ai/image-profiles/{profile_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Image Profile */
+        post: operations["activate_image_profile_api_settings_ai_image_profiles__profile_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/ai/image-profiles/{profile_id}/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reveal Image Profile Key
+         * @description 返回该生图配置的完整 API Key（明文），供设置页「显示/复制」用。与文本配置同理。
+         */
+        get: operations["reveal_image_profile_key_api_settings_ai_image_profiles__profile_id__key_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/ai/image-profiles/{profile_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Image Profile
+         * @description 真出一张图验证该生图配置——用的是运行时同一条装配路径（image_generator_from_profile），
+         *     所以「测试通过」意味着跑团时也确实出得来图。
+         */
+        post: operations["test_image_profile_api_settings_ai_image_profiles__profile_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/ai/profiles": {
         parameters: {
             query?: never;
@@ -1933,26 +2051,6 @@ export interface paths {
          * @description 测试配置连接
          */
         post: operations["test_profile_api_settings_ai_profiles__profile_id__test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/ai/profiles/{profile_id}/test-image": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Profile Image
-         * @description 测试文生图能力：填了 image_model 后，真打一次 images 端点看能否生图。
-         */
-        post: operations["test_profile_image_api_settings_ai_profiles__profile_id__test_image_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2141,40 +2239,10 @@ export interface components {
              */
             base_url: string;
             /**
-             * Comfyui Base Url
-             * @default
-             */
-            comfyui_base_url: string;
-            /**
-             * Comfyui Workflow
-             * @default
-             */
-            comfyui_workflow: string;
-            /**
              * Context Window
              * @default 0
              */
             context_window: number;
-            /**
-             * Image Api Key
-             * @default
-             */
-            image_api_key: string;
-            /**
-             * Image Backend
-             * @default openai
-             */
-            image_backend: string;
-            /**
-             * Image Base Url
-             * @default
-             */
-            image_base_url: string;
-            /**
-             * Image Model
-             * @default
-             */
-            image_model: string;
             /**
              * Model Name
              * @default
@@ -2209,20 +2277,8 @@ export interface components {
             api_key?: string | null;
             /** Base Url */
             base_url?: string | null;
-            /** Comfyui Base Url */
-            comfyui_base_url?: string | null;
-            /** Comfyui Workflow */
-            comfyui_workflow?: string | null;
             /** Context Window */
             context_window?: number | null;
-            /** Image Api Key */
-            image_api_key?: string | null;
-            /** Image Backend */
-            image_backend?: string | null;
-            /** Image Base Url */
-            image_base_url?: string | null;
-            /** Image Model */
-            image_model?: string | null;
             /** Model Name */
             model_name?: string | null;
             /** Name */
@@ -2305,9 +2361,11 @@ export interface components {
              */
             is_player: boolean;
             /** Module Id */
-            module_id: string;
+            module_id?: string | null;
             /** Name */
             name: string;
+            /** Origin Character Id */
+            origin_character_id?: string | null;
             /** Rule System */
             rule_system: string;
             /**
@@ -2346,6 +2404,8 @@ export interface components {
             module_id: string | null;
             /** Name */
             name: string;
+            /** Origin Character Id */
+            origin_character_id?: string | null;
             /** Rule System */
             rule_system: string;
             /** Skills */
@@ -2494,6 +2554,113 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * ImageProfile
+         * @description 生图配置：与文本模型完全解耦，独立增删改与激活。
+         *
+         *     从前生图字段寄生在文本 AIProfile 上，后果有二：①同一台 ComfyUI 要在每个文本配置里
+         *     重抄一遍；②`image_model` 只传给 OpenAICompatProvider，Anthropic 协议的配置填了也**静默
+         *     失效**。拆开之后，用什么文本模型跑团与用什么后端出图互不相干。
+         */
+        ImageProfile: {
+            /**
+             * Api Key
+             * @default
+             */
+            api_key: string;
+            /**
+             * Backend
+             * @default openai
+             */
+            backend: string;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Comfyui Base Url
+             * @default
+             */
+            comfyui_base_url: string;
+            /**
+             * Comfyui Workflow
+             * @default
+             */
+            comfyui_workflow: string;
+            /**
+             * Id
+             * @default
+             */
+            id: string;
+            /**
+             * Is Active
+             * @default false
+             */
+            is_active: boolean;
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+        };
+        /** ImageProfileCreate */
+        ImageProfileCreate: {
+            /**
+             * Api Key
+             * @default
+             */
+            api_key: string;
+            /**
+             * Backend
+             * @default openai
+             */
+            backend: string;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Comfyui Base Url
+             * @default
+             */
+            comfyui_base_url: string;
+            /**
+             * Comfyui Workflow
+             * @default
+             */
+            comfyui_workflow: string;
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /** Name */
+            name: string;
+        };
+        /** ImageProfileUpdate */
+        ImageProfileUpdate: {
+            /** Api Key */
+            api_key?: string | null;
+            /** Backend */
+            backend?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Comfyui Base Url */
+            comfyui_base_url?: string | null;
+            /** Comfyui Workflow */
+            comfyui_workflow?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Name */
+            name?: string | null;
         };
         /**
          * InventoryDropRequest
@@ -2657,6 +2824,13 @@ export interface components {
         };
         /** ModuleRead */
         ModuleRead: {
+            /**
+             * Character Guidance
+             * @default {}
+             */
+            character_guidance: {
+                [key: string]: unknown;
+            };
             /** Clues */
             clues: unknown[];
             /**
@@ -2718,6 +2892,10 @@ export interface components {
          * @description 手动新建/编辑模组的结构化内容。
          */
         ModuleWrite: {
+            /** Character Guidance */
+            character_guidance?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Clues
              * @default []
@@ -3663,6 +3841,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_character_guidance_api_modules__module_id__character_guidance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleRead"];
                 };
             };
             /** @description Validation Error */
@@ -6320,6 +6529,218 @@ export interface operations {
             };
         };
     };
+    list_image_profiles_api_settings_ai_image_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageProfile"][];
+                };
+            };
+        };
+    };
+    create_image_profile_api_settings_ai_image_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageProfileCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageProfile"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_image_profile_api_settings_ai_image_profiles__profile_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageProfile"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_image_profile_api_settings_ai_image_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_image_profile_api_settings_ai_image_profiles__profile_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reveal_image_profile_key_api_settings_ai_image_profiles__profile_id__key_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_image_profile_api_settings_ai_image_profiles__profile_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_profiles_api_settings_ai_profiles_get: {
         parameters: {
             query?: never;
@@ -6564,37 +6985,6 @@ export interface operations {
         };
     };
     test_profile_api_settings_ai_profiles__profile_id__test_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profile_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    test_profile_image_api_settings_ai_profiles__profile_id__test_image_post: {
         parameters: {
             query?: never;
             header?: never;

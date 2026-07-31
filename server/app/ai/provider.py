@@ -86,19 +86,7 @@ class LLMProvider(ABC):
         """据若干图片 + 文本提示生成文本（多模态）。images=[(base64, mime), …]。非视觉 Provider 不实现。"""
         raise NotImplementedError("当前模型不支持多模态")
 
-    # ── 文生图（可选增强，如手书配图）：默认不支持，OpenAI 兼容 Provider 覆盖。
-    # 挂了 ComfyUI 后端（set_comfyui）时任何协议的 Provider 都获得文生图能力，
-    # 且 ComfyUI 优先于 OpenAI Images（本地内网免费出图）。──
-    _comfyui = None  # ComfyUIClient | None
-
-    def set_comfyui(self, client) -> None:
-        self._comfyui = client
-
-    def supports_image_gen(self) -> bool:
-        return self._comfyui is not None
-
-    async def generate_image(self, prompt: str, size: str = "1024x1024") -> str | None:
-        """文生图，返回 base64（无 data: 前缀）；不支持/失败返回 None（绝不因配图中断游戏）。"""
-        if self._comfyui is not None:
-            return await self._comfyui.generate(prompt)
-        return None
+    # ── 文生图不在本抽象里 ──
+    # 生图有自己的配置与后端链路，见 app.ai.image_gen 的 ImageGenerator / get_image_llm()。
+    # 从前它挂在这里（set_comfyui + OpenAI images 兼职），导致「用 Anthropic 跑团就没法用
+    # OpenAI 生图」这类静默失效；现在文本 Provider 只管文本。

@@ -166,7 +166,8 @@ def test_image_preview_is_private_until_explicit_publish(tmp_path, monkeypatch):
             return _png_b64()
 
     llm = ImageLlm()
-    monkeypatch.setattr(human_kp_service, "get_llm", lambda: llm)
+    # 提示词走文本模型（get_fast_llm）、出图走生图配置（get_image_llm）——两条链已分开
+    monkeypatch.setattr(human_kp_service, "get_image_llm", lambda: llm)
     monkeypatch.setattr(human_kp_service, "get_fast_llm", lambda: llm)
     preview = asyncio.run(human_kp_service.generate_image_preview("废弃门厅", "停电后的门厅"))
     assert preview["url"].startswith("/api/images/")

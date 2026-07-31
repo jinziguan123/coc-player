@@ -49,52 +49,59 @@ def test_client_fails_open_without_base_url():
     assert asyncio.run(client.generate("x")) is None
 
 
-# ── Provider 委托 ────────────────────────────────────────────
+# ── 生图后端装配 ─────────────────────────────────────────────
+# 生图有自己的配置与后端链路（app.ai.image_gen），与文本 Provider 用什么协议无关。
 
 
-class _FakeComfy:
-    async def generate(self, prompt, negative=""):
-        return "FAKE_B64"
+def test_comfyui_generator_from_profile():
+    from app.ai import image_gen
+    from app.api.ai_settings import ImageProfile
+
+    gen = image_gen.image_generator_from_profile(
+        ImageProfile(name="本地", backend="comfyui",
+                     comfyui_base_url="http://172.30.18.236:8188"),
+    )
+    assert gen.supports_image_gen() is True
+    assert gen._client.base_url == "http://172.30.18.236:8188"
 
 
-class _Bare(LLMProvider):
-    """最小 Provider：验证任何协议挂上 ComfyUI 都获得生图能力。"""
-    async def complete(self, *a, **k):
-        return ""
+def test_image_generator_needs_no_text_profile():
+    """回归：过去 image_model 只传给 OpenAICompatProvider，用 Anthropic 跑团就静默不出图。
 
-    async def stream(self, *a, **k):
-        yield ""
+    现在生图配置自成一体，压根不经过文本 Provider——用什么协议跑团都不影响出图。
+    """
+    from app.ai import image_gen
+    from app.api.ai_settings import ImageProfile
 
-
-def test_provider_gains_image_gen_via_comfyui():
-    p = _Bare()
-    assert p.supports_image_gen() is False
-    assert asyncio.run(p.generate_image("x")) is None
-    p.set_comfyui(_FakeComfy())
-    assert p.supports_image_gen() is True
-    assert asyncio.run(p.generate_image("x")) == "FAKE_B64"
+    gen = image_gen.image_generator_from_profile(
+        ImageProfile(name="远端", backend="openai", model="gpt-image-1", api_key="k"),
+    )
+    assert gen.supports_image_gen() is True
 
 
-def test_openai_provider_prefers_comfyui(monkeypatch):
+def test_no_image_profile_means_no_image_gen():
+    """没有激活的生图配置 → 空对象；调用方据此静默跳过配图，不报错、不中断游戏。"""
+    from app.ai import image_gen
+
+    gen = image_gen.image_generator_from_profile(None)
+    assert gen.supports_image_gen() is False
+    assert asyncio.run(gen.generate_image("x")) is None
+
+    # 后端选了 openai 却没填模型名 → 同样不出图，且不打任何端点
+    from app.api.ai_settings import ImageProfile
+
+    bare = image_gen.image_generator_from_profile(ImageProfile(name="空", backend="openai"))
+    assert bare.supports_image_gen() is False
+    assert asyncio.run(bare.generate_image("x")) is None
+
+
+def test_text_provider_no_longer_generates_images():
+    """文本 Provider 只管文本：生图方法已从这条链上彻底移除，防止旧写法悄悄复活。"""
     from app.ai.providers.openai_compat import OpenAICompatProvider
 
-    prov = OpenAICompatProvider(model="m", api_key="k", image_model="dall-e-3")
-    prov.set_comfyui(_FakeComfy())
-    # 挂了 ComfyUI：不打 OpenAI Images 端点，直接走内网出图
-    assert asyncio.run(prov.generate_image("x")) == "FAKE_B64"
-
-
-def test_factory_attaches_comfyui_for_any_protocol(monkeypatch):
-    from app.api import ai_settings
-    from app.ai import llm_factory
-
-    profile = ai_settings.AIProfile(
-        name="主", protocol="anthropic", model_name="claude-x", api_key="k",
-        image_backend="comfyui", comfyui_base_url="http://172.30.18.236:8188",
-    )
-    prov = llm_factory.provider_from_profile(profile)
-    assert prov.supports_image_gen() is True       # Anthropic 协议也获得生图能力
-    assert prov._comfyui.base_url == "http://172.30.18.236:8188"
+    prov = OpenAICompatProvider(model="m", api_key="k")
+    assert not hasattr(prov, "generate_image")
+    assert not hasattr(prov, "set_comfyui")
 
 
 # ── 图片存取 ────────────────────────────────────────────────
@@ -177,7 +184,7 @@ def test_illustrate_handout_patches_event_and_broadcasts(db_factory, monkeypatch
 
     sent: list[str] = []
     monkeypatch.setattr(chat_service.illustration_service, "get_fast_llm", lambda: PromptLLM())
-    monkeypatch.setattr(chat_service.illustration_service, "get_llm", lambda: ImageLLM())
+    monkeypatch.setattr(chat_service.illustration_service, "get_image_llm", lambda: ImageLLM())
     monkeypatch.setattr(chat_service.room_hub, "broadcast", lambda sid, chunk: sent.append(wire(chunk)))
 
     asyncio.run(chat_service._illustrate_handout(session.id, ev.id, "遗书", "letter", ev.content))
@@ -196,7 +203,7 @@ def test_illustrate_handout_patches_event_and_broadcasts(db_factory, monkeypatch
     sent.clear()
     ev_b = session_service.add_event(db, session.id, "system", "第二封", actor_name="系统",
                                      metadata={"kind": "handout"})
-    monkeypatch.setattr(chat_service.illustration_service, "get_llm", lambda: NoImage())
+    monkeypatch.setattr(chat_service.illustration_service, "get_image_llm", lambda: NoImage())
     asyncio.run(chat_service._illustrate_handout(session.id, ev_b.id, "x", "letter", "y"))
     assert not sent
     assert "image" not in (db_factory().get(EventLog, ev_b.id).metadata_ or {})
@@ -241,7 +248,7 @@ def _wire_image_stubs(monkeypatch, db_factory, tmp_path, prompt: str):
         chat_service.illustration_service, "get_fast_llm", lambda: _StubPromptLLM(prompt),
     )
     monkeypatch.setattr(
-        chat_service.illustration_service, "get_llm", lambda: _CountingImageLLM(calls),
+        chat_service.illustration_service, "get_image_llm", lambda: _CountingImageLLM(calls),
     )
     monkeypatch.setattr(chat_service.room_hub, "broadcast", lambda sid, chunk: sent.append(wire(chunk)))
     return calls, sent

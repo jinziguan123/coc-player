@@ -7,7 +7,8 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.ai.llm_factory import get_fast_llm, get_llm
+from app.ai.image_gen import get_image_llm
+from app.ai.llm_factory import get_fast_llm
 from app.models.module import Module
 from app.services import image_store
 
@@ -128,7 +129,8 @@ async def regenerate_module_image(
     if image_url_available(cached):
         return cached
 
-    image_llm = get_llm()
+    # 提示词用文本模型写、图用生图配置出——两者各走各的配置，互不牵连。
+    image_llm = get_image_llm()
     if not image_llm.supports_image_gen():
         return None
     try:

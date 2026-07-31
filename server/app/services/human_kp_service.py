@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import director_signals, turn_planner
 from app.ai.context import build_kp_context
+from app.ai.image_gen import get_image_llm
 from app.ai.llm_factory import get_fast_llm, get_llm
 from app.models.character import Character
 from app.models.module import Module, ModuleChunk
@@ -350,9 +351,9 @@ def lookup(
 
 
 async def generate_image_preview(prompt: str, title: str) -> dict:
-    image_llm = get_llm()
+    image_llm = get_image_llm()
     if not image_llm.supports_image_gen():
-        raise ValueError("当前 AI 配置不支持生图")
+        raise ValueError("尚未配置生图模型：请到「设置 → AI 配置 → 生图模型」添加并激活一个")
     translated = await get_fast_llm().complete(
         [
             {

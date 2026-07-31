@@ -90,20 +90,23 @@ def test_reveal_key_and_duplicate_profile(monkeypatch, tmp_path):
     assert c.post("/api/settings/ai/profiles/nope/duplicate").status_code == 404
 
 
-def test_update_profile_persists_comfyui_fields(monkeypatch, tmp_path):
-    """回归：PUT 更新必须应用 image_backend/comfyui_* 三字段（此前模型收了、应用漏了，静默丢弃）。"""
+def test_update_image_profile_persists_comfyui_fields(monkeypatch, tmp_path):
+    """回归：PUT 更新必须应用 backend/comfyui_* 三字段（此前模型收了、应用漏了，静默丢弃）。
+
+    生图配置独立后这几个字段搬到了 image-profiles，原来的 bug 形态在新端点上同样可能复发。
+    """
     c = TestClient(app)
     monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
 
-    p = c.post("/api/settings/ai/profiles", json={"name": "A", "model_name": "m", "api_key": "k"}).json()
-    r = c.put(f"/api/settings/ai/profiles/{p['id']}", json={
-        "name": "A",
-        "image_backend": "comfyui",
+    p = c.post("/api/settings/ai/image-profiles", json={"name": "本地出图"}).json()
+    r = c.put(f"/api/settings/ai/image-profiles/{p['id']}", json={
+        "name": "本地出图",
+        "backend": "comfyui",
         "comfyui_base_url": "http://172.30.18.236:8188",
         "comfyui_workflow": '{"1": {}}',
     })
     assert r.status_code == 200, r.text
-    saved = ai_settings._load_profiles()[0]
-    assert saved.image_backend == "comfyui"
+    saved = ai_settings._load_image_profiles()[0]
+    assert saved.backend == "comfyui"
     assert saved.comfyui_base_url == "http://172.30.18.236:8188"
     assert saved.comfyui_workflow == '{"1": {}}'
