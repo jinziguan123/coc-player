@@ -1,9 +1,30 @@
 # 设计文档（DESIGN）
 
-本文件记录 TRPG Player 中**较重要、跨模块、不易从单个文件读出**的设计决策与工作机制，
-描述的是「当前实现的事实」。探索期的过程稿、备选方案与阶段规划见 [`docs/plans/`](docs/plans/)。
+本文件记录 TRPG Player 的**架构设计**，以及**较重要、跨模块、不易从单个文件读出**的设计决策与
+工作机制，描述的是「当前实现的事实」。探索期的过程稿、备选方案与阶段规划见
+[`docs/plans/`](docs/plans/)；带约束力的决策见 [`docs/adr/`](docs/adr/)；
+一次带评审意见与改进建议的架构快照见 [`docs/architecture.md`](docs/architecture.md)
+（那是**评审**，本文件是**事实**，两者角色不同）。
 
 ## 目录
+
+**第一部分：架构设计**
+
+- [一、定位与架构约束](#一定位与架构约束)
+- [二、运行形态与部署拓扑](#二运行形态与部署拓扑)
+- [三、分层与模块边界](#三分层与模块边界)
+- [四、核心架构不变量](#四核心架构不变量)
+- [五、领域数据模型与状态分布](#五领域数据模型与状态分布)
+- [六、回合主链路](#六回合主链路)
+- [七、实时层：房间事件与重连](#七实时层房间事件与重连)
+- [八、规则引擎与 AI 的边界](#八规则引擎与-ai-的边界)
+- [九、记忆、检索与上下文预算](#九记忆检索与上下文预算)
+- [十、联机与信任边界](#十联机与信任边界)
+- [十一、桌面分发链路](#十一桌面分发链路)
+- [十二、契约治理与验证门禁](#十二契约治理与验证门禁)
+- [十三、关键取舍与已知边界](#十三关键取舍与已知边界)
+
+**第二部分：跨模块机制细节**
 
 - [KP 回合三段式：规划器（TurnPlan）与校验器（TurnValidator）](#kp-回合三段式规划器turnplan与校验器turnvalidator)
 - [长局上下文：滚动剧情摘要](#长局上下文滚动剧情摘要)
@@ -11,10 +32,493 @@
 
 ---
 
+# 第一部分：架构设计
+
+## 一、定位与架构约束
+
+TRPG Player 是一个**本地优先的 AI 跑团桌面应用**：AI（或真人）担任 KP，玩家可独自开团，
+也可邀请朋友通过可信局域网或内置直连隧道加入同一房间。
+
+产品定位直接决定了几条架构约束，后面的所有设计都从这里推导：
+
+| 产品事实 | 由此确定的架构约束 |
+|---|---|
+| 玩家的数据（角色、模组、存档、API Key）都在自己机器上 | SQLite 单文件 + 本地素材目录，不引入外部依赖服务；打包时数据落用户可写目录并在迁移前自动备份 |
+| 一局游戏＝一个房间，同时在线人数是个位数 | 实时层刻意做成**进程内**广播与锁，不引入 Redis / 消息总线（[ADR-005](docs/adr/ADR-005-进程内实时态与扩展触发条件.md)） |
+| 跑团的乐趣依赖规则被严肃对待 | AI 只做**语义裁定**，规则状态一律由确定性规则引擎与领域服务变更（[ADR-004](docs/adr/ADR-004-AI语义裁定与规则确定性变更.md)） |
+| 断线重连是常态（笔记本合盖、切网、跨网隧道抖动） | 事件日志 + 稳定序号 + 状态快照对齐，界面任何时候都能从零重建（[ADR-002](docs/adr/ADR-002-事件日志序号与SSE重连.md)） |
+| 只面向「朋友之间」，没有账号体系与 TLS | 明确**不支持公网暴露**；信任边界靠监听地址、来源校验与房主批准（[ADR-001](docs/adr/ADR-001-桌面优先与可信局域网边界.md)、[ADR-007](docs/adr/ADR-007-管理端点仅限本机.md)） |
+| AI 增强件（规划、摘要、配图、幕后推演）随时可能失败 | 增强件一律 **fail-open**，核心状态机 **fail-closed**（见 [§4.6](#46-fail-open-与-fail-closed-的分界)） |
+
+一句话概括当前架构风格：
+
+> **模块化单体（FastAPI）＋ 事件日志 ＋ 进程内实时广播 ＋ AI 编排管线 ＋ 桌面 sidecar 分发**
+
+## 二、运行形态与部署拓扑
+
+同一套代码支持四种运行形态，差别只在「前端从哪来、后端绑哪、客人怎么连」：
+
+| 形态 | 前端 | 后端 | 场景 |
+|---|---|---|---|
+| 开发模式 | Vite `5173`（代理 `/api`） | Uvicorn `8000` | 本地开发调试 |
+| 桌面模式 | Tauri 窗口指向本机后端 | Rust 外壳 spawn PyInstaller sidecar，FastAPI 同源托管 `apps/web/dist` | 首选游玩方式 |
+| 局域网客人 | 客人的 SPA | 客人前端把 `server_url` 指向房主后端 | 同一可信网络多人 |
+| 内置直连客人 | 客人的 SPA 指向 `127.0.0.1:<临时端口>` | 请求经 Tauri 外壳内的 iroh QUIC 隧道反代到房主后端 | 不同网络的朋友 |
+
+```mermaid
+flowchart LR
+    subgraph Guest[客人机器]
+      GUI[React SPA] --> GT[iroh Endpoint<br/>Tauri 外壳]
+    end
+    subgraph Host[房主机器]
+      UI[React SPA] -->|REST /api| API[FastAPI]
+      UI -->|SSE /live| Hub[RoomHub<br/>进程内广播]
+      HT[iroh Endpoint + 反代<br/>Tauri 外壳] --> API
+      API --> SVC[领域服务<br/>session / turn / combat / module …]
+      SVC --> DB[(SQLite<br/>SQLAlchemy + Alembic)]
+      SVC --> EV[(event_logs)]
+      SVC --> RAG[(RuleChunk / ModuleChunk<br/>fastembed 向量)]
+      SVC --> RULES[规则引擎<br/>CoC]
+      SVC --> LLM[LLM Provider<br/>OpenAI 兼容 / Anthropic]
+      SVC --> Hub
+      Tauri[Tauri 外壳] -->|spawn sidecar| API
+    end
+    GT <-.QUIC，打不通走 relay.-> HT
+```
+
+值得注意的分工：**桌面外壳（Rust）不承载任何业务逻辑**，只做三件事——拉起 sidecar 并等健康检查、
+托管窗口、跑内置直连隧道。业务全部在 Python 单体里，因此「桌面版」和「开发版」跑的是同一套代码。
+
+## 三、分层与模块边界
+
+### 3.1 顶层目录
+
+```text
+apps/web/              React 19 + TypeScript + Vite 8 + Tailwind 4 前端 SPA
+  src/api/             API 客户端 + OpenAPI 生成的 TS 类型（generated.ts 不手改）
+  src/pages/           页面级容器
+  src/features/        按特性聚合的数据获取 + 纯逻辑（可测）
+  src/components/      game / character / module / ui 四类组件
+  src/lib/             重连时序、事件分发、主题、地形等纯逻辑
+  src/stores/          Zustand 状态容器（会话、模组）
+server/app/api/        FastAPI 路由：参数校验、授权、触发生成
+server/app/services/   领域服务：会话、回合编排、战斗、追逐、模组、RAG、房间、实时
+server/app/ai/         Provider 抽象、上下文装配、规划器、校验器、子代理、提示词
+server/app/rules/      规则系统抽象 + CoC 确定性实现
+server/app/models/     SQLAlchemy ORM
+server/app/schemas/    Pydantic 请求/响应模型
+server/alembic/        数据库迁移
+server/tests/          后端测试；server/evals/ 叙事与指令评测
+src-tauri/             Tauri 2 桌面外壳 + netlink（iroh 直连）
+docs/adr/              架构决策记录；docs/plans/ 设计稿
+```
+
+### 3.2 后端模块边界
+
+| 模块簇 | 主要文件 | 职责 |
+|---|---|---|
+| 应用入口 | `main.py` | 生命周期（种子初始化 → 迁移 → 维护模式）、来源校验中间件、限流、CORS、SPA 同源托管 |
+| 授权 | `api/deps.py` | 全部会话读写的统一授权语义：viewer / actor / token actor / host / manager / kp / local |
+| 会话域 | `session_service.py` | 席位与房间码、权限判定、事件仓库与序号、回合确认、场景图与位置、待投骰台账 |
+| 回合编排 | `turn_orchestrator.py` | 回合用例编排：开场、玩家行动、检定申请、投骰续写、分头行动、战斗善后、前往、重新生成 |
+| 回合支撑 | `turn_context.py`、`turn_effects.py`、`planned_effects.py`、`turn_event_order.py`、`kp_tool_loop.py`、`narration_protocol.py`、`command_protocol.py`、`chat_event_writer.py` | 上下文取数与校验、确定性副作用、计划落实、事件重排、工具循环与文本兼容路径、叙事流协议、事件落库 |
+| 生成生命周期 | `generation_manager.py`、`generation_lifecycle.py`、`generation_housekeeping.py`、`ai_quota.py` | 单房间生成锁、错误分类、后台收尾任务、房间级配额 |
+| 战斗/追逐 | `combat_service.py`、`chase_service.py` + `rules/coc/combat.py`、`chase.py`、`positioning.py` | 可暂停状态机、先攻队列、方格站位与掩体、抽象距离轨 |
+| 模组/规则书 | `module_service.py`、`module_rag_service.py`、`rulebook_service.py`、`module_map_service.py`、`hex_map.py`、`excel_import.py` | 导入解析、结构化、切块与向量检索、六边形沙盘落位 |
+| 世界状态 | `world_state.py`、`world_memory.py` | `world_state` 的唯一读写口径；线索台账与 NPC 记忆 |
+| 实时层 | `room_hub.py`、`room_events.py`、`room_sync.py`、`event_protocol.py` | 事件类型注册表、SSE 广播、状态快照、线上格式 |
+| 联机边界 | `net_access.py`、`rate_limit.py` | 监听地址与来源三态判定、限流 |
+| 真人 KP | `human_kp_service.py`、`human_kp_actions.py` | KP 私有工作区、AI 参谋草稿、发布动作 |
+| 收尾产物 | `recap_service.py`、`replay_service.py`、`growth_service.py`、`promote_service.py`、`illustration_service.py` | 战报、团记导出、成长结算、临场 NPC 转正、配图 |
+
+### 3.3 前端模块边界
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| 路由壳 | `App.tsx`、`components/layout/*` | 11 条路由、布局、错误边界、全局提示 |
+| API 客户端 | `api/client.ts` | API base 解析、`X-Player-Token` 按**主机身份**归属、上传、SSE 解析 |
+| 直连 IPC | `api/netlink.ts` | 前端唯一不走后端 HTTP 而走 Tauri IPC 的地方（隧道在 Rust 进程里） |
+| 实时时序 | `lib/liveSession.ts`、`lib/roomEvents.ts` | 重连循环（先订阅后对齐）、事件三分类与穷尽分发 |
+| 纯派生 | `features/game-session/derive.ts` | 从事件流派生界面状态，独立可测 |
+| 游戏组件 | `components/game/*` | 战斗 HUD、3D 骰子、调查板、六边形沙盘、追逐、战报、成长 |
+| 状态容器 | `stores/sessionStore.ts`、`moduleStore.ts` | 会话与模组的客户端状态 |
+
+## 四、核心架构不变量
+
+这一节是本文档最重要的部分：下面每一条都是**修改代码时不能破坏的约束**，
+而不是「建议」。绝大多数已经有对应的 ADR 和回归测试。
+
+### 4.1 AI 只做语义裁定，规则状态由确定性代码变更
+
+自然语言本身永远不改变规则状态。模型能做的只有两件事：产出结构化裁定（`TurnPlan`）、
+发起工具调用（`dice_check` / `start_combat` / `scene_change` …）。真正改状态的是
+`RuleEngine` 与领域服务，它们的输入输出可测、可重放。
+
+推论：模型漏调工具不能让状态机悬空——规划器一旦裁定开战，后端在叙事收尾时
+由 `planned_effects._ensure_planned_combat` 补执行；而后端**不会**用关键词正则从叙事里
+猜测发生了什么。详见 [ADR-004](docs/adr/ADR-004-AI语义裁定与规则确定性变更.md) 与
+[第二部分的三段式机制](#kp-回合三段式规划器turnplan与校验器turnvalidator)。
+
+### 4.2 一个事件只能有一个稳定序号
+
+`event_logs(session_id, sequence_num)` 上有数据库唯一约束，序号分配与写入在同一事务边界内，
+冲突回滚重试；回合内重排使用临时序号区间。序号是重连对齐的水位线，也是历史分页的游标。
+`visibility` 列承载可见性（如 `["kp"]` 表示玩家永不可见的幕后事件）。
+
+### 4.3 `world_state` 有唯一读写口径与版本号
+
+`GameSession.world_state` 是一块 JSON，承载战斗、追逐、回合确认、剧情 flag、线索台账、
+NPC 记忆、幕后游标、滚动摘要、RAG 统计、token 用量、战报等。SQLAlchemy 不追踪 JSON 的
+就地修改，因此新代码一律走 `world_state.py` 的 `read` / `get` / `set_key` / `mutate`
+（深拷贝读、整体重赋值写、写入时盖 `SCHEMA_VERSION`），而不是 `dict(session.world_state)`
+再整段回写。边界与拆表规则见 [ADR-003](docs/adr/ADR-003-world-state边界与版本.md)。
+
+### 4.4 实时态刻意留在进程内
+
+`RoomHub`（`dict[str, list[asyncio.Queue]]`）、`GenerationManager`（`dict[str, asyncio.Task]`）、
+限流与配额计数都在单进程内存里。这不是欠债而是选择：桌面版天然单进程，因此不存在
+「加了 `--workers 4` 就悄悄失效」的路径。健壮性靠单进程内的手段补齐——队列有界
+（`MAX_PENDING_CHUNKS`，积压即终止该连接让它重连）、SSE 心跳 15s、重连按快照对齐。
+迁移到 Redis/任务队列的触发条件写在 [ADR-005](docs/adr/ADR-005-进程内实时态与扩展触发条件.md)。
+
+### 4.5 同一房间同一时刻至多一次生成
+
+全应用**唯一**的生成入口是 `GenerationManager.start`——真人发言、AI 队友回合、战斗续跑、
+开场、前往、重新生成都汇到这一处。它同时承担并发锁、房间级配额扣减、in-flight 缓冲切换
+与 usage 追踪。因此不需要 `generation_id`：任一时刻「当前生成」是唯一的。
+
+### 4.6 fail-open 与 fail-closed 的分界
+
+| 类别 | 失败时行为 | 例子 |
+|---|---|---|
+| 生成增强件（fail-open） | 退化为无增强，绝不阻塞跑团 | TurnPlan、TurnValidator、滚动摘要、幕后推演、导演信号、配图、战报、成长、RAG |
+| 核心状态机（fail-closed） | 后端确定性保证落地 | 规划已裁定的开战与伤害、事件序号、world_state 写入、授权 |
+| 启动期（fail-closed） | 进入维护模式而不是带病运行 | 迁移失败 → 除 `/api/health` 外全部返回可读错误页 |
+
+### 4.7 所有会话读写共用一套授权语义
+
+`api/deps.py` 是唯一入口：`require_session_viewer`（读）、`require_session_actor` /
+`require_session_token_actor`（写）、`require_session_host` / `require_session_manager`（管理）、
+`require_session_kp`（真人 KP，与玩家席严格分离）、`require_local_client`（管理本机资产）。
+历史、搜索、SSE、战斗、追逐、库存、成长、战报都走同一套，不各自解释「谁能看」。
+
+### 4.8 前后端契约可生成、可 diff
+
+REST 契约的单一真源是 `server/openapi.json`，前端类型由 `pnpm api:generate` 生成到
+`apps/web/src/api/generated.ts`（不手改）。SSE 事件类型的单一真源是
+`services/room_events.py`，通过只为契约存在的 `GET /sessions/{id}/live/_schema`
+（`response_model=RoomEvent`）进入 OpenAPI。CI 对两份生成物做 `git diff --exit-code`，
+后端改了契约却没重新生成会直接失败。见 [ADR-006](docs/adr/ADR-006-OpenAPI生成与兼容策略.md)。
+
+## 五、领域数据模型与状态分布
+
+### 5.1 持久化模型
+
+| 模型 | 承载 | 架构角色 |
+|---|---|---|
+| `Module` | 场景、NPC、线索、手书、触发器、幕后真相、沙盘节点、车卡建议、RAG 状态 | 可复用剧本定义 |
+| `ModuleChunk` / `Rulebook` + `RuleChunk` | 原文切块 + float32 向量 BLOB | 模组原文 RAG / 规则书 RAG |
+| `Character` | 属性、技能、`system_data`、背景、状态、`owner_token`、`origin_character_id` | 玩家/AI 角色资产；参战副本指回客人库里的原件（[ADR-008](docs/adr/ADR-008-角色数据归属与参战副本.md)） |
+| `GameSession` | 模组引用、状态、`kp_mode`、`host_token`、`room_code`、当前场景、`world_state`、`kp_state`、`turn_state` | 一局游戏的聚合根 |
+| `SessionParticipant` | 席位：`role`（human/ai/kp）、`seat_order`、`is_primary`、`owner_token`、`claimed`、`ready` | 多人房间席位的事实来源 |
+| `EventLog` | `sequence_num`、类型、actor、内容、`visibility`、`metadata` | 会话事件日志与重放来源 |
+
+`kp_state` 是真人 KP 的私有工作区，**永不进入** `SessionRead`，避免玩家端读到。
+
+### 5.2 会话状态分布在三处
+
+1. **结构化列**：`status`、`room_code`、`current_scene_id`、`player_character_id` 等；
+2. **JSON 列**：`world_state`（公共）、`kp_state`（KP 私有）、`turn_state`；
+3. **事件日志**：`event_logs`，玩家输入、叙事、骰子、系统、OOC。
+
+这是一个自觉的取舍：结构化列服务查询与外键，JSON 列服务快速演进的剧情状态，事件日志服务
+重放与重连。代价是 `GameSession` 同时是「会话聚合根 + 多子系统状态仓库 + 运行统计仓库」，
+高频强一致状态（战斗、回合）长期应当拆表，规则写在 ADR-003。
+
+### 5.3 回合确认制
+
+非战斗回合采用**确认制**而非轮转制：玩家的发言先以 `metadata.pending_turn` 暂存并广播，
+所有「需确认」真人都点过推进后（`turn_confirm_state`），`commit_turn` 把暂存转正并触发生成。
+掉线玩家自动豁免，否则一个人关掉浏览器就会让整局永久卡死。进入结构化战斗后，回合模型
+切换为**先攻队列**驱动（`turn_index` 指向当前行动者），覆盖确认制。
+
+## 六、回合主链路
+
+```mermaid
+sequenceDiagram
+    participant UI as GameSessionPage
+    participant API as api/chat.py
+    participant SS as session_service
+    participant GM as GenerationManager
+    participant TO as turn_orchestrator
+    participant PL as turn_planner
+    participant KP as KPAgent + kp_tool_loop
+    participant RS as 规则引擎 / 领域服务
+    participant Hub as RoomHub → SSE
+
+    UI->>API: POST /chat（行动/台词/OOC）
+    API->>SS: 写 pending_turn 事件
+    API->>Hub: 广播事件与 turn_state
+    UI->>API: POST /advance
+    API->>SS: turn_confirm 齐 → commit_turn
+    API->>GM: start(run_chat_generation)
+    GM->>GM: 并发锁 + 房间配额 + in-flight buffer
+    GM->>TO: 执行回合用例
+    TO->>PL: ① TurnPlan（温度 0，JSON）
+    PL-->>TO: 裁定：检定/线索/NPC/场景/开战/安全
+    TO->>KP: ② 注入计划 + KP 上下文，流式叙事
+    KP->>RS: 工具调用（掷骰、SAN、开战、切场景、道具、RAG）
+    RS-->>KP: 确定性结果回注（或 suspend 等真人投骰）
+    TO->>TO: ③ TurnValidator 落库前安检
+    TO->>RS: 计划状态守卫（确保开战/伤害落地）
+    TO->>SS: 持久化事件（唯一序号）
+    TO->>Hub: 广播 token / 离散事件 / done
+    TO-->>TO: 后台收尾：滚动摘要、幕后推演、配图
+```
+
+**生成入口一览**（全部经 `GenerationManager.start`）：
+
+| 入口 | 触发 | 编排函数 |
+|---|---|---|
+| 开场 | `POST /{id}/opening` | `run_opening_generation` |
+| 常规玩家回合 | `POST /{id}/advance` | `run_chat_generation` → `_run_generation` / `_run_split_generation` |
+| 显式申请检定 | `POST /{id}/check` | `run_check_request_generation` |
+| 投骰后续写 | `POST /{id}/roll` | `run_roll_generation` |
+| 大地图前往 | `POST /{id}/travel` | `run_travel_generation` |
+| 战斗善后 | 战斗结束 | `run_combat_aftermath_generation` |
+| 重新生成 | `POST /{id}/regenerate` | `run_regenerate_generation` |
+| 真人 KP 模式 | `POST /{id}/kp/*` | `human_kp_service` + `initialize_human_session` |
+
+只有「常规玩家回合」跑完整三段式；其余入口刻意保持简单，理由见
+[三段式机制的接入点表](#接入点哪些生成路径走三段式)。
+
+**planner 前移**：`TurnPlan` 在 AI 队友回合**之前**就跑，作为本回合的共享契约——队友据
+`plan.direction` 派生的导演提示行动（例如把话头递给被冷落的玩家），KP 叙事时再以队友的
+实际行动 + 同一份 plan 为准。plan 是「裁定意图」而非「剧本」，队友行动后语义不变。
+
+**分头行动**：队伍身处 ≥2 个场景时逐场景生成，整回合共用一份 `TurnPlan`，
+每列以自身所在场景为锚构建上下文并各自过一次校验器。
+
+## 七、实时层：房间事件与重连
+
+### 7.1 事件三分类
+
+`services/room_events.py` 是事件类型的唯一真源：一个 `Literal` 联合 + 一张分类表，
+两份清单在导入期 `assert` 对齐。分类决定**持久化、重放、去重**三套完全不同的规则：
+
+| 分类 | 语义 | 持久化 | 去重规则 | 例子 |
+|---|---|---|---|---|
+| `stream` | 流控与流式片段 | 不进 `event_logs` | 最后一条为准 | `generating`、`done`、`narration`、`typing`、`presence` |
+| `log` | 叙事日志 | 进 `event_logs`，带 id 与 seq | 按 id 去重，断线后从 DB 补 | `dialogue`、`action`、`dice`、`narration_full`、`ooc` |
+| `sync` | 状态失效通知 | 真值在业务表里 | 后到者覆盖 | `combat_state`、`turn_state`、`seat`、`map_update` |
+
+此前这些类型是散落在 20 多个文件里的裸字符串，扁平命名空间正是重连逻辑要写一堆特判的根因。
+现在前端 `lib/roomEvents.ts` 的 `Record<RoomEventType, Category>` 与分发处的 `never` 守卫
+共同保证：后端加一种事件而前端没归类或没处理，`pnpm --filter web typecheck` 直接失败。
+
+编码是传输层职责：业务代码只造 `RoomEvent`，`broadcast` 显式拒收裸字符串，
+`encode_sse` 是唯一拼 `data:` 前缀的地方——将来换 WebSocket 只需要改这一处和 `stream_room`。
+
+### 7.2 重连时序
+
+```text
+断线
+  → 退避 1.5s
+  → ① 先订阅 /live（期间到达的事件进缓冲区）
+  → ② 再对齐：拉历史 + GET /sync（快照注册表 + 事件水位线 seq）
+  → ③ 回放缓冲（log 按 id 去重、sync/stream 后到者覆盖，重复应用安全）
+  → 恢复正常投递
+```
+
+顺序不能反：先对齐再订阅会丢掉两者之间产生的事件，这个窗口在跨网重连时并不窄。
+`GET /sessions/{id}/sync` 用一次往返返回所有需要对齐的系统快照（战斗、追逐、回合确认…），
+新增一个需要对齐的系统只需在 `room_sync.PROVIDERS` 里加一行，不必改前端重连流程。
+协议版本走 `/api/health` 握手，客人连接前比对，不一致明确提示升级。
+
+## 八、规则引擎与 AI 的边界
+
+### 8.1 规则系统插件化
+
+`rules/base.py` 定义 `RuleEngine` 抽象（角色 schema、建卡、校验、技能检定、SAN 检定、
+成长检定等），`rules/registry.py` 按 `rule_system` 注册与取用，`rules/coc/` 是唯一完整实现
+（建卡与职业、检定与难度分档、战斗与方格站位、追逐、疯狂、装备与武器、专精、状态）。
+调用方一律 `get_engine(rule_system)`，不硬编码 CoC。DnD 目前只是**数据类型可选**，
+没有规则引擎实现——这一点在 README 里明确标注为未实现。
+
+`CheckResult` 除成败外还带 d100 逐骰明细（`tens` / `tens_kept` / `units` / `bonus` / `penalty`），
+供前端 3D 骰子严格还原真实掷骰过程，而不是先给结果再演动画。
+
+### 8.2 LLM Provider 抽象
+
+`ai/provider.py` 定义 `LLMProvider`（`complete` / `stream` / `stream_chat`）与流式增量
+`StreamDelta`（`text` / `reasoning` / `tool_call`）。工具调用的参数分片由 Provider 内部聚合，
+**调用方永远拿到完整的 `ToolCall`**，不需要自己拼 JSON 片段。
+`ai/llm_factory.py` 只负责「按激活配置选谁」，实现在 `ai/providers/`（OpenAI 兼容、Anthropic），
+文生图后端可挂 ComfyUI，于是任何协议的文本模型都获得配图能力。
+
+配置分「主模型」与「快模型」（`get_llm` / `get_fast_llm`）：低温结构化调用、分诊、
+摘要等走快模型，主叙事走主模型。
+
+### 8.3 KP 工具注册表与双路径
+
+`ai/tools.py` 是 agent loop 路径的单一真源：每条注册项 = {工具名, OpenAI function schema,
+loop 行为}，行为分四类——`check`（掷骰后回注结果续写，挂真人明骰时 `suspend`）、
+`lookup`（RAG 检索回注，有每轮配额）、`npc`（触发 NPCAgent 生成台词并落库广播）、
+`state`（fire-and-continue 的状态变更）。
+
+供应商不支持工具调用或开关关闭时，保留 `_process_commands` 的方括号文本指令兼容路径。
+两条路径共享规划器、校验器、持久化、世界记忆与最终状态守卫。
+
+### 8.4 子代理
+
+| 代理 | 职责 | 上下文策略 |
+|---|---|---|
+| `KPAgent` | 主叙事与工具循环 | 完整 KP 上下文（预算装配） |
+| `NPCAgent` | 单个 NPC 台词 | `build_npc_context`，只给该 NPC 该知道的 |
+| `TeamAgent` | AI 队友的结构化行动意图 | `build_team_context`，队友视角 |
+| `CombatAgent` | 战斗叙述与关键 NPC 战术决策 | **刻意精瘦**：只给战斗态、本轮结算、场景一句话 |
+| `BackstageAgent` | 玩家不在场时世界按 NPC 动机演进 | 低温 JSON；产物只落 KP 可见事件，绝不直接改 flag |
+
+`ai/director_signals.py` 从事件流确定性地算出节奏提示（聚光灯冷落、卡关、未解悬念），
+作为规划器的**软输入**，只影响叙事表达，不改世界状态。
+
+## 九、记忆、检索与上下文预算
+
+长局的核心矛盾是「上下文窗口有限，但剧情会一直长」。当前用四层机制应对：
+
+1. **上下文预算装配**（`ai/context.py`）：按模型上下文窗口推导预算
+   （`CONTEXT_BUDGET_WINDOW_FRACTION=0.6`，上限 15 万，默认 48k），分项装配系统提示、
+   角色卡、场景、事件全文、摘要，并为输出预留 `RESERVE_FOR_OUTPUT`。
+   `context_estimate.py` 复用同一段装配给用户看分项占用，零 LLM 调用。
+2. **滚动剧情摘要**：持久摘要 + 游标，只把游标之后的事件给全文。
+   详见[第二部分](#长局上下文滚动剧情摘要)。
+3. **世界记忆层**（`world_memory.py`）：把「玩家知道了什么」「NPC 记得什么」从上下文推断
+   变成 `world_state` 里的持久结构——线索台账（partial/known，不降级）与 NPC 记忆
+   （态度/承诺/谎言/最近互动，环形缓冲防膨胀）。纯确定性，零额外 LLM 调用。
+4. **按需 RAG**：规则书与模组原文各自切块并存 float32 向量 BLOB，共用
+   `vector_search.cosine_top_k` 暴力余弦（千级块，不引入向量库）。模组检索对
+   `scene_hint` 命中当前场景的块加权。嵌入走 `ai/embedding.py` 的 `Embedder` 抽象，
+   默认 fastembed + `BAAI/bge-small-zh-v1.5`，纯 ONNX、全本地。
+   检索由模型在需要时通过 `rule_lookup` / `module_lookup` 工具触发，不是每轮无条件塞进去。
+
+`ai/usage_tracker.py` 用 contextvar 按 asyncio task 隔离地累加一次生成里所有 LLM 调用的
+服务端 usage——planner、主叙事、校验器、队友、NPC、幕后、战斗叙述即便用不同 Provider 实例，
+也都记进同一个累加器，最终累进 `world_state.session_usage`。
+
+## 十、联机与信任边界
+
+### 10.1 两道闸
+
+局域网可达性**默认关闭**（`services/net_access.py`）：
+
+1. **监听地址**（socket 层，进程启动时决定）：默认只绑回环，关着就根本连不上。
+   这是主闸，也是 ADR-001 的可信边界所在；socket 绑定不能热改，所以开关需要重启。
+2. **来源校验**（HTTP 中间件，实时生效）：补主闸的两个空档——关掉开关立即对新请求生效；
+   即便端口被误转发到公网，非私有网段（含放行的 CGNAT 100.64.0.0/10）一律拒绝。
+
+### 10.2 来源三态与管理端点
+
+`peer_kind` 把来源分成三态而非二值：`local`（房主本机）、`lan`（局域网客人）、
+`netlink`（内置直连客人）。区分的必要性在于：隧道会把远端客人的请求以 `127.0.0.1`
+反代进来，只看 IP 的话客人会原地变成房主，顺带拿到明文 API Key 与限速豁免。
+
+管理本机资产（AI 配置增删改、素材库删改、Excel 导入、新手团开局）的端点挂
+`require_local_client`，只接受 `local`（[ADR-007](docs/adr/ADR-007-管理端点仅限本机.md)）。
+
+### 10.3 内置直连（netlink）
+
+`src-tauri/src/netlink/` 用 iroh QUIC 把远端客人的 HTTP/SSE 送到房主本机后端：
+
+- **身份**：一把持久化的 iroh 私钥（`identity.rs`，unix 下 0600）。不持久化的话，
+  邀请码每次重启作废、名册永远匹配不上。
+- **邀请码**：`trpg:<EndpointId>:<房间码>`，不加密不签名——EndpointId 本就是公钥，
+  准入由房主批准把关。
+- **准入**：`roster.rs` 名册 + `handshake.rs` 握手。客人连上后第一条流是控制流，
+  自报备注名，房主批准/拒绝；自报的名字**不可信**，真身份是 QUIC 握手证明过的公钥。
+- **安全契约**：`rewrite.rs` 在转发前**无条件剥离**客户端自带的所有 `X-Netlink-*` 头再注入
+  本次隧道的标记。漏掉剥离，客人只要什么都不发就会被后端判成 `local`。
+  HTTP 只在房主侧解析（客人侧是纯字节泵），保证 keep-alive 连接上的**每个**请求都经过改写。
+
+### 10.4 身份与配额
+
+玩家身份仍是本地生成的明文 `X-Player-Token`（局域网 MVP），但**按主机身份隔离**：
+前端为每个 `server identity` 存一份 token，直连场景下用 `netlink:<房主公钥>` 作为稳定标识，
+避免隧道临时端口每次变化导致重连即掉席位。房间内一个 token 只能占一个席位，
+由 `session_participants` 的部分唯一索引在 `identity_version >= 2` 时保证。
+
+滥用防护分两层，各管各的：`rate_limit.py` 按来源限流（防外人敲门、枚举房间码，
+房间码 40 bit），`ai_quota.py` 按房间限配额（防已经进门的人一直点单烧房主额度，默认关闭）。
+
+## 十一、桌面分发链路
+
+```text
+Tauri 窗口 → loader 加载页
+  → spawn resources/trpg-server/trpg-server（PyInstaller onedir sidecar）
+  → sidecar 按开关决定绑回环还是全网卡，挑 8756 或随机空闲端口
+  → stdout 打印 "TRPG_BACKEND_PORT <port>"
+  → loader 轮询 /api/health
+  → 窗口跳转 http://127.0.0.1:<port>
+  → FastAPI 同源托管 web_dist + /api + /live（SPA 深链回退 index.html）
+```
+
+数据安全在这条链路上是重点：打包模式数据目录切到系统用户可写目录
+（mac `~/Library/Application Support/TRPGPlayer`、win `%APPDATA%`、其它 `~/.local/share`），
+启动时先从内置种子初始化再跑迁移，**迁移前自动备份**（WAL checkpoint 后复制单文件，保留 2 份），
+迁移失败进入维护模式而不是以「新代码 + 旧 schema」带病运行。SQLite 开 WAL + busy_timeout，
+让生成写事件时前端拉历史不被阻塞。
+
+## 十二、契约治理与验证门禁
+
+| 契约 | 真源 | 生成物 | 门禁 |
+|---|---|---|---|
+| REST | `server/openapi.json`（由 `scripts/export_openapi.py` 导出） | `apps/web/src/api/generated.ts` | CI 对两者 `git diff --exit-code` |
+| SSE 事件类型 | `services/room_events.py` | 经 `/live/_schema` 进 OpenAPI → 前端字面量联合 | 前端 `Record<RoomEventType, …>` + `never` 守卫，typecheck 失败 |
+| 协议版本 | `room_events.PROTOCOL_VERSION` | `/api/health` | 客人连接前握手比对 |
+
+CI（`.github/workflows/ci.yml`）三个 job：后端 ruff + pytest + evals 冒烟 + OpenAPI diff；
+前端类型生成 diff + typecheck + build + oxlint；gitleaks 密钥扫描。
+`server/evals/` 是叙事与指令质量的离线评测，`--smoke` 模式零 LLM 费用（只验 fixture 可重建、
+上下文可构建、ORM 可用），带模型的完整评测本地手动跑。
+
+## 十三、关键取舍与已知边界
+
+**刻意为之的取舍**
+
+1. **单体而非微服务**：领域复杂但并发极小，边界靠模块与端口约束而非网络调用。
+2. **单进程实时态**：见 [§4.4](#44-实时态刻意留在进程内)，扩展触发条件写在 ADR-005。
+3. **确定性优先**：能用确定性代码算的（世界记忆、导演信号、成长、上下文预估、沙盘落位）
+   一律不调 LLM——省钱、可测、可重放。
+4. **fail-open 的增强件**：宁可退化也不阻塞跑团，因为跑团是实时活动，卡住比降级更糟。
+5. **不重写手写 KP 提示词**：工具注册表只服务 loop 路径，旧正则路径与其手写提示词原样
+   保留为降级开关，避免一次伤筋动骨的全量评估回归。
+
+**已知边界（当前不打算解决）**
+
+1. **不支持公网暴露**：没有账号体系、没有 TLS、`X-Player-Token` 是明文串。跨网请走覆盖网络
+   或内置直连，不要做端口转发。
+2. **`world_state` 仍然过宽**：高频强一致状态（战斗、回合）长期应当拆表；已有版本号与
+   写入口径，但存量调用点仍在增量迁移。
+3. **TurnValidator 只改落库版本**：已流式推给在线玩家的那一瞬收不回。
+4. **重新生成不逆转状态**：只清叙事文本与待投骰请求，不回滚 HP / 场景 / flag。
+5. **DnD 只是数据类型可选**，无规则引擎实现。
+6. **向量检索是应用内暴力余弦**：数据规模上升后需要抽象 `VectorStore`。
+7. **页面级大组件仍在**：`GameSessionPage` / `CharacterPage` / `SettingsPage` 均超千行；
+   可测的时序与派生逻辑已抽出（`lib/liveSession.ts`、`features/game-session/derive.ts`），
+   剩余纯 prop plumbing 的拆分被判定为风险大于收益，等需要为它写测试时再动。
+
+带评审意见与改进优先级的完整分析见 [`docs/architecture.md`](docs/architecture.md)；
+`turn_orchestrator` 的拆分纪律见 [`docs/chat-service-split-discipline.md`](docs/chat-service-split-discipline.md)
+（`chat_service.py` 现已退化为 9 行兼容垫片，回合用例编排已迁至 `turn_orchestrator.py`）。
+
+---
+
+# 第二部分：跨模块机制细节
+
 ## KP 回合三段式：规划器（TurnPlan）与校验器（TurnValidator）
 
-> 代码：`server/app/ai/turn_planner.py`、`server/app/ai/turn_validator.py`、
-> 接入点在 `server/app/services/chat_service.py`。
+> 代码：`server/app/ai/turn_planner.py`、`server/app/ai/turn_validator.py`，
+> 接入点在 `server/app/services/turn_orchestrator.py`
+> （旧路径 `chat_service.py` 现为兼容垫片）。
 > 原始设计稿：[`docs/plans/2026-07-01-kp-turn-planner-design.md`](docs/plans/2026-07-01-kp-turn-planner-design.md)。
 
 ### 背景与动机
@@ -74,13 +578,13 @@ KP 回合拆成三步——用两个**低温辅助 LLM 调用**把主叙事夹�
 
 ### 阶段二：KP 叙事（中间）
 
-单场景主路径在 AI 配置启用工具调用且供应商支持时进入 `_run_kp_agent_loop`：模型的文本增量
-继续实时广播；`dice_check`、`san_check`、`say`、`start_combat`、`scene_change` 等标准工具调用
-由 `_build_kp_tool_executor` 分发给规则或状态服务，执行结果以 `role=tool` 回注模型，再由模型决定
+单场景主路径在 AI 配置启用工具调用且供应商支持时进入 `kp_tool_loop._run_kp_agent_loop`：模型的
+文本增量继续实时广播；`dice_check`、`san_check`、`say`、`start_combat`、`scene_change` 等标准工具
+调用由工具执行器分发给规则或状态服务，执行结果以 `role=tool` 回注模型，再由模型决定
 续写或收束。需要真人掷骰、进入战斗/追逐等工具会返回 `suspend`，立即结束本轮自由叙事。
 
-工具模式关闭或供应商不支持时，系统保留 `_stream_narration_filtered` + `_process_commands` 的文本
-指令兼容路径。两条路径共享规划器、校验器、持久化、世界记忆和最终状态守卫；**规则引擎与状态
+工具模式关闭或供应商不支持时，系统保留文本指令兼容路径（`kp_tool_loop._process_commands`）。
+两条路径共享规划器、校验器、持久化、世界记忆和最终状态守卫；**规则引擎与状态
 服务始终是最终执行者**，自然语言本身不直接改变规则状态。
 
 ### 战斗切换的确定性保证
@@ -95,8 +599,9 @@ KP 回合拆成三步——用两个**低温辅助 LLM 调用**把主叙事夹�
 2. 明确的攻击/射击/格斗宣言会绕过前置的“普通技能检定申请”分诊，确保进入 TurnPlan；该规则
    只决定路由，不凭关键词直接创建战斗，最终仍由规划器结合场景判断。
 3. KP 正常调用 `start_combat` 时，工具执行器立即创建战斗态、广播先攻与当前行动者并挂起叙事。
-4. 叙事和文本指令处理结束后，`_ensure_planned_combat` 检查计划与持久化战斗态：计划要求开战
-   但尚无活动战斗时，由后端补执行 `_exec_start_combat`；已有战斗则幂等跳过，不会重复开场。
+4. 叙事和文本指令处理结束后，`planned_effects._ensure_planned_combat` 检查计划与持久化战斗态：
+   计划要求开战但尚无活动战斗时，由后端补执行 `_exec_start_combat`；已有战斗则幂等跳过，
+   不会重复开场。
 5. 该守卫同时接在单场景工具路径、单场景文本兼容路径和分头叙事收尾，避免模型能力或开关差异
    改变核心状态机行为。
 
@@ -105,7 +610,8 @@ KP 回合拆成三步——用两个**低温辅助 LLM 调用**把主叙事夹�
 
 ### 阶段三：TurnValidator（落库前安检）
 
-- **触发**：叙事流跑完、**落库前**，`_validate_and_patch_narration`；单场景与分头每列各校验一次。
+- **触发**：叙事流跑完、**落库前**，`turn_context._validate_and_patch_narration`；单场景与分头
+  每列各校验一次。
 - **零成本预筛**（`_looks_suspicious`）：并非每轮都调 LLM。只有满足其一才值得付这次调用——
   (a) `safety.do_not_reveal` 非空（有硬隐藏信息，泄露代价高）；(b) 文本已出现「汇报体」正则
   特征；(c) 出现 `flag_xxx` 这类内部标识。都不满足则直接放行。
@@ -126,13 +632,16 @@ KP 回合拆成三步——用两个**低温辅助 LLM 调用**把主叙事夹�
 |----------|------|:-------:|:---------:|
 | 常规玩家输入（单场景） | `_run_generation` | ✓ | ✓ |
 | 常规玩家输入（分头分栏） | `_run_split_generation` | ✓（每列注入同一份） | ✓（每列各校验） |
-| 玩家显式申请检定 / 意图分诊命中 | `_run_kp_turn` ← `run_check_request_generation` | ✗ | ✗ |
+| 回合内检定申请分诊命中 | `run_chat_generation` → `_run_kp_turn` | ✓（复用本回合那一份） | ✗ |
+| 玩家从界面显式申请检定 | `_run_kp_turn` ← `run_check_request_generation` | ✗ | ✗ |
 | 投骰后续写 | `_run_kp_turn` ← `run_roll_generation` | ✗ | ✗ |
 | 大地图前往（travel） | `_run_kp_turn` ← `run_travel_generation` | ✗ | ✗ |
 | 开场 | `_run_generation`（`events` 为空） | ✗ | ✗ |
 
-> 检定意图仍由独立的轻量分诊 `_detect_check_request` 处理，未被 planner 取代（降低风险；
-> 见设计稿「待确认决策 2」）。
+> **检定意图分诊已并入 planner**：原先独立的一次轻量分诊 LLM 调用被 `TurnPlan.player_check_request`
+> 取代，省掉一段串行延迟。分诊命中时直接走确定性检定裁定（避免被 KP 当叙事顺过去），
+> 不再跑队友回合与常规叙事；明确的战斗宣言（`_looks_like_combat_declaration`）
+> 与 `combat.should_start` 不走此路。
 
 ### 分头行动下的行为
 
@@ -156,8 +665,9 @@ KP 回合拆成三步——用两个**低温辅助 LLM 调用**把主叙事夹�
 - 规划器：`server/app/ai/turn_planner.py`（`TurnPlan` / `build_turn_plan_messages` /
   `run_turn_planner` / `build_turn_plan_message`）
 - 校验器：`server/app/ai/turn_validator.py`（`_looks_suspicious` / `validate_turn_narration`）
-- 接入：`server/app/services/chat_service.py`（`_run_generation` / `_run_split_generation` /
-  `_run_kp_agent_loop` / `_ensure_planned_combat` / `_validate_and_patch_narration`）
+- 接入：`server/app/services/turn_orchestrator.py`（`_run_generation` / `_run_split_generation`）、
+  `kp_tool_loop.py`（`_run_kp_agent_loop` / `_process_commands`）、
+  `planned_effects.py`（`_ensure_planned_combat`）、`turn_context.py`（`_validate_and_patch_narration`）
 - 测试：`server/tests/test_turn_planner.py`、`server/tests/test_turn_validator.py`、
   `server/tests/test_kp_tool_loop.py`、`server/tests/test_chat_service.py`
 
@@ -166,7 +676,7 @@ KP 回合拆成三步——用两个**低温辅助 LLM 调用**把主叙事夹�
 ## 长局上下文：滚动剧情摘要
 
 > 代码：`server/app/ai/story_summarizer.py`、`build_kp_context`（`server/app/ai/context.py`）、
-> `_maybe_roll_story_summary`（`server/app/services/chat_service.py`）。
+> `_maybe_roll_story_summary`（`server/app/services/generation_housekeeping.py`）。
 
 **问题**：KP 上下文按 token 预算装配「最近事件全文 + 更早事件的即时摘要」。游戏一长，
 即时摘要（`_summarize_old_events`）只能粗暴截断老事件，KP 逐渐「失忆」中段与近段剧情、
@@ -191,7 +701,8 @@ KP 回合拆成三步——用两个**低温辅助 LLM 调用**把主叙事夹�
 ## 重新生成：回滚并重跑最新一轮 KP
 
 > 代码：`generation_manager.cancel`、`session_service.rollback_last_kp_output`、
-> `run_regenerate_generation`、`POST /{session}/regenerate`；前端在 `GameSessionPage.tsx`。
+> `turn_orchestrator.run_regenerate_generation`、`POST /{session}/regenerate`；
+> 前端在 `GameSessionPage.tsx`。
 
 **问题**：生成到一半断网时，KP 侧会卡住（僵死 task 占着并发锁、`done` 永不来），且断流时
 落库的半截叙事会污染下一轮上下文。
