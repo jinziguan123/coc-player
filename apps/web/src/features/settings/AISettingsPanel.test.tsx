@@ -11,6 +11,11 @@ vi.mock('@/api/client', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
+/** 生图配置在第二个 tab 里，Radix 只渲染选中页，测它得先切过去。 */
+async function openImageTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('tab', { name: '生图模型' }))
+}
+
 /** Modal 是无 role 的 portal 容器，用弹窗标题回溯到面板本身作为查询范围。 */
 async function findDialog(title: string | RegExp): Promise<HTMLElement> {
   const heading = await screen.findByRole('heading', { name: title })
@@ -70,21 +75,31 @@ describe('AI 配置面板', () => {
     mockLists([chatProfile], [imageProfile])
   })
 
-  it('对话模型与生图模型分成两个各自独立的区块', async () => {
+  it('对话模型与生图模型各自成页，一次只显示一套配置', async () => {
+    const user = userEvent.setup()
     render(<AISettingsPanel />)
 
-    expect(await screen.findByRole('heading', { name: '对话模型' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: '生图模型' })).toBeInTheDocument()
-    // 生图配置有自己的列表项与「使用中」标记，不再寄生在对话配置的徽章上
-    expect(screen.getByText('ComfyUI（172.30.18.236）')).toBeInTheDocument()
+    // 默认停在「对话模型」：只看得到对话配置
+    expect(await screen.findByRole('tab', { name: '对话模型' })).toHaveAttribute(
+      'data-state', 'active',
+    )
+    expect(screen.getByRole('button', { name: '编辑 deepseek 主力' })).toBeInTheDocument()
+    expect(screen.queryByText('ComfyUI（172.30.18.236）')).not.toBeInTheDocument()
+
+    await openImageTab(user)
+    expect(await screen.findByText('ComfyUI（172.30.18.236）')).toBeInTheDocument()
     expect(screen.getByText('http://172.30.18.236:8188')).toBeInTheDocument()
+    // 对话配置整套都退场了，不是叠在下面
+    expect(screen.queryByRole('button', { name: '编辑 deepseek 主力' })).not.toBeInTheDocument()
   })
 
   it('没有生图配置时明确说明「不出图但不影响跑团」', async () => {
+    const user = userEvent.setup()
     mockLists([chatProfile], [])
     render(<AISettingsPanel />)
+    await openImageTab(user)
 
-    expect(await screen.findByText(/尚未配置生图模型/)).toBeInTheDocument()
+    expect(await screen.findByText(/还没有添加生图模型/)).toBeInTheDocument()
   })
 
   it('编辑弹窗把连接四件套收在同一页，密钥不再被高级配置隔开', async () => {
@@ -98,8 +113,9 @@ describe('AI 配置面板', () => {
     expect(within(dialog).getByDisplayValue('https://api.deepseek.com')).toBeInTheDocument()
     expect(within(dialog).getByDisplayValue('deepseek-chat')).toBeInTheDocument()
     expect(within(dialog).getByDisplayValue('sk-1****4321')).toBeInTheDocument()
-    // 生图字段已经不在对话配置里了
+    // 生图字段已经不在对话配置里了（连同整个生图页都是独立的）
     expect(within(dialog).queryByText(/ComfyUI/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/生图/)).not.toBeInTheDocument()
   })
 
   it('推理档位只在 OpenAI 兼容协议下出现', async () => {
@@ -125,7 +141,7 @@ describe('AI 配置面板', () => {
     // 选择器不出现——填了也不会下发，摆着只会误导
     expect(within(dialog).queryByRole('combobox', { name: /推理档位/ })).not.toBeInTheDocument()
     // 但旧值必须说清楚它已经失效，否则用户以为还在起作用
-    expect(within(dialog).getByRole('alert')).toHaveTextContent(/不接受该参数/)
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(/不支持这项设置/)
 
     await user.click(within(dialog).getByRole('button', { name: '清除' }))
     expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
@@ -159,6 +175,7 @@ describe('AI 配置面板', () => {
     mockLists([chatProfile], [{ ...imageProfile, is_active: false }])
     mockPost.mockResolvedValue({ status: 'ok' })
     render(<AISettingsPanel />)
+    await openImageTab(user)
 
     await user.click(await screen.findByRole('button', { name: /使用 ComfyUI（172.30.18.236） 出图/ }))
     await waitFor(() =>
@@ -174,7 +191,8 @@ describe('AI 配置面板', () => {
   it('新增生图配置时按后端切换表单字段', async () => {
     const user = userEvent.setup()
     render(<AISettingsPanel />)
-    await user.click(await screen.findByRole('button', { name: '+ 新增生图配置' }))
+    await openImageTab(user)
+    await user.click(await screen.findByRole('button', { name: '+ 新增配置' }))
 
     const dialog = await findDialog('新增生图配置')
     // 默认 OpenAI 后端：填模型名与密钥，不该出现 ComfyUI 工作流框

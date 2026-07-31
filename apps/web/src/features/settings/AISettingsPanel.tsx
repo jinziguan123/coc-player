@@ -217,15 +217,38 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
     <div>
       <h2 className="page-title">AI 配置</h2>
 
-      <h3 className="card-title" style={{ fontSize: '1rem', marginBottom: '0.35rem' }}>
-        对话模型
-      </h3>
-      <p
-        className="text-xs"
-        style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
+      {/* 两类模型互不相干，各自独立成页：一次只看一套配置，不必在长页面里上下找。
+          页面级页签按内容宽度左对齐——tabs.tsx 默认的 flex-1 是给窄弹窗用的，
+          铺满整行会把两个标签拉成两条大色块。 */}
+      <Tabs defaultValue="chat">
+        <TabsList style={{ marginBottom: '1.25rem' }}>
+          <TabsTrigger value="chat" className="!flex-none !text-[length:var(--text-sm)] px-5">
+            对话模型
+          </TabsTrigger>
+          <TabsTrigger value="image" className="!flex-none !text-[length:var(--text-sm)] px-5">
+            生图模型
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="chat" className="!p-0">
+      <div
+        style={{
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          gap: '1rem', marginBottom: '0.85rem',
+        }}
       >
-        KP 叙事、NPC 台词与各类结构化裁定都走它。
-      </p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)', margin: 0 }}>
+          游戏里主持人的叙述、NPC 的对话，以及骰子和规则的判定，都由这个模型生成。
+        </p>
+        <button
+          className="btn-primary !px-3 !py-1.5 !text-[length:var(--text-xs)]"
+          style={{ flexShrink: 0 }}
+          onClick={startCreate}
+          disabled={editingId !== null}
+        >
+          + 新增配置
+        </button>
+      </div>
 
       {/* 当前激活配置状态 */}
       <div
@@ -262,7 +285,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
             </>
           ) : (
             <span style={{ color: 'var(--color-text-secondary)' }}>
-              暂无激活配置，将使用环境变量默认值
+              还没有启用任何配置，请先添加一个并点「激活」
             </span>
           )}
         </span>
@@ -334,7 +357,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   </button>
                 )}
                 <button
-                  className="chip chip--accent hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
+                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
                   onClick={() => handleToggleFast(p.id)}
                   aria-label={`${p.is_fast ? '取消' : '设为'}快模型 ${p.name}`}
                   title="快模型：裁定 planner、AI 队友、滚动摘要等结构化副任务改走此配置（KP 叙事仍走激活配置）；再点一次取消"
@@ -366,7 +389,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   {testingId === p.id ? '测试中…' : '测试'}
                 </button>
                 <button
-                  className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                  className="chip hover:!border-[var(--color-danger)] hover:!text-[var(--color-danger)] transition-colors"
                   onClick={() => handleDelete(p.id, p.name)}
                   aria-label={`删除 ${p.name}`}
                 >
@@ -377,10 +400,6 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
           ))}
         </div>
       )}
-
-      <button className="btn-primary" onClick={startCreate} disabled={editingId !== null}>
-        + 新增配置
-      </button>
 
       {editingId !== null && (
         <Modal onClose={cancelEdit} widthClass="max-w-xl" padded>
@@ -448,7 +467,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                     className="block text-sm font-semibold mb-1"
                     style={{ fontSize: '0.85rem' }}
                   >
-                    Base URL
+                    服务地址
                   </label>
                   <input
                     type="text"
@@ -482,7 +501,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   value={form.api_key}
                   onChange={(v) => setForm({ ...form, api_key: v })}
                   placeholder={form.protocol === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
-                  hint="如果使用本地模型（如 Ollama），可以留空"
+                  hint="使用本机运行的模型（如 Ollama）时可以留空"
                   revealKey={revealKey}
                 />
               </div>
@@ -507,8 +526,9 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                     支持视觉（多模态）
                   </label>
                   <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    勾选后才能用「据图片生成地图 / 图片模组解析」等看图功能。请确保所选模型确实支持视觉
-                    （如 GPT-4o / Claude / Gemini / Qwen-VL）。这是「看图」，与出图无关。
+                    勾选后才能使用「上传图片生成地图」「图片剧本解析」等需要模型看图的功能。
+                    请确认所选模型支持看图（如 GPT-4o、Claude、Gemini、Qwen-VL）。
+                    这里说的是「看懂图片」，生成图片请到「生图模型」页设置。
                   </p>
                 </div>
 
@@ -530,7 +550,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                     }
                   />
                   <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    用于游戏页「上下文占用」预估，判断模型还撑不撑得住继续跑团。填 0 则自动按模型名推断。
+                    用来估算游戏页显示的「上下文占用」，提示这局还能继续多久。留空会按模型名自动判断。
                   </p>
                 </div>
 
@@ -557,8 +577,8 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                       <option value="xhigh">xhigh</option>
                     </select>
                     <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      仅对支持推理的模型生效（如 gpt-5 系）。设定后会一并省略 temperature；
-                      非推理模型请留「默认」，否则个别端点会因未知参数报错。
+                      只对带推理能力的模型有用（如 gpt-5 系列）。档位越高思考越久、也越贵。
+                      普通模型请保持「默认」，否则有些服务会直接报错。
                     </p>
                   </div>
                 ) : (
@@ -566,8 +586,8 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                     <div className="notice notice--danger" role="alert">
                       <AlertTriangle size={13} style={{ flexShrink: 0 }} aria-hidden="true" />
                       <span>
-                        这份配置留着推理档位「{form.reasoning_effort}」，但 Anthropic 协议不接受该参数，
-                        保存后也不会下发。
+                        这份配置里还留着推理档位「{form.reasoning_effort}」，但 Anthropic 的模型不支持这项设置，
+                        它不会起任何作用。
                       </span>
                       <button
                         type="button"
@@ -594,7 +614,12 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
         </Modal>
       )}
 
-      <ImageProfilePanel />
+        </TabsContent>
+
+        <TabsContent value="image" className="!p-0">
+          <ImageProfilePanel />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

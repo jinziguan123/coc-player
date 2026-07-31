@@ -70,8 +70,6 @@ export function ImageProfilePanel() {
     void fetchProfiles()
   }, [fetchProfiles])
 
-  const active = profiles.find((p) => p.is_active)
-
   const startCreate = () => {
     setEditingId('new')
     setForm(EMPTY_FORM)
@@ -168,25 +166,32 @@ export function ImageProfilePanel() {
   if (loading) return <p style={{ color: 'var(--color-text-secondary)' }}>加载中...</p>
 
   return (
-    <div style={{ marginTop: '2rem' }}>
-      <h3
-        className="card-title"
-        style={{ fontSize: '1rem', marginBottom: '0.35rem' }}
+    <div>
+      {/* 标题由所在的 tab 承担，这里不再重复一遍 */}
+      <div
+        style={{
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          gap: '1rem', marginBottom: '0.85rem',
+        }}
       >
-        生图模型
-      </h3>
-      <p
-        className="text-xs"
-        style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
-      >
-        手书配图、场景插画与沙盘底图用它出图，与上面的对话模型各走各的——
-        用 Anthropic 跑团也能配 OpenAI 或本地 ComfyUI 出图。不配则不出图，游戏照常进行。
-      </p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)', margin: 0 }}>
+          游戏中的场景插画、信件与道具图片由这个模型生成。它和对话模型是分开的，
+          可以各用各的服务。不填也能正常游戏，只是没有配图。
+        </p>
+        <button
+          className="btn-primary !px-3 !py-1.5 !text-[length:var(--text-xs)]"
+          style={{ flexShrink: 0 }}
+          onClick={startCreate}
+          disabled={editingId !== null}
+        >
+          + 新增配置
+        </button>
+      </div>
 
       {profiles.length === 0 ? (
         <div className="card" style={{ marginBottom: '1rem' }}>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)', margin: 0 }}>
-            尚未配置生图模型——手书与场景配图会静默跳过，不影响跑团。
+            还没有添加生图模型，游戏中不会生成图片。这不影响正常游戏。
           </p>
         </div>
       ) : (
@@ -257,12 +262,12 @@ export function ImageProfilePanel() {
                   onClick={() => handleTest(p.id)}
                   disabled={testingId !== null}
                   aria-label={`测试生图 ${p.name}`}
-                  title="真出一张图，验证这份配置能否用于配图"
+                  title="真出一张图，确认这份配置能正常生成图片"
                 >
                   {testingId === p.id ? '测试中…' : '测试生图'}
                 </button>
                 <button
-                  className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                  className="chip hover:!border-[var(--color-danger)] hover:!text-[var(--color-danger)] transition-colors"
                   onClick={() => handleDelete(p.id, p.name)}
                   aria-label={`删除 ${p.name}`}
                 >
@@ -273,10 +278,6 @@ export function ImageProfilePanel() {
           ))}
         </div>
       )}
-
-      <button className="btn-secondary" onClick={startCreate} disabled={editingId !== null}>
-        + 新增生图配置
-      </button>
 
       {editingId !== null && (
         <Modal onClose={cancelEdit} widthClass="max-w-xl" padded>
@@ -306,7 +307,7 @@ export function ImageProfilePanel() {
                   className="block text-sm font-semibold mb-1"
                   style={{ fontSize: '0.85rem' }}
                 >
-                  出图后端
+                  生图方式
                 </label>
                 <Select
                   value={form.backend}
@@ -318,8 +319,8 @@ export function ImageProfilePanel() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="openai">OpenAI 接口</SelectItem>
-                    <SelectItem value="comfyui">ComfyUI</SelectItem>
+                    <SelectItem value="openai">在线服务（OpenAI 等）</SelectItem>
+                    <SelectItem value="comfyui">本机 ComfyUI</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -355,12 +356,12 @@ export function ImageProfilePanel() {
                         fontSize: '0.78rem',
                         resize: 'vertical',
                       }}
-                      placeholder={'从 ComfyUI 菜单导出 (API) 格式粘贴到这里；\n正/负提示词处分别写 PLACEHOLDER_POSITIVE / PLACEHOLDER_NEGATIVE 占位；\n留空则使用内置默认工作流。'}
+                      placeholder={'留空即可，会用内置的默认流程。\n想用自己的流程：在 ComfyUI 里「导出 (API)」，把内容粘贴到这里，\n并把正、反向提示词分别改成 PLACEHOLDER_POSITIVE 和 PLACEHOLDER_NEGATIVE。'}
                       value={form.comfyui_workflow}
                       onChange={(e) => setForm({ ...form, comfyui_workflow: e.target.value })}
                     />
                     <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      后端会把正/负提示词占位符替换成画面描述后提交生图。
+                      生成时会把这两个占位词替换成实际的画面描述。
                     </p>
                   </div>
                 </>
@@ -385,11 +386,11 @@ export function ImageProfilePanel() {
                       className="block text-sm font-semibold mb-1"
                       style={{ fontSize: '0.85rem' }}
                     >
-                      Base URL
+                      服务地址
                     </label>
                     <input
                       className="input w-full"
-                      placeholder="留空则用 https://api.openai.com/v1"
+                      placeholder="留空则使用 OpenAI 官方地址"
                       value={form.base_url}
                       onChange={(e) => setForm({ ...form, base_url: e.target.value })}
                     />
@@ -398,7 +399,7 @@ export function ImageProfilePanel() {
                     value={form.api_key}
                     onChange={(v) => setForm({ ...form, api_key: v })}
                     placeholder="sk-..."
-                    hint="生图与对话常不在同一分组/供应商，这里填生图端点自己的密钥。"
+                    hint="填这个生图服务自己的密钥；它与对话模型的密钥互不相干。"
                     revealKey={revealKey}
                   />
                 </>
@@ -415,12 +416,6 @@ export function ImageProfilePanel() {
             </div>
           </div>
         </Modal>
-      )}
-
-      {active && (
-        <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: '0.6rem' }}>
-          当前用「{active.name}」出图。保存后点该卡片的「测试生图」可确认是否真的能出图。
-        </p>
       )}
     </div>
   )
