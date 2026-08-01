@@ -194,6 +194,37 @@ def _plan_check_call(plan: turn_planner.TurnPlan) -> ToolCall:
     return ToolCall(id=f"fallback_{uuid.uuid4().hex[:8]}", name="dice_check", arguments=args)
 
 
+# 工具名 → 这一步之后玩家该看到的等待说明。措辞按玩家视角写，不出现工具名/字段名。
+_STEP_NOTES: dict[str, str] = {
+    "dice_check": "守秘人正在结算这次检定…",
+    "opposed_check": "守秘人正在结算这次对抗…",
+    "san_check": "守秘人正在结算理智…",
+    "hp_change": "守秘人正在结算伤势…",
+    "start_combat": "战斗即将开始…",
+    "start_chase": "追逐即将开始…",
+    "scene_change": "守秘人正在带你们前往新的地方…",
+    "handout": "守秘人正在准备要给你们的东西…",
+    "rule_lookup": "守秘人正在翻阅规则书…",
+    "module_lookup": "守秘人正在翻阅剧本…",
+    "set_flag": "守秘人正在推进剧情…",
+    "clear_flag": "守秘人正在推进剧情…",
+    # say / npc_act 不单列：它们之后紧接着往往就是正文，用通用措辞即可。
+}
+_STEP_NOTE_DEFAULT = "守秘人正在继续…"
+
+
+def _step_note(tool_calls: list[ToolCall]) -> str:
+    """本步执行了哪些工具 → 一句给玩家看的等待说明。
+
+    多个工具时取第一个有专门措辞的；都没有则用通用兜底。
+    """
+    for tc in tool_calls:
+        note = _STEP_NOTES.get(tc.name)
+        if note:
+            return note
+    return _STEP_NOTE_DEFAULT
+
+
 def _build_kp_tool_executor(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     player_char: Character, teammates: list[Character] | None, llm,
@@ -514,6 +545,10 @@ async def _run_kp_agent_loop(
                 suspended = True
         if suspended:
             return
+        # 调过工具就必须再跑一轮，哪怕只是为了确认「没有更多工具了」——那一轮往往几乎不产
+        # 文本，屏幕上只剩一个不动的脉冲点。这里说明一句正在做什么；下一轮一有正文到达，
+        # 前端会自行清掉这行字（见 GameSessionPage 对 narration 增量的处理）。
+        yield _make_chunk("housekeeping", _step_note(tool_calls))
 
     if not natural_end:
         # 步数超限：注入收束指令，最后一次不带工具生成收尾

@@ -383,6 +383,7 @@ def _recent_seen_text(events: list | None, limit: int = 6) -> str:
 async def _validate_and_patch_narration(
     llm, plan: turn_planner.TurnPlan | None, result: list,
     event_order: list | None = None, seen_context: str = "", turn_inputs: str = "",
+    on_start=None,
 ) -> None:
     """校验本轮旁白是否违反裁定计划的硬约束（泄露 do_not_reveal / 汇报体+内部标识泄露），
     违反则用改写版本替换落库文本，防止违规内容永久留在会话记录里。
@@ -399,7 +400,7 @@ async def _validate_and_patch_narration(
     if turn_inputs:
         validator_kwargs["turn_inputs"] = turn_inputs
     validation = await turn_validator.validate_turn_narration(
-        llm, plan, result[0], **validator_kwargs,
+        llm, plan, result[0], on_start=on_start, **validator_kwargs,
     )
     if validation is None or not validation.violated:
         return

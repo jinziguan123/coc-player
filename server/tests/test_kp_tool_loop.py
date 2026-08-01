@@ -153,9 +153,10 @@ def test_tool_result_feedback_order():
     assert tool_msg["tool_call_id"] == "call_1"
     # 两步文本聚合进同一 result（validator/落库直接复用旧路径收尾）
     assert result[0] == "你俯身敲击。尘埃落定。"
-    # 广播顺序：step1 旁白 → 工具的 system chunk → step2 旁白
+    # 广播顺序：step1 旁白 → 工具的 system chunk → 等待说明 → step2 旁白
+    # （housekeeping 是给玩家看的「正在做什么」，下一轮正文一到前端就会清掉它）
     kinds = [c.type for c in chunks]
-    assert kinds == ["narration", "system", "narration"]
+    assert kinds == ["narration", "system", "housekeeping", "narration"]
 
 
 def test_reasoning_content_is_preserved_for_tool_continuation():
@@ -607,3 +608,58 @@ def test_executor_dispatch_covers_registry():
     from app.services.chat_service import _build_kp_tool_executor
     ex = _build_kp_tool_executor(None, "s", None, None, None, None, None, ["", "", [], [], []])
     assert ex._handled_tools == set(kp_tools.TOOLS_BY_NAME)
+
+
+# ── 等待期文案 ──────────────────────────────────────────────────────────
+# 调过工具就必须再跑一轮（哪怕只为确认「没有更多工具」），那一轮往往几乎不产文本：
+# 屏幕上只剩一个不动的脉冲点。循环在每次工具执行后补一条 housekeeping 说明在做什么。
+
+
+def _housekeeping_notes(chunks: list) -> list[str]:
+    return [c.content for c in chunks if c.type == "housekeeping"]
+
+
+def test_emits_wait_note_after_tool_step():
+    """执行完工具、要再跑一轮时给出说明，且按工具类型措辞。"""
+    llm = _FakeToolLLM([
+        [_text("你俯身查看。"), _call("dice_check", {"skill": "侦查"})],
+        [_text("尘埃落定。")],
+    ])
+    _result, chunks = asyncio.run(_run_loop(llm, _RecordingExecutor()))
+
+    notes = _housekeeping_notes(chunks)
+    assert len(notes) == 1
+    assert "结算这次检定" in notes[0]
+
+
+def test_wait_note_falls_back_for_unmapped_tools():
+    """没有专门措辞的工具（say/npc_act 等）用通用说法，而不是漏掉说明。"""
+    llm = _FakeToolLLM([
+        [_call("say", {"npc": "乘务员", "text": "别过去"})],
+        [_text("他往后缩了缩。")],
+    ])
+    _result, chunks = asyncio.run(_run_loop(llm, _RecordingExecutor()))
+
+    notes = _housekeeping_notes(chunks)
+    assert len(notes) == 1 and "守秘人正在继续" in notes[0]
+
+
+def test_no_wait_note_when_loop_ends_naturally():
+    """一次工具都没调 → 本轮就此结束，不该凭空冒出一句「正在…」。"""
+    llm = _FakeToolLLM([[_text("车厢安静下来。")]])
+    _result, chunks = asyncio.run(_run_loop(llm, _RecordingExecutor()))
+
+    assert _housekeeping_notes(chunks) == []
+
+
+def test_no_wait_note_when_suspended():
+    """挂起（如已挂待玩家投骰）→ 本轮收束，不再有下一轮，也就不需要说明。"""
+    llm = _FakeToolLLM([
+        [_text("请投骰。"), _call("dice_check", {"skill": "幸运"})],
+    ])
+    executor = _RecordingExecutor({
+        "dice_check": kp_tools.ToolOutcome("pending", suspend=True),
+    })
+    _result, chunks = asyncio.run(_run_loop(llm, executor))
+
+    assert _housekeeping_notes(chunks) == []

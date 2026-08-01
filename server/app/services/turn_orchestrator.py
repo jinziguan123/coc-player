@@ -284,6 +284,13 @@ _ensure_scene_entry_checks = planned_effects._ensure_scene_entry_checks
 
 
 
+def _validator_note(session_id: str):
+    """校验器真要调 LLM 时，告诉玩家这段静默在做什么（叙事流此时已经停了）。"""
+    return lambda: room_hub.broadcast(
+        session_id, _make_chunk("housekeeping", "守秘人正在复核这段叙述…"),
+    )
+
+
 async def _run_generation(
     db: Session,
     session_id: str,
@@ -408,7 +415,7 @@ async def _run_generation(
         _record_turn_usage(db, game_session, llm, events)   # validator 前，趁 last_usage 仍是主叙事那次
         await _validate_and_patch_narration(
             llm, plan, result, event_order, seen_context=_recent_seen_text(events),
-            turn_inputs=turn_inputs,
+            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
         )
         _persist_narration(db, session_id, result, event_order)
         _reorder_turn_events(db, session_id, event_order, base_seq)
@@ -434,7 +441,7 @@ async def _run_generation(
         _record_turn_usage(db, game_session, llm, events)   # validator 前，趁 last_usage 仍是主叙事那次
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
-            turn_inputs=turn_inputs,
+            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
         )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
@@ -599,7 +606,7 @@ async def _run_split_generation(
             raise
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
-            turn_inputs=turn_inputs,
+            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
         )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本组 NPC 台词记入其互动史（听众＝该组成员，信息不跨组共享）

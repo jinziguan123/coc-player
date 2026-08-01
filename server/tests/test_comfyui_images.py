@@ -12,7 +12,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.ai import comfyui
-from app.ai.provider import LLMProvider
 from app.models import Base, Character, EventLog, GameSession, Module  # noqa: F401
 from app.services import session_service
 

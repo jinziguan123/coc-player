@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -115,18 +116,24 @@ def build_validator_messages(
 
 async def validate_turn_narration(
     llm: Any, plan: TurnPlan | None, narration: str, seen_context: str = "",
-    turn_inputs: str = "",
+    turn_inputs: str = "", on_start: Callable[[], None] | None = None,
 ) -> TurnValidation | None:
     """校验一段已生成的旁白是否违反本轮裁定计划的硬约束，违反则给出改写版本。
 
     只对『落库/持久化的文本』生效——无法收回已经流式广播出去的内容，但能防止违规
     内容永久留在会话记录里（重连、其他玩家、复盘都会看到落库版本）。
     校验失败（无 LLM / 解析出错 / 调用异常）一律放行原文，不阻塞跑团。
+
+    ``on_start`` 在**确定要真的调一次 LLM 时**才触发（短路掉的绝大多数轮次不触发），
+    调用方据此告诉玩家这段静默在做什么——这一步发生在叙事流已经停下之后，不说明的话
+    界面上只剩一个不动的脉冲点。
     """
     if plan is None or llm is None or not narration.strip():
         return None
     if not _looks_suspicious(narration, plan, turn_inputs):
         return None
+    if on_start is not None:
+        on_start()
 
     messages = build_validator_messages(plan, narration, seen_context, turn_inputs)
     try:
