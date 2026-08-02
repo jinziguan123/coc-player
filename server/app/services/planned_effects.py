@@ -493,7 +493,16 @@ async def _ensure_planned_items(
 
     幂等：按「本轮玩家行动锚序号 + 获/失 + 名字 + 角色」去重（存 world_state.item_delta_keys），
     重新生成不会重复增减。物品效果仍由 KP 叙述——这里只保证库存数目可靠。
+
+    **未决检定不预发收益**：本轮 requires_check=true 时，获得一律转入 world_state.pending_item_gains
+    暂存，等检定结算出来再由 `settle_pending_item_gains` 决定给还是不给。否则会出现「东西已经进包、
+    才被要求投扒窃/撬锁」——掷输了那件东西算什么？失去/消耗不走这条：那多是尝试本身的代价
+    （划掉最后一根火柴、绳子被割断），无论成败都已然发生。
     """
+    # 新一轮开始就先作废上一轮遗留的暂存收益：玩家没投那颗骰子就又干别的去了，那份收益不该
+    # 一直挂着、更不该被后面某次不相干的检定顺手兑现掉。放在所有早退之前，确保每轮都清。
+    if _discard_pending_item_gains(db, game_session):
+        yield _make_chunk("inventory_update")
     if plan is None or (not plan.items_gained and not plan.items_lost):
         return
     module = db.get(Module, game_session.module_id)
@@ -519,7 +528,25 @@ async def _ensure_planned_items(
     def _who(name: str) -> Character:
         return _resolve_hp_target((name or "").strip(), player_char, teammates) or player_char
 
-    for ig in plan.items_gained:
+    # 本轮挂着未决检定 → 收获全部转暂存，等骰子落地再定给不给（见 settle_pending_item_gains）。
+    deferred = []
+    for ig in plan.items_gained if plan.requires_check else []:
+        name = (ig.name or "").strip()
+        if not name:
+            continue
+        target = _who(ig.who)
+        key = f"g|{anchor}|{name}|{target.id}"
+        if key in done:      # 重新生成时已兑现过的收益不再重复暂存
+            continue
+        deferred.append({
+            "name": name, "qty": int(ig.qty or 1),
+            "kind": (ig.kind or ""), "char_id": target.id, "key": key,
+        })
+    if deferred:
+        ws["pending_item_gains"] = deferred
+        changed = True
+
+    for ig in ([] if plan.requires_check else plan.items_gained):
         name = (ig.name or "").strip()
         if not name:
             continue
@@ -558,6 +585,61 @@ async def _ensure_planned_items(
         ws["item_delta_keys"] = list(done)
         game_session.world_state = ws
         db.commit()
+
+
+def _discard_pending_item_gains(db: Session, game_session: GameSession) -> bool:
+    """作废暂存的待检定收益（检定失败 / 玩家干脆没投就又行动了）。返回是否真的清掉了东西。"""
+    ws = dict(game_session.world_state or {})
+    if not ws.get("pending_item_gains"):
+        return False
+    ws["pending_item_gains"] = []
+    game_session.world_state = ws
+    db.commit()
+    return True
+
+
+def settle_pending_item_gains(
+    db: Session, session_id: str, game_session: GameSession, succeeded: bool,
+) -> list[str]:
+    """检定落地后结算暂存收益：成功才入库，失败一律作废。返回要广播的 chunk 列表。
+
+    这是「先检定、后发货」的另一半——`_ensure_planned_items` 在有未决检定时只暂存不入库，
+    真正决定给不给的是这里的骰子结果。玩家扒窃掷输了，那块表就不该在他包里。
+    """
+    ws = dict(game_session.world_state or {})
+    pending = list(ws.get("pending_item_gains") or [])
+    if not pending:
+        return []
+    ws["pending_item_gains"] = []
+    chunks: list[str] = []
+    if succeeded:
+        done = set(ws.get("item_delta_keys") or [])
+        for item in pending:
+            target = db.get(Character, str(item.get("char_id") or ""))
+            name = str(item.get("name") or "").strip()
+            key = str(item.get("key") or "")
+            if target is None or not name or (key and key in done):
+                continue
+            qty = int(item.get("qty") or 1)
+            inventory_service.add_item(
+                db, target, name, qty=qty, kind=(str(item.get("kind") or "") or None),
+            )
+            if key:
+                done.add(key)
+            suffix = f"×{qty}" if qty > 1 else ""
+            ev = session_service.add_event(
+                db, session_id, "system", f"{target.name} 获得了 {name}{suffix}",
+                actor_name="系统", metadata={"item_gain": True, "char_id": target.id},
+            )
+            chunks.append(
+                _make_chunk("system", ev.content, event_id=ev.id, metadata={"item_gain": True}))
+            chunks.append(_make_chunk("inventory_update", metadata={"char_id": target.id}))
+        ws["item_delta_keys"] = list(done)
+    else:
+        chunks.append(_make_chunk("inventory_update"))
+    game_session.world_state = ws
+    db.commit()
+    return chunks
 
 
 async def _ensure_planned_combat_damage(

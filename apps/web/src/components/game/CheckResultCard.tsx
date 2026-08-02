@@ -176,8 +176,8 @@ export function CheckResultCard({
 
       {ts && (
         <span
-          className="self-end flex-shrink-0"
-          style={{ fontSize: '0.6rem', opacity: 0.5, color: 'var(--color-text-secondary)' }}
+          className="msg-ts self-end flex-shrink-0"
+          style={{ color: 'var(--color-text-secondary)' }}
         >
           {ts}
         </span>

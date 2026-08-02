@@ -7,7 +7,7 @@
 // 只在「本机从未看过」时自动弹一次（localStorage 记住），随时可跳过；
 // 之后可从顶栏的「操作说明」重新打开。
 import { useState } from 'react'
-import { GiRollingDices, GiCharacter, GiScrollUnfurled } from 'react-icons/gi'
+import { GiRollingDices, GiCharacter, GiScrollUnfurled, GiSpellBook } from 'react-icons/gi'
 import { Modal } from '@/components/ui/modal'
 
 const SEEN_KEY = 'trpg_coach_seen_v1'
@@ -86,15 +86,61 @@ const STEPS: Step[] = [
           难度由 KP 视情境裁定，不是你自己定。
         </p>
         <p className="coach-note">
-          多人同桌时，所有真人都点过「推进本回合」，这一轮的发言才会整批交给 KP。
+          多人同桌时，所有真人都点过「推进本回合」，这一轮的发言才会整批交给 KP；
+          独自开团时直接发送即可，不必再点一次。
         </p>
+      </>
+    ),
+  },
+  // 常驻速查：前三页是「第一次进来该知道什么」，这一页是「玩到一半忘了随时能翻回来看什么」。
+  // 从顶栏「操作说明」打开时直接落在这一页——回头查一个规则不该先点三次「下一步」。
+  {
+    title: '速查',
+    Icon: GiSpellBook,
+    body: (
+      <>
+        <dl className="coach-ref">
+          <dt>怎么读骰子</dt>
+          <dd>
+            读数是<strong>掷出点数 / 目标值</strong>。<strong>点数越低越好</strong>，
+            不超过目标值即成功；远低于目标值可达成困难/极难成功。
+          </dd>
+          <dt>暗投是什么</dt>
+          <dd>
+            部分检定（心理学、侦查等）由系统<strong>暗投</strong>，点数只有 KP 看得到——
+            因为「知道自己失败了」本身就是情报。你只会读到一段可能真也可能假的描述。
+          </dd>
+          <dt>主动申请检定</dt>
+          <dd>
+            角色卡 → <strong>技能</strong>页点任意一条。可以补一句想查什么
+            （如「他刚才那句话」），<strong>难度由 KP 裁定</strong>，之后再由你投骰。
+          </dd>
+          <dt>三种输入</dt>
+          <dd>
+            裸文字 = 行动；<code className="coach-code">「……」</code> = 说出口的台词；
+            <code className="coach-code">（……）</code> = 场外发言，不进剧情。
+          </dd>
+          <dt>身上有什么</dt>
+          <dd>
+            角色卡 → <strong>道具</strong>页是权威清单。<strong>不在清单上的东西就是没有</strong>，
+            写「我掏出某某」也变不出来。
+          </dd>
+          <dt>卡住了 / 生成很久没反应</dt>
+          <dd>
+            等待处会显示已等秒数；真卡住可点<strong>「打断并重新生成」</strong>。
+            剧情不知道往哪走时，多和 NPC 说话、或申请一次<strong>灵感</strong>检定。
+          </dd>
+        </dl>
       </>
     ),
   },
 ]
 
-export function OnboardingCoach({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState(0)
+export function OnboardingCoach(
+  { onClose, startAtReference = false }: { onClose: () => void; startAtReference?: boolean },
+) {
+  // 从顶栏「操作说明」进来的是已经在玩的人，他要查的是速查页；只有首次进对局才从第一页走。
+  const [step, setStep] = useState(startAtReference ? STEPS.length - 1 : 0)
   const current = STEPS[step]
   const last = step === STEPS.length - 1
 
@@ -114,7 +160,7 @@ export function OnboardingCoach({ onClose }: { onClose: () => void }) {
             className="mb-0.5 tracking-widest"
             style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
           >
-            新手引导 {step + 1} / {STEPS.length}
+            {last ? '操作速查' : `新手引导 ${step + 1} / ${STEPS.length}`}
           </div>
           <h2
             className="font-semibold"
@@ -138,11 +184,16 @@ export function OnboardingCoach({ onClose }: { onClose: () => void }) {
             <span key={index} className={`coach-dot ${index === step ? 'coach-dot--on' : ''}`} />
           ))}
         </div>
-        <button onClick={finish} className="btn-secondary ml-auto !px-3 !py-1 text-sm">
-          跳过
-        </button>
+        {!last && (
+          <button onClick={finish} className="btn-secondary ml-auto !px-3 !py-1 text-sm">
+            跳过
+          </button>
+        )}
         {step > 0 && (
-          <button onClick={() => setStep((s) => s - 1)} className="btn-secondary !px-3 !py-1 text-sm">
+          <button
+            onClick={() => setStep((s) => s - 1)}
+            className={`btn-secondary !px-3 !py-1 text-sm${last ? ' ml-auto' : ''}`}
+          >
             上一步
           </button>
         )}
@@ -150,7 +201,7 @@ export function OnboardingCoach({ onClose }: { onClose: () => void }) {
           onClick={() => (last ? finish() : setStep((s) => s + 1))}
           className="btn-primary !px-3 !py-1 text-sm"
         >
-          {last ? '开始游戏' : '下一步'}
+          {last ? (startAtReference ? '知道了' : '开始游戏') : '下一步'}
         </button>
       </div>
     </Modal>

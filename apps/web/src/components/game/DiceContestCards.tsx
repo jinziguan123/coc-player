@@ -63,7 +63,7 @@ export function OpposedCard({ data, fresh, ts }: { data: OpposedData; fresh: boo
         </div>
         <div className="text-center mt-1 font-semibold" style={{ fontSize: '0.8rem', color: resultAccent }}>
           {data.result}
-          {ts && <span className="ml-2" style={{ fontSize: '0.6rem', opacity: 0.5, color: 'var(--color-text-secondary)' }}>{ts}</span>}
+          {ts && <span className="msg-ts ml-2" style={{ color: 'var(--color-text-secondary)' }}>{ts}</span>}
         </div>
       </div>
     </div>
@@ -121,7 +121,7 @@ export function BurstCard({ data, fresh, ts }: { data: BurstData; fresh: boolean
             </div>
           ))}
         </div>
-        {ts && <div className="text-right mt-1" style={{ fontSize: '0.6rem', opacity: 0.5, color: 'var(--color-text-secondary)' }}>{ts}</div>}
+        {ts && <div className="msg-ts text-right mt-1" style={{ color: 'var(--color-text-secondary)' }}>{ts}</div>}
       </div>
     </div>
   )

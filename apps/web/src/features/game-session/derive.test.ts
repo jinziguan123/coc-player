@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildPartyByName,
   fmtTime,
+  isSoloTable,
   npcHue,
   resolveActorKind,
   selectCombatLog,
@@ -181,5 +182,34 @@ describe('selectCombatResult', () => {
       ],
     })
     expect(out?.content).toBe('骰子')
+  })
+})
+
+describe('isSoloTable', () => {
+  const seat = (over: Partial<{ role: string; character_id: string | null; is_mine: boolean }> = {}) => ({
+    is_mine: false, role: 'human', character_id: 'c1', ...over,
+  })
+
+  it('旧单人会话（无 participants）算独自开团', () => {
+    expect(isSoloTable(undefined)).toBe(true)
+    expect(isSoloTable([])).toBe(true)
+  })
+
+  it('只有自己一个真人 → 独自开团，AI 队友不算人头', () => {
+    expect(isSoloTable([seat({ is_mine: true })])).toBe(true)
+    expect(isSoloTable([
+      seat({ is_mine: true }),
+      seat({ role: 'ai', character_id: 'c2' }),
+      seat({ role: 'ai', character_id: 'c3' }),
+    ])).toBe(true)
+  })
+
+  it('两个真人 → 不是独自开团，别提前把回合交出去', () => {
+    expect(isSoloTable([seat({ is_mine: true }), seat({ character_id: 'c2' })])).toBe(false)
+  })
+
+  it('还没认领角色的空席位不算人头；真人 KP 席也不算', () => {
+    expect(isSoloTable([seat({ is_mine: true }), seat({ character_id: null })])).toBe(true)
+    expect(isSoloTable([seat({ is_mine: true }), seat({ role: 'kp', character_id: null })])).toBe(true)
   })
 })

@@ -506,6 +506,25 @@ def _format_player_info(char: Character, full_persona: bool = False) -> str:
         lines.append(f"SAN：{san.get('current', '?')}/{san.get('max', '?')}")
     if mp:
         lines.append(f"MP：{mp.get('current', '?')}/{mp.get('max', '?')}")
+    # 随身物品是权威库存：KP 据此判断「玩家说他掏出 X」到底成不成立。没有这一行，KP 只能对
+    # 玩家现编的道具装看不见，玩家于是一路按错误前提往下玩，直到走到门口才发现钥匙从来不在身上。
+    # 规则跟着数据一起注入（而不是进静态系统提示）：它只在有角色卡时才有意义，静态手册也已无余量。
+    #
+    # **武器必须一并列出**：它存在 system_data.weapons，不在 inventory 里（战斗结算从前者读）。
+    # 只报 inventory 会让 KP 把角色卡上白纸黑字的撬棍当成玩家现编的东西否掉——比不否更糟。
+    carried = [
+        f"{it['name']}×{it['qty']}" if int(it.get("qty") or 1) > 1 else str(it["name"])
+        for it in (sd.get("inventory") or []) if (it or {}).get("name")
+    ] + [
+        str(w["name"]) for w in (sd.get("weapons") or []) if (w or {}).get("name")
+    ]
+    lines.append(
+        "随身物品与武器（权威清单，此外一律没有）：" + ("、".join(carried) if carried else "空")
+        + "。玩家若把清单外的具体物件当既定事实使用（「我掏出灯塔的备用钥匙」），"
+        "**当场用世界一侧的感官事实否掉**（「手在内袋里摸了个空」），否完接着演这一轮其余仍成立的"
+        "部分；不许装看不见，也不许出戏纠正或顺着写成真的。职业常识内的随身小物与「打算/设想」"
+        "类措辞不算，照常演。"
+    )
     # 临时疯狂症状：注入到角色信息，让 KP 叙述与 AI 队友演绎都体现该症状（言行影响）。
     madness = sd.get("madness")
     if madness and char.status == "temporary_insanity":

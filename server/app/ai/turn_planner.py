@@ -278,6 +278,10 @@ class TurnPlan(BaseModel):
     combat_damage: CombatDamage = Field(default_factory=CombatDamage)  # 战斗中非常规/范围攻击伤害
     items_gained: ItemDeltaList = Field(default_factory=list)  # 本轮玩家获得的物品 → 确定性入库
     items_lost: ItemDeltaList = Field(default_factory=list)     # 本轮确定性失去/消耗/损毁的物品
+    # 玩家把「自己拥有某物」或「此前发生过某事」当成既定事实写进宣言，但库存/事件流里并无此物此事
+    # （「我掏出灯塔的备用钥匙」而随身物品里没有钥匙）。填一句说明 → KP 必须当场在叙述里把它否掉。
+    # 默默略过是最坏的处理：玩家不知道自己到底有没有那件东西，会一路按错误前提往下玩。
+    false_claim: str = ""
     direction: DirectionPolicy = Field(default_factory=DirectionPolicy)
     # 本轮裁定涉及拿不准的具体规则时，planner 显式点名要查的规则关键词（如「霰弹枪 抵近 伤害」）。
     # 系统据此检索规则书原文喂给 KP——把「主动查规则」的判断交给稳定的裁定器，
@@ -365,6 +369,19 @@ def _compact_player(character: Character) -> dict[str, Any]:
         "status": character.status,
         "skills": character.skills or {},
         "base_attributes": character.base_attributes or {},
+        # 随身物品是**权威库存**：没有它，规划器无从判断玩家「我掏出灯塔备用钥匙」是真有还是
+        # 现编，只能装作没看见——玩家于是永远不知道自己身上到底有没有那件东西。给了它才谈得上
+        # false_claim 的裁定。武器另存在 system_data.weapons（战斗结算从那里读），必须一并给，
+        # 否则会把角色卡上白纸黑字的撬棍误判成现编。
+        "inventory": [
+            {"name": it.get("name", ""), "qty": int(it.get("qty") or 1), "kind": it.get("kind", "")}
+            for it in ((character.system_data or {}).get("inventory") or [])
+            if (it or {}).get("name")
+        ] + [
+            {"name": w.get("name", ""), "qty": 1, "kind": "weapon"}
+            for w in ((character.system_data or {}).get("weapons") or [])
+            if (w or {}).get("name")
+        ],
     }
 
 
@@ -577,7 +594,19 @@ def build_turn_plan_messages(
                 "items_gained/items_lost：本轮玩家**确实**获得或失去/用掉/损毁的物品——后端据此"
                 "确定性增减库存，不靠 KP 记账。每项给 name、qty（缺省 1）、who（获得/失去者角色名，"
                 "缺省=本轮行动玩家）；获得时 kind 可选 consumable/gear/key/document。只记**已然发生**"
-                "的（捡起、被给、用掉最后一根火柴、绳子被割断）；仅打算拿、还没到手的不记。\n"
+                "的（捡起、被给、用掉最后一根火柴、绳子被割断）；仅打算拿、还没到手的不记。"
+                "**本轮 requires_check=true 时，被这次检定门控的收获一律不填 items_gained**"
+                "（扒窃要过敏捷、撬箱要过锁匠——检定还没掷，东西凭什么已经到手）；"
+                "后端会等检定通过后再入库，失败则不给。\n"
+                "false_claim：玩家把「自己身上有某物」或「此前发生过某事」当既定事实写进宣言，"
+                "但 player.inventory（权威随身清单，此外一律没有）与已发生的事件流里**并无此物此事**"
+                "时，填一句说明（如「玩家声称掏出灯塔备用钥匙，但其随身物品里没有钥匙，剧情中也"
+                "从未获得过」）。KP 会据此当场在叙述里否掉。判定从严也从实：\n"
+                "  · 清单里没有的**具体物件**（钥匙/枪/证件/药）→ 填；\n"
+                "  · 记者有笔记本、猎人有猎刀这类**职业常识随身小物**，以及衣服/鞋/口袋本身 → 不填，"
+                "别为难玩家；\n"
+                "  · 玩家只是**打算/提议/回忆不确定的事**（「要是我带了钥匙就好了」）→ 不填。\n"
+                "无虚假声称就留空 \"\"。\n"
                 "scene_policy.scene_change：本轮玩家**确实移动并到达了别的场景**时，填目标场景的 id 或"
                 "名字（只能取运行时资料里的 current_scene / 可见场景，解析不到就别填）——后端据此确定性"
                 "把角色位置与大地图切过去，不靠 KP 记得。**仅讨论/打算/建议去某地（『我们该先去X』）"
@@ -721,12 +750,32 @@ def build_turn_plan_message(plan: TurnPlan) -> dict:
         "combat": plan.combat.model_dump(),
         "combat_damage": plan.combat_damage.model_dump(),
         "narration_brief": plan.narration_brief,
+        "false_claim": plan.false_claim,
         "safety": plan.safety.model_dump(),
         "sanity": plan.sanity.model_dump(),
         "items_gained": [it.model_dump() for it in plan.items_gained],
         "items_lost": [it.model_dump() for it in plan.items_lost],
         "direction": plan.direction.model_dump(),
     }
+
+    # 玩家把不存在的东西当既定事实写进宣言时，最坏的处理是**默默略过**：玩家不知道自己到底有没有
+    # 那件东西，会一路按错误前提往下玩，直到走到门口才发现钥匙从来不在身上。必须当场否掉。
+    false_claim_block = ""
+    if plan.false_claim.strip():
+        false_claim_block = (
+            "\n\n【玩家声称了不存在的东西——本轮必须当场否掉，不许略过】\n"
+            f"裁定：{plan.false_claim.strip()}\n"
+            "处理方式（务必照做）：\n"
+            "1. **在本轮叙述里明确写出这次落空**，用世界一侧的感官事实去否，不要用旁白说教、"
+            "更不要以 KP 口吻纠正玩家（「你并没有这个道具」是错的写法）。"
+            "正确写法示例：「你的手在内袋里摸了个空——除了打火机和半包受潮的烟，那里什么都没有。」\n"
+            "2. 否掉之后**不要停在这里等玩家反应**：接着把他这一轮**其余仍然成立的部分**照常演下去"
+            "（他要走就让他走，他还问了话就让 NPC 答），别让整轮卡死在一句「你没有」上。\n"
+            "3. 绝不能顺着玩家的说法把这件东西写成真的、也不能含糊其辞装作没看见——"
+            "**装看不见是最坏的处理**，玩家会一路按错误前提往下玩。\n"
+            "4. 玩家角色对此的反应（懊恼、错愕、想起把它落在哪了）由玩家自己决定，你只写"
+            "「摸空」这个客观事实，不替他写心理和表情。\n"
+        )
 
     # requires_check=true 时，把「必须发检定、且发之前不许泄结果/线索位置」写成不可绕过的硬约束，
     # 单独成段、给出照发的指令原文——否则模型容易把动作叙述「讲完」（敲出空层、摸到暗缝），
@@ -820,6 +869,9 @@ def build_turn_plan_message(plan: TurnPlan) -> dict:
             "其他玩家角色一律不替其行动。nudge 是解卡手段，只能让线索更显眼或让 NPC 主动接触，"
             "绝不能替玩家决定或直接宣布检定成功；foreshadow 是可择机埋设/回收的悬念。\n"
             + json.dumps(content, ensure_ascii=False, indent=2)
+            # false_claim 放在 check_block 之前：check_block 靠「最末尾」的位置权重换取
+            # 「照发 [DICE_CHECK] 收尾」的遵循率，不能被别的段落挤掉尾巴。
+            + false_claim_block
             + check_block
             + auto_block
             + combat_block

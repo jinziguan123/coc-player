@@ -1188,6 +1188,12 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
             desc = "\n".join(batch_results)
             succeeded = bool(check.get("check_any_success")) or succeeded
             fumbled = bool(check.get("check_any_fumble")) or fumbled
+        # 「先检定、后发货」的落地：本轮被这次检定门控的收获此前只暂存未入库，
+        # 到这里骰子落地才决定给不给（扒窃掷输了，那块表不该在他包里）。
+        for chunk in planned_effects.settle_pending_item_gains(
+            db, session_id, game_session, succeeded,
+        ):
+            room_hub.broadcast(session_id, chunk)
         if game_session.kp_mode == "human":
             # 真人 KP 模式下掷骰只完成确定性结算，不自动生成后续叙事；KP 可据结果手动发布。
             room_hub.broadcast(

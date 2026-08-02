@@ -8,6 +8,7 @@ import { runLiveSession } from '@/lib/liveSession'
 import {
   buildPartyByName,
   fmtTime,
+  isSoloTable,
   npcHue,
   resolveActorKind,
   selectCombatLog,
@@ -250,9 +251,10 @@ export function GameSessionPage() {
   const [panelChar, setPanelChar] = useState<Character | null>(null)
   const [panelCharId, setPanelCharId] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
-  // 新手引导：本机从未看过时自动弹一次；之后可从顶栏「操作说明」重开。
-  // KP 席不弹——这三步讲的是玩家侧操作（输入语法/投骰/角色卡），对 KP 没用。
-  const [showCoach, setShowCoach] = useState(false)
+  // 新手引导：本机从未看过时自动弹一次（intro，从第一页走）；之后从顶栏那个问号重开时直接
+  // 落在速查页（reference）——玩到一半回头查一条规则，不该先点三次「下一步」。
+  // KP 席不弹——这几页讲的是玩家侧操作（输入语法/投骰/角色卡），对 KP 没用。
+  const [showCoach, setShowCoach] = useState<false | 'intro' | 'reference'>(false)
   // 窄屏默认收起：角色卡在手机上是覆盖式抽屉，默认展开会挡住叙事流。
   const [showPanel, setShowPanel] = useState(
     () => !(typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches),
@@ -288,11 +290,13 @@ export function GameSessionPage() {
   const myCharId = myPlayerSeat?.character_id ?? (currentSession?.participants?.length ? null : primaryId)
   const isKp = currentSession?.kp_mode === 'human'
     && !!currentSession.participants?.some((p) => p.role === 'kp' && p.is_mine)
+  // 独自开团 → 发送即推进（判定见 derive.isSoloTable）。KP 席不适用：他走右侧工作台。
+  const soloTable = !isKp && !!currentSession && isSoloTable(currentSession.participants)
   const shownCharId = panelCharId ?? myCharId
   // 会话载入完、且确认自己是玩家（非 KP）后再决定弹不弹——KP 席不需要这套玩家侧操作说明。
   useEffect(() => {
     if (!currentSession || isKp) return
-    if (!hasSeenCoach()) setShowCoach(true)
+    if (!hasSeenCoach()) setShowCoach('intro')
   }, [currentSession, isKp])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -314,12 +318,17 @@ export function GameSessionPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)  // 消息流内容层，供 ResizeObserver 量高度变化
+  const roRef = useRef<ResizeObserver | null>(null)
   // 「跳到最新」：贴底时不显示。ref 与 state 各留一份——自动滚底的副作用要同步读当前值，
   // 走 state 会读到上一帧的旧值。
   const atBottomRef = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
   const [hasNewBelow, setHasNewBelow] = useState(false)
   const pinActive = useRef(false)   // 初次加载「持续钉底」窗口是否进行中（期间抑制平滑滚动，避免抢滚）
+  const jumpInFlight = useRef(false)  // 「跳到最新」的平滑滚动进行中（期间不下调贴底状态）
+  const jumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [waitSec, setWaitSec] = useState(0)   // 本次生成已等待秒数（长回合的进度感）
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const openingTriggered = useRef(false)
   const composingRef = useRef(false)
@@ -931,13 +940,60 @@ export function GameSessionPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages.length])
 
+  // 粘底：只要用户贴着底，内容长高就立刻跟到底。
+  //
+  // 光靠上面那个 [messages.length] 的副作用是不够的，它漏掉了两类最常见的增长：
+  // ① **流式续写**——KP 叙事逐段写进同一条消息，条数不变，副作用一次都不触发，玩家眼睁睁
+  //    看着文字往下长出可视区；
+  // ② **迟到的布局膨胀**——场景配图加载完、markdown 排版回流，都发生在那一次 scrollTo 之后，
+  //    于是滚动落在半空（实测「有新内容」点下去只挪了 94px，容器还剩 1276px 可滚）。
+  // ResizeObserver 直接盯内容层高度，谁把它撑高都能兜住。用瞬时赋值不用 smooth：流式期间
+  // 每秒好几次增长，平滑动画会互相打断，反而永远追不上。
+  //
+  // 走 **callback ref** 而不是 useEffect + ref.current：组件在 currentSession 为空时先返回
+  // 「加载中」，那一轮根本没有滚动容器，effect 里的 ref.current 是 null 直接早退，而依赖数组
+  // 又不变 → 永远不会重挂。文件里 handleScroll 上方那段注释记着的正是同一个坑。
+  const attachContent = useCallback((node: HTMLDivElement | null) => {
+    contentRef.current = node
+    roRef.current?.disconnect()
+    roRef.current = null
+    if (!node) return
+    const ro = new ResizeObserver(() => {
+      const el = scrollRef.current
+      if (!el || !atBottomRef.current) return   // 用户正在往上翻，别把他拽回来
+      el.scrollTop = el.scrollHeight
+      el.querySelectorAll<HTMLElement>('[data-scene-col]')
+        .forEach((c) => { c.scrollTop = c.scrollHeight })
+    })
+    ro.observe(node)
+    roRef.current = ro
+  }, [])
+  useEffect(() => () => { roRef.current?.disconnect() }, [])
+
+  // 等待秒数：规划 + 工具循环 + 叙事串起来，一个回合跑一分多钟很正常，而屏幕上只有一句不动的
+  // 「守秘人正在判读局势…」和三个点——玩家会开始怀疑它卡死了。给个在走的数字，等待就有了底。
+  useEffect(() => {
+    if (!streaming) { setWaitSec(0); return }
+    const started = Date.now()
+    const t = setInterval(() => setWaitSec(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [streaming])
+
   const jumpToLatest = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    // 先把「贴底」置真，这样上面的 ResizeObserver 会接手后续的迟到膨胀（图片加载完等），
+    // 不会像原来那样只滚一次、落在半空还把提示消掉了。
     atBottomRef.current = true
     setAtBottom(true)
     setHasNewBelow(false)
+    // 平滑滚动途中每一帧都会触发 onScroll，而途中离底还很远 → handleScroll 会把 atBottomRef
+    // 打回 false，粘底当场失效。挂个飞行标记，让 handleScroll 在落地前别下调这个状态。
+    // 兜底超时：用户在动画途中自己往上翻时不会有「落地」那一下，标记不能就此卡死。
+    jumpInFlight.current = true
+    if (jumpTimer.current) clearTimeout(jumpTimer.current)
+    jumpTimer.current = setTimeout(() => { jumpInFlight.current = false }, 1200)
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [])
 
   // 分头行动的每个场景列是各自独立滚动的容器，主页面的「滚到底」管不到它们。初次钉底窗口
@@ -956,6 +1012,10 @@ export function GameSessionPage() {
     if (!el) return
     // 先记「是否贴底」——这段不能被下面加载旧史的早退挡掉，否则翻到顶部时状态就不更新了。
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_SLACK
+    // 「跳到最新」的平滑滚动途中不下调贴底状态：途中每一帧都离底很远，照单全收会在落地前
+    // 就把粘底关掉，于是又停在半空。滚到底了才解除飞行标记。
+    if (jumpInFlight.current && !nearBottom) return
+    jumpInFlight.current = false
     atBottomRef.current = nearBottom
     setAtBottom(nearBottom)
     if (nearBottom) setHasNewBelow(false)   // 自己滚回底部即消掉新内容提示
@@ -1180,6 +1240,9 @@ export function GameSessionPage() {
       } else {
         // 回合确认制：发言只进入「本回合暂存」（不进 streaming），等点「推进」且所有真人确认后才交 KP。
         await api.post(`/sessions/${currentSession.id}/chat`, body)
+        // 独自开团时「攒一批再一起交」没有协同对象，那一步只是每回合多一次点击 → 发送即推进。
+        // 仍走同一个 /advance，多人局的确认语义分毫未变。
+        if (soloTable) await advanceTurn()
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '发送失败'
@@ -1342,9 +1405,9 @@ export function GameSessionPage() {
             )}
             {!isKp && (
               <button
-                onClick={() => setShowCoach(true)}
+                onClick={() => setShowCoach('reference')}
                 className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
-                title="操作说明：怎么行动、怎么投骰、角色卡在哪"
+                title="操作速查：怎么读骰子、暗投是什么、怎么申请检定"
               >
                 <HelpCircle size={13} />
               </button>
@@ -1532,6 +1595,9 @@ export function GameSessionPage() {
           </div>
         )}
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto pb-4 chat-scroll game-info">
+          {/* 内容包一层专供 ResizeObserver 量高度：容器自身的盒子不随内容变，观察它量不到
+              「流式续写把叙事撑长了」「场景图片刚加载完把下面顶下去了」这两件事。 */}
+          <div ref={attachContent}>
           {loadingOlder && (
             <div className="text-center py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               加载更早的记录...
@@ -1539,8 +1605,12 @@ export function GameSessionPage() {
           )}
           {(() => {
           // 是否可增删改：自己本回合尚未推进的暂存发言（action/dialogue + pending_turn + 本人）。
+          //
+          // 独自开团时一律不可编辑：发送即推进，那个「攒着待改」的窗口根本不存在。而且此时
+          // 消息经 SSE 推回来时后端尚未清 pending_turn，之后也没有事件来纠正这份客户端副本——
+          // 不排掉的话，回合早已交出去，那条发言旁边还挂着一对编辑/删除按钮，点了也没用。
           const canEditMsg = (m: ChatMessage) =>
-            !streaming && !!m.id && (m.type === 'action' || m.type === 'dialogue')
+            !streaming && !soloTable && !!m.id && (m.type === 'action' || m.type === 'dialogue')
             && !!m.metadata?.pending_turn && m.metadata?.is_player === true
           // 这条消息是否「本轮新到达」（决定是否播一次入场动效）。历史/重连整批为 false。
           // enterIds 已排除流式中的临时 stream-* 消息（其内容逐段增长，动效会与流式节奏打架；
@@ -1705,7 +1775,7 @@ export function GameSessionPage() {
                     <GiRollingDices style={{ color: accent, fontSize: '1.1rem', flexShrink: 0, marginTop: '0.1rem' }} />
                     <span className="whitespace-pre-wrap">{diceText}</span>
                     {noteChips}
-                    {fmtTime(msg.ts) && <span className="self-end" style={{ fontSize: '0.6rem', opacity: 0.5, flexShrink: 0 }}>{fmtTime(msg.ts)}</span>}
+                    {fmtTime(msg.ts) && <span className="msg-ts self-end" style={{ flexShrink: 0 }}>{fmtTime(msg.ts)}</span>}
                   </div>
                 </div>
               )
@@ -1739,7 +1809,7 @@ export function GameSessionPage() {
                         {msg.content}
                       </div>
                       {fmtTime(msg.ts) && (
-                        <div className="text-right mt-2" style={{ fontSize: '0.6rem', opacity: 0.5, color: 'var(--color-text-secondary)' }}>{fmtTime(msg.ts)}</div>
+                        <div className="msg-ts text-right mt-2" style={{ color: 'var(--color-text-secondary)' }}>{fmtTime(msg.ts)}</div>
                       )}
                     </div>
                   </div>
@@ -1850,7 +1920,7 @@ export function GameSessionPage() {
                   <div className={`flex items-center gap-1 ${isPlayer ? 'justify-end chat-actor-player' : 'chat-actor'}`}>
                     {kind !== 'npc' && <SeatIcon kind={kind} size={12} />}
                     {msg.actor_name}
-                    {fmtTime(msg.ts) && <span style={{ marginLeft: 6, fontSize: '0.6rem', opacity: 0.5 }}>{fmtTime(msg.ts)}</span>}
+                    {fmtTime(msg.ts) && <span className="msg-ts" style={{ marginLeft: 6 }}>{fmtTime(msg.ts)}</span>}
                   </div>
                 )}
                 {isPlayer && msg.type === 'dialogue' ? (
@@ -1940,6 +2010,12 @@ export function GameSessionPage() {
                   {tailNote || 'KP 正在思考……'}
                 </span>
               )}
+              {/* 满 5 秒才出现：短回合不必看见秒表，长回合才需要「它还在跑」的凭据 */}
+              {waitSec >= 5 && (
+                <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-secondary)', opacity: 0.6 }}>
+                  {waitSec}s
+                </span>
+              )}
               {showInterrupt && messages.some((m) => m.type === 'action') && (
                 <button
                   onClick={regenerate}
@@ -1952,6 +2028,7 @@ export function GameSessionPage() {
               )}
             </div>
           )}
+          </div>
         </div>
 
         {combat && !immersiveOn && (
@@ -2003,13 +2080,18 @@ export function GameSessionPage() {
                   color: 'var(--color-on-accent)',
                   opacity: (turnState && myCharId && turnState.confirmed_ids.includes(myCharId)) ? 0.5 : 1,
                 }}
-                title={currentSession.kp_mode === 'human' ? '所有真人都提交后，真人 KP 会收到本回合行动' : '所有真人都点「推进」后，本回合发言才整批交给 KP'}
+                title={currentSession.kp_mode === 'human'
+                  ? '所有真人都提交后，真人 KP 会收到本回合行动'
+                  : soloTable
+                    ? '把本回合已暂存的内容（如「前往」）交给 KP；直接发言会自动推进，不必点这里'
+                    : '所有真人都点「推进」后，本回合发言才整批交给 KP'}
               >
                 {turnState && myCharId && turnState.confirmed_ids.includes(myCharId)
-                  ? '已提交 · 等待其他人'
+                  ? (soloTable ? '已提交' : '已提交 · 等待其他人')
                   : currentSession.kp_mode === 'human' ? '提交给 KP' : '推进本回合'}
               </button>
-              {turnState && turnState.total > 0 && (
+              {/* 「已确认 0/1」对独自开团的人毫无信息量——房里就他一个 */}
+              {turnState && turnState.total > 1 && (
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   已确认 {turnState.confirmed_ids.length}/{turnState.total}
                 </span>
@@ -2181,7 +2263,12 @@ export function GameSessionPage() {
           <span className="kp-rail-label">KP</span>
         </button>
       )}
-      {showCoach && <OnboardingCoach onClose={() => setShowCoach(false)} />}
+      {showCoach && (
+        <OnboardingCoach
+          startAtReference={showCoach === 'reference'}
+          onClose={() => setShowCoach(false)}
+        />
+      )}
       {isKp && !kpCollapsed && (
         <aside className="kp-console-pane flex-shrink-0">
           <HumanKpPanel

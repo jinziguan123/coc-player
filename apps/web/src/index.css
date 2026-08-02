@@ -1173,6 +1173,22 @@ body {
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
+/* 速查页：条目多且是回头查的，行距压紧一点，条目名做成可扫读的锚 */
+.coach-ref { margin: 0; line-height: 1.7; }
+.coach-ref dt {
+  margin-top: 0.7em;
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  color: var(--color-text-accent);
+}
+.coach-ref dt:first-child { margin-top: 0; }
+.coach-ref dd {
+  margin: 0.1em 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.coach-ref dd strong { color: var(--color-text-primary); }
 .coach-dot {
   width: 6px;
   height: 6px;
@@ -1854,6 +1870,13 @@ body {
 /* 暂存发言的编辑/删除操作：默认隐藏，hover 整行时淡入（不依赖 Tailwind group-hover 变体） */
 .msg-row .msg-actions { opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
 .msg-row:hover .msg-actions { opacity: 1; pointer-events: auto; }
+
+/* 消息时间戳：常驻挂一个现实世界的 10:39，会把 1920 年代的雾港硬生生拽出戏。信息本身仍有用
+   （回看某事发生在几点），所以留着，只在 hover 该条消息时浮现——与上面的编辑/删除同一机制。 */
+.msg-ts { font-size: 0.6rem; opacity: 0; transition: opacity 0.12s ease; }
+.msg-row:hover .msg-ts,
+.msg-row:focus-within .msg-ts { opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) { .msg-ts { transition: none; } }
 
 /* 历史检索跳转后的短暂高亮 */
 .search-hit {

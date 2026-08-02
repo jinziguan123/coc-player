@@ -514,3 +514,64 @@ def test_turn_plan_messages_include_truth_and_scene_events(db_factory):
     assert "0/1d3" in text and "翻动书桌后的尸体" in text  # 当前场景 events 进 payload
     instruction = messages[1]["content"]
     assert "机制点" in instruction and "照抄" in instruction
+
+
+def test_planner_payload_带随身物品清单(db_factory):
+    """没有库存，规划器无从判断「我掏出灯塔备用钥匙」是真有还是现编，只能装看不见。"""
+    db = db_factory()
+    module, hero, session = _seed(db)
+    hero.system_data = {
+        **(hero.system_data or {}),
+        "inventory": [{"id": "i1", "name": "手电筒", "qty": 1, "kind": "gear"},
+                      {"id": "i2", "name": "火柴", "qty": 3, "kind": "consumable"}],
+    }
+    db.commit()
+
+    text = "\n".join(m["content"] for m in turn_planner.build_turn_plan_messages(
+        session, module, hero, [], teammates=[], rules_lookup_enabled=False,
+    ))
+    assert "手电筒" in text and "火柴" in text
+    assert "false_claim" in text          # 字段说明在册
+    assert "requires_check=true 时" in text  # 未决检定不预发收益
+
+
+def test_build_turn_plan_message_注入虚假声称硬约束():
+    """玩家声称了身上没有的东西 → KP 必须当场否掉，装看不见是最坏的处理。"""
+    plan = turn_planner.TurnPlan(
+        false_claim="玩家声称掏出灯塔备用钥匙，但其随身物品里没有钥匙",
+    )
+    content = turn_planner.build_turn_plan_message(plan)["content"]
+    assert "灯塔备用钥匙" in content
+    assert "当场否掉" in content and "装看不见" in content
+
+    # 没有虚假声称时不注入这一段，别白占上下文
+    assert "当场否掉" not in turn_planner.build_turn_plan_message(turn_planner.TurnPlan())["content"]
+
+
+def test_虚假声称段不抢走检定硬约束的末尾位置():
+    """check_block 靠「上下文最末尾」换取照发 [DICE_CHECK] 的遵循率，不能被别的段落挤掉尾巴。"""
+    content = turn_planner.build_turn_plan_message(turn_planner.TurnPlan(
+        requires_check=True,
+        check=turn_planner.CheckPlan(skill="敏捷"),
+        false_claim="玩家声称掏出灯塔备用钥匙，但其随身物品里没有钥匙",
+    ))["content"]
+    assert content.index("当场否掉") < content.index(turn_planner.REQUIRES_CHECK_MARKER)
+    assert content.rstrip().endswith("]")   # 仍以那行检定指令收尾
+
+
+def test_planner_payload_把武器一并算进随身清单(db_factory):
+    """武器存在 system_data.weapons 而非 inventory；漏了它，规划器会把角色卡上真有的撬棍
+    当成玩家现编的东西填进 false_claim——比不否更糟。"""
+    db = db_factory()
+    module, hero, session = _seed(db)
+    hero.system_data = {
+        **(hero.system_data or {}),
+        "inventory": [{"id": "i1", "name": "手电筒", "qty": 1}],
+        "weapons": [{"name": "撬棍", "skill": "斗殴", "success": 45, "dam": "1d8"}],
+    }
+    db.commit()
+
+    text = "\n".join(m["content"] for m in turn_planner.build_turn_plan_messages(
+        session, module, hero, [], teammates=[], rules_lookup_enabled=False,
+    ))
+    assert "撬棍" in text and "手电筒" in text
