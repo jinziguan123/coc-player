@@ -706,7 +706,17 @@ def _team_guidance_from_plan(plan: turn_planner.TurnPlan | None) -> str:
 
 
 async def run_chat_generation(session_id: str) -> None:
+    # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 → 二次 planner →
+    # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
+    # 都要有耗时，否则「为什么这么慢」只能靠猜。t_turn 给出总时长做对账。
+    t_turn = time.monotonic()
+    t_drain = time.monotonic()
     await _drain_housekeeping(session_id)
+    drain_s = time.monotonic() - t_drain
+    if drain_s > 0.5:
+        # 上一轮的滚动摘要/幕后推演是「后台」跑的，但下一回合开头要等它写完才能动
+        # world_state。玩家手快时就会替上一轮的后台工作买单，且此前完全看不见。
+        logger.info("耗时|等上轮收尾 %.1fs session=%s", drain_s, session_id)
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -807,6 +817,7 @@ async def run_chat_generation(session_id: str) -> None:
         # 队友导演提示，不能继续作为最终副作用裁定。重新规划后的结果才交给 KP 与守卫。
         generation_plan = plan
         if ai_teammates:
+            t_post = time.monotonic()
             db.refresh(game_session)
             post_rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
             post_plan_messages = turn_planner.build_turn_plan_messages(
@@ -816,6 +827,11 @@ async def run_chat_generation(session_id: str) -> None:
                 rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
             )
             post_plan = await turn_planner.run_turn_planner(fast_llm, post_plan_messages)
+            # 有 AI 队友的局，planner 一个回合要跑**两次**（队友行动会改变裁定前提）。
+            # 这是队友局比单人局明显慢的主因之一，必须单独计时才看得见。
+            logger.info(
+                "耗时|二次 planner %.1fs session=%s", time.monotonic() - t_post, session_id,
+            )
             if post_plan is not None:
                 generation_plan = post_plan
                 planned_effects.enforce_plan_item_locations(
@@ -832,6 +848,10 @@ async def run_chat_generation(session_id: str) -> None:
         )
         logger.info(
             "耗时|KP 叙事 %.1fs session=%s", time.monotonic() - t_kp, session_id,
+        )
+        # 对账用：各环节之和应约等于总时长，对不上说明还有没埋点的环节在吃时间。
+        logger.info(
+            "耗时|本回合合计 %.1fs session=%s", time.monotonic() - t_turn, session_id,
         )
     except asyncio.CancelledError:
         logger.info("生成被取消: session=%s", session_id)
