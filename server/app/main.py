@@ -11,10 +11,33 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.router import api_router
+from app.config import settings
 from app.services.ai_quota import QuotaExceeded
 from app.services.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_app_logging() -> None:
+    """给 ``app.*`` 这棵 logger 树装上 handler 与级别。
+
+    此前全项目没有任何日志配置，于是走 Python 的默认值：根 logger 级别 WARNING、无 handler。
+    结果是**后端 27 处 logger.info 从来没有输出过**——包括各环节的「耗时|…」埋点。
+    埋点在跑却看不见，比没有埋点更糟：查性能问题时会以为「日志里没有就是没发生」。
+
+    只配 ``app`` 这一棵，不碰根 logger：uvicorn 的访问日志有自己的 handler，
+    动根会让它重复输出。propagate=False 同理——防止本树的记录再冒泡到根被打第二遍。
+    """
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(settings.log_level.upper())
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+        app_logger.addHandler(handler)
+    app_logger.propagate = False
+
+
+_configure_app_logging()
 
 # 迁移失败进入的「维护模式」：非空即代表启动迁移失败，所有请求返回可读错误页而非
 # 以「新代码 + 旧 schema」带病运行。开发与打包环境都启用，避免业务接口继续返回 500。

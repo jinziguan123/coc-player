@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # SQL 回显独立于 debug：默认关闭，避免每次请求把整串 SELECT/INSERT 刷屏。
     # 真要调 SQL 时在 .env 设 SQL_ECHO=true。
     sql_echo: bool = False
+    # 应用自身日志级别（不影响 uvicorn 的访问日志，它有自己的一套）。
+    # 默认 INFO：回合耗时、配图完成、生成取消这些运行信息本就是给人看的。
+    # 嫌吵可在 .env 设 LOG_LEVEL=WARNING。
+    log_level: str = "INFO"
 
     # extra="ignore"：.env 里的历史遗留变量（如已废弃的 OPENAI_API_KEY）不该让进程起不来。
     # pydantic-settings 默认是 forbid，于是从仓库根启动后端会崩在一句难懂的校验错误上；
