@@ -32,6 +32,17 @@ NEGATIVE_PLACEHOLDER = "PLACEHOLDER_NEGATIVE"
 GENERATE_TIMEOUT_S = 180
 POLL_INTERVAL_S = 1.5
 
+# 内容红线：任何生成都强制附加的负面词，与画质负面分开写、也不受用户工作流影响。
+#
+# 跑团模组里「衣着不整的受害者」「浴室」「床」这类描述很常见，而本地 SD 检查点不少是
+# NSFW 微调（用户当前用的就是），提示词不设防就可能出成人内容。负面词是这条路径上最硬的
+# 那道闸——它直接作用于采样，比在正向提示词里写「不要…」可靠得多。
+SAFETY_NEGATIVE = (
+    "nsfw, nude, nudity, naked, topless, exposed breasts, exposed genitalia, "
+    "sexual, sexually suggestive, erotic, lingerie, underwear only, "
+    "suggestive pose, cleavage focus, child, minor, loli"
+)
+
 # 默认负面提示词：占位符留空时的兜底（通用画质负面）
 DEFAULT_NEGATIVE = (
     "photo, photorealistic, 3d render, realistic skin texture, "
@@ -91,7 +102,8 @@ def build_workflow(
             if val == POSITIVE_PLACEHOLDER:
                 inputs[key] = prompt
             elif val == NEGATIVE_PLACEHOLDER:
-                inputs[key] = (negative or "").strip() or DEFAULT_NEGATIVE
+                # 内容红线永远拼在最前，用户自定的负面词只能往上加、不能把它顶掉
+                inputs[key] = f"{SAFETY_NEGATIVE}, {(negative or '').strip() or DEFAULT_NEGATIVE}"
         if node.get("class_type") in ("KSampler", "KSamplerAdvanced"):
             for seed_key in ("seed", "noise_seed"):
                 if seed_key in inputs:

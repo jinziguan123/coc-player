@@ -6,7 +6,7 @@
 //   · 只有 <img onError> 触发的自愈重生成，没有面向人的按钮，出图不满意只能干瞪眼；
 //   · 完全没有上传通道，没配文生图模型的人一张图都拿不到。
 // 这个组件把这四件事补齐，三处配图（场景 / NPC / 线索）共用。
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ImageOff, LoaderCircle, RefreshCw, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, getServerUrl, uploadFile } from '@/api/client'
@@ -36,7 +36,16 @@ export function ImageSlot({
 }: ImageSlotProps) {
   const image = useRepairableImage({ src, moduleId, kind, itemId, field, onRegenerated: onChange, visualStateKey })
   const [busy, setBusy] = useState<'' | 'gen' | 'upload'>('')
+  const [waited, setWaited] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // 已等秒数：生图后端一次只跑一张，同时点多个必然排队，后面那几张要等很久。
+  useEffect(() => {
+    if (!busy) { setWaited(0); return }
+    const started = Date.now()
+    const t = setInterval(() => setWaited(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [busy])
 
   // 模组或条目还没落库（后端查不到），换图必然 404 —— 与其让用户点了才吃报错，
   // 不如先把按钮禁掉并说清楚原因。
@@ -118,12 +127,17 @@ export function ImageSlot({
         )}
         {working && (
           <div
-            className="absolute inset-0 flex items-center justify-center gap-2 text-xs"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-xs"
             style={{ background: 'rgba(0,0,0,0.45)', color: 'var(--color-text-primary)' }}
             aria-label={busy === 'upload' ? '图片上传中' : '配图生成中'}
           >
             <LoaderCircle className="animate-spin" size={18} />
             {busy === 'upload' ? '上传中…' : '生成中…'}
+            {/* 生图后端一次只跑一张，同时点多个必然排队。不说清楚的话，后面那几张看起来
+                就像卡住了——用户会以为坏了而反复重点。 */}
+            {busy === 'gen' && waited >= 8 && (
+              <span style={{ opacity: 0.75 }}>已等 {waited}s · 多张会排队，逐张出图</span>
+            )}
           </div>
         )}
       </div>

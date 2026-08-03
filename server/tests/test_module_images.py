@@ -263,3 +263,64 @@ def test_upload_module_image_writes_back(tmp_path, monkeypatch):
             assert missing.status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+def test_concurrent_regenerate_keeps_every_image(tmp_path, monkeypatch):
+    """一次给多个条目点「重新生成」，每张都要留在库里。
+
+    scenes/npcs/clues 是整列 JSON 字段，写回是「读整列 → 改一项 → 整列写回」。两个请求重叠时，
+    后提交的那份里带着对方写入之前的旧快照，于是把别人刚写的图覆盖回去——实测三张并发只有
+    最后一张活下来，前两张的图直接从库里丢了（前端草稿里还留着，所以表现为「过一会儿才出现」）。
+    """
+    import asyncio as aio
+
+    from app.services import image_store, module_image_service
+
+    monkeypatch.setattr(image_store, "IMAGES_DIR", tmp_path / "images")
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}")
+    Base.metadata.create_all(engine)
+    make_session = sessionmaker(bind=engine)
+
+    seed = make_session()
+    module = Module(
+        title="m", rule_system="coc",
+        scenes=[{"id": "s1", "name": "A"}, {"id": "s2", "name": "B"}, {"id": "s3", "name": "C"}],
+    )
+    seed.add(module); seed.commit()
+    module_id = module.id
+    seed.close()
+
+    class PromptLLM:
+        async def complete(self, messages, **kwargs):
+            return "x"
+
+    class ImageLLM:
+        def supports_image_gen(self):
+            return True
+
+        async def generate_image(self, prompt, size="1024x1024"):
+            await aio.sleep(0.05)      # 制造重叠窗口：没有它三个请求会自然串行、掩盖问题
+            return _png_b64()
+
+    monkeypatch.setattr(module_image_service, "get_fast_llm", lambda: PromptLLM())
+    monkeypatch.setattr(module_image_service, "get_image_llm", lambda: ImageLLM())
+
+    async def regen(scene_id):
+        db = make_session()            # 每个请求各自的会话，与 FastAPI 的依赖注入一致
+        try:
+            return await module_image_service.regenerate_module_image(
+                db, db.get(Module, module_id), "scene", scene_id, "image", force=True)
+        finally:
+            db.close()
+
+    scene_ids = ("s1", "s2", "s3")
+
+    async def all_at_once():
+        return await aio.gather(*(regen(s) for s in scene_ids))
+
+    urls = asyncio.run(all_at_once())
+    assert all(urls)
+
+    final = {s["id"]: s.get("image") for s in make_session().get(Module, module_id).scenes}
+    lost = [sid for sid, url in zip(scene_ids, urls) if final.get(sid) != url]
+    assert not lost, f"这些场景的图被并发写回覆盖丢了：{lost}"

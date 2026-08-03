@@ -29,12 +29,13 @@ USER_WF = json.dumps({
 def test_build_workflow_injects_placeholders_and_randomizes_seed():
     wf = comfyui.build_workflow(USER_WF, "an old letter", "blurry")
     assert wf["2"]["inputs"]["text"] == "an old letter"
-    assert wf["3"]["inputs"]["text"] == "blurry"
+    # 负面词 = 内容红线 + 用户自己的词（红线恒在前，用户词只能往上加、顶不掉它）
+    assert wf["3"]["inputs"]["text"] == f"{comfyui.SAFETY_NEGATIVE}, blurry"
     assert wf["5"]["inputs"]["seed"] != 0          # seed 随机化（否则同提示词恒出同图）
 
     # 负面占位留空 → 用默认负面；坏 JSON → None（fail-open）
     wf2 = comfyui.build_workflow(USER_WF, "x", "")
-    assert wf2["3"]["inputs"]["text"] == comfyui.DEFAULT_NEGATIVE
+    assert wf2["3"]["inputs"]["text"] == f"{comfyui.SAFETY_NEGATIVE}, {comfyui.DEFAULT_NEGATIVE}"
     assert comfyui.build_workflow("{不是json", "x") is None
 
     # 未配置工作流 → 内置默认模板，且不污染模板本体

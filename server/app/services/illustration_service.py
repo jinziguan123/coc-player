@@ -32,6 +32,7 @@ _HANDOUT_PROMPT_SYS = (
     " Stable Diffusion 提示词：只描绘这份实体文书本身的画面内容——纸张、字迹/排版、年代感、"
     "光线氛围（如 aged paper, ink handwriting, dim candlelight）。画风词不用写，系统会统一追加。"
     "不要出现人物面孔与真实人名，不要引号，只输出提示词本身。"
+    + module_image_service.SAFETY_PROMPT_RULE
 )
 
 async def _illustrate_event(
@@ -208,6 +209,7 @@ _SCENE_ILLUST_PROMPT_SYS = (
     "只描绘该地点的空镜画面内容——环境/建筑、光影、天气与年代质感，按给定年代取材"
     "（如 abandoned train car, flickering lights）。危险度越高画面越阴沉压抑。画风词不用写，系统会统一追加。"
     "不要出现人物面孔与真实人名，不要引号，只输出提示词本身。"
+    + module_image_service.SAFETY_PROMPT_RULE
 )
 
 _SCENE_ILLUST_INFLIGHT: set[tuple[str, str]] = set()
@@ -249,18 +251,21 @@ _NPC_PORTRAIT_PROMPT_SYS = (
     "该人物的半身肖像（character portrait, bust shot，按给定年代取服饰）。据外貌/身份/性格"
     "描绘气质与神态。画风词不用写，系统会统一追加。不要出现真实人名，"
     "不要引号，只输出提示词本身。"
+    + module_image_service.SAFETY_PROMPT_RULE
 )
 
 _CLUE_ILLUST_PROMPT_SYS = (
     "你是文生图提示词工程师。把给定的 TRPG 线索转成一行**英文** Stable Diffusion 提示词："
     "描绘这件线索物证本身的特写画面——材质、细节、陈放环境与年代质感（evidence close-up, "
     "dim lighting）。画风词不用写，系统会统一追加。不要出现人物面孔与真实人名，不要引号，只输出提示词本身。"
+    + module_image_service.SAFETY_PROMPT_RULE
 )
 
 _ENCOUNTER_ILLUST_PROMPT_SYS = (
     "你是文生图提示词工程师。把给定的 TRPG 遭遇战敌人转成一行**英文** Stable Diffusion 提示词："
     "描绘紧张的遭遇场面（horror creature encounter, dramatic composition），按敌方"
     "描述刻画其形貌与压迫感，按给定年代取环境质感。不要出现真实人名，不要引号，只输出提示词本身。"
+    + module_image_service.SAFETY_PROMPT_RULE
 )
 
 

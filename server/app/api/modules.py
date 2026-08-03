@@ -578,7 +578,7 @@ async def upload_module_image(
     if not url:
         raise HTTPException(422, "无法识别这个文件，请换一张常见格式的图片（JPG / PNG / WebP）")
     try:
-        ok = module_image_service.write_back_image_url(
+        ok = await module_image_service.write_back_image_url(
             db, module, kind, item_id, field, url, visual_state_key,
         )
     except LookupError as e:
