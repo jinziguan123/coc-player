@@ -24,12 +24,8 @@ _make_chunk = make_chunk
 _scene_name = turn_context._scene_name
 _apply_world_memory = turn_context._apply_world_memory
 
-# 全部配图的统一画风后缀（确定性追加在快模型产出的提示词之后，保证风格一致）：
-# 非全彩漫画——墨线 + 网点/排线阴影，单色为主、少量低饱和点缀色，阴郁美漫质感。
-_ILLUST_STYLE_SUFFIX = (
-    "monochrome manga illustration, bold ink lineart, cross-hatching and screentone shading, "
-    "mostly black and white with sparse desaturated color accent, gritty dark comic style"
-)
+# 画风后缀的唯一出处在 module_image_service，三处共用同一段文案（原先各写一份，改一处就散）。
+_ILLUST_STYLE_SUFFIX = module_image_service.IMAGE_STYLE_SUFFIX
 
 _HANDOUT_PROMPT_SYS = (
     "你是文生图提示词工程师。把给定的 TRPG 手书（信件/报纸/日记/便条）转成一行**英文**"

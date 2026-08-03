@@ -63,6 +63,7 @@ interface KnownLocation {
   clues?: { id: string; name: string; status: string }[]
   map?: { q: number; r: number; biome: string } | null   // 沙盘坐标与地貌
   known?: boolean                                        // KP 上帝视角下玩家是否已知
+  image?: string                                         // 场景配图（氛围底的色调来源）
   sceneId?: string
   nodeKind?: 'scene' | 'terrain'
 }
@@ -486,10 +487,10 @@ export function GameSessionPage() {
   }, [])
   const sceneBackdrop = useMemo(() => {
     if (!backdropOn) return ''
-    const raw = sceneBackdropOf(messages, currentSession?.current_scene_id)
+    const raw = sceneBackdropOf(messages, locations)
     if (!raw) return ''
     return /^https?:\/\//i.test(raw) ? raw : `${getServerUrl()}${raw}`
-  }, [backdropOn, messages, currentSession?.current_scene_id])
+  }, [backdropOn, messages, locations])
   // 氛围底真的铺上了才给正文加护读底：没图（未配生图 / 还在生成）时保持原有的透明观感。
   useEffect(() => {
     const root = document.documentElement
@@ -857,14 +858,25 @@ export function GameSessionPage() {
       .catch(() => setMyWeapons([]))
   }, [myCharId, refreshTick])
 
-  // 大地图（已知地点）：展开时拉取，前往后/生成结束刷新。真人 KP 返回全图（god_view）。
+  // 已知地点：前往后/生成结束刷新。真人 KP 返回全图（god_view）。
+  //
+  // 原来只在展开大地图时才拉（`if (!showBigMap) return`），现在改为常驻——场景氛围底要靠
+  // 它拿「**我自己**所在场景」及其配图：分头行动时各人所在地不同，会话的 current_scene_id
+  // 只是房主锚点，照它渲染会让分头的队友都看到房主那间屋子。存量存档也只有这里取得到图
+  // （配图回写在 scene.image，而聊天流里那条「抵达」插图消息可能不在已加载的分页里）。
+  //
+  // refreshTick 这个依赖是必需的、不能为了省一次请求删掉：客人自己「前往」时只改
+  // party_locations，不动 current_scene_id（那只在主角移动时同步），光靠场景 id 变化
+  // 这条副作用不会重跑，客人的背景会一直停在旧场景。抵达叙述结束时 refreshTick 会 +1。
+  // 代价可接受：实测取全量事件 + 算地点在 70 条事件的会话上约 1ms，2000 条外推约 30ms，
+  // 相对一回合几十秒的 LLM 调用可以忽略。
   useEffect(() => {
-    if (!showBigMap || !sessionId) return
+    if (!sessionId) return
     const q = myCharId ? `?char_id=${myCharId}` : ''
     api.get<{ locations: KnownLocation[]; map_nodes?: MapNodePayload[]; god_view?: boolean }>(`/sessions/${sessionId}/locations${q}`)
       .then((r) => { setLocations(r.locations || []); setMapNodes(r.map_nodes || []); setCanGodView(!!r.god_view) })
       .catch(() => { setLocations([]); setMapNodes([]); setCanGodView(false) })
-  }, [showBigMap, sessionId, myCharId, currentSession?.current_scene_id, refreshTick])
+  }, [sessionId, myCharId, currentSession?.current_scene_id, refreshTick])
 
   // 局内沙盘拖拽（真人 KP 专属）：单格移动立即落库并广播，撞格等非法情形由后端拒绝。
   // 走 PATCH /modules/{id}/scene-map 而不是整体保存模组——局内 KP 只该改位置，

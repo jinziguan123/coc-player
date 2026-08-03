@@ -219,24 +219,46 @@ describe('sceneBackdropOf', () => {
   const 场景图 = (sceneId: string, image: string) =>
     ({ metadata: { kind: 'illustration', icat: 'scene', scene_id: sceneId, image } })
   const 别的消息 = { metadata: { icat: 'npc', portrait: '/api/images/p.jpg' } }
+  /** 后端按「查看者自己的角色位置」算出的已知地点表 */
+  const 在 = (id: string, image = '') => ({ id, current: true, image })
+  const 别处 = (id: string, image = '') => ({ id, current: false, image })
 
-  it('取当前场景那张图，不被别的场景或别类配图串台', () => {
+  it('取自己所在场景那张图，不被别的场景或别类配图串台', () => {
     const msgs = [场景图('a', '/api/images/a.jpg'), 别的消息, 场景图('b', '/api/images/b.jpg')]
-    expect(sceneBackdropOf(msgs, 'b')).toBe('/api/images/b.jpg')
-    // 回到旧场景也能取回它原来的图
-    expect(sceneBackdropOf(msgs, 'a')).toBe('/api/images/a.jpg')
+    expect(sceneBackdropOf(msgs, [别处('a'), 在('b')])).toBe('/api/images/b.jpg')
+    // 回到走过的旧场景也能取回它原来的图
+    expect(sceneBackdropOf(msgs, [在('a'), 别处('b')])).toBe('/api/images/a.jpg')
+  })
+
+  it('分头行动：各人按自己所在地渲染，不跟着房主锚点走', () => {
+    const msgs = [场景图('地窖', '/api/images/cellar.jpg'), 场景图('阁楼', '/api/images/attic.jpg')]
+    // 同一份消息流，两个查看者的 locations 不同 → 各看各的
+    expect(sceneBackdropOf(msgs, [在('地窖'), 别处('阁楼')])).toBe('/api/images/cellar.jpg')
+    expect(sceneBackdropOf(msgs, [别处('地窖'), 在('阁楼')])).toBe('/api/images/attic.jpg')
+  })
+
+  it('存量存档：那条「抵达」插图消息不在已加载分页里，回落 locations 上的 scene.image', () => {
+    expect(sceneBackdropOf([], [在('a', '/api/images/from-module.jpg')]))
+      .toBe('/api/images/from-module.jpg')
+  })
+
+  it('聊天流优先于 locations：刚重生成的图比后端那份新', () => {
+    const msgs = [场景图('a', '/api/images/fresh.jpg')]
+    expect(sceneBackdropOf(msgs, [在('a', '/api/images/stale.jpg')])).toBe('/api/images/fresh.jpg')
   })
 
   it('同场景重复到达取最后一张', () => {
     const msgs = [场景图('a', '/api/images/old.jpg'), 场景图('a', '/api/images/new.jpg')]
-    expect(sceneBackdropOf(msgs, 'a')).toBe('/api/images/new.jpg')
+    expect(sceneBackdropOf(msgs, [在('a')])).toBe('/api/images/new.jpg')
   })
 
   it('没图就回落空串，界面自然退回主题底色', () => {
-    expect(sceneBackdropOf([], 'a')).toBe('')
-    expect(sceneBackdropOf([别的消息], 'a')).toBe('')
-    expect(sceneBackdropOf([场景图('a', '/api/images/a.jpg')], null)).toBe('')
+    expect(sceneBackdropOf([], [在('a')])).toBe('')
+    expect(sceneBackdropOf([别的消息], [在('a')])).toBe('')
+    expect(sceneBackdropOf([场景图('a', '/api/images/a.jpg')], undefined)).toBe('')
+    // locations 还没拉回来 / 没有任何 current
+    expect(sceneBackdropOf([场景图('a', '/api/images/a.jpg')], [别处('a')])).toBe('')
     // 图还在生成：只有占位没有 url
-    expect(sceneBackdropOf([{ metadata: { icat: 'scene', scene_id: 'a' } }], 'a')).toBe('')
+    expect(sceneBackdropOf([{ metadata: { icat: 'scene', scene_id: 'a' } }], [在('a')])).toBe('')
   })
 })

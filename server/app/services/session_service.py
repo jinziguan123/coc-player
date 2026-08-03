@@ -1670,6 +1670,11 @@ def list_known_locations(
             "clues": clues_at.get(sid, []),
             "map": s.get("map"),   # 沙盘坐标与地貌（旧模组未回填时为 None）
             "known": sid in known,  # KP 上帝视角下标记玩家是否已知；玩家侧恒 True
+            # 场景配图：前端拿它做「场景氛围底」的色调来源。之所以从这里给而不是只靠聊天流里
+            # 那条「抵达」插图消息——那条消息可能压根不在已加载的分页里（存量存档翻页只取最近
+            # 一段），而配图生成后是回写进 scene.image 的，这份数据一直都在。
+            # 本函数的 cur 取的是**查看者自己**的角色位置，分头行动时各人也就各看各的场景。
+            "image": s.get("image") or "",
         })
     out.sort(key=lambda x: (not x["current"], not x["visited"], x["id"]))
     return out

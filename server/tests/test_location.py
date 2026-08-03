@@ -319,3 +319,55 @@ def test_set_char_location_moves_player(db_factory):
     assert session_service.get_char_location(session, pc_id) == "c"
     assert "c" in (session.world_state or {}).get("visited_scenes")
 
+
+
+def test_locations_carry_scene_image_for_backdrop(db_factory):
+    """场景氛围底的取图来源：locations 要带 scene.image。
+
+    只靠聊天流里那条「抵达」插图消息不够——存量存档翻页只加载最近一段，那条消息可能压根
+    不在里面；而配图生成后是回写进 scene.image 的，这份数据一直都在。
+    """
+    db = db_factory()
+    sid, pc_id, _, mod_id = _seed(db)
+    module = db.get(Module, mod_id)
+    scenes = [dict(s) for s in module.scenes]
+    scenes[0]["image"] = "/api/images/hall.jpg"     # a = 门厅，玩家当前所在
+    module.scenes = scenes
+    db.commit()
+
+    locs = session_service.list_known_locations(
+        module, db.get(GameSession, sid), char_id=pc_id, events=[],
+    )
+    by_id = {x["id"]: x for x in locs}
+    assert by_id["a"]["current"] is True
+    assert by_id["a"]["image"] == "/api/images/hall.jpg"
+    # 没配图的场景给空串而不是缺字段，前端据此回落主题底色
+    assert by_id["a"].get("image") is not None
+
+
+def test_split_party_each_sees_own_scene_as_current(db_factory):
+    """分头行动：current 按**查看者自己**的角色位置算，不是会话的房主锚点。
+
+    照 current_scene_id 渲染氛围底，会让分头在别处的队友都看到房主那间屋子。
+    """
+    db = db_factory()
+    sid, pc_id, ally_id, mod_id = _seed(db)
+    module = db.get(Module, mod_id)
+    scenes = [dict(s) for s in module.scenes]
+    scenes[0]["image"] = "/api/images/hall.jpg"      # a 门厅
+    scenes[1]["image"] = "/api/images/library.jpg"   # b 图书馆
+    module.scenes = scenes
+    session = db.get(GameSession, sid)
+    # 队友分头去了图书馆；会话锚点仍在门厅
+    session.world_state = {**session.world_state, "party_locations": {ally_id: "b"}}
+    db.commit()
+
+    events = [_Ev("narration", "门上挂着牌子：图书馆、档案馆。")]
+    def _cur(char_id):
+        locs = session_service.list_known_locations(
+            module, db.get(GameSession, sid), char_id=char_id, events=events)
+        return next(x for x in locs if x["current"])
+
+    assert db.get(GameSession, sid).current_scene_id == "a"   # 锚点没动
+    assert _cur(pc_id)["image"] == "/api/images/hall.jpg"
+    assert _cur(ally_id)["image"] == "/api/images/library.jpg"

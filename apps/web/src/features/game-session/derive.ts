@@ -86,23 +86,31 @@ export function buildPartyByName(
   return m
 }
 
-/** 挑当前场景的氛围底图（原始相对地址，调用方再拼服务器前缀）。
+/** 挑「我此刻所在场景」的氛围底图（原始相对地址，调用方再拼服务器前缀）。
  *
- * 图来自「抵达某场景」时那条插图消息（kind=illustration + icat=scene + scene_id）。它是到场时
- * 按需生成的——没配生图模型、或图还在生成中都取不到，此时回落空串，界面退回主题底色而不是留空洞。
- * 倒着找当前场景的那条：回到走过的旧场景时也能取回它原来的图。 */
+ * 两个来源，缺一不可：
+ *  ① `locations` —— 后端按**查看者自己的角色位置**算出的已知地点表（含 current 与 image）。
+ *     这是权威来源，也是存量存档唯一能取到图的地方：配图生成后会回写进 scene.image，
+ *     而聊天流里那条「抵达」插图消息可能压根不在已加载的分页里。
+ *     分头行动时各人的 current 各不相同，于是各看各的场景，不会都跟着房主的锚点走。
+ *  ② `messages` —— 刚到场时新生成的图先经 SSE 到达聊天流，此时 locations 还没重拉，
+ *     用它补这段空窗，换场景的背景切换才是即时的。
+ *
+ * 两边都没有（没配生图模型 / 图还在生成）就回落空串，界面退回主题底色而不是留个空洞。 */
 export function sceneBackdropOf(
   messages: { metadata?: Record<string, unknown> | null }[],
-  currentSceneId: string | null | undefined,
+  locations: { id: string; current?: boolean; image?: string }[] | undefined,
 ): string {
-  if (!currentSceneId) return ''
+  const here = (locations || []).find((l) => l.current)
+  if (!here) return ''
+  // 先看聊天流：同一场景若刚重生成过图，这里拿到的比 locations 更新
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]?.metadata
-    if (m?.icat === 'scene' && m?.scene_id === currentSceneId && m?.image) {
+    if (m?.icat === 'scene' && m?.scene_id === here.id && m?.image) {
       return String(m.image).trim()
     }
   }
-  return ''
+  return (here.image || '').trim()
 }
 
 /** 决定一条消息用哪种席位图标。玩家角色一视同仁，没有「主角」特权。 */

@@ -15,10 +15,22 @@ from app.services import image_store
 logger = logging.getLogger(__name__)
 
 _IMAGE_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$")
-_STYLE_SUFFIX = (
-    "monochrome manga illustration, bold ink lineart, cross-hatching and screentone shading, "
-    "mostly black and white with sparse desaturated color accent, gritty dark comic style"
+
+# 全部配图的统一画风后缀（确定性追加在快模型产出的提示词之后，保证风格一致）。
+#
+# **本模块是这段文案的唯一出处**：illustration_service / human_kp_service 从这里 import。
+# 原来三处各写一份完全相同的字符串，改一处就会和另两处不一致。
+#
+# 不再强制黑白：`mostly black and white` 把每张图都压成灰的，场景之间失去区分度——
+# 煤油灯的暖黄、地窖的霉绿、雪夜的冷蓝本该是各自最有辨识度的东西，也是场景氛围底赖以
+# 成立的前提（见 index.css 的 --scene-backdrop-*：它拿配图当色调来源，源图没颜色就没色调）。
+# 改成「低饱和的有限色调」：仍是阴郁墨线漫画质感，但允许每个场景有自己的主色倾向。
+IMAGE_STYLE_SUFFIX = (
+    "moody manga illustration, bold ink lineart, cross-hatching and screentone shading, "
+    "limited desaturated palette with one dominant color cast from the scene's own light source, "
+    "muted low-saturation tones, gritty dark comic style"
 )
+_STYLE_SUFFIX = IMAGE_STYLE_SUFFIX   # 兼容本模块内既有引用
 
 SCENE_PROMPT_SYS = (
     "你是文生图提示词工程师。把给定的 TRPG 场景转成一行**英文** Stable Diffusion 提示词："

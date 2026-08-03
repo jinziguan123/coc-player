@@ -29,10 +29,7 @@ from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
 
-_IMAGE_STYLE = (
-    "monochrome manga illustration, bold ink lineart, cross-hatching and screentone shading, "
-    "mostly black and white with sparse desaturated color accent, gritty dark comic style"
-)
+_IMAGE_STYLE = module_image_service.IMAGE_STYLE_SUFFIX   # 唯一出处见该模块
 _CONTROL_TAG_RE = re.compile(r"\[(?:[A-Z_]{3,})(?::[^\]]*)?\]")
 
 
