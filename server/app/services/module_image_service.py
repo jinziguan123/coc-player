@@ -120,6 +120,40 @@ def _prompt_user(kind: str, item: dict, module: Module, field: str) -> str:
     )
 
 
+def write_back_image_url(
+    db: Session,
+    module: Module,
+    kind: str,
+    item_id: str,
+    field: str | None,
+    url: str,
+    visual_state_key: str | None = None,
+) -> bool:
+    """把一个图片 URL 原子地写回模组 JSON 的对应条目。生成与手动上传共用这一条写回路径。
+
+    走 `_target` 做校验：类型、条目存在性、字段与类型是否匹配，三者任一不合都会抛，
+    避免上传接口绕开生成路径已有的那套约束、把图写到不该写的字段上。
+    """
+    _item, list_field, expected_field, _sys = _target(module, kind, item_id, field)
+    state_key = str(visual_state_key or "").strip()
+    if kind == "scene" and expected_field == "image_variant" and (not state_key or state_key == "base"):
+        raise ValueError("状态图片缺少 visual_state_key")
+    items = [dict(v) if isinstance(v, dict) else v for v in (getattr(module, list_field, None) or [])]
+    for value in items:
+        if isinstance(value, dict) and str(value.get("id") or "") == str(item_id):
+            if kind == "scene" and expected_field == "image_variant":
+                variants = dict(value.get("image_variants") or {})
+                variants[state_key] = url
+                value["image_variants"] = variants
+            else:
+                value[expected_field] = url
+            setattr(module, list_field, items)
+            db.commit()
+            db.refresh(module)
+            return True
+    return False
+
+
 async def regenerate_module_image(
     db: Session,
     module: Module,
@@ -127,8 +161,14 @@ async def regenerate_module_image(
     item_id: str,
     field: str | None = None,
     visual_state_key: str | None = None,
+    force: bool = False,
 ) -> str | None:
-    """重新生成一个失效的模组图片，并将新 URL 原子地写回模组 JSON。"""
+    """重新生成一个模组图片，并将新 URL 原子地写回模组 JSON。
+
+    ``force=False``（默认）是**自愈**语义：图片文件还在就直接复用，只补那些指向已失效
+    文件的条目——这条路径由 <img onError> 自动触发，不该每次报错都重花一次生图的钱。
+    ``force=True`` 是**用户点了「重新生成」**：必须真的重出一张，否则点了跟没点一样。
+    """
     item, list_field, expected_field, prompt_sys = _target(module, kind, item_id, field)
     if kind == "scene" and expected_field == "image_variant":
         state_key = str(visual_state_key or "").strip()
@@ -138,7 +178,7 @@ async def regenerate_module_image(
     else:
         state_key = ""
         cached = str(item.get(expected_field) or "").strip()
-    if image_url_available(cached):
+    if not force and image_url_available(cached):
         return cached
 
     # 提示词用文本模型写、图用生图配置出——两者各走各的配置，互不牵连。
@@ -162,24 +202,8 @@ async def regenerate_module_image(
         url = image_store.save_image_b64(b64)
         if not url:
             return None
-
-        items = [dict(value) if isinstance(value, dict) else value for value in (getattr(module, list_field, None) or [])]
-        updated = False
-        for value in items:
-            if isinstance(value, dict) and str(value.get("id") or "") == str(item_id):
-                if kind == "scene" and expected_field == "image_variant":
-                    variants = dict(value.get("image_variants") or {})
-                    variants[state_key] = url
-                    value["image_variants"] = variants
-                else:
-                    value[expected_field] = url
-                updated = True
-                break
-        if not updated:
+        if not write_back_image_url(db, module, kind, item_id, field, url, state_key):
             return None
-        setattr(module, list_field, items)
-        db.commit()
-        db.refresh(module)
         return url
     except Exception:  # noqa: BLE001 — 图片是增强能力，失败时由调用方返回可读错误
         logger.exception("模组图片重新生成失败：module=%s kind=%s item=%s", module.id, kind, item_id)

@@ -165,3 +165,101 @@ def test_regenerate_scene_visual_variant_updates_variant_cache(tmp_path, monkeyp
         db, module, "scene", "s1", "image_variant", "flooded",
     ))
     assert url and db.get(Module, module.id).scenes[0]["image_variants"]["flooded"] == url
+
+
+def test_force_regenerate_replaces_existing_image(tmp_path, monkeypatch):
+    """用户点「重新生成」必须真的重出一张。
+
+    默认的 force=False 是 <img onError> 的自愈语义：图还在就复用，不为每次加载报错重花
+    一次生图的钱。但用户主动点按钮时若也走这条短路，就会拿回原来那张，点了跟没点一样。
+    """
+    from app.services import image_store, module_image_service
+
+    monkeypatch.setattr(image_store, "IMAGES_DIR", tmp_path / "images")
+    old = image_store.save_image_b64(_png_b64())
+    engine = create_engine(f"sqlite:///{tmp_path / 'force.db'}")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    module = Module(title="m", rule_system="coc", scenes=[{"id": "s1", "name": "教堂", "image": old}])
+    db.add(module); db.commit()
+
+    class PromptLLM:
+        async def complete(self, messages, **kwargs):
+            return "old chapel interior"
+
+    class ImageLLM:
+        def supports_image_gen(self):
+            return True
+
+        async def generate_image(self, prompt, size="1024x1024"):
+            return _png_b64()
+
+    monkeypatch.setattr(module_image_service, "get_fast_llm", lambda: PromptLLM())
+    monkeypatch.setattr(module_image_service, "get_image_llm", lambda: ImageLLM())
+
+    new = asyncio.run(
+        module_image_service.regenerate_module_image(db, module, "scene", "s1", force=True))
+    assert new and new != old, "force=True 必须产出新图，不能复用旧的"
+    assert db.get(Module, module.id).scenes[0]["image"] == new   # 已回写
+
+
+def test_upload_module_image_writes_back(tmp_path, monkeypatch):
+    """手动上传换图：没有它，配图完全受制于文生图——没配生图模型的人一张图都拿不到。"""
+    from app.services import image_store
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'upload.db'}")
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine)
+
+    def override_get_db():
+        db = testing_session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr(image_store, "IMAGES_DIR", tmp_path / "images")
+    try:
+        with TestClient(app) as client:
+            db = testing_session()
+            module = Module(
+                title="m", rule_system="coc",
+                scenes=[{"id": "s1", "name": "教堂"}],          # 本来就没有图
+                npcs=[{"id": "n1", "name": "守墓人"}],
+            )
+            db.add(module); db.commit()
+            module_id = module.id
+            db.close()
+
+            png = base64.b64decode(_png_b64())
+            r = client.post(
+                f"/api/modules/{module_id}/images/upload",
+                files={"file": ("x.png", png, "image/png")},
+                data={"kind": "scene", "item_id": "s1", "field": "image"},
+            )
+            assert r.status_code == 200, r.text
+            url = r.json()["url"]
+            saved = testing_session().get(Module, module_id)
+            assert saved.scenes[0]["image"] == url
+            # 一律重存为 JPEG（与生成图同一条落盘路径，两者在系统里没有区别）
+            assert url.endswith(".jpg")
+            assert (tmp_path / "images" / url.rsplit("/", 1)[-1]).is_file()
+
+            # 不是图片的文件要被挡住，而不是原样落进图片目录
+            bad = client.post(
+                f"/api/modules/{module_id}/images/upload",
+                files={"file": ("x.txt", b"this is not an image", "text/plain")},
+                data={"kind": "scene", "item_id": "s1", "field": "image"},
+            )
+            assert bad.status_code == 422
+
+            # 条目不存在要报 404，不能静默丢图
+            missing = client.post(
+                f"/api/modules/{module_id}/images/upload",
+                files={"file": ("x.png", png, "image/png")},
+                data={"kind": "scene", "item_id": "不存在", "field": "image"},
+            )
+            assert missing.status_code == 404
+    finally:
+        app.dependency_overrides.clear()

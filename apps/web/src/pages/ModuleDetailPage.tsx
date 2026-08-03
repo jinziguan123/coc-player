@@ -12,7 +12,8 @@ import {
 } from 'lucide-react'
 import { ModuleGraph } from '../components/module/ModuleGraph'
 import { HexSandbox } from '../components/game/HexSandbox'
-import { ModuleImage, type ModuleImageKind } from '../components/module/ModuleImage'
+import { type ModuleImageKind } from '../components/module/ModuleImage'
+import { ImageSlot } from '../components/module/ImageSlot'
 import { CharacterGuidanceCard } from '../components/module/CharacterGuidanceCard'
 import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { ModuleTimeline } from '../components/module/ModuleTimeline'
@@ -777,7 +778,9 @@ export function ModuleDetailPage() {
         <ItemGrid>
         {data.scenes.map((s, i) => (
           <ItemCard key={s.id || i} onRemove={edit ? () => removeAt('scenes', i) : undefined}>
-            {!edit && s.image && <ModuleImage src={s.image} moduleId={data.id} kind="scene" itemId={s.id} field="image" alt={sceneName(s)} className="mb-3" onRegenerated={(url) => updScene(i, { image: url })} />}
+            {/* 编辑态同样要显示：房主改场景描述时看不到这个场景长什么样，是最需要看图的时候 */}
+            <ImageSlot src={s.image} moduleId={data.id} kind="scene" itemId={s.id} field="image"
+              alt={sceneName(s)} className="mb-3" onChange={(url) => updScene(i, { image: url })} />
             {!edit && (
               <ItemHead
                 title={sceneName(s)}
@@ -833,7 +836,9 @@ export function ModuleDetailPage() {
         <ItemGrid>
         {data.npcs.map((n, i) => (
           <ItemCard key={n.id || i} onRemove={edit ? () => removeAt('npcs', i) : undefined}>
-            {!edit && n.portrait && <ModuleImage src={n.portrait} moduleId={data.id} kind="npc" itemId={n.id} field="portrait" alt={n.name || 'NPC'} aspectRatio="3 / 4" className="mb-3 max-w-48" onRegenerated={(url) => updNpc(i, { portrait: url })} />}
+            <ImageSlot src={n.portrait} moduleId={data.id} kind="npc" itemId={n.id} field="portrait"
+              alt={n.name || 'NPC'} aspectRatio="3 / 4" className="mb-3 max-w-48"
+              onChange={(url) => updNpc(i, { portrait: url })} />
             {!edit && (
               <ItemHead
                 title={n.name || '(未命名)'}
@@ -905,7 +910,9 @@ export function ModuleDetailPage() {
         <ItemGrid>
         {data.clues.map((c, i) => (
           <ItemCard key={c.id || i} onRemove={edit ? () => removeAt('clues', i) : undefined}>
-            {!edit && c.image && <ModuleImage src={c.image} moduleId={data.id} kind="clue" itemId={c.id} field="image" alt={c.name || '线索'} aspectRatio="4 / 3" className="mb-3" onRegenerated={(url) => updClue(i, { image: url })} />}
+            <ImageSlot src={c.image} moduleId={data.id} kind="clue" itemId={c.id} field="image"
+              alt={c.name || '线索'} aspectRatio="4 / 3" className="mb-3"
+              onChange={(url) => updClue(i, { image: url })} />
             {!edit && (
               <div className="mb-1.5 flex items-start justify-between gap-2 pb-1.5"
                 style={{ borderBottom: '1px solid var(--color-border)' }}>

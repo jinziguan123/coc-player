@@ -4,7 +4,7 @@ import logging
 import uuid
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.database import SessionLocal, get_db
 from app.schemas.module import ModuleRead, ModuleUploadResponse, ModuleWrite
 from app.services import (
     hex_map,
+    image_store,
     module_image_service,
     module_map_service,
     module_rag_service,
@@ -84,6 +85,9 @@ class ModuleImageRegenerateRequest(BaseModel):
     item_id: str
     field: str | None = None
     visual_state_key: str | None = None
+    #: True = 用户点了「重新生成」，必须真的重出一张；缺省 False 是 <img onError> 的自愈路径，
+    #: 图还在就复用，不为每次加载报错重花一次生图的钱。
+    force: bool = False
 
 
 def _decode_text(content: bytes) -> str:
@@ -526,14 +530,17 @@ async def regenerate_module_image(
     data: ModuleImageRegenerateRequest,
     db: Session = Depends(get_db),
 ):
-    """图片文件缺失时重新生成，并回写 scenes/npcs/clues 中的图片 URL。"""
+    """重新生成配图并回写 scenes/npcs/clues 中的图片 URL。
+
+    force=False：自愈（图片文件缺失时才重出）。force=True：用户主动点「重新生成」，必重出。
+    """
     module = module_service.get_module(db, module_id)
     if not module:
         raise HTTPException(404, "模组不存在")
     try:
         url = await module_image_service.regenerate_module_image(
             db, module, data.kind, data.item_id, data.field,
-            data.visual_state_key,
+            data.visual_state_key, force=data.force,
         )
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
@@ -542,6 +549,45 @@ async def regenerate_module_image(
     if not url:
         raise HTTPException(503, "图片重新生成失败，请检查文生图配置后重试")
     return {"url": url, "kind": data.kind, "item_id": data.item_id}
+
+
+@router.post("/{module_id}/images/upload", dependencies=[Depends(require_local_client)])
+async def upload_module_image(
+    module_id: str,
+    file: UploadFile,
+    kind: str = Form(...),
+    item_id: str = Form(...),
+    field: str | None = Form(None),
+    visual_state_key: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    """手动给某个场景/NPC/线索换图：上传一张图片，落盘后回写该条目的图片 URL。
+
+    没有它，配图就完全受制于文生图——没配生图模型的人一张图都拿不到，出图不满意的人也只能
+    反复重掷。上传走的是和生成同一条落盘与回写路径，因此两者产出的图在系统里毫无区别。
+    """
+    module = module_service.get_module(db, module_id)
+    if not module:
+        raise HTTPException(404, "模组不存在")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "上传的文件是空的")
+    if len(raw) > image_store.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"图片过大（上限 {image_store.MAX_UPLOAD_BYTES // 1024 // 1024}MB）")
+    url = image_store.save_image_bytes(raw)
+    if not url:
+        raise HTTPException(422, "无法识别这个文件，请换一张常见格式的图片（JPG / PNG / WebP）")
+    try:
+        ok = module_image_service.write_back_image_url(
+            db, module, kind, item_id, field, url, visual_state_key,
+        )
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    if not ok:
+        raise HTTPException(404, "模组图片条目不存在")
+    return {"url": url, "kind": kind, "item_id": item_id}
 
 
 @router.post("/{module_id}/rag/rebuild", dependencies=[Depends(require_local_client)], response_model=ModuleRead)

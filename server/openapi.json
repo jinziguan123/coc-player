@@ -393,6 +393,52 @@
         "title": "Body_upload_module_api_modules_upload_post",
         "type": "object"
       },
+      "Body_upload_module_image_api_modules__module_id__images_upload_post": {
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "visual_state_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual State Key"
+          }
+        },
+        "required": [
+          "file",
+          "kind",
+          "item_id"
+        ],
+        "title": "Body_upload_module_image_api_modules__module_id__images_upload_post",
+        "type": "object"
+      },
       "Body_upload_rulebook_api_rulebooks_upload_post": {
         "properties": {
           "file": {
@@ -1468,6 +1514,11 @@
               }
             ],
             "title": "Field"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
           },
           "item_id": {
             "title": "Item Id",
@@ -3330,7 +3381,7 @@
     },
     "/api/modules/{module_id}/images/regenerate": {
       "post": {
-        "description": "图片文件缺失时重新生成，并回写 scenes/npcs/clues 中的图片 URL。",
+        "description": "重新生成配图并回写 scenes/npcs/clues 中的图片 URL。\n\nforce=False：自愈（图片文件缺失时才重出）。force=True：用户主动点「重新生成」，必重出。",
         "operationId": "regenerate_module_image_api_modules__module_id__images_regenerate_post",
         "parameters": [
           {
@@ -3374,6 +3425,57 @@
           }
         },
         "summary": "Regenerate Module Image",
+        "tags": [
+          "modules"
+        ]
+      }
+    },
+    "/api/modules/{module_id}/images/upload": {
+      "post": {
+        "description": "手动给某个场景/NPC/线索换图：上传一张图片，落盘后回写该条目的图片 URL。\n\n没有它，配图就完全受制于文生图——没配生图模型的人一张图都拿不到，出图不满意的人也只能\n反复重掷。上传走的是和生成同一条落盘与回写路径，因此两者产出的图在系统里毫无区别。",
+        "operationId": "upload_module_image_api_modules__module_id__images_upload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "module_id",
+            "required": true,
+            "schema": {
+              "title": "Module Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_module_image_api_modules__module_id__images_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Module Image",
         "tags": [
           "modules"
         ]

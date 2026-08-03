@@ -289,9 +289,34 @@ export interface paths {
         put?: never;
         /**
          * Regenerate Module Image
-         * @description 图片文件缺失时重新生成，并回写 scenes/npcs/clues 中的图片 URL。
+         * @description 重新生成配图并回写 scenes/npcs/clues 中的图片 URL。
+         *
+         *     force=False：自愈（图片文件缺失时才重出）。force=True：用户主动点「重新生成」，必重出。
          */
         post: operations["regenerate_module_image_api_modules__module_id__images_regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/modules/{module_id}/images/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Module Image
+         * @description 手动给某个场景/NPC/线索换图：上传一张图片，落盘后回写该条目的图片 URL。
+         *
+         *     没有它，配图就完全受制于文生图——没配生图模型的人一张图都拿不到，出图不满意的人也只能
+         *     反复重掷。上传走的是和生成同一条落盘与回写路径，因此两者产出的图在系统里毫无区别。
+         */
+        post: operations["upload_module_image_api_modules__module_id__images_upload_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2331,6 +2356,19 @@ export interface components {
             /** Files */
             files: string[];
         };
+        /** Body_upload_module_image_api_modules__module_id__images_upload_post */
+        Body_upload_module_image_api_modules__module_id__images_upload_post: {
+            /** Field */
+            field?: string | null;
+            /** File */
+            file: string;
+            /** Item Id */
+            item_id: string;
+            /** Kind */
+            kind: string;
+            /** Visual State Key */
+            visual_state_key?: string | null;
+        };
         /** Body_upload_rulebook_api_rulebooks_upload_post */
         Body_upload_rulebook_api_rulebooks_upload_post: {
             /** File */
@@ -2815,6 +2853,11 @@ export interface components {
         ModuleImageRegenerateRequest: {
             /** Field */
             field?: string | null;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
             /** Item Id */
             item_id: string;
             /** Kind */
@@ -3897,6 +3940,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ModuleImageRegenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_module_image_api_modules__module_id__images_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_module_image_api_modules__module_id__images_upload_post"];
             };
         };
         responses: {
