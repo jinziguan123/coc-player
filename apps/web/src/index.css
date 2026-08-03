@@ -57,6 +57,20 @@
     radial-gradient(ellipse 130% 90% at 50% 115%, rgba(4, 5, 8, 0.85) 0%, transparent 55%),
     linear-gradient(180deg, #0e1118 0%, #0c0e13 55%, #0a0c10 100%);
 
+  /* 场景氛围底：把当前场景配图糊成「这个地方的色调」。
+     关键是 contrast 而不是 brightness——AI 生图的亮度分布不可控（实测港务所那张中央
+     就是一大片过曝白窗），而 brightness 压不住过曝：白点乘 0.3 仍是 0.3，照样顶穿文字。
+     contrast(0.5) 先把整幅图的动态范围压扁到中灰附近，brightness(0.4) 再整体拉进暗带，
+     于是纯白与纯黑都落进同一个窄区间，任何一张图都不会有能压垮正文的亮块。 */
+  --scene-backdrop-filter: blur(32px) saturate(0.9) contrast(0.5) brightness(0.4);
+  --scene-backdrop-opacity: 0.9;
+  /* 压在图上的罩子：中间留出色调，四周与上下收回主题底色，接缝不露 */
+  --scene-backdrop-scrim:
+    radial-gradient(ellipse 90% 76% at 50% 45%, transparent 0%, rgba(12, 14, 19, 0.5) 100%),
+    linear-gradient(180deg, #0c0e13 0%, transparent 12%, transparent 88%, #0c0e13 100%);
+  /* 叙事护读底：KP 旁白是唯一没有自带底色的长文，氛围底会直接顶到字后面。 */
+  --scene-backdrop-read-guard: rgba(12, 14, 19, 0.7);
+
   /* 字体（按区域拆分）：
      · --font-ui  系统 UI「羊皮卷」衬线：首页/列表/侧边栏/按钮/表单/游戏外壳等一切非游戏内信息
      · --font-body KP 叙事等旧衬线正文（与 UI 同源 Noto Serif SC）
@@ -137,6 +151,16 @@
     radial-gradient(ellipse at 20% 50%, #f5ead5 0%, transparent 70%),
     radial-gradient(ellipse at 80% 50%, #ebe0ca 0%, transparent 70%),
     linear-gradient(180deg, #f0e6d3 0%, #e5d8c0 50%, #ddd0b5 100%);
+
+  /* 浅底深字，压暗会把正文吃掉 → 反过来提亮、褪色，做成「晒过头的旧照片」。
+     照搬暗色主题那套参数会得到一张深色照片衬深色字，正是最不能读的组合。
+     同样靠 contrast 压扁动态范围，只是这次往亮的一端拉。 */
+  --scene-backdrop-filter: blur(32px) saturate(0.5) contrast(0.45) brightness(1.5);
+  --scene-backdrop-opacity: 0.55;
+  --scene-backdrop-scrim:
+    radial-gradient(ellipse 90% 76% at 50% 45%, transparent 0%, rgba(240, 230, 211, 0.55) 100%),
+    linear-gradient(180deg, #f0e6d3 0%, transparent 12%, transparent 88%, #ddd0b5 100%);
+  --scene-backdrop-read-guard: rgba(245, 237, 222, 0.78);
 
   /* 羊皮纸主题整套 UI 皆衬线（还原旧版观感）。
      --font-game 在 :root 已定义并被本主题继承，游戏内信息同样走圆润楷体（配泛黄纸质更协调）。 */
@@ -2216,6 +2240,60 @@ select.input option {
   0% { opacity: 0; }
   45% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* ===== 场景氛围底 =====================================================
+ * 当前场景的配图糊成「这个地方的色调」铺在整个对局界面后面。
+ *
+ * 三层叠出来，缺一不可：
+ *   .scene-backdrop      图本身，重度模糊 + 按主题压暗/提亮（滤镜见主题变量）
+ *   .scene-backdrop::after  罩子，四周与上下收回主题底色，不露接缝
+ *   （正文所在的各层都在其上，z-index 0 保证它永远垫底）
+ *
+ * transform: scale(1.14) 是必需的：blur 会让元素边缘向内透出背景，放大一圈才能盖住
+ * 那一圈羽化边。切场景时靠已有的 .scene-veil 暗幕遮住换图，不必再单独做 crossfade。
+ */
+.scene-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.scene-backdrop__img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: var(--scene-backdrop-filter);
+  opacity: var(--scene-backdrop-opacity);
+  transform: scale(1.14);
+  transition: opacity 0.8s ease;
+}
+.scene-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--scene-backdrop-scrim);
+}
+/* 氛围底以对局布局为定位基准（布局本身默认 static，不给它 relative 的话
+   inset:0 会去贴更外层的祖先，尺寸与位置全错）；内容整体抬到氛围底之上。 */
+.game-session-layout { position: relative; }
+.game-session-layout > *:not(.scene-backdrop) { position: relative; z-index: 1; }
+
+/* 叙事护读底：只在氛围底真的开着时加，关掉即完全回到原有观感（透明、无底）。
+   KP 旁白是聊天流里唯一没有自带底色的长文——气泡、骰子卡、场景卡都有自己的底，
+   只有它是裸文字直接坐在页面背景上，也就是氛围底唯一能顶到字后面的地方。
+   借它已有的左侧描边收边，看起来像一条压在雾上的窄卷轴，不是硬贴的方框。 */
+[data-scene-backdrop='on'] .chat-msg--narration .chat-content {
+  background: var(--scene-backdrop-read-guard);
+  padding-right: 1rem;
+  border-radius: 0 4px 4px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-backdrop__img { transition: none; }
 }
 
 /* ===== 沉浸战斗布局（战斗激活时：战场为主、聊天收成侧栏） ===== */

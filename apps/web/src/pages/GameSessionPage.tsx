@@ -5,11 +5,13 @@ import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { api, connectSSE, getServerUrl } from '../api/client'
 import { runLiveSession } from '@/lib/liveSession'
+import { getSceneBackdropEnabled } from '@/lib/theme'
 import {
   buildPartyByName,
   fmtTime,
   isSoloTable,
   npcHue,
+  sceneBackdropOf,
   resolveActorKind,
   selectCombatLog,
   selectCombatResult,
@@ -473,6 +475,28 @@ export function GameSessionPage() {
   }, [currentSession?.current_scene_id])
   // 切会话时重置场景基线，避免跨会话误触发暗幕
   useEffect(() => { prevSceneId.current = undefined; setSceneVeil(false) }, [sessionId])
+
+  // 场景氛围底：拿当前场景那张配图当底色来源（重度模糊压暗后铺满，见 index.css）。选图逻辑
+  // 在 derive.sceneBackdropOf；这里只负责开关、拼服务器前缀，以及告诉 CSS 底铺上没有。
+  const [backdropOn, setBackdropOn] = useState(() => getSceneBackdropEnabled())
+  useEffect(() => {
+    const sync = () => setBackdropOn(getSceneBackdropEnabled())
+    window.addEventListener('focus', sync)          // 从设置页切回来即时生效
+    return () => window.removeEventListener('focus', sync)
+  }, [])
+  const sceneBackdrop = useMemo(() => {
+    if (!backdropOn) return ''
+    const raw = sceneBackdropOf(messages, currentSession?.current_scene_id)
+    if (!raw) return ''
+    return /^https?:\/\//i.test(raw) ? raw : `${getServerUrl()}${raw}`
+  }, [backdropOn, messages, currentSession?.current_scene_id])
+  // 氛围底真的铺上了才给正文加护读底：没图（未配生图 / 还在生成）时保持原有的透明观感。
+  useEffect(() => {
+    const root = document.documentElement
+    if (sceneBackdrop) root.dataset.sceneBackdrop = 'on'
+    else delete root.dataset.sceneBackdrop
+    return () => { delete root.dataset.sceneBackdrop }
+  }, [sceneBackdrop])
 
   // 角色名 → 归属（用于消息前的身份图标：我 / AI 队友 / 其他真人 / NPC）
   const partyByName = useMemo(
@@ -1270,6 +1294,11 @@ export function GameSessionPage() {
 
   return (
     <div className="game-session-layout flex h-full gap-4">
+      {sceneBackdrop && (
+        <div className="scene-backdrop" aria-hidden="true">
+          <div className="scene-backdrop__img" style={{ backgroundImage: `url("${sceneBackdrop}")` }} />
+        </div>
+      )}
       {sceneVeil && <div className="scene-veil" aria-hidden="true" />}
       {battleVeil && <div className="scene-veil" aria-hidden="true" />}
       {/* 沉浸战斗布局：战斗激活时战场占左侧约 2/3（棋盘居中放大、参战卡环绕、动作区钉底），

@@ -86,6 +86,25 @@ export function buildPartyByName(
   return m
 }
 
+/** 挑当前场景的氛围底图（原始相对地址，调用方再拼服务器前缀）。
+ *
+ * 图来自「抵达某场景」时那条插图消息（kind=illustration + icat=scene + scene_id）。它是到场时
+ * 按需生成的——没配生图模型、或图还在生成中都取不到，此时回落空串，界面退回主题底色而不是留空洞。
+ * 倒着找当前场景的那条：回到走过的旧场景时也能取回它原来的图。 */
+export function sceneBackdropOf(
+  messages: { metadata?: Record<string, unknown> | null }[],
+  currentSceneId: string | null | undefined,
+): string {
+  if (!currentSceneId) return ''
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]?.metadata
+    if (m?.icat === 'scene' && m?.scene_id === currentSceneId && m?.image) {
+      return String(m.image).trim()
+    }
+  }
+  return ''
+}
+
 /** 决定一条消息用哪种席位图标。玩家角色一视同仁，没有「主角」特权。 */
 export function resolveActorKind(
   partyByName: Record<string, PartyMember>,

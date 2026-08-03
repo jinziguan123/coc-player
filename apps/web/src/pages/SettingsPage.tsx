@@ -23,7 +23,9 @@ import {
   shortPeerId,
   type NetlinkStatus,
 } from '@/api/netlink'
-import { THEMES, getTheme, setTheme, type Theme } from '@/lib/theme'
+import {
+  THEMES, getTheme, setTheme, getSceneBackdropEnabled, setSceneBackdropEnabled, type Theme,
+} from '@/lib/theme'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getOnboardingReturnTo } from '@/features/onboarding/navigation'
 import { AISettingsPanel } from '@/features/settings/AISettingsPanel'
@@ -688,6 +690,7 @@ function NetlinkPanel({ backendPort }: { backendPort: number | null }) {
 
 function AppearanceSettingsPanel() {
   const [theme, setThemeState] = useState<Theme>(() => getTheme())
+  const [backdrop, setBackdrop] = useState(() => getSceneBackdropEnabled())
 
   const choose = (t: Theme) => {
     setTheme(t) // 写 localStorage + 改 documentElement.dataset.theme，即时生效
@@ -767,6 +770,34 @@ function AppearanceSettingsPanel() {
             )
           })}
         </div>
+      </div>
+
+      <div className="card">
+        <h3 className="card-title">场景氛围底</h3>
+        <p
+          className="text-xs"
+          style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
+        >
+          把当前场景的配图重度模糊后铺在对局界面后面，只留下这个地方的色调（雾港的冷灰、
+          地窖的暗褐），换场景时跟着变。图会被糊掉细节并压暗，不影响读字。
+          没有配图的场景（未配置生图模型，或图还在生成）自动回落到主题底色。
+        </p>
+        <label
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.6rem',
+            cursor: 'pointer', fontSize: '0.85rem',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={backdrop}
+            onChange={(e) => {
+              setSceneBackdropEnabled(e.target.checked)
+              setBackdrop(e.target.checked)
+            }}
+          />
+          <span>在对局界面渲染场景氛围底</span>
+        </label>
       </div>
     </div>
   )

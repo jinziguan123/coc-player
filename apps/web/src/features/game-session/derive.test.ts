@@ -4,6 +4,7 @@ import {
   buildPartyByName,
   fmtTime,
   isSoloTable,
+  sceneBackdropOf,
   npcHue,
   resolveActorKind,
   selectCombatLog,
@@ -211,5 +212,31 @@ describe('isSoloTable', () => {
   it('还没认领角色的空席位不算人头；真人 KP 席也不算', () => {
     expect(isSoloTable([seat({ is_mine: true }), seat({ character_id: null })])).toBe(true)
     expect(isSoloTable([seat({ is_mine: true }), seat({ role: 'kp', character_id: null })])).toBe(true)
+  })
+})
+
+describe('sceneBackdropOf', () => {
+  const 场景图 = (sceneId: string, image: string) =>
+    ({ metadata: { kind: 'illustration', icat: 'scene', scene_id: sceneId, image } })
+  const 别的消息 = { metadata: { icat: 'npc', portrait: '/api/images/p.jpg' } }
+
+  it('取当前场景那张图，不被别的场景或别类配图串台', () => {
+    const msgs = [场景图('a', '/api/images/a.jpg'), 别的消息, 场景图('b', '/api/images/b.jpg')]
+    expect(sceneBackdropOf(msgs, 'b')).toBe('/api/images/b.jpg')
+    // 回到旧场景也能取回它原来的图
+    expect(sceneBackdropOf(msgs, 'a')).toBe('/api/images/a.jpg')
+  })
+
+  it('同场景重复到达取最后一张', () => {
+    const msgs = [场景图('a', '/api/images/old.jpg'), 场景图('a', '/api/images/new.jpg')]
+    expect(sceneBackdropOf(msgs, 'a')).toBe('/api/images/new.jpg')
+  })
+
+  it('没图就回落空串，界面自然退回主题底色', () => {
+    expect(sceneBackdropOf([], 'a')).toBe('')
+    expect(sceneBackdropOf([别的消息], 'a')).toBe('')
+    expect(sceneBackdropOf([场景图('a', '/api/images/a.jpg')], null)).toBe('')
+    // 图还在生成：只有占位没有 url
+    expect(sceneBackdropOf([{ metadata: { icat: 'scene', scene_id: 'a' } }], 'a')).toBe('')
   })
 })
