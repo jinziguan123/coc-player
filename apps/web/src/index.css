@@ -2293,6 +2293,41 @@ select.input option {
   [data-scene-backdrop='on'] .game-session-layout { padding: 0.75rem; }
 }
 
+/* ── 前景「玻璃化」：让卡片和氛围底成为同一层 ──────────────────────────────
+ *
+ * 卡片底色（--surface-*、气泡底）本是给纯色页面设计的**不透明实色**。一放到有内容的
+ * 氛围底上，它们就成了一张张贴纸：骰子卡是实心色块、卡片之间露出模糊的照片、叙事正文
+ * 又完全透明——同一列里三种材质打架，这就是「突兀」的来源。
+ *
+ * 解法是把这些底统一改成**半透明**：卡片透出背景当前的色调，于是整屏是一层玻璃浮在
+ * 场景之上，而不是一堆贴纸摆在照片上。
+ *
+ * 刻意**不加 backdrop-filter**：氛围底自己已经 blur(30–36px) 糊过了，半透明透出来的
+ * 本来就是没有细节的色块，读字不受影响；而聊天流里几十个卡片各做一次背景模糊是实打实
+ * 的合成开销，白花。
+ *
+ * 作用域限定在 .game-session-layout 内：弹窗/下拉走 createPortal 挂在 body 层，
+ * 拿不到这里的变量，仍是不透明——浮层要的就是挡住底下的东西。
+ */
+[data-scene-backdrop='on'] .game-session-layout {
+  --surface-1: rgba(23, 27, 36, 0.72);
+  --surface-2: rgba(28, 33, 44, 0.70);
+  --surface-3: rgba(35, 41, 54, 0.72);
+  --color-player-bg: rgba(38, 32, 22, 0.76);
+  --npc-bubble-bg: hsl(var(--npc-hue, 222) 18% 13% / 0.72);
+  --color-bg-card: rgba(20, 23, 31, 0.72);
+  --color-bg-tertiary: rgba(26, 30, 40, 0.70);
+}
+:root[data-theme='parchment'][data-scene-backdrop='on'] .game-session-layout {
+  --surface-1: rgba(236, 226, 206, 0.72);
+  --surface-2: rgba(227, 215, 192, 0.70);
+  --surface-3: rgba(216, 202, 174, 0.72);
+  --color-player-bg: rgba(212, 196, 168, 0.76);
+  --npc-bubble-bg: rgba(255, 255, 255, 0.42);
+  --color-bg-card: rgba(236, 226, 206, 0.72);
+  --color-bg-tertiary: rgba(227, 215, 192, 0.70);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scene-backdrop__img { transition: none; }
 }
