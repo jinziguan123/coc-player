@@ -1275,10 +1275,10 @@ export function GameSessionPage() {
         await api.post(`/sessions/${currentSession.id}/ooc`, body)
       } else {
         // 回合确认制：发言只进入「本回合暂存」（不进 streaming），等点「推进」且所有真人确认后才交 KP。
+        //
+        // 独自开团时也照走这一步、**不做发送即推进**：一个人同样会写完想改，暂存期正是唯一能
+        // 改的窗口。为省一次点击把它换掉，是拿真实需要的能力去换一个便利，划不来。
         await api.post(`/sessions/${currentSession.id}/chat`, body)
-        // 独自开团时「攒一批再一起交」没有协同对象，那一步只是每回合多一次点击 → 发送即推进。
-        // 仍走同一个 /advance，多人局的确认语义分毫未变。
-        if (soloTable) await advanceTurn()
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '发送失败'
@@ -1646,12 +1646,9 @@ export function GameSessionPage() {
           )}
           {(() => {
           // 是否可增删改：自己本回合尚未推进的暂存发言（action/dialogue + pending_turn + 本人）。
-          //
-          // 独自开团时一律不可编辑：发送即推进，那个「攒着待改」的窗口根本不存在。而且此时
-          // 消息经 SSE 推回来时后端尚未清 pending_turn，之后也没有事件来纠正这份客户端副本——
-          // 不排掉的话，回合早已交出去，那条发言旁边还挂着一对编辑/删除按钮，点了也没用。
+          // 单人局同样适用——一个人也会写完想改，这是唯一能改的窗口。
           const canEditMsg = (m: ChatMessage) =>
-            !streaming && !soloTable && !!m.id && (m.type === 'action' || m.type === 'dialogue')
+            !streaming && !!m.id && (m.type === 'action' || m.type === 'dialogue')
             && !!m.metadata?.pending_turn && m.metadata?.is_player === true
           // 这条消息是否「本轮新到达」（决定是否播一次入场动效）。历史/重连整批为 false。
           // enterIds 已排除流式中的临时 stream-* 消息（其内容逐段增长，动效会与流式节奏打架；
@@ -2124,7 +2121,7 @@ export function GameSessionPage() {
                 title={currentSession.kp_mode === 'human'
                   ? '所有真人都提交后，真人 KP 会收到本回合行动'
                   : soloTable
-                    ? '把本回合已暂存的内容（如「前往」）交给 KP；直接发言会自动推进，不必点这里'
+                    ? '把本回合暂存的发言交给 KP；交出去之前都还能改'
                     : '所有真人都点「推进」后，本回合发言才整批交给 KP'}
               >
                 {turnState && myCharId && turnState.confirmed_ids.includes(myCharId)

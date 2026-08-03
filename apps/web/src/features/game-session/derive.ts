@@ -65,12 +65,14 @@ interface ParticipantLike {
   role: string
 }
 
-/** 全桌只有自己一个真人？回合确认制是给多人同桌用的（各自写完、凑齐再一起交给 KP）——
- *  一个人时那一步没有协同对象，只是每回合多一次点击，于是发送即推进。
+/** 全桌只有自己一个真人？**只用于措辞**：一个人时「已确认 0/1」「等待其他人」这类文案
+ *  没有信息量，房里就他一个。
  *
- *  判错的代价不对称：误判成单人会让多人局在队友还没写完时就把回合交出去，所以只认
- *  「已占角色席的真人」，AI 队友与 KP 席都不算，宁可多点一次也不要提前交卷。
- *  无 participants 的旧单人会话同样算独自开团。 */
+ *  它不改变回合确认制本身——单人局同样是「发言先暂存、点推进才交给 KP」，因为一个人
+ *  也会写完想改，暂存期是唯一能改的窗口。曾经据此做过「单人发送即推进」，那是拿真实
+ *  需要的能力去换一次点击，已撤掉。
+ *
+ *  只认「已占角色席的真人」，AI 队友与 KP 席都不算。 */
 export function isSoloTable(participants: ParticipantLike[] | undefined): boolean {
   const humans = (participants || []).filter((p) => p.role === 'human' && p.character_id)
   return humans.length <= 1

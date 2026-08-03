@@ -205,7 +205,7 @@ describe('isSoloTable', () => {
     ])).toBe(true)
   })
 
-  it('两个真人 → 不是独自开团，别提前把回合交出去', () => {
+  it('两个真人 → 不是独自开团，措辞里要提到其他人', () => {
     expect(isSoloTable([seat({ is_mine: true }), seat({ character_id: 'c2' })])).toBe(false)
   })
 
