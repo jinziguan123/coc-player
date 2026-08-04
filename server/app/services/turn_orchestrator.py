@@ -161,20 +161,28 @@ async def _drain_housekeeping(session_id: str) -> None:
     await _housekeeping_manager.drain(session_id)
 
 
-def _spawn_housekeeping(session_id: str, llm) -> None:
-    """启动独立数据库会话中的摘要与幕后推演。"""
+def _spawn_housekeeping(session_id: str) -> None:
+    """启动独立数据库会话中的摘要与幕后推演。
+
+    **走快模型**：滚动摘要与幕后推演都是结构化副任务（浓缩既往事件、按 NPC 动机推演），
+    不吃文笔，正是「快模型」这档的既定职责（设置页写的就是「裁定 planner、AI 队友、
+    滚动摘要走它」）。此前误传主模型：主模型往往开着思考换文笔，实测收尾因此要 30.9s。
+
+    而这 30.9s 不只是后台慢——**下一回合开头与投骰后的 KP 续写都要等它 drain 完**才能动
+    world_state，于是它直接变成玩家的等待。
+    """
     _housekeeping_manager.spawn(
         session_id,
-        llm,
+        get_fast_llm(),
         _maybe_roll_story_summary,
         _maybe_run_backstage,
     )
 
 
 async def _finish_generation(db: Session, session_id: str, llm) -> None:
-    """先广播完成，再异步启动收尾。"""
+    """先广播完成，再异步启动收尾（收尾自取快模型，与本次叙事用的 llm 无关）。"""
     room_hub.broadcast(session_id, _make_chunk("done"))
-    _spawn_housekeeping(session_id, llm)
+    _spawn_housekeeping(session_id)
 
 
 def _persist_narration(
@@ -1214,7 +1222,14 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         )
 
         # 骰子已经落地、动画已经在玩家那边跑起来了，现在才等上一轮后台收尾。
+        # 但玩家看到的是「骰子出了，然后 KP 迟迟不说话」——这段等待此前一处埋点都没有，
+        # 只能靠体感描述。骰子落地到 KP 开口之间的每一段都要能计时。
+        t_roll = time.monotonic()
+        t_drain = time.monotonic()
         await _drain_housekeeping(session_id)
+        drain_s = time.monotonic() - t_drain
+        if drain_s > 0.5:
+            logger.info("耗时|投骰后等上轮收尾 %.1fs session=%s", drain_s, session_id)
         # housekeeping 是在另一个 Session 里提交的；本会话的身份映射还挂着旧的
         # world_state，直接写回会把它刚写的摘要/记忆盖掉。expire 掉强制重新取。
         db.expire_all()
@@ -1279,12 +1294,22 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         # 恐怖多在**检定成功**时才被揭示（看清那具尸体…）；仅成功时才在叙事后补跑 planner
         # 判理智（失败不多花这次调用）。失败若也揭示了恐怖，仍可由 KP 自发 [SAN_CHECK] 兜底。
         # 大失败则可能有**身体反噬**（踢燃烧瓶被烧等）→ 开 mishap 守卫，叙事后据 planner 确定性扣血。
+        t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
         await _run_kp_turn(
             db, session_id, game_session, module, player_char, party_others,
             KP_DICE_CONTINUATION_PROMPT.format(dice_results=desc),
             sanity_guard=succeeded,
             mishap_guard=fumbled,
         )
+        logger.info(
+            "耗时|投骰后 KP 续写 %.1fs（%s）session=%s",
+            time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
+        )
+        logger.info(
+            "耗时|投骰合计 %.1fs（%s）session=%s",
+            time.monotonic() - t_roll, usage_tracker.fmt(usage_tracker.snapshot()), session_id,
+        )
+        usage_tracker.warn_if_reasoning_dominates(usage_tracker.snapshot())
     except asyncio.CancelledError:
         logger.info("投骰生成被取消: session=%s", session_id)
     except Exception:
