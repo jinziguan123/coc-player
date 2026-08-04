@@ -467,6 +467,14 @@ async def _run_kp_agent_loop(
     messages = list(messages)  # loop 会往里回注消息，不污染调用方的列表
     did_check = False
     natural_end = False
+    # 工具轮次与用到的工具：这一段现已是整个回合最贵的部分（实测一轮 5 次调用、输入 57.1k）。
+    # 轮次是乘数——每轮都要把累积消息整份重发、模型每轮再思考一遍。不记下「几轮、哪些工具」，
+    # 就只能看到「KP 叙事 95.7s」而不知道是谁把它拖长的。
+    used_tools: list[str] = []
+
+    def _log_rounds() -> None:
+        if used_tools:
+            logger.info("耗时|KP 工具循环 %d 轮：%s", len(used_tools), "、".join(used_tools))
 
     for _step in range(max_steps):
         step = ["", "", [], [], []]
@@ -508,6 +516,7 @@ async def _run_kp_agent_loop(
             natural_end = True
             break
 
+        used_tools.extend(tc.name for tc in tool_calls)
         assistant_message = {
             "role": "assistant",
             "content": step[1] or "",
@@ -544,12 +553,14 @@ async def _run_kp_agent_loop(
             if outcome.suspend:
                 suspended = True
         if suspended:
+            _log_rounds()
             return
         # 调过工具就必须再跑一轮，哪怕只是为了确认「没有更多工具了」——那一轮往往几乎不产
         # 文本，屏幕上只剩一个不动的脉冲点。这里说明一句正在做什么；下一轮一有正文到达，
         # 前端会自行清掉这行字（见 GameSessionPage 对 narration 增量的处理）。
         yield _make_chunk("housekeeping", _step_note(tool_calls))
 
+    _log_rounds()
     if not natural_end:
         # 步数超限：注入收束指令，最后一次不带工具生成收尾
         messages.append({
