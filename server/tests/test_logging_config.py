@@ -56,3 +56,56 @@ def test_usage_delta_handles_empty_accumulator():
     zero = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
     assert usage_tracker.delta(zero, zero)["calls"] == 0
     assert "0 次调用" in usage_tracker.fmt(usage_tracker.delta(zero, zero))
+
+
+def test_reasoning_tokens_are_tracked_separately():
+    """思考 token 要单独记：它计入 completion_tokens，但内容被 complete() 丢弃。
+
+    不拆开看就分不清「模型话多」（要改提示词）和「模型在空想」（把思考等级调低即可），
+    两者的解法完全不同。实测 planner 一次吐 5.4k 输出，正是靠这一项才判得出成因。
+    """
+    from app.ai import usage_tracker
+
+    before = usage_tracker._zero()
+    after = {
+        "prompt_tokens": 8000, "completion_tokens": 5400,
+        "reasoning_tokens": 4600, "total_tokens": 13400, "calls": 1,
+    }
+    assert "思考 4.6k" in usage_tracker.fmt(usage_tracker.delta(before, after))
+
+
+def test_reasoning_tokens_parsed_from_completion_details(monkeypatch):
+    """服务端把 reasoning_tokens 挂在 completion_tokens_details 下（OpenAI/DeepSeek 同构）。"""
+    import contextvars
+
+    from app.ai import usage_tracker
+
+    ctx = contextvars.copy_context()
+
+    def _run():
+        usage_tracker._acc.set(usage_tracker._zero())
+        usage_tracker.add({
+            "prompt_tokens": 100, "completion_tokens": 900, "total_tokens": 1000,
+            "completion_tokens_details": {"reasoning_tokens": 700},
+        })
+        return usage_tracker.snapshot()
+
+    snap = ctx.run(_run)
+    assert snap["reasoning_tokens"] == 700
+    assert snap["completion_tokens"] == 900   # 思考含在总输出里，不是额外的
+
+
+def test_no_reasoning_detail_means_zero():
+    """普通模型不返回这项，不能因此报错或算成缺失。"""
+    import contextvars
+
+    from app.ai import usage_tracker
+
+    def _run():
+        usage_tracker._acc.set(usage_tracker._zero())
+        usage_tracker.add({"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30})
+        return usage_tracker.snapshot()
+
+    snap = contextvars.copy_context().run(_run)
+    assert snap["reasoning_tokens"] == 0
+    assert "思考" not in usage_tracker.fmt(snap)

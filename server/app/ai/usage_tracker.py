@@ -16,7 +16,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens", "calls")
+#: reasoning_tokens 单独记：思考型模型把它算进 completion_tokens，但内容会被丢弃
+#: （complete() 只收 delta.content）。不拆开看，就分不清「模型话多」和「模型在空想」——
+#: 前者要改提示词，后者只需把思考等级调低，解法完全不同。
+_FIELDS = ("prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens", "calls")
 _acc: contextvars.ContextVar[dict | None] = contextvars.ContextVar("llm_usage_acc", default=None)
 
 
@@ -34,6 +37,10 @@ def add(usage: dict | None) -> None:
     acc["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
     acc["completion_tokens"] += int(usage.get("completion_tokens") or 0)
     acc["total_tokens"] += int(usage.get("total_tokens") or 0)
+    # 思考 token 挂在 completion_tokens_details 下（OpenAI 与 DeepSeek 同构）；没有就算 0。
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict):
+        acc["reasoning_tokens"] += int(details.get("reasoning_tokens") or 0)
     acc["calls"] += 1
 
 
@@ -54,13 +61,18 @@ def delta(before: dict, after: dict | None = None) -> dict:
 
 
 def fmt(d: dict) -> str:
-    """把用量格式化成跟在耗时后面的短串：`3 次调用，入 45.2k / 出 18.3k`。
+    """把用量格式化成跟在耗时后面的短串：`3 次调用，入 45.2k / 出 18.3k（思考 12.1k）`。
 
-    只看时间没法判断慢在哪：输入大是上下文撑的，输出大是模型话多或在思考。
+    只看时间没法判断慢在哪，三种情况的解法完全不同：
+      · 入大 → 上下文该裁了；
+      · 出大且思考占大头 → 把思考等级调低（那些 token 生成完就被丢弃，纯属白等）；
+      · 出大但思考很少 → 是提示词让模型话多，要改提示词或缩小输出结构。
     """
     calls = int(d.get("calls") or 0)
     pt, ct = int(d.get("prompt_tokens") or 0), int(d.get("completion_tokens") or 0)
-    return f"{calls} 次调用，入 {pt / 1000:.1f}k / 出 {ct / 1000:.1f}k"
+    rt = int(d.get("reasoning_tokens") or 0)
+    tail = f"（思考 {rt / 1000:.1f}k）" if rt else ""
+    return f"{calls} 次调用，入 {pt / 1000:.1f}k / 出 {ct / 1000:.1f}k{tail}"
 
 
 def accumulate(ws: dict | None, snap: dict) -> dict:
