@@ -88,12 +88,15 @@ class OpenAICompatProvider(LLMProvider):
     def __init__(
         self, model: str = "deepseek-chat", base_url: str = "", api_key: str = "",
         vision: bool = False, reasoning_effort: str = "",
+        thinking_disabled: bool = False,
     ):
         self.model = model
         self._api_key = api_key
         self._vision = vision  # 配置里的显式「支持视觉」开关
-        # 推理档位（reasoning_effort：minimal/low/medium/high/xhigh…）。空=不带该参数，用模型默认档。
+        # 思考强度（reasoning_effort：low/high/max）。空=不带该参数，用模型默认档。
+        # 它**只调强度、关不掉思考**——要关走下面的 thinking_disabled。
         self._reasoning_effort = (reasoning_effort or "").strip()
+        self._thinking_disabled = bool(thinking_disabled)
         self._client = httpx.AsyncClient(timeout=120.0)
         base = base_url.rstrip("/") if base_url else "https://api.deepseek.com"
         self._api_url = f"{base}/chat/completions"
@@ -108,7 +111,19 @@ class OpenAICompatProvider(LLMProvider):
         }
 
     def _apply_reasoning(self, payload: dict) -> dict:
-        """按配置带上 reasoning_effort；推理模型多拒绝/忽略 temperature，设了推理档就去掉它。"""
+        """按配置带上思考开关与强度；四条调用路径都经过这里，改一处即全覆盖。
+
+        两者管的不是一回事，别混：
+          · ``thinking={"type":"disabled"}`` 是**开关**——思考默认是开的，这是关掉它的唯一途径；
+          · ``reasoning_effort`` 只调**强度**（low/high/max），关不掉思考。
+
+        为什么要能关：思考内容会被 complete() 丢弃（只收 delta.content），时间照花、产物照扔。
+        实测一个回合 91% 的输出是思考，落到正文的只有 1.1k。而 DeepSeek 思考默认开、effort
+        默认 high，所以「什么都不设」恰恰是最费的一档。
+        不认这两个字段的服务会忽略它们，故对其他 OpenAI 兼容后端也安全。
+        """
+        if self._thinking_disabled:
+            payload["thinking"] = {"type": "disabled"}
         if self._reasoning_effort:
             payload["reasoning_effort"] = self._reasoning_effort
             payload.pop("temperature", None)

@@ -25,6 +25,7 @@ interface AIProfile {
   is_fast?: boolean
   vision?: boolean
   context_window?: number
+  thinking_disabled?: boolean
   reasoning_effort?: string
 }
 
@@ -42,6 +43,7 @@ type FormData = {
   api_key: string
   vision: boolean
   context_window: number
+  thinking_disabled: boolean
   reasoning_effort: string
 }
 
@@ -53,6 +55,7 @@ const EMPTY_FORM: FormData = {
   api_key: '',
   vision: false,
   context_window: 0,
+  thinking_disabled: false,
   reasoning_effort: '',
 }
 
@@ -103,6 +106,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
       api_key: p.api_key,
       vision: !!p.vision,
       context_window: p.context_window || 0,
+      thinking_disabled: !!p.thinking_disabled,
       reasoning_effort: p.reasoning_effort || '',
     })
   }
@@ -554,8 +558,39 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   </p>
                 </div>
 
-                {/* 思考等级只在 OpenAI 兼容协议下出现——Anthropic 的 Provider 不接这个参数，
-                    摆在那里只会让人填一个永远不生效的值。 */}
+                {/* 思考开关与等级只在 OpenAI 兼容协议下出现——Anthropic 的 Provider 不接这两个
+                    参数，摆在那里只会让人设一个永远不生效的值。 */}
+                {supportsReasoning(form.protocol) && (
+                  <div>
+                    <label
+                      style={{
+                        display: 'flex', alignItems: 'flex-start', gap: '0.6rem',
+                        cursor: 'pointer', fontSize: '0.85rem',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.thinking_disabled}
+                        onChange={(e) => setForm({ ...form, thinking_disabled: e.target.checked })}
+                        style={{ marginTop: '0.2rem', flexShrink: 0 }}
+                      />
+                      <span>
+                        <strong>关闭模型思考</strong>
+                        <span
+                          className="block text-xs mt-1"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          这是唯一能真正提速的开关。思考模式<strong>默认是开的</strong>，而思考内容
+                          会被丢弃、只有耗时留下——实测一个回合 91% 的输出是思考，落到正文的只有
+                          1.1k。跑团的裁定与队友决策并不需要长篇思考，
+                          <strong>建议给「快模型」勾上</strong>（planner / AI 队友 / 校验走的都是它）。
+                          不认这个参数的服务会忽略它。
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+
                 {supportsReasoning(form.protocol) ? (
                   <div>
                     <label
@@ -569,21 +604,26 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                     <input
                       type="text"
                       className="input w-full"
-                      placeholder="留空 = 用模型默认档；如需指定填 minimal、low、medium、high 等"
+                      placeholder="留空 = 用模型默认档（DeepSeek 默认 high）；可填 low / high / max"
                       value={form.reasoning_effort}
                       onChange={(e) => setForm({ ...form, reasoning_effort: e.target.value })}
+                      disabled={form.thinking_disabled}
+                      style={{ opacity: form.thinking_disabled ? 0.5 : 1 }}
                     />
                     <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      只对带思考能力的模型有用，等级越高想得越久、也越贵。
-                      具体能填哪些值请看你所用模型的文档；普通模型请留空，否则有些服务会直接报错。
-                    </p>
-                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      <strong style={{ color: 'var(--color-text-accent)' }}>这一项多半不能用来提速。</strong>
-                      留空表示<strong>不下发该参数</strong>、用模型自己的默认档；而各家对它的解释并不一致——
-                      实测 deepseek-v4-flash 下发 <code className="coach-code">low</code> 或
-                      <code className="coach-code">minimal</code> 后思考量反而涨到留空时的 5 倍以上。
-                      嫌一个回合等太久，正确做法是把<strong>快模型</strong>换成本来就不带思考的型号
-                      （如 <code className="coach-code">deepseek-chat</code>），planner、AI 队友与校验走的都是它。
+                      {form.thinking_disabled ? (
+                        <>已关闭思考，这一项不再起作用。</>
+                      ) : (
+                        <>
+                          <strong style={{ color: 'var(--color-text-accent)' }}>
+                            它只调强度、关不掉思考
+                          </strong>
+                          ——要关请勾上面那个开关。留空表示不下发该参数、用模型默认档，
+                          而默认档往往就是最费的一档（DeepSeek 默认 <code className="coach-code">high</code>）。
+                          各家取值不统一，具体请看所用模型的文档；不带思考能力的模型请留空，
+                          否则有些服务会直接报错。
+                        </>
+                      )}
                     </p>
                   </div>
                 ) : (

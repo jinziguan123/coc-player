@@ -25,6 +25,7 @@ def _provider_from_profile(profile) -> LLMProvider:
             api_key=profile.api_key,
             vision=getattr(profile, "vision", False),
             reasoning_effort=getattr(profile, "reasoning_effort", ""),
+            thinking_disabled=getattr(profile, "thinking_disabled", False),
         )
     # 生图不在这里装配——它有独立的配置与后端，见 app.ai.image_gen.get_image_llm()。
     return provider

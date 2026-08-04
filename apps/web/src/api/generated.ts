@@ -2241,6 +2241,11 @@ export interface components {
              */
             reasoning_effort: string;
             /**
+             * Thinking Disabled
+             * @default false
+             */
+            thinking_disabled: boolean;
+            /**
              * Use Tool Calls
              * @default true
              */
@@ -2286,6 +2291,11 @@ export interface components {
              */
             reasoning_effort: string;
             /**
+             * Thinking Disabled
+             * @default false
+             */
+            thinking_disabled: boolean;
+            /**
              * Use Tool Calls
              * @default true
              */
@@ -2312,6 +2322,8 @@ export interface components {
             protocol?: string | null;
             /** Reasoning Effort */
             reasoning_effort?: string | null;
+            /** Thinking Disabled */
+            thinking_disabled?: boolean | null;
             /** Use Tool Calls */
             use_tool_calls?: boolean | null;
             /** Vision */

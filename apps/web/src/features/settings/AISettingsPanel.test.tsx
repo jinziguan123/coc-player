@@ -128,13 +128,35 @@ describe('AI 配置面板', () => {
     await user.click(within(dialog).getByRole('tab', { name: '能力' }))
 
     // 是输入框而非下拉：各家取值不统一，写死选项会把能用的值挡在外面
-    const field = within(dialog).getByPlaceholderText(/如需指定填/)
+    const field = within(dialog).getByPlaceholderText(/可填 low \/ high \/ max/)
     expect(field.tagName).toBe('INPUT')
     await user.type(field, 'ultra')
 
     await user.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(mockPut).toHaveBeenCalled())
     expect(mockPut.mock.calls[0][1]).toMatchObject({ reasoning_effort: 'ultra' })
+  })
+
+  it('「关闭模型思考」勾上后随表单保存，并禁用只调强度的思考等级', async () => {
+    // 思考默认是开的、effort 默认 high，这个开关是唯一能真正关掉它的途径；
+    // 而 reasoning_effort 只调强度、关不掉思考，两者同时可填只会让人以为自己关了。
+    const user = userEvent.setup()
+    mockPut.mockResolvedValue(chatProfile)
+    render(<AISettingsPanel />)
+    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+
+    const dialog = await findDialog('编辑配置')
+    await user.click(within(dialog).getByRole('tab', { name: '能力' }))
+
+    const effort = within(dialog).getByPlaceholderText(/可填 low \/ high \/ max/)
+    expect(effort).not.toBeDisabled()
+
+    await user.click(within(dialog).getByRole('checkbox', { name: /关闭模型思考/ }))
+    expect(effort).toBeDisabled()          // 关了思考，强度就没有意义了
+
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    expect(mockPut.mock.calls[0][1]).toMatchObject({ thinking_disabled: true })
   })
 
   it('Anthropic 配置不显示思考等级，但残留值会被点名并可一键清除', async () => {

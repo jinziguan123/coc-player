@@ -52,8 +52,15 @@ class AIProfile(BaseModel):
     # 模型上下文窗口（token）。0 = 未知，由 resolve_context_window 按模型名启发式回落。
     # 用于「上下文占用预估」判断模型是否还撑得住继续跑团。
     context_window: int = 0
-    # 推理档位（reasoning_effort）：minimal/low/medium/high/xhigh 等。空=不下发该参数、用模型默认档。
-    # 仅 OpenAI 兼容协议、且模型支持推理时生效；设了会一并省略 temperature（推理模型多拒绝/忽略它）。
+    # 关闭模型思考：下发 {"thinking": {"type": "disabled"}}（DeepSeek 等在 OpenAI 兼容格式下
+    # 的思考模式开关）。**这是唯一可靠的提速手段**——思考默认是开的、effort 默认 high，而思考
+    # 内容会被 complete() 丢弃（只收 delta.content），时间照花、产物照扔。
+    # 实测 deepseek-v4-flash：默认思考 73~140 token，置本项后恒为 0。
+    # 不认这个字段的服务会忽略它；只在 OpenAI 兼容协议下下发。
+    thinking_disabled: bool = False
+    # 思考强度（reasoning_effort）：low/high/max。空=不下发、用模型默认档（DeepSeek 默认 high）。
+    # 注意它**只调强度、不能关思考**，要关请用上面的 thinking_disabled。
+    # 仅 OpenAI 兼容协议生效；设了会一并省略 temperature（推理模型多拒绝/忽略它）。
     reasoning_effort: str = ""
     # ── 以下生图字段已废弃：生图配置已独立成 ImageProfile（见下），不再随文本配置走。
     # 保留纯粹是为了读得懂旧 ai_settings.json 并把它们迁移出去（_migrate_image_profiles），
@@ -117,6 +124,7 @@ class AIProfileCreate(BaseModel):
     vision: bool = False
     use_tool_calls: bool = True
     context_window: int = 0
+    thinking_disabled: bool = False
     reasoning_effort: str = ""
 
 
@@ -129,6 +137,7 @@ class AIProfileUpdate(BaseModel):
     vision: bool | None = None
     use_tool_calls: bool | None = None
     context_window: int | None = None
+    thinking_disabled: bool | None = None
     reasoning_effort: str | None = None
 
 
@@ -371,6 +380,7 @@ def create_profile(body: AIProfileCreate):
         vision=body.vision,
         use_tool_calls=body.use_tool_calls,
         context_window=body.context_window,
+        thinking_disabled=body.thinking_disabled,
         reasoning_effort=body.reasoning_effort,
         is_active=len(profiles) == 0,  # 第一个配置自动激活
     )
@@ -406,6 +416,8 @@ def update_profile(profile_id: str, body: AIProfileUpdate):
         target.use_tool_calls = body.use_tool_calls
     if body.context_window is not None:
         target.context_window = body.context_window
+    if body.thinking_disabled is not None:
+        target.thinking_disabled = body.thinking_disabled
     if body.reasoning_effort is not None:
         target.reasoning_effort = body.reasoning_effort
     if body.api_key is not None:
@@ -699,7 +711,9 @@ async def _test_openai(client: httpx.AsyncClient, profile: AIProfile) -> str:
         "max_tokens": 16,
         "temperature": 0,
     }
-    # 设了推理档就按真实调用口径带上（并省略 temperature），让连接测试如实反映能否用
+    # 按真实调用口径带上思考开关与强度，让连接测试如实反映能否用
+    if getattr(profile, "thinking_disabled", False):
+        payload["thinking"] = {"type": "disabled"}
     if getattr(profile, "reasoning_effort", "").strip():
         payload["reasoning_effort"] = profile.reasoning_effort.strip()
         payload.pop("temperature", None)
