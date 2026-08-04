@@ -705,6 +705,42 @@ def _team_guidance_from_plan(plan: turn_planner.TurnPlan | None) -> str:
     )
 
 
+#: 队友这一轮产出了这些类型的事件，就说明裁定前提变了，必须重新规划。
+#: dialogue（对白）**不在其中**——这是本判据的全部要点，理由见下。
+_PREMISE_CHANGING_EVENT_TYPES = frozenset(
+    ("action", "dice", "system", "combat", "scene_change"),
+)
+
+
+def _team_turn_changed_premises(events: list, ai_teammates: list, pre_seq: int) -> bool:
+    """队友这一轮是否改变了裁定前提——决定要不要再跑一次 planner。
+
+    planner 裁定的是**玩家这一轮宣言**该怎么判（要不要检定、什么难度、给什么线索）。队友
+    只是接了句话时，这些前提一个都没变，重新裁定一遍纯属浪费——实测那一次要 46 秒，占整个
+    回合的 44%（两个队友分别说了「背面也写了字？让我看看」和「便签背面写了什么？」，
+    planner 于是对着一模一样的前提把「扯下便签」重判了一遍）。
+
+    但队友真动手就不一样了：他挪了位置、开了箱子、掷了骰、触发了机制点，玩家动作的判定
+    前提就真的变了，必须重规划。
+
+    判错的代价不对称：漏判（该重规划却跳过）会让 KP 拿着过时的裁定叙事；多判只是慢几十秒。
+    所以这里**从宽认定「变了」**——除对白外的任何新事件都算，拿不准就重规划。
+    """
+    if not ai_teammates:
+        return False
+    mate_ids = {t.id for t in ai_teammates}
+    mate_names = {(t.name or "").strip() for t in ai_teammates if (t.name or "").strip()}
+    for e in events:
+        if (e.sequence_num or 0) <= pre_seq:
+            continue                                  # 队友开口前就有的，不算
+        by_mate = (getattr(e, "actor_id", None) in mate_ids
+                   or (getattr(e, "actor_name", "") or "").strip() in mate_names)
+        # 系统事件（掷骰、入库、场景切换）不带队友署名，但同样是队友行动的产物 → 一律算。
+        if e.event_type in _PREMISE_CHANGING_EVENT_TYPES and (by_mate or e.event_type != "action"):
+            return True
+    return False
+
+
 async def run_chat_generation(session_id: str) -> None:
     # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 → 二次 planner →
     # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
@@ -799,6 +835,8 @@ async def run_chat_generation(session_id: str) -> None:
         # 玩家输入后：先跑一轮 AI 队友自动响应（仅 AI 席、仅一轮、不自触发），再交 KP 收束。
         # 队友暗骰（心理学等）的真实结果收集到 team_blind，注入本回合 KP 上下文而不落库/广播。
         team_blind: list[str] = []
+        # 记下队友开口前的进度线，之后据此只看「队友这一轮新产生的事件」。
+        pre_seq = max((e.sequence_num or 0 for e in pre_events), default=0)
         if ai_teammates:
             t_team = time.monotonic()
             async for chunk in _run_team_turn(
@@ -816,7 +854,7 @@ async def run_chat_generation(session_id: str) -> None:
         # 队友行动可能补充真实移动、恐怖见闻或新的行动事实；回合起点的 plan 只用于
         # 队友导演提示，不能继续作为最终副作用裁定。重新规划后的结果才交给 KP 与守卫。
         generation_plan = plan
-        if ai_teammates:
+        if ai_teammates and _team_turn_changed_premises(events, ai_teammates, pre_seq):
             t_post = time.monotonic()
             db.refresh(game_session)
             post_rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
@@ -841,6 +879,10 @@ async def run_chat_generation(session_id: str) -> None:
                     db, game_session, generation_plan, events, player_char, party_others,
                     module=module,
                 )
+        elif ai_teammates:
+            logger.info(
+                "耗时|二次 planner 已跳过（队友本轮只有对白）session=%s", session_id,
+            )
         t_kp = time.monotonic()
         await _run_generation(
             db, session_id, game_session, module, player_char, events,
