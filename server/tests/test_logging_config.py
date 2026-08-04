@@ -89,7 +89,7 @@ def test_usage_delta_handles_empty_accumulator():
 def test_reasoning_tokens_are_tracked_separately():
     """思考 token 要单独记：它计入 completion_tokens，但内容被 complete() 丢弃。
 
-    不拆开看就分不清「模型话多」（要改提示词）和「模型在空想」（把思考等级调低即可），
+    不拆开看就分不清「模型话多」（要改提示词）和「模型在空想」（勾上「关闭模型思考」即可），
     两者的解法完全不同。实测 planner 一次吐 5.4k 输出，正是靠这一项才判得出成因。
     """
     from app.ai import usage_tracker
@@ -140,7 +140,7 @@ def test_no_reasoning_detail_means_zero():
 
 
 def test_warns_when_reasoning_dominates_output(app_log):
-    """思考占输出大头就提醒，并指向**换快模型**这个真正有效的做法。
+    """思考又多又占大头时提醒，并指向真正能关掉它的那个开关。
 
     没有这条提醒，「跑一个回合等两分钟」得靠翻日志、比对多轮 token 用量才查得出来。
     """
@@ -151,7 +151,8 @@ def test_warns_when_reasoning_dominates_output(app_log):
     )
     msg = _text(app_log)
     assert "86%" in msg
-    assert "快模型" in msg            # 指向真正有效的做法
+    assert "关闭模型思考" in msg      # 指向真正能关掉它的那个开关
+    assert "快模型" in msg            # 并说清先给哪一档勾
 
 
 def test_warning_does_not_recommend_tuning_reasoning_effort(app_log):
@@ -177,6 +178,30 @@ def test_no_warning_when_reasoning_is_minor(app_log):
         {"completion_tokens": 8300, "reasoning_tokens": 300},
     )
     assert not app_log
+
+
+def test_no_warning_when_ratio_high_but_amount_small(app_log):
+    """比例高但总量很小时不该报——这是关掉快模型思考之后的常态，不是问题。
+
+    实测：关掉后一个 34.6s 的回合输出降到 2.2k、其中主模型思考 1.6k，比例 70% 却只等半分钟。
+    只卡比例会在这里误报，反过来劝用户去改一个他已经改好的设置。
+    """
+    from app.ai import usage_tracker
+
+    usage_tracker.warn_if_reasoning_dominates(
+        {"completion_tokens": 2200, "reasoning_tokens": 1600},   # 70%，但绝对量小
+    )
+    assert not app_log
+
+
+def test_warns_only_when_both_ratio_and_amount_are_high(app_log):
+    """量大且占比高才是真的在空想——那次 132.9s 的回合正是 7.1k/8.3k。"""
+    from app.ai import usage_tracker
+
+    usage_tracker.warn_if_reasoning_dominates(
+        {"completion_tokens": 8300, "reasoning_tokens": 7100},
+    )
+    assert app_log
 
 
 def test_no_warning_without_output():

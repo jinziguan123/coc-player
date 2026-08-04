@@ -75,31 +75,35 @@ def fmt(d: dict) -> str:
     return f"{calls} 次调用，入 {pt / 1000:.1f}k / 出 {ct / 1000:.1f}k{tail}"
 
 
-#: 思考占输出的比例超过这个数就提醒。取 0.6：偶尔想得多是正常的，长期六成以上说明
-#: 模型基本在空想——实测一个 132.9s 的回合里思考占了 86%，落到文本的只有 1.2k token。
+#: 触发提醒要**同时**满足比例与绝对量两个条件。
+#:
+#: 只看比例会误报：关掉快模型的思考之后，一个 34.6s 的回合输出降到 2.2k、其中主模型思考
+#: 1.6k——比例 70% 但总共才等半分钟，没什么可提醒的。只看绝对量则会漏掉「输出巨大且几乎
+#: 全是思考」的情形。两个都卡住才是真的「在空想」。
+#: 3k 的门槛按实测吞吐（约 110 tok/s）折算约等于 27 秒纯思考，值得说一句。
 _REASONING_WARN_RATIO = 0.6
+_REASONING_WARN_TOKENS = 3000
 
 
 def warn_if_reasoning_dominates(snap: dict) -> None:
-    """思考 token 占了输出的大头就提醒一句，并说清怎么改。
+    """思考 token 又多又占大头时提醒一句，并指向真正能关掉它的开关。
 
     这条提醒是为了让「跑一个回合要等两分钟」能自己解释自己：思考内容会被 complete() 丢弃
     （只收 delta.content），于是时间照花、产物照扔。
 
-    **不要在这里推荐调思考等级**。实测 deepseek-v4-flash：不下发 reasoning_effort 时思考
-    中位数 73 token，下发 low 是 391、minimal 是 437（各 5 次，区间不重叠）——下发这个参数
-    反而让它想得更多，值本身几乎不起作用。各家对该参数的解释并不一致，唯一可靠的办法是
-    换一个本来就不思考的模型（同厂的 deepseek-chat 实测思考恒为 0）。
+    **不要在这里推荐调思考等级**：那只调强度、关不掉思考。实测 deepseek-v4-flash 下发
+    reasoning_effort=low/minimal 后思考反而涨到留空时的 5 倍以上。真正的开关是配置里的
+    「关闭模型思考」（下发 thinking={"type":"disabled"}，实测思考恒为 0）。
     """
     ct = int(snap.get("completion_tokens") or 0)
     rt = int(snap.get("reasoning_tokens") or 0)
-    if ct <= 0 or rt / ct < _REASONING_WARN_RATIO:
+    if ct <= 0 or rt < _REASONING_WARN_TOKENS or rt / ct < _REASONING_WARN_RATIO:
         return
     logger.warning(
         "本回合 %.0f%% 的输出是模型思考（%.1fk/%.1fk），落到正文的只有 %.1fk——"
-        "这些思考内容生成完即被丢弃，时间却照花。想提速就在设置里把**快模型**换成不带思考的"
-        "型号（planner / AI 队友 / 校验走的都是它）；调「思考等级」多半没用，某些模型下发该"
-        "参数反而想得更多。",
+        "这些思考内容生成完即被丢弃，时间却照花。想提速就在「设置 → AI 配置 → 编辑配置 → "
+        "能力」里勾上「关闭模型思考」；先给**快模型**勾（planner / AI 队友 / 校验走的都是它），"
+        "主叙事那档可留着思考换文笔。注意「思考等级」只调强度、关不掉思考。",
         rt / ct * 100, rt / 1000, ct / 1000, (ct - rt) / 1000,
     )
 
