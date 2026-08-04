@@ -7,7 +7,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from app.ai import turn_planner
+from app.ai import turn_planner, usage_tracker
 from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import KPAgent
 from app.ai.context import build_kp_context
@@ -795,7 +795,7 @@ async def run_chat_generation(session_id: str) -> None:
         fast_llm = get_fast_llm()
         if pre_events:
             room_hub.broadcast(session_id, _make_chunk("housekeeping", "守秘人正在判读局势…"))
-            t_plan = time.monotonic()
+            t_plan = time.monotonic(); u_plan = usage_tracker.snapshot()
             rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
             plan_messages = turn_planner.build_turn_plan_messages(
                 game_session, module, player_char, pre_events,
@@ -807,7 +807,8 @@ async def run_chat_generation(session_id: str) -> None:
                 plan, module, game_session.current_scene_id,
             )
             logger.info(
-                "耗时|planner %.1fs session=%s", time.monotonic() - t_plan, session_id,
+                "耗时|planner %.1fs（%s）session=%s",
+                time.monotonic() - t_plan, usage_tracker.fmt(usage_tracker.delta(u_plan)), session_id,
             )
             # 世界记忆钩子 a：本轮裁定要揭示线索 → 写入线索台账（前移后在此统一记账）
             if plan is not None:
@@ -838,7 +839,7 @@ async def run_chat_generation(session_id: str) -> None:
         # 记下队友开口前的进度线，之后据此只看「队友这一轮新产生的事件」。
         pre_seq = max((e.sequence_num or 0 for e in pre_events), default=0)
         if ai_teammates:
-            t_team = time.monotonic()
+            t_team = time.monotonic(); u_team = usage_tracker.snapshot()
             async for chunk in _run_team_turn(
                 db, session_id, game_session, module, player_char, ai_teammates, fast_llm,
                 blind_results=team_blind,
@@ -846,8 +847,9 @@ async def run_chat_generation(session_id: str) -> None:
             ):
                 room_hub.broadcast(session_id, chunk)
             logger.info(
-                "耗时|队友回合 %.1fs（%d 人）session=%s",
-                time.monotonic() - t_team, len(ai_teammates), session_id,
+                "耗时|队友回合 %.1fs（%d 人，%s）session=%s",
+                time.monotonic() - t_team, len(ai_teammates),
+                usage_tracker.fmt(usage_tracker.delta(u_team)), session_id,
             )
 
         events = session_service.get_session_events(db, session_id)
@@ -855,7 +857,7 @@ async def run_chat_generation(session_id: str) -> None:
         # 队友导演提示，不能继续作为最终副作用裁定。重新规划后的结果才交给 KP 与守卫。
         generation_plan = plan
         if ai_teammates and _team_turn_changed_premises(events, ai_teammates, pre_seq):
-            t_post = time.monotonic()
+            t_post = time.monotonic(); u_post = usage_tracker.snapshot()
             db.refresh(game_session)
             post_rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
             post_plan_messages = turn_planner.build_turn_plan_messages(
@@ -868,7 +870,8 @@ async def run_chat_generation(session_id: str) -> None:
             # 有 AI 队友的局，planner 一个回合要跑**两次**（队友行动会改变裁定前提）。
             # 这是队友局比单人局明显慢的主因之一，必须单独计时才看得见。
             logger.info(
-                "耗时|二次 planner %.1fs session=%s", time.monotonic() - t_post, session_id,
+                "耗时|二次 planner %.1fs（%s）session=%s",
+                time.monotonic() - t_post, usage_tracker.fmt(usage_tracker.delta(u_post)), session_id,
             )
             if post_plan is not None:
                 generation_plan = post_plan
@@ -883,17 +886,19 @@ async def run_chat_generation(session_id: str) -> None:
             logger.info(
                 "耗时|二次 planner 已跳过（队友本轮只有对白）session=%s", session_id,
             )
-        t_kp = time.monotonic()
+        t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
         await _run_generation(
             db, session_id, game_session, module, player_char, events,
             teammates=party_others, blind_results=team_blind, plan=generation_plan,
         )
         logger.info(
-            "耗时|KP 叙事 %.1fs session=%s", time.monotonic() - t_kp, session_id,
+            "耗时|KP 叙事 %.1fs（%s）session=%s",
+            time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
         )
         # 对账用：各环节之和应约等于总时长，对不上说明还有没埋点的环节在吃时间。
         logger.info(
-            "耗时|本回合合计 %.1fs session=%s", time.monotonic() - t_turn, session_id,
+            "耗时|本回合合计 %.1fs（%s）session=%s",
+            time.monotonic() - t_turn, usage_tracker.fmt(usage_tracker.snapshot()), session_id,
         )
     except asyncio.CancelledError:
         logger.info("生成被取消: session=%s", session_id)

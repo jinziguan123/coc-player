@@ -569,13 +569,20 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                     <input
                       type="text"
                       className="input w-full"
-                      placeholder="留空即可；如需指定填 low、medium、high 等"
+                      placeholder="留空 = 用模型默认档；如需指定填 minimal、low、medium、high 等"
                       value={form.reasoning_effort}
                       onChange={(e) => setForm({ ...form, reasoning_effort: e.target.value })}
                     />
                     <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      只对带思考能力的模型有用（如 gpt-5 系列），等级越高想得越久、也越贵。
+                      只对带思考能力的模型有用，等级越高想得越久、也越贵。
                       具体能填哪些值请看你所用模型的文档；普通模型请留空，否则有些服务会直接报错。
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                      <strong style={{ color: 'var(--color-text-accent)' }}>留空不等于关闭思考</strong>
+                      ——留空表示<strong>不下发这个参数</strong>，模型用它自己的默认档；
+                      而不少思考型模型默认就是开的。嫌跑团一个回合等太久，
+                      请显式填 <code className="coach-code">minimal</code> 或
+                      <code className="coach-code">low</code>，而不是清空。
                     </p>
                   </div>
                 ) : (

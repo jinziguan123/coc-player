@@ -43,6 +43,26 @@ def snapshot() -> dict:
     return dict(acc) if acc else _zero()
 
 
+def delta(before: dict, after: dict | None = None) -> dict:
+    """两次 snapshot 之差＝这中间所有 LLM 调用的合计。用于把用量绑到某个阶段上。
+
+    比读 provider 的 last_usage 准：一个阶段里往往不止一次调用（工具轮次、校验重写、
+    并行的队友决策），last_usage 只剩最后一次，差值才是这个阶段真正花掉的。
+    """
+    after = snapshot() if after is None else after
+    return {k: int(after.get(k) or 0) - int(before.get(k) or 0) for k in _FIELDS}
+
+
+def fmt(d: dict) -> str:
+    """把用量格式化成跟在耗时后面的短串：`3 次调用，入 45.2k / 出 18.3k`。
+
+    只看时间没法判断慢在哪：输入大是上下文撑的，输出大是模型话多或在思考。
+    """
+    calls = int(d.get("calls") or 0)
+    pt, ct = int(d.get("prompt_tokens") or 0), int(d.get("completion_tokens") or 0)
+    return f"{calls} 次调用，入 {pt / 1000:.1f}k / 出 {ct / 1000:.1f}k"
+
+
 def accumulate(ws: dict | None, snap: dict) -> dict:
     """把一次生成的 usage 合计累进 world_state.session_usage（纯函数，返回新 ws，单调累增）。"""
     cur = dict((ws or {}).get("session_usage") or _zero())
