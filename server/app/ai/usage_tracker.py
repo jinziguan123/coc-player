@@ -83,19 +83,23 @@ _REASONING_WARN_RATIO = 0.6
 def warn_if_reasoning_dominates(snap: dict) -> None:
     """思考 token 占了输出的大头就提醒一句，并说清怎么改。
 
-    这条提醒是为了让「跑一个回合要等两分钟」能自己解释自己。思考型模型默认多是开着的，
-    而设置页把思考等级**留空的语义是「不下发该参数、用模型默认档」**，不是关闭——
-    很容易误以为已经关了。思考内容还会被 complete() 丢弃（只收 delta.content），
-    于是时间照花、产物照扔。
+    这条提醒是为了让「跑一个回合要等两分钟」能自己解释自己：思考内容会被 complete() 丢弃
+    （只收 delta.content），于是时间照花、产物照扔。
+
+    **不要在这里推荐调思考等级**。实测 deepseek-v4-flash：不下发 reasoning_effort 时思考
+    中位数 73 token，下发 low 是 391、minimal 是 437（各 5 次，区间不重叠）——下发这个参数
+    反而让它想得更多，值本身几乎不起作用。各家对该参数的解释并不一致，唯一可靠的办法是
+    换一个本来就不思考的模型（同厂的 deepseek-chat 实测思考恒为 0）。
     """
     ct = int(snap.get("completion_tokens") or 0)
     rt = int(snap.get("reasoning_tokens") or 0)
     if ct <= 0 or rt / ct < _REASONING_WARN_RATIO:
         return
     logger.warning(
-        "本回合 %.0f%% 的输出是模型思考（%.1fk/%.1fk），落到正文的只有 %.1fk。"
-        "思考型模型默认多为开启，设置页「思考等级」留空只是不下发该参数、仍用模型默认档；"
-        "嫌慢请显式填 minimal 或 low，而不是清空。",
+        "本回合 %.0f%% 的输出是模型思考（%.1fk/%.1fk），落到正文的只有 %.1fk——"
+        "这些思考内容生成完即被丢弃，时间却照花。想提速就在设置里把**快模型**换成不带思考的"
+        "型号（planner / AI 队友 / 校验走的都是它）；调「思考等级」多半没用，某些模型下发该"
+        "参数反而想得更多。",
         rt / ct * 100, rt / 1000, ct / 1000, (ct - rt) / 1000,
     )
 

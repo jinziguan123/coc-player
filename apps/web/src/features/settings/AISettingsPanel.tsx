@@ -578,11 +578,12 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                       具体能填哪些值请看你所用模型的文档；普通模型请留空，否则有些服务会直接报错。
                     </p>
                     <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      <strong style={{ color: 'var(--color-text-accent)' }}>留空不等于关闭思考</strong>
-                      ——留空表示<strong>不下发这个参数</strong>，模型用它自己的默认档；
-                      而不少思考型模型默认就是开的。嫌跑团一个回合等太久，
-                      请显式填 <code className="coach-code">minimal</code> 或
-                      <code className="coach-code">low</code>，而不是清空。
+                      <strong style={{ color: 'var(--color-text-accent)' }}>这一项多半不能用来提速。</strong>
+                      留空表示<strong>不下发该参数</strong>、用模型自己的默认档；而各家对它的解释并不一致——
+                      实测 deepseek-v4-flash 下发 <code className="coach-code">low</code> 或
+                      <code className="coach-code">minimal</code> 后思考量反而涨到留空时的 5 倍以上。
+                      嫌一个回合等太久，正确做法是把<strong>快模型</strong>换成本来就不带思考的型号
+                      （如 <code className="coach-code">deepseek-chat</code>），planner、AI 队友与校验走的都是它。
                     </p>
                   </div>
                 ) : (

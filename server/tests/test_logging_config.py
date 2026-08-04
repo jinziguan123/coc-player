@@ -140,7 +140,7 @@ def test_no_reasoning_detail_means_zero():
 
 
 def test_warns_when_reasoning_dominates_output(app_log):
-    """思考占输出大头就提醒，并说清「留空≠关闭」——这是那轮 132.9s 回合的真实成因。
+    """思考占输出大头就提醒，并指向**换快模型**这个真正有效的做法。
 
     没有这条提醒，「跑一个回合等两分钟」得靠翻日志、比对多轮 token 用量才查得出来。
     """
@@ -151,8 +151,22 @@ def test_warns_when_reasoning_dominates_output(app_log):
     )
     msg = _text(app_log)
     assert "86%" in msg
-    assert "minimal" in msg          # 给出可操作的改法
-    assert "留空" in msg              # 点破「留空≠关闭」这个误解
+    assert "快模型" in msg            # 指向真正有效的做法
+
+
+def test_warning_does_not_recommend_tuning_reasoning_effort(app_log):
+    """别再推荐调思考等级——实测那是反效果。
+
+    deepseek-v4-flash：不下发 reasoning_effort 时思考中位数 73 token，下发 low 是 391、
+    minimal 是 437（各 5 次，区间不重叠）。下发该参数反而想得更多，值本身几乎不起作用。
+    """
+    from app.ai import usage_tracker
+
+    usage_tracker.warn_if_reasoning_dominates(
+        {"completion_tokens": 8300, "reasoning_tokens": 7100},
+    )
+    msg = _text(app_log)
+    assert "填 minimal" not in msg and "填 low" not in msg
 
 
 def test_no_warning_when_reasoning_is_minor(app_log):
