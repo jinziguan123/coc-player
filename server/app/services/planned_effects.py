@@ -179,7 +179,17 @@ def _scene_sanity_mechanism(
     evidence_text: str,
     entered: bool,
 ) -> dict | None:
-    """找出本轮实际命中的当前场景 SAN 机制；进入场景时优先选择 entry 机制。"""
+    """找出本轮实际命中的当前场景 SAN 机制；进入场景时才认写明「进场触发」的那条。
+
+    命中顺序：先按 trigger 与本轮实际发生的事对文（``_trigger_matches``），对不上时，
+    只有在「玩家本轮确实进场」且该机制的 trigger 明写进场标记（进入/走进/抵达…）时才补发。
+
+    **绝不因为「这个场景只有一条 SAN 机制」就当成进场机制。** 曾经有过这条兜底，代价是
+    5 号车厢那条 ``trigger="阅读报纸时"`` 的机制在玩家刚拉开隔门时就触发了——玩家没读报纸、
+    甚至没走到报纸跟前，SAN 就先掉了。机制点的 trigger 是模组作者写死的判定条件，
+    「只有一条」不构成把它改判成进场触发的理由；宁可漏发（KP 仍可在玩家真读报纸时自发
+    [SAN_CHECK]），也不能凭空对玩家扣 SAN。
+    """
     if not module or not scene_id:
         return None
     scene = next(
@@ -207,13 +217,6 @@ def _scene_sanity_mechanism(
         ]
         if len(entry) == 1:
             index, event = entry[0]
-            matched = dict(event)
-            matched["_source_key"] = dice_runtime._san_mechanism_source_key(
-                str(scene_id), index,
-            )
-            return matched
-        if len(mechanisms) == 1:
-            index, event = mechanisms[0]
             matched = dict(event)
             matched["_source_key"] = dice_runtime._san_mechanism_source_key(
                 str(scene_id), index,
