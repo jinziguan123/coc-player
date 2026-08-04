@@ -7,6 +7,37 @@
 
 import logging
 
+import pytest
+
+
+@pytest.fixture
+def app_log():
+    """抓 app 树真正写出去的日志。
+
+    不能用 pytest 的 caplog：它把 handler 挂在根 logger 上，而 app 树是 propagate=False
+    （防止与 uvicorn 的 handler 重复打印），记录压根不冒泡到根。直接往 app 上挂一个
+    handler，测的才是线上真正走的那条路径。
+    """
+    import app.main  # noqa: F401 — 导入即完成日志配置
+
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    app_logger = logging.getLogger("app")
+    handler = _Collect()
+    app_logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        app_logger.removeHandler(handler)
+
+
+def _text(records) -> str:
+    return " ".join(r.getMessage() for r in records)
+
 
 def test_app_logger_emits_info():
     import app.main  # noqa: F401 — 导入即完成日志配置
@@ -24,14 +55,11 @@ def test_app_logger_has_handler_and_does_not_propagate():
     assert app_logger.propagate is False
 
 
-def test_timing_marks_are_actually_logged(caplog):
-    """回合各环节的耗时埋点要能被捕获到——这是排查「为什么这么慢」的唯一依据。"""
-    import app.main  # noqa: F401
-
-    logger = logging.getLogger("app.services.turn_orchestrator")
-    with caplog.at_level(logging.INFO, logger="app.services.turn_orchestrator"):
-        logger.info("耗时|planner %.1fs session=%s", 1.5, "s1")
-    assert any("耗时|planner" in r.message for r in caplog.records)
+def test_timing_marks_are_actually_logged(app_log):
+    """回合各环节的耗时埋点要能被真的写出去——这是排查「为什么这么慢」的唯一依据。"""
+    logging.getLogger("app.services.turn_orchestrator").info(
+        "耗时|planner %.1fs session=%s", 1.5, "s1")
+    assert "耗时|planner 1.5s" in _text(app_log)
 
 
 def test_usage_delta_and_format():
@@ -109,3 +137,36 @@ def test_no_reasoning_detail_means_zero():
     snap = contextvars.copy_context().run(_run)
     assert snap["reasoning_tokens"] == 0
     assert "思考" not in usage_tracker.fmt(snap)
+
+
+def test_warns_when_reasoning_dominates_output(app_log):
+    """思考占输出大头就提醒，并说清「留空≠关闭」——这是那轮 132.9s 回合的真实成因。
+
+    没有这条提醒，「跑一个回合等两分钟」得靠翻日志、比对多轮 token 用量才查得出来。
+    """
+    from app.ai import usage_tracker
+
+    usage_tracker.warn_if_reasoning_dominates(
+        {"completion_tokens": 8300, "reasoning_tokens": 7100},
+    )
+    msg = _text(app_log)
+    assert "86%" in msg
+    assert "minimal" in msg          # 给出可操作的改法
+    assert "留空" in msg              # 点破「留空≠关闭」这个误解
+
+
+def test_no_warning_when_reasoning_is_minor(app_log):
+    """思考很少时不该刷屏——偶尔想得多是正常的。"""
+    from app.ai import usage_tracker
+
+    usage_tracker.warn_if_reasoning_dominates(
+        {"completion_tokens": 8300, "reasoning_tokens": 300},
+    )
+    assert not app_log
+
+
+def test_no_warning_without_output():
+    """没有输出（调用失败等）不能除零。"""
+    from app.ai import usage_tracker
+
+    usage_tracker.warn_if_reasoning_dominates({"completion_tokens": 0, "reasoning_tokens": 0})

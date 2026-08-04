@@ -75,6 +75,31 @@ def fmt(d: dict) -> str:
     return f"{calls} 次调用，入 {pt / 1000:.1f}k / 出 {ct / 1000:.1f}k{tail}"
 
 
+#: 思考占输出的比例超过这个数就提醒。取 0.6：偶尔想得多是正常的，长期六成以上说明
+#: 模型基本在空想——实测一个 132.9s 的回合里思考占了 86%，落到文本的只有 1.2k token。
+_REASONING_WARN_RATIO = 0.6
+
+
+def warn_if_reasoning_dominates(snap: dict) -> None:
+    """思考 token 占了输出的大头就提醒一句，并说清怎么改。
+
+    这条提醒是为了让「跑一个回合要等两分钟」能自己解释自己。思考型模型默认多是开着的，
+    而设置页把思考等级**留空的语义是「不下发该参数、用模型默认档」**，不是关闭——
+    很容易误以为已经关了。思考内容还会被 complete() 丢弃（只收 delta.content），
+    于是时间照花、产物照扔。
+    """
+    ct = int(snap.get("completion_tokens") or 0)
+    rt = int(snap.get("reasoning_tokens") or 0)
+    if ct <= 0 or rt / ct < _REASONING_WARN_RATIO:
+        return
+    logger.warning(
+        "本回合 %.0f%% 的输出是模型思考（%.1fk/%.1fk），落到正文的只有 %.1fk。"
+        "思考型模型默认多为开启，设置页「思考等级」留空只是不下发该参数、仍用模型默认档；"
+        "嫌慢请显式填 minimal 或 low，而不是清空。",
+        rt / ct * 100, rt / 1000, ct / 1000, (ct - rt) / 1000,
+    )
+
+
 def accumulate(ws: dict | None, snap: dict) -> dict:
     """把一次生成的 usage 合计累进 world_state.session_usage（纯函数，返回新 ws，单调累增）。"""
     cur = dict((ws or {}).get("session_usage") or _zero())

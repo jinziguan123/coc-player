@@ -896,10 +896,12 @@ async def run_chat_generation(session_id: str) -> None:
             time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
         )
         # 对账用：各环节之和应约等于总时长，对不上说明还有没埋点的环节在吃时间。
+        turn_usage = usage_tracker.snapshot()
         logger.info(
             "耗时|本回合合计 %.1fs（%s）session=%s",
-            time.monotonic() - t_turn, usage_tracker.fmt(usage_tracker.snapshot()), session_id,
+            time.monotonic() - t_turn, usage_tracker.fmt(turn_usage), session_id,
         )
+        usage_tracker.warn_if_reasoning_dominates(turn_usage)
     except asyncio.CancelledError:
         logger.info("生成被取消: session=%s", session_id)
     except Exception:
