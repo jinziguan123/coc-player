@@ -866,3 +866,29 @@ def test_style_options_endpoint_not_shadowed_by_session_id(client):
     body = r.json()
     assert {"narrative", "image"} == set(body)
     assert any(x["id"] == "terse" for x in body["narrative"])
+
+
+def test_locations_returns_sandbox_backdrop(client):
+    """局内大地图要拿得到模组里生成的沙盘氛围底图。
+
+    此前这张图只有模组详情页看得到——后端不下发、前端也不传，局内大地图永远是空底。
+    """
+    c, ids = client
+    gen = app.dependency_overrides[get_db]()
+    db = next(gen)
+    module = db.get(Module, ids["module"])
+    module.scenes = [{"id": "a", "title": "门厅", "map": {"q": 0, "r": 0, "biome": "interior"}}]
+    module.world_setting = {"sandbox_backdrop": "/api/images/backdrop.jpg"}
+    db.commit()
+    gen.close()
+
+    sid = _make_session(c, ids)
+    body = c.get(f"/api/sessions/{sid}/locations").json()
+    assert body["map_backdrop"] == "/api/images/backdrop.jpg"
+
+
+def test_locations_backdrop_empty_when_module_has_none(client):
+    """模组没生成过底图 → 空串，前端据此不铺（不是 None，省得前端还要判两种空）。"""
+    c, ids = client
+    sid = _make_session(c, ids)
+    assert c.get(f"/api/sessions/{sid}/locations").json()["map_backdrop"] == ""

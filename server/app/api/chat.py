@@ -492,6 +492,10 @@ def locations(
         "locations": locations,
         "map_nodes": session_service.list_visible_map_nodes(module, locations, reveal_all=god_view),
         "god_view": god_view,
+        # 沙盘氛围底图：模组里生成的那张俯视图，局内大地图同样垫在网格之下。
+        # 纯装饰、不参与方位与迷雾——地貌格本就全量下发（未发现的场景只清掉 scene_id、
+        # 保留其地貌），所以底图的铺展范围在局内与模组页一致，不会随探索进度伸缩。
+        "map_backdrop": str((module.world_setting or {}).get("sandbox_backdrop") or ""),
     }
 
 

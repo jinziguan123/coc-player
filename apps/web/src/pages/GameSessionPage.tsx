@@ -273,6 +273,7 @@ export function GameSessionPage() {
   const [showStyle, setShowStyle] = useState(false)           // 本局文风/画风（房主专用）
   const [locations, setLocations] = useState<KnownLocation[]>([])
   const [mapNodes, setMapNodes] = useState<MapNodePayload[]>([])
+  const [mapBackdrop, setMapBackdrop] = useState('')     // 沙盘氛围底图（模组里生成的那张俯视图）
   const [mapTab, setMapTab] = useState<'sandbox' | 'board'>('sandbox')  // 大地图页签：沙盘/调查板
   const [canGodView, setCanGodView] = useState(false)         // 真人 KP 席位（服务端判定）
   const [playerView, setPlayerView] = useState(false)         // KP 切「玩家视角」预览迷雾
@@ -497,6 +498,11 @@ export function GameSessionPage() {
     if (!raw) return ''
     return /^https?:\/\//i.test(raw) ? raw : `${getServerUrl()}${raw}`
   }, [backdropOn, messages, locations])
+  // 沙盘氛围底图：模组里生成的那张俯视图，局内大地图同样垫在网格之下。
+  const sandboxBackdropUrl = useMemo(() => {
+    if (!mapBackdrop) return undefined
+    return /^https?:\/\//i.test(mapBackdrop) ? mapBackdrop : `${getServerUrl()}${mapBackdrop}`
+  }, [mapBackdrop])
   // 氛围底真的铺上了才给正文加护读底：没图（未配生图 / 还在生成）时保持原有的透明观感。
   useEffect(() => {
     const root = document.documentElement
@@ -879,9 +885,12 @@ export function GameSessionPage() {
   useEffect(() => {
     if (!sessionId) return
     const q = myCharId ? `?char_id=${myCharId}` : ''
-    api.get<{ locations: KnownLocation[]; map_nodes?: MapNodePayload[]; god_view?: boolean }>(`/sessions/${sessionId}/locations${q}`)
-      .then((r) => { setLocations(r.locations || []); setMapNodes(r.map_nodes || []); setCanGodView(!!r.god_view) })
-      .catch(() => { setLocations([]); setMapNodes([]); setCanGodView(false) })
+    api.get<{ locations: KnownLocation[]; map_nodes?: MapNodePayload[]; god_view?: boolean; map_backdrop?: string }>(`/sessions/${sessionId}/locations${q}`)
+      .then((r) => {
+        setLocations(r.locations || []); setMapNodes(r.map_nodes || [])
+        setCanGodView(!!r.god_view); setMapBackdrop(r.map_backdrop || '')
+      })
+      .catch(() => { setLocations([]); setMapNodes([]); setCanGodView(false); setMapBackdrop('') })
   }, [sessionId, myCharId, currentSession?.current_scene_id, refreshTick])
 
   // 局内沙盘拖拽（真人 KP 专属）：单格移动立即落库并广播，撞格等非法情形由后端拒绝。
@@ -1630,6 +1639,9 @@ export function GameSessionPage() {
               {mapTab === 'sandbox' ? (
                 <HexSandbox
                   locations={playerSandboxLocations}
+                  // 底图相对地址（/api/images/xxx）：本机同源，客人模式要拼房主地址；
+                  // 已是绝对地址就原样用（与 sceneBackdrop 同一处理）
+                  backdropUrl={sandboxBackdropUrl}
                   disabled={streaming}
                   revealUnknownTokens={canGodView && !playerView}
                   editable={canGodView && !playerView}
