@@ -106,6 +106,11 @@ describe('模组详情图片', () => {
     )
 
     await user.click(await screen.findByRole('button', { name: '沙盘' }))
+    // 查看态是只读的：AI 补全会立刻写库，不该在这儿点得动
+    expect(screen.queryByRole('button', { name: 'AI 补全地貌与连接' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'AI 生成氛围底图' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '编辑' }))
     await user.click(screen.getByRole('button', { name: 'AI 补全地貌与连接' }))
     expect(screen.getByText('已有连接不会被删除', { exact: false })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '开始补全' }))
@@ -236,5 +241,81 @@ describe('模组详情图片', () => {
     const payload = mockPut.mock.calls[0][1] as { scenes: { connections?: string[] }[] }
     expect(payload.scenes[0].connections).toEqual([])
     expect(payload.scenes[1].connections).toEqual([])
+  })
+})
+
+describe('查看模组时页面是只读的', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGet.mockResolvedValue({
+      id: 'module-1', title: '常暗之箱', rule_system: 'coc', description: '',
+      world_setting: {}, scenes: [{ id: 'scene-1', name: '六号车厢', image: '/api/images/s.jpg' }],
+      npcs: [], clues: [], triggers: [], truth: '',
+      character_guidance: { summary: '普通现代人' },
+    })
+  })
+
+  const renderPage = () => render(
+    <MemoryRouter initialEntries={['/modules/module-1']}>
+      <Routes><Route path="/modules/:id" element={<ModuleDetailPage />} /></Routes>
+    </MemoryRouter>,
+  )
+
+  it('配图只看不改：重新生成与上传都会立刻写库，查看态不该有入口', async () => {
+    renderPage()
+    expect(await screen.findByRole('img', { name: '六号车厢' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /重新生成/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /上传/ })).toBeNull()
+  })
+
+  it('车卡建议的 AI 重写也只在编辑态出现（它会直接覆盖已有内容）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('img', { name: '六号车厢' })
+    expect(screen.queryByRole('button', { name: /AI 重写|AI 生成车卡建议/ })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByRole('button', { name: /AI 重写/ })).toBeInTheDocument()
+  })
+
+  it('进编辑态后配图入口才出现', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('img', { name: '六号车厢' })
+    await user.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByRole('button', { name: /重新生成/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /上传/ })).toBeInTheDocument()
+  })
+})
+
+describe('视图切换不挪动标签栏', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGet.mockResolvedValue({
+      id: 'module-1', title: 'M', rule_system: 'coc', description: '',
+      world_setting: {}, scenes: [], npcs: [], clues: [], triggers: [], truth: '',
+    })
+  })
+
+  it('标签栏锚在标题右侧，不随右侧按钮增减而横向漂移', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <MemoryRouter initialEntries={['/modules/module-1']}>
+        <Routes><Route path="/modules/:id" element={<ModuleDetailPage />} /></Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByRole('button', { name: '详情' })
+
+    // 「编辑」按钮只在详情/沙盘视图出现；标签栏若与它同处右对齐的一组，切到关系图就会被推走。
+    const bar = container.querySelector('.module-toolbar') as HTMLElement
+    const tabsParent = () => screen.getByRole('button', { name: '详情' }).parentElement
+    const before = tabsParent()
+    expect(bar.contains(before!)).toBe(true)
+    // 标签栏不能是那个 ml-auto 的容器（右对齐容器里的东西才会被右侧增减推动）
+    expect(before!.className).not.toContain('ml-auto')
+
+    await user.click(screen.getByRole('button', { name: '关系图' }))
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()   // 右侧确实变了
+    expect(tabsParent()!.className).not.toContain('ml-auto')            // 标签栏仍不受其影响
   })
 })

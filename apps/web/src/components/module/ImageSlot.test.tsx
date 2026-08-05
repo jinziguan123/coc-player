@@ -12,9 +12,10 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const { api, uploadFile } = await import('@/api/client')
 
+// 默认按编辑态渲染：改图入口只在编辑态出现，下面绝大多数用例测的正是这些入口。
 const props = {
   moduleId: 'm1', kind: 'scene' as const, itemId: 's1',
-  field: 'image' as const, alt: '教堂', onChange: vi.fn(),
+  field: 'image' as const, alt: '教堂', onChange: vi.fn(), editable: true,
 }
 
 beforeEach(() => { vi.clearAllMocks() })
@@ -67,5 +68,25 @@ describe('模组配图槽位', () => {
     expect(screen.getByRole('button', { name: /AI 生成/ })).toBeDisabled()
     rerender(<ImageSlot {...props} itemId="" />)
     expect(screen.getByRole('button', { name: /上传/ })).toBeDisabled()
+  })
+})
+
+describe('查看态是只读的', () => {
+  it('不给 editable 时不渲染任何改图按钮——重新生成与上传都会立刻写库', () => {
+    render(<ImageSlot {...props} editable={false} src="/api/images/a.jpg" />)
+    expect(screen.queryByRole('button', { name: /重新生成/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /AI 生成/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /上传/ })).toBeNull()
+  })
+
+  it('图本身照常显示：查看模组时要看得到配图，只是不能改', () => {
+    render(<ImageSlot {...props} editable={false} src="/api/images/a.jpg" />)
+    expect(screen.getByRole('img', { name: '教堂' })).toBeInTheDocument()
+  })
+
+  it('漏传 editable 即按只读处理（默认 false，宁可少个入口也不误改）', () => {
+    const { moduleId, kind, itemId, field, alt, onChange } = props
+    render(<ImageSlot {...{ moduleId, kind, itemId, field, alt, onChange }} src="/api/images/a.jpg" />)
+    expect(screen.queryByRole('button', { name: /上传/ })).toBeNull()
   })
 })

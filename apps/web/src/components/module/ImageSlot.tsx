@@ -1,4 +1,4 @@
-// 模组配图槽位：看图 + 重新生成 + 手动上传，编辑态与查看态通用。
+// 模组配图槽位：**图**在编辑态与查看态都看得到，**改图的按钮只在编辑态**出现。
 //
 // 此前配图只有一条隐形路径：`{!edit && item.image && <ModuleImage/>}`——
 //   · 编辑模组时整个不渲染，房主在改场景的时候根本看不到这个场景长什么样；
@@ -28,11 +28,14 @@ interface ImageSlotProps {
   /** 新图落库后回调，调用方据此更新本地模组草稿 */
   onChange: (url: string) => void
   visualStateKey?: string
+  /** 是否给出改图入口。查看模组时为 false——重新生成与上传都会**立刻写库**，
+   *  不该在一个自称「查看」的页面上点得动。默认 false：漏传即只读，宁可少个入口也不误改。 */
+  editable?: boolean
 }
 
 export function ImageSlot({
   src, moduleId, kind, itemId, field, alt,
-  aspectRatio = '16 / 9', className = '', onChange, visualStateKey,
+  aspectRatio = '16 / 9', className = '', onChange, visualStateKey, editable = false,
 }: ImageSlotProps) {
   const image = useRepairableImage({ src, moduleId, kind, itemId, field, onRegenerated: onChange, visualStateKey })
   const [busy, setBusy] = useState<'' | 'gen' | 'upload'>('')
@@ -142,6 +145,7 @@ export function ImageSlot({
         )}
       </div>
 
+      {editable && (
       <div className="mt-1.5 flex items-center gap-1.5">
         <button
           type="button"
@@ -171,6 +175,7 @@ export function ImageSlot({
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f) }}
         />
       </div>
+      )}
     </div>
   )
 }

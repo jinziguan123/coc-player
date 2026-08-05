@@ -256,9 +256,15 @@ export function HexSandbox({
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
+    // 尺寸有下限：容器为 0 时（页签在后台、祖先 display:none、布局还没落定）konva 会拿
+    // 0×0 的画布去 drawImage，抛 InvalidStateError 把**整页**掀进错误边界——一个看不见的
+    // 画布不该有能力弄崩页面。ResizeObserver 随后会带着真实尺寸再来一次。
+    const measure = () => setSize({
+      w: Math.max(1, el.clientWidth), h: Math.max(1, el.clientHeight),
+    })
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-    setSize({ w: el.clientWidth, h: el.clientHeight })
+    measure()
     return () => ro.disconnect()
   }, [])
 

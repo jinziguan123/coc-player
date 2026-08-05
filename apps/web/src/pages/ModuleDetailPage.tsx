@@ -388,16 +388,26 @@ export function ModuleDetailPage() {
   }
 
   const enrichMap = async () => {
-    if (!id || edit) return
+    if (!id) return
     setEnriching(true)
     try {
       await api.post(`/modules/${id}/map/enrich`)
       const refreshed = await api.get<ModuleData>(`/modules/${id}`)
-      setData({
-        ...BLANK,
-        ...refreshed,
-        map_nodes: refreshed.map_nodes || [],
-        world_setting: { ...BLANK.world_setting, ...(refreshed.world_setting || {}) },
+      // **只并回地图相关的字段**，不整包覆盖：这个按钮现在只在编辑态可点，而编辑态手里有一份
+      // 未保存的草稿，整包 setData 会把它连同标题、描述、NPC 的改动一起吞掉。
+      // AI 依据的是**已保存**的那份内容，所以草稿里刚加、还没存的场景拿不到落位，属预期。
+      setData((d) => {
+        const geo = new Map(
+          (refreshed.scenes || []).map((x: Scene) => [x.id, x]),
+        )
+        return {
+          ...d,
+          map_nodes: refreshed.map_nodes || d.map_nodes,
+          scenes: d.scenes.map((sc) => {
+            const from = geo.get(sc.id)
+            return from ? { ...sc, map: from.map, connections: from.connections } : sc
+          }),
+        }
       })
       toast.success('AI 已补全地貌、连接与场景落位')
     } catch (e) {
@@ -408,7 +418,7 @@ export function ModuleDetailPage() {
   }
 
   const makeBackdrop = async () => {
-    if (!id || edit) return
+    if (!id) return
     setBackdropping(true)
     try {
       const res = await api.post<{ backdrop: string }>(`/modules/${id}/map/backdrop`)
@@ -564,15 +574,19 @@ export function ModuleDetailPage() {
           <GiReturnArrow /> 返回
         </button>
         <h2 className="page-title !mb-0 flex items-center gap-2"><GiScrollUnfurled />{isNew ? '新建模组' : edit ? '编辑模组' : '查看模组'}</h2>
+        {/* 视图切换锚在标题右侧、**不放进右对齐那一组**：右侧按钮会随视图增减
+            （关系图/时间线没有「编辑」），整组右对齐时这一增一减就把标签横向推走，
+            切个页签鼠标底下的按钮就换了一个。锚在左边则谁也推不动它。
+            标题「新建/编辑/查看模组」三态等宽，所以起点在任何状态下都对齐。 */}
+        {!isNew && (
+          <div className="flex rounded overflow-hidden text-sm shrink-0" style={{ border: '1px solid var(--color-border)' }}>
+            {tabBtn('detail', <FileText size={14} />, '详情')}
+            {!edit && tabBtn('graph', <Network size={14} />, '关系图')}
+            {!edit && tabBtn('timeline', <GitBranch size={14} />, '时间线')}
+            {tabBtn('sandbox', <Hexagon size={14} />, '沙盘')}
+          </div>
+        )}
         <div className="ml-auto flex gap-2 items-center">
-          {!isNew && (
-            <div className="flex rounded overflow-hidden text-sm" style={{ border: '1px solid var(--color-border)' }}>
-              {tabBtn('detail', <FileText size={14} />, '详情')}
-              {!edit && tabBtn('graph', <Network size={14} />, '关系图')}
-              {!edit && tabBtn('timeline', <GitBranch size={14} />, '时间线')}
-              {tabBtn('sandbox', <Hexagon size={14} />, '沙盘')}
-            </div>
-          )}
           {!isNew && !edit && (view === 'detail' || view === 'sandbox') && (
             <button onClick={beginEdit} className="btn-secondary flex items-center gap-1 text-sm"><Pencil size={14} /> 编辑</button>
           )}
@@ -598,11 +612,13 @@ export function ModuleDetailPage() {
       ) : view === 'sandbox' ? (
         <div className={edit ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_252px]' : ''}>
           <div className="min-w-0">
-          {!edit && (
+          {/* 这两个都会**立刻写库**（补全改场景落位与连接、底图改 world_setting），
+              属于改内容，只能在编辑态点——查看模组时页面应当是只读的。 */}
+          {edit && (
             <div className="flex justify-end gap-2 mb-2">
               <ConfirmDialog
                 title="AI 补全沙盘"
-                description="将由 AI 重排场景落位、补全地貌与连接；已有连接不会被删除，之后仍可拖拽微调。"
+                description="将由 AI 重排场景落位、补全地貌与连接；已有连接不会被删除，之后仍可拖拽微调。AI 依据的是已保存的内容——草稿里刚加、还没存的场景这次拿不到落位。"
                 confirmLabel="开始补全"
                 onConfirm={enrichMap}
               >
@@ -752,16 +768,7 @@ export function ModuleDetailPage() {
                 placeholder="会大量用到的技能、队伍需覆盖的能力、角色需要的动机——每行一条"
               />
             </Row>
-          </>
-        ) : (
-          <>
-            {hasGuidance(data.character_guidance) ? (
-              <CharacterGuidanceCard guidance={data.character_guidance} />
-            ) : (
-              <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                还没有车卡建议。点下面的按钮，让 AI 按这个本子的设定写一份。
-              </p>
-            )}
+            {/* AI 重写会**立刻覆盖**这几栏，属于改内容，只能在编辑态点 */}
             {!isNew && (
               <button
                 onClick={() => void regenerateGuidance()}
@@ -769,8 +776,18 @@ export function ModuleDetailPage() {
                 className="btn-secondary !px-2.5 !py-1 text-xs inline-flex items-center gap-1"
               >
                 <Sparkles size={12} />
-                {guidanceBusy ? '生成中…' : hasGuidance(data.character_guidance) ? '重新生成' : 'AI 生成车卡建议'}
+                {guidanceBusy ? '生成中…' : hasGuidance(data.character_guidance) ? 'AI 重写' : 'AI 生成车卡建议'}
               </button>
+            )}
+          </>
+        ) : (
+          <>
+            {hasGuidance(data.character_guidance) ? (
+              <CharacterGuidanceCard guidance={data.character_guidance} />
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                还没有车卡建议。点右上角「编辑」，可以手写一份，或让 AI 按这个本子的设定生成。
+              </p>
             )}
           </>
         )}
@@ -833,7 +850,7 @@ export function ModuleDetailPage() {
         {data.scenes.map((s, i) => (
           <ItemCard key={s.id || i} onRemove={edit ? () => removeAt('scenes', i) : undefined}>
             {/* 编辑态同样要显示：房主改场景描述时看不到这个场景长什么样，是最需要看图的时候 */}
-            <ImageSlot src={s.image} moduleId={data.id} kind="scene" itemId={s.id} field="image"
+            <ImageSlot editable={edit} src={s.image} moduleId={data.id} kind="scene" itemId={s.id} field="image"
               alt={sceneName(s)} className="mb-3" onChange={(url) => updScene(i, { image: url })} />
             {!edit && (
               <ItemHead
@@ -890,7 +907,7 @@ export function ModuleDetailPage() {
         <ItemGrid>
         {data.npcs.map((n, i) => (
           <ItemCard key={n.id || i} onRemove={edit ? () => removeAt('npcs', i) : undefined}>
-            <ImageSlot src={n.portrait} moduleId={data.id} kind="npc" itemId={n.id} field="portrait"
+            <ImageSlot editable={edit} src={n.portrait} moduleId={data.id} kind="npc" itemId={n.id} field="portrait"
               alt={n.name || 'NPC'} aspectRatio="3 / 4" className="mb-3 max-w-48"
               onChange={(url) => updNpc(i, { portrait: url })} />
             {!edit && (
@@ -964,7 +981,7 @@ export function ModuleDetailPage() {
         <ItemGrid>
         {data.clues.map((c, i) => (
           <ItemCard key={c.id || i} onRemove={edit ? () => removeAt('clues', i) : undefined}>
-            <ImageSlot src={c.image} moduleId={data.id} kind="clue" itemId={c.id} field="image"
+            <ImageSlot editable={edit} src={c.image} moduleId={data.id} kind="clue" itemId={c.id} field="image"
               alt={c.name || '线索'} aspectRatio="4 / 3" className="mb-3"
               onChange={(url) => updClue(i, { image: url })} />
             {!edit && (
