@@ -2520,6 +2520,10 @@ export interface components {
         /**
          * CheckRequest
          * @description 玩家『申请』技能/属性检定——只报技能，难度由 KP 裁定（玩家不指定）。
+         *
+         *     stash=True：与大地图「前往」同一模式——把申请作为本回合暂存动作加入，和这一轮的
+         *     台词、行动一起交给 KP，而不是自己单独触发一次生成。跑团里「一边说话一边动手查」
+         *     本就是一个回合内的事，拆成两次生成既慢又会让 KP 看不到完整的上下文。
          */
         CheckRequest: {
             /** Acting Character Id */
@@ -2531,6 +2535,11 @@ export interface components {
             intent: string;
             /** Skill */
             skill: string;
+            /**
+             * Stash
+             * @default false
+             */
+            stash: boolean;
         };
         /** ClaimSeatRequest */
         ClaimSeatRequest: {

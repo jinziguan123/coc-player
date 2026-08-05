@@ -749,6 +749,26 @@ def _team_turn_changed_premises(events: list, ai_teammates: list, pre_seq: int) 
     return False
 
 
+def _stashed_check_request(turn: list, actor_id: str | None) -> str:
+    """本轮暂存的技能检定申请（技能页点出来的那种）→ 技能名；没有则空串。
+
+    与暂存的「前往」同一路数：申请时把 skill/intent 落进 metadata，推进时确定性取出，
+    不让 planner 再从「（申请「侦查」检定）」这行文本里认一遍——认漏了这次申请就会被当成
+    普通叙事顺过去，玩家点的那一下等于没发生。
+
+    同一轮点了多次只认最后一次：那是玩家改主意的自然语义（前一次还能自己删掉）。
+    """
+    skill = ""
+    for ev in turn:
+        meta = ev.metadata_ or {}
+        if not meta.get("check_request") or not str(meta.get("skill") or "").strip():
+            continue
+        if actor_id and ev.actor_id and ev.actor_id != actor_id:
+            continue        # 多人同桌：只认本轮行动者自己的申请
+        skill = str(meta["skill"]).strip()
+    return skill
+
+
 async def run_chat_generation(session_id: str) -> None:
     # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 → 二次 planner →
     # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
@@ -825,9 +845,15 @@ async def run_chat_generation(session_id: str) -> None:
                     module=module,
                 )
 
-        # 玩家明确申请检定（plan.player_check_request）→ 直接走确定性检定裁定
-        # （避免被 KP 当叙事顺过去），不再跑队友回合与常规叙事。战斗宣言不走此路。
-        requested_skill = (plan.player_check_request if plan else "").strip()
+        # 玩家明确申请检定 → 直接走确定性检定裁定（避免被 KP 当叙事顺过去），不走常规叙事。
+        # 战斗宣言不走此路。
+        #
+        # 技能页点出来的申请带 check_request 元数据，**优先据此确定性取技能名**：那是玩家点
+        # 明白了的，不该再让 planner 从「（申请「侦查」检定）」这行文本里认一遍——认漏了这次
+        # 申请就被当成普通叙事顺过去，玩家点的那一下等于没发生。planner 的
+        # player_check_request 仍作为「玩家直接打字申请」的兜底。
+        stashed_check = _stashed_check_request(turn, acting.id)
+        requested_skill = (stashed_check or (plan.player_check_request if plan else "")).strip()
         if (
             requested_skill and player_text
             and not _looks_like_combat_declaration(player_text)
@@ -838,6 +864,10 @@ async def run_chat_generation(session_id: str) -> None:
                 CHECK_REQUEST_PROMPT.format(
                     actor=acting.name, skill=requested_skill, intent=player_text,
                 ),
+                # 暂存式申请：这一轮里还有玩家的台词与行动，队友得像常规回合那样接话——
+                # 否则「说一句 + 顺手查一下」会让队友从申请一路哑到投骰结果之后（这条路和
+                # 投骰续写都不跑队友回合）。打字申请的老路径维持原样，不跑队友。
+                then_team_turn=ai_teammates if stashed_check else None,
             )
             return
 

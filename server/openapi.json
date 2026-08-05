@@ -766,7 +766,7 @@
         "type": "object"
       },
       "CheckRequest": {
-        "description": "玩家『申请』技能/属性检定——只报技能，难度由 KP 裁定（玩家不指定）。",
+        "description": "玩家『申请』技能/属性检定——只报技能，难度由 KP 裁定（玩家不指定）。\n\nstash=True：与大地图「前往」同一模式——把申请作为本回合暂存动作加入，和这一轮的\n台词、行动一起交给 KP，而不是自己单独触发一次生成。跑团里「一边说话一边动手查」\n本就是一个回合内的事，拆成两次生成既慢又会让 KP 看不到完整的上下文。",
         "properties": {
           "acting_character_id": {
             "anyOf": [
@@ -787,6 +787,11 @@
           "skill": {
             "title": "Skill",
             "type": "string"
+          },
+          "stash": {
+            "default": false,
+            "title": "Stash",
+            "type": "boolean"
           }
         },
         "required": [

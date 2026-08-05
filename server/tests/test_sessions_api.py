@@ -633,6 +633,40 @@ def test_check_endpoint_intent_optional(client, monkeypatch):
     assert resp.status_code == 200, resp.text
 
 
+def test_check_stash_adds_pending_turn_without_generation(client, monkeypatch):
+    """暂存式申请检定（与大地图「前往」同一模式）：stash=True 只加一条 pending_turn 行动、
+    不单独触发一次生成——「一边说话一边动手查」本就是一个回合里的事，得和本轮台词一起交 KP。
+
+    技能/目标要落进 metadata：推进时据此确定性取出，不靠 planner 从行动文本里再认一遍。"""
+    import app.api.chat as chat_module
+
+    started = {"n": 0}
+
+    def fake_start(session_id, coro, prelude=None):
+        started["n"] += 1
+        coro.close()
+
+    monkeypatch.setattr(chat_module.generation_manager, "start", fake_start)
+
+    c, ids = client
+    sid = _make_session(c, ids)
+    resp = c.post(
+        f"/api/sessions/{sid}/check",
+        json={"skill": "侦查", "intent": "搜查书桌暗格", "stash": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json().get("stashed") is True
+    assert started["n"] == 0  # 暂存不触发生成
+
+    events = c.get(f"/api/sessions/{sid}/events").json()["events"]
+    pend = [e for e in events if (e.get("metadata_") or {}).get("check_request")]
+    assert pend, "申请应落成一条可见的暂存行动"
+    meta = pend[-1]["metadata_"]
+    assert meta.get("pending_turn") is True
+    assert meta.get("skill") == "侦查"
+    assert meta.get("intent") == "搜查书桌暗格"
+
+
 def _client_with_scenes(tmp_path, scenes=None, visited=None):
     """自带带场景的模组 + 已访问两处的会话 + 无归属真人主席位——用于大地图前往。"""
     from sqlalchemy import create_engine

@@ -39,6 +39,7 @@ export interface InventoryActions {
 interface CharacterPanelProps {
   character: CharacterData
   /** 提供时（在场、查看自己的卡）技能可点击「申请检定」——难度由 KP 裁定，玩家不指定。
+   *  申请进本回合暂存（同大地图「前往」），与这一轮的发言一起交给 KP。
    * intent 是玩家顺带说明的检定目标（可选，如「书桌暗格」），场景里线索不止一处时帮 KP 判断具体目标 */
   onSkillCheck?: (skill: string, intent: string) => void
   inventoryActions?: InventoryActions
@@ -307,7 +308,8 @@ function SkillCheckRow({
   return (
     <ConfirmDialog
       title="申请检定"
-      description={`就「${name}」（当前值 ${value}）向 KP 申请检定？难度由 KP 据情境裁定，随后你再投骰。`}
+      description={`就「${name}」（当前值 ${value}）向 KP 申请检定？申请会加入本回合暂存，`
+        + `点「推进本回合」后与你的发言一起交给 KP；难度由 KP 据情境裁定，随后你再投骰。`}
       confirmLabel="申请"
       onConfirm={() => {
         onSkillCheck(name, intent.trim())
@@ -358,7 +360,7 @@ function SkillsTab({
       />
       {onSkillCheck && (
         <p className="text-xs py-1" style={{ color: 'var(--color-text-secondary)', opacity: 0.7 }}>
-          点击技能向 KP 申请检定（难度由 KP 裁定，之后再投骰）
+          点击技能把检定申请加入本回合，与你这一轮的发言一起交给 KP（难度由 KP 裁定，之后再投骰）
         </p>
       )}
       <div className="space-y-0.5">

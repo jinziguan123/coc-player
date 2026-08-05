@@ -208,6 +208,27 @@ async def check(
     # 落一条可见行动记录：申请检定这件事本身要留痕（供其他玩家看到、KP 后续上下文也能看到），
     # 带上 intent 是因为光报技能名时，现场若同时有多条线索/多个可疑点，KP 猜不出具体目标。
     content = f"（申请「{skill}」检定：{intent}）" if intent else f"（申请「{skill}」检定）"
+
+    if data.stash:
+        # 暂存模式（与大地图「前往」同一模式）：申请进本回合暂存，和这一轮的台词、行动
+        # 一起交给 KP。skill/intent 一并落进 metadata——推进时据此**确定性**取出，
+        # 不靠 planner 从「（申请「侦查」检定）」这行文本里再认一遍（暂存的前往也是这么做的）。
+        ev = session_service.add_event(
+            db, session_id, "action", content,
+            actor_id=actor.id, actor_name=actor.name,
+            metadata={
+                "pending_turn": True, "check_request": True,
+                "skill": skill, "intent": intent,
+            },
+        )
+        room_hub.broadcast(session_id, event_to_chunk(ev))
+        session_service.set_turn_confirm(db, session_id, actor.id, False)
+        room_hub.broadcast(
+            session_id,
+            _make_chunk("turn_state", metadata=session_service.turn_confirm_state(db, session_id)),
+        )
+        return {"ok": True, "stashed": True}
+
     ev = session_service.add_event(
         db, session_id, "action", content,
         actor_id=actor.id, actor_name=actor.name,

@@ -1081,19 +1081,22 @@ export function GameSessionPage() {
 
   // 玩家「申请」检定：只报技能，难度交 KP 裁定（玩家不指定）；intent 是顺带说明的检定目标，
   // 场景里同时有多条线索/多个可疑点时，光报技能名 KP 猜不出玩家具体想查什么。
-  const rollCheck = (skill: string, intent: string) => {
+  const rollCheck = async (skill: string, intent: string) => {
     if (!currentSession || streaming) {
       if (streaming) toast.error('KP 正在叙事，请稍候')
       return
     }
-    setStreaming(true)
-    // 同 submitRoll：不 await，否则挂起的请求会挤到 SSE 前面，自己反而最后看到动画。
-    api.post(`/sessions/${currentSession.id}/check`, {
-      skill, intent, acting_character_id: myCharId,
-    }).catch((e: unknown) => {
-      setStreaming(false)
+    // 暂存模式（与大地图「前往」一致）：申请进本回合暂存，和这一轮的台词、行动一起交给 KP。
+    // 「一边说话一边动手查」本就是一个回合内的事——各自单独触发一次生成既慢，也让 KP 看不到
+    // 完整上下文（先跑的那次没有后写的台词）。暂存后还能像别的暂存发言一样改或删。
+    try {
+      await api.post(`/sessions/${currentSession.id}/check`, {
+        skill, intent, acting_character_id: myCharId, stash: true,
+      })
+      toast.success('已把检定申请加入本回合，点「推进本回合」后与发言一起交给 KP')
+    } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '检定申请失败')
-    })
+    }
   }
 
   // 重新生成最新一轮 KP：打断卡住的生成 → 回滚上一轮 KP 叙事 → 用玩家/队友的既有输入重跑

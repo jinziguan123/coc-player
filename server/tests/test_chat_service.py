@@ -797,8 +797,11 @@ def test_generation_check_intent_detection_forwards_player_text(db_factory, monk
     async def fake_planner(llm, messages):
         return chat_service.turn_planner.TurnPlan(player_check_request="侦查")
 
-    async def fake_run_kp_turn(db, session_id, game_session, module, player_char, party_others, user_prompt):
+    async def fake_run_kp_turn(
+        db, session_id, game_session, module, player_char, party_others, user_prompt, **kw,
+    ):
         captured["prompt"] = user_prompt
+        captured["then_team_turn"] = kw.get("then_team_turn")
 
     monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_planner)
     monkeypatch.setattr(chat_service, "_run_kp_turn", fake_run_kp_turn)
@@ -814,6 +817,49 @@ def test_generation_check_intent_detection_forwards_player_text(db_factory, monk
     asyncio.run(chat_service.run_chat_generation(session_id))
 
     assert "书桌暗格" in captured["prompt"]
+    # 打字触发的老路径维持原样：不在这一轮跑队友回合。
+    assert not captured["then_team_turn"]
+
+
+def test_stashed_check_request_routes_without_planner(db_factory, monkeypatch):
+    """暂存式申请（技能页点出来的）：planner 没认出检定时，仍要据 check_request 元数据
+    确定性走检定裁定——否则玩家点的那一下会被当成普通叙事顺过去。
+
+    同时这一轮里还有玩家的台词，队友要像常规回合那样接话（不能从申请一路哑到投骰之后）。"""
+    _patch_runtime(monkeypatch, db_factory)
+    captured = {}
+
+    async def fake_planner(llm, messages):
+        return chat_service.turn_planner.TurnPlan()      # planner 没认出这是一次检定申请
+
+    async def fake_run_kp_turn(
+        db, session_id, game_session, module, player_char, party_others, user_prompt, **kw,
+    ):
+        captured["prompt"] = user_prompt
+        captured["then_team_turn"] = kw.get("then_team_turn")
+
+    monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_planner)
+    monkeypatch.setattr(chat_service, "_run_kp_turn", fake_run_kp_turn)
+
+    db = db_factory()
+    session_id = _seed_session(db)
+    actor_id = db.get(GameSession, session_id).player_character_id
+    session_service.add_event(
+        db, session_id, "dialogue", "这份报纸不对劲。",
+        actor_id=actor_id, actor_name="测试角色",
+    )
+    session_service.add_event(
+        db, session_id, "action", "（申请「侦查」检定：报纸的日期）",
+        actor_id=actor_id, actor_name="测试角色",
+        metadata={"check_request": True, "skill": "侦查", "intent": "报纸的日期"},
+    )
+
+    asyncio.run(chat_service.run_chat_generation(session_id))
+
+    assert "侦查" in captured["prompt"]
+    assert "这份报纸不对劲" in captured["prompt"]      # 同轮台词一并进裁定上下文
+    # 走了「带队友回合」的分支（本用例没有 AI 队友，故取到的是空列表而非 None）
+    assert captured["then_team_turn"] is not None
 
 
 def test_persisted_order_interleaves_narration_and_dialogue(db_factory):
