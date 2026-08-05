@@ -731,6 +731,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/style-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Style Options
+         * @description 文风 / 画风的预设清单（供前端下拉）。自定义不在此列——直接填原文即可。
+         *
+         *     **必须注册在 `/{session_id}` 之前**：FastAPI 按注册顺序匹配，排在后面的话
+         *     `GET /api/sessions/style-options` 会先命中 `/{session_id}`，被当成一个会话 id 去查。
+         */
+        get: operations["style_options_api_sessions_style_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -1761,6 +1784,28 @@ export interface paths {
         get?: never;
         /** Update Status */
         put: operations["update_status_api_sessions__session_id__status_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/style": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Style
+         * @description 改本局的文风 / 画风。空串=改回继承模组默认；None=本次不动该项。
+         *
+         *     按房主授权：风格是整桌共享的观感，不该让任一玩家单方面改掉别人的体验。
+         */
+        put: operations["update_style_api_sessions__session_id__style_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2902,6 +2947,16 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Default Image Style
+             * @default
+             */
+            default_image_style: string;
+            /**
+             * Default Narrative Style
+             * @default
+             */
+            default_narrative_style: string;
             /** Description */
             description: string;
             /**
@@ -2965,6 +3020,10 @@ export interface components {
              * @default []
              */
             clues: unknown[];
+            /** Default Image Style */
+            default_image_style?: string | null;
+            /** Default Narrative Style */
+            default_narrative_style?: string | null;
             /**
              * Description
              * @default
@@ -3237,12 +3296,22 @@ export interface components {
              */
             identity_version: number;
             /**
+             * Image Style
+             * @default
+             */
+            image_style: string;
+            /**
              * Kp Mode
              * @default ai
              */
             kp_mode: string;
             /** Module Id */
             module_id: string;
+            /**
+             * Narrative Style
+             * @default
+             */
+            narrative_style: string;
             /**
              * Participants
              * @default []
@@ -3272,6 +3341,18 @@ export interface components {
         SessionStatusUpdate: {
             /** Status */
             status: string;
+        };
+        /**
+         * SessionStyleUpdate
+         * @description 改本局的文风 / 画风。值为预设 id 或自定义原文，空串=改回「继承模组默认」。
+         *
+         *     None = 本次不动该项（只想改画风时不必把文风也回传一遍）。
+         */
+        SessionStyleUpdate: {
+            /** Image Style */
+            image_style?: string | null;
+            /** Narrative Style */
+            narrative_style?: string | null;
         };
         /** SkillPointsRequest */
         SkillPointsRequest: {
@@ -4675,6 +4756,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    style_options_api_sessions_style_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
@@ -6506,6 +6607,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SessionStatusUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_style_api_sessions__session_id__style_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionStyleUpdate"];
             };
         };
         responses: {

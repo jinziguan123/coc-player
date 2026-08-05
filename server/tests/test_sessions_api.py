@@ -837,3 +837,32 @@ def test_travel_connectivity_gate(tmp_path, monkeypatch):
         assert started["n"] == 1
     finally:
         app.dependency_overrides.clear()
+
+
+def test_session_style_api_round_trip(client):
+    """PUT /style 落库并回读；空串=改回继承模组默认。取值约定见 services.style_presets。"""
+    c, ids = client
+    sid = _make_session(c, ids)
+    assert c.get(f"/api/sessions/{sid}").json()["narrative_style"] == ""
+
+    r = c.put(f"/api/sessions/{sid}/style", json={
+        "narrative_style": "cinematic", "image_style": "woodcut",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["narrative_style"] == "cinematic"
+    assert r.json()["image_style"] == "woodcut"
+
+    # 只改一项时另一项不动（None = 本次不动）
+    r = c.put(f"/api/sessions/{sid}/style", json={"image_style": ""})
+    assert r.json()["narrative_style"] == "cinematic"
+    assert r.json()["image_style"] == ""
+
+
+def test_style_options_endpoint_not_shadowed_by_session_id(client):
+    """/style-options 必须注册在 /{session_id} 之前，否则会被当成一个会话 id 去查。"""
+    c, _ids = client
+    r = c.get("/api/sessions/style-options")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {"narrative", "image"} == set(body)
+    assert any(x["id"] == "terse" for x in body["narrative"])

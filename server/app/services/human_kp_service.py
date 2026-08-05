@@ -29,7 +29,7 @@ from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
 
-_IMAGE_STYLE = module_image_service.IMAGE_STYLE_SUFFIX   # 唯一出处见该模块
+# 画风一律经 module_image_service.style_suffix_for() 取（会话 > 模组 > 默认档 + 内容红线）
 _CONTROL_TAG_RE = re.compile(r"\[(?:[A-Z_]{3,})(?::[^\]]*)?\]")
 
 
@@ -347,7 +347,9 @@ def lookup(
     raise ValueError("检索范围必须是 rule 或 module")
 
 
-async def generate_image_preview(prompt: str, title: str) -> dict:
+async def generate_image_preview(
+    prompt: str, title: str, module=None, session=None,
+) -> dict:
     image_llm = get_image_llm()
     if not image_llm.supports_image_gen():
         raise ValueError("尚未配置生图模型：请到「设置 → AI 配置 → 生图模型」添加并激活一个")
@@ -362,7 +364,9 @@ async def generate_image_preview(prompt: str, title: str) -> dict:
         temperature=0.4,
     )
     visual_prompt = str(translated or prompt).strip().splitlines()[0][:700]
-    b64 = await image_llm.generate_image(f"{visual_prompt}, {_IMAGE_STYLE}")
+    b64 = await image_llm.generate_image(
+        f"{visual_prompt}, {module_image_service.style_suffix_for(module, session)}",
+    )
     url = image_store.save_image_b64(b64 or "")
     if not url:
         raise ValueError("图片生成失败")

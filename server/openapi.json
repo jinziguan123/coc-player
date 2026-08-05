@@ -1591,6 +1591,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "default_image_style": {
+            "default": "",
+            "title": "Default Image Style",
+            "type": "string"
+          },
+          "default_narrative_style": {
+            "default": "",
+            "title": "Default Narrative Style",
+            "type": "string"
+          },
           "description": {
             "title": "Description",
             "type": "string"
@@ -1696,6 +1706,28 @@
             "items": {},
             "title": "Clues",
             "type": "array"
+          },
+          "default_image_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Image Style"
+          },
+          "default_narrative_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Narrative Style"
           },
           "description": {
             "default": "",
@@ -2325,6 +2357,11 @@
             "title": "Identity Version",
             "type": "integer"
           },
+          "image_style": {
+            "default": "",
+            "title": "Image Style",
+            "type": "string"
+          },
           "kp_mode": {
             "default": "ai",
             "title": "Kp Mode",
@@ -2332,6 +2369,11 @@
           },
           "module_id": {
             "title": "Module Id",
+            "type": "string"
+          },
+          "narrative_style": {
+            "default": "",
+            "title": "Narrative Style",
             "type": "string"
           },
           "participants": {
@@ -2416,6 +2458,35 @@
           "status"
         ],
         "title": "SessionStatusUpdate",
+        "type": "object"
+      },
+      "SessionStyleUpdate": {
+        "description": "改本局的文风 / 画风。值为预设 id 或自定义原文，空串=改回「继承模组默认」。\n\nNone = 本次不动该项（只想改画风时不必把文风也回传一遍）。",
+        "properties": {
+          "image_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Style"
+          },
+          "narrative_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrative Style"
+          }
+        },
+        "title": "SessionStyleUpdate",
         "type": "object"
       },
       "SkillPointsRequest": {
@@ -4435,6 +4506,26 @@
           }
         ],
         "summary": "Get Session By Code",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/sessions/style-options": {
+      "get": {
+        "description": "文风 / 画风的预设清单（供前端下拉）。自定义不在此列——直接填原文即可。\n\n**必须注册在 `/{session_id}` 之前**：FastAPI 按注册顺序匹配，排在后面的话\n`GET /api/sessions/style-options` 会先命中 `/{session_id}`，被当成一个会话 id 去查。",
+        "operationId": "style_options_api_sessions_style_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Style Options",
         "tags": [
           "sessions"
         ]
@@ -7380,6 +7471,64 @@
           }
         ],
         "summary": "Update Status",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/sessions/{session_id}/style": {
+      "put": {
+        "description": "改本局的文风 / 画风。空串=改回继承模组默认；None=本次不动该项。\n\n按房主授权：风格是整桌共享的观感，不该让任一玩家单方面改掉别人的体验。",
+        "operationId": "update_style_api_sessions__session_id__style_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionStyleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Update Style",
         "tags": [
           "sessions"
         ]

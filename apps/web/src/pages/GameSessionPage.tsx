@@ -46,11 +46,12 @@ import { GrowthModal } from '../components/game/GrowthModal'
 import { InvestigationBoard } from '../components/game/InvestigationBoard'
 import { HexSandbox } from '../components/game/HexSandbox'
 import { ImprovisedNpcModal } from '../components/game/ImprovisedNpcModal'
+import { SessionStyleModal } from '../components/game/SessionStyleModal'
 import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntry, type CombatResultView } from '../components/game/CombatStage'
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { Modal } from '../components/ui/modal'
-import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass } from 'react-icons/gi'
+import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
@@ -268,6 +269,7 @@ export function GameSessionPage() {
   const [portraitView, setPortraitView] = useState<string | null>(null)  // NPC 立绘放大查看
 
   const [showImprov, setShowImprov] = useState(false)         // 临场角色收编（房主专用）
+  const [showStyle, setShowStyle] = useState(false)           // 本局文风/画风（房主专用）
   const [locations, setLocations] = useState<KnownLocation[]>([])
   const [mapNodes, setMapNodes] = useState<MapNodePayload[]>([])
   const [mapTab, setMapTab] = useState<'sandbox' | 'board'>('sandbox')  // 大地图页签：沙盘/调查板
@@ -1447,6 +1449,15 @@ export function GameSessionPage() {
                 <GiCharacter size={13} /> 临场角色
               </button>
             )}
+            {isHost && (
+              <button
+                onClick={() => setShowStyle(true)}
+                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                title="本局的文风与画风：几档预设或自己写一段，留空则跟随模组（房主）"
+              >
+                <GiQuillInk size={13} /> 风格
+              </button>
+            )}
             {!isKp && (
               <button
                 onClick={() => setShowCoach('reference')}
@@ -1481,6 +1492,15 @@ export function GameSessionPage() {
           <GrowthModal sessionId={currentSession.id} characterId={myCharId} onClose={() => setShowGrowth(false)} />
         )}
         {showImprov && <ImprovisedNpcModal sessionId={currentSession.id} onClose={() => setShowImprov(false)} />}
+        {showStyle && (
+          <SessionStyleModal
+            sessionId={currentSession.id}
+            narrativeStyle={currentSession.narrative_style || ''}
+            imageStyle={currentSession.image_style || ''}
+            onSaved={() => void refetchSession()}
+            onClose={() => setShowStyle(false)}
+          />
+        )}
         {portraitView && (
           // NPC 立绘放大查看：复用通用 Modal（Esc / 点遮罩关闭），点图本身也可关闭
           <Modal onClose={() => setPortraitView(null)} widthClass="max-w-md">

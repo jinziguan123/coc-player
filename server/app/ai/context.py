@@ -10,6 +10,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.ai.prompts.kp_system import (
     KP_SYSTEM_PROMPT,
+    NARRATIVE_STYLE_SECTION,
     KP_OPENING_PROMPT,
     HANDOUT_INSTRUCTION,
     MODULE_EXCERPT_SECTION,
@@ -26,7 +27,7 @@ from app.ai.prompts.team_system import (
     TEAM_MODE_TOGETHER,
     TEAM_SYSTEM_PROMPT,
 )
-from app.services import world_memory
+from app.services import style_presets, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -858,6 +859,16 @@ def build_kp_context(
         clues_info=clues_info,
         player_info=player_info,
     )
+
+    # 文风（玩家指定）：本局 > 模组默认 > 不指定。放在最前面追加是有意的——下面的模组原文
+    # 摘录可能很长，超预算时 _truncate_to_tokens 从**尾部**截；文风若排在它们之后会被整段截掉，
+    # 表现成「设置有时生效有时不生效」这种最难查的样子。
+    style_prompt = style_presets.narrative_style_prompt(
+        getattr(session, "narrative_style", ""),
+        getattr(module, "default_narrative_style", ""),
+    )
+    if style_prompt:
+        system_content += NARRATIVE_STYLE_SECTION.format(style=style_prompt)
 
     # 幕后真相（守秘人专属）：模组解析出的全局真相，KP 据此裁定与铺垫（带守密措辞）。
     truth = (getattr(module, "truth", "") or "").strip()

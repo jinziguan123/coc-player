@@ -1084,6 +1084,29 @@ def update_session_status(db: Session, session_id: str, status: str) -> GameSess
     return session
 
 
+def update_session_style(
+    db: Session,
+    session_id: str,
+    narrative_style: str | None,
+    image_style: str | None,
+) -> GameSession | None:
+    """改本局的文风 / 画风。None=不动该项，空串=改回「继承模组默认」。
+
+    不做预设 id 校验：非预设值本来就是合法的自定义原文（取值约定见 style_presets），
+    在这里挡一道只会把自定义功能挡掉。
+    """
+    session = db.get(GameSession, session_id)
+    if not session:
+        return None
+    if narrative_style is not None:
+        session.narrative_style = narrative_style.strip()
+    if image_style is not None:
+        session.image_style = image_style.strip()
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 def get_session_events(
     db: Session, session_id: str, limit: int = 0, offset: int = 0
 ) -> list[EventLog]:

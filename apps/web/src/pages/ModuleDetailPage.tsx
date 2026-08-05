@@ -19,6 +19,14 @@ import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { ModuleTimeline } from '../components/module/ModuleTimeline'
 import { BIOMES, BIOME_LABELS, BIOME_TEXTURES } from '../lib/biome'
 import { MODULE_DIFFICULTIES } from '../lib/module'
+import { StylePicker } from '@/components/style/StylePicker'
+import { useStyleOptions, type StyleOption } from '@/components/style/useStyleOptions'
+
+/** 只读态显示成人话：命中预设显示预设名，自定义显示原文，空串返回空串。 */
+function styleLabel(options: StyleOption[] | undefined, value: string): string {
+  if (!value) return ''
+  return options?.find((o) => o.id === value)?.label || value
+}
 
 // 表单态允许先选 biome、保存时再由后端补 q/r；旧瓦片图遗留数据也由后端归一化接管。
 interface SceneState { when?: string[]; danger?: string; atmosphere?: string; description?: string }
@@ -44,6 +52,9 @@ interface ModuleData {
   truth: string
   /** 车卡建议：玩家建角色时看到的取向与限制，由 AI 出初稿、房主可改写。 */
   character_guidance: CharacterGuidance
+  /** 本模组推荐的文风 / 画风（预设 id 或自定义原文，''=不指定）。开局继承到会话，玩家仍可改。 */
+  default_narrative_style: string
+  default_image_style: string
 }
 
 const BLANK: ModuleData = {
@@ -51,6 +62,7 @@ const BLANK: ModuleData = {
   world_setting: { era: '', location: '', tone: '', player_count: '', region: '', difficulty: '', tags: [], player_brief: '', intro: '' },
   scenes: [], map_nodes: [], npcs: [], clues: [], triggers: [], truth: '',
   character_guidance: {},
+  default_narrative_style: '', default_image_style: '',
 }
 
 const EVENT_KINDS: { value: string; label: string }[] = [
@@ -223,6 +235,7 @@ export function ModuleDetailPage() {
   const navigate = useNavigate()
   const isNew = !id
   const [data, setData] = useState<ModuleData>(BLANK)
+  const styleOptions = useStyleOptions()
   const [edit, setEdit] = useState(isNew)
   const [view, setView] = useState<'detail' | 'graph' | 'timeline' | 'sandbox'>('detail')
   const [loading, setLoading] = useState(!isNew)
@@ -355,6 +368,8 @@ export function ModuleDetailPage() {
         triggers: data.triggers,
         truth: data.truth,
         character_guidance: data.character_guidance,
+        default_narrative_style: data.default_narrative_style,
+        default_image_style: data.default_image_style,
       }
       const saved = isNew
         ? await api.post<ModuleData>('/modules', payload)
@@ -758,6 +773,45 @@ export function ModuleDetailPage() {
               </button>
             )}
           </>
+        )}
+      </Section>
+
+      {/* 本模组推荐的文风 / 画风：开局继承到会话，玩家仍可在局内一局一局地改 */}
+      <Section title="文风与画风（本模组默认）">
+        {edit ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block mb-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                叙事文风
+              </label>
+              <StylePicker
+                kind="narrative" inheritLabel="不指定（KP 自由发挥）"
+                options={styleOptions?.narrative || []}
+                value={data.default_narrative_style}
+                onChange={(v) => setData((d) => ({ ...d, default_narrative_style: v }))}
+              />
+            </div>
+            <div>
+              <label className="block mb-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                配图画风
+              </label>
+              <StylePicker
+                kind="image" inheritLabel="不指定（用系统默认画风）"
+                options={styleOptions?.image || []}
+                value={data.default_image_style}
+                onChange={(v) => setData((d) => ({ ...d, default_image_style: v }))}
+              />
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            文风：{styleLabel(styleOptions?.narrative, data.default_narrative_style) || '不指定'}
+            {'　'}·{'　'}
+            画风：{styleLabel(styleOptions?.image, data.default_image_style) || '不指定'}
+            <span className="block mt-1 text-xs opacity-70">
+              这是<strong>默认值</strong>：开局会继承到对局，房主仍可在局内单独调整这一局的风格。
+            </span>
+          </p>
         )}
       </Section>
 

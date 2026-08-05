@@ -31,6 +31,9 @@ interface GameSession {
   room_code?: string | null
   current_scene_id: string | null
   world_state: Record<string, unknown>
+  /** 本局的文风 / 画风（预设 id 或自定义原文）；''=继承模组默认。见 components/style/StylePicker */
+  narrative_style?: string
+  image_style?: string
   participants?: SessionParticipant[]
   module_title?: string
   character_name?: string

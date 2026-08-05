@@ -61,6 +61,9 @@ class SessionRead(BaseModel):
     current_scene_id: str | None
     world_state: dict
     turn_state: dict | None
+    # 本局的文风 / 画风（预设 id 或自定义原文）；""=继承模组默认值。见 services.style_presets
+    narrative_style: str = ""
+    image_style: str = ""
     participants: list[ParticipantRead] = []
     created_at: datetime
     updated_at: datetime
@@ -70,6 +73,16 @@ class SessionRead(BaseModel):
 
 class SessionStatusUpdate(BaseModel):
     status: str
+
+
+class SessionStyleUpdate(BaseModel):
+    """改本局的文风 / 画风。值为预设 id 或自定义原文，空串=改回「继承模组默认」。
+
+    None = 本次不动该项（只想改画风时不必把文风也回传一遍）。
+    """
+
+    narrative_style: str | None = None
+    image_style: str | None = None
 
 
 class ClaimSeatRequest(BaseModel):

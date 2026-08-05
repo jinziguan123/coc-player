@@ -31,6 +31,9 @@ class ModuleRead(BaseModel):
     truth: str = ""
     # 原文 RAG 索引状态：""=未建 / indexing / ready / failed
     rag_status: str = ""
+    # 本模组推荐的文风 / 画风（预设 id 或自定义原文），开局继承到会话，""=不指定
+    default_narrative_style: str = ""
+    default_image_style: str = ""
     created_at: datetime
     updated_at: datetime
 
@@ -55,6 +58,9 @@ class ModuleWrite(BaseModel):
     handouts: list = []
     # None = 本次编辑不动 truth（update_module 跳过 None，防旧前端把真相清空）
     truth: str | None = None
+    # None = 本次编辑不动风格默认值（同 truth，防旧前端清空）
+    default_narrative_style: str | None = None
+    default_image_style: str | None = None
 
 
 class ModuleUploadResponse(BaseModel):

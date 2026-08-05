@@ -11,28 +11,37 @@ from sqlalchemy.orm import Session
 from app.ai.image_gen import get_image_llm
 from app.ai.llm_factory import get_fast_llm
 from app.models.module import Module
-from app.services import image_store
+from app.services import image_store, style_presets
 
 logger = logging.getLogger(__name__)
 
 _IMAGE_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)$")
 
-# 全部配图的统一画风后缀（确定性追加在快模型产出的提示词之后，保证风格一致）。
+# 画风后缀（确定性追加在快模型产出的提示词之后，保证同一局里风格一致）。
 #
-# **本模块是这段文案的唯一出处**：illustration_service / human_kp_service 从这里 import。
-# 原来三处各写一份完全相同的字符串，改一处就会和另两处不一致。
+# 具体文案与「预设 / 自定义」的取值约定见 services.style_presets；本模块只负责
+# 「从模组与会话上取出该用哪一档」，各调用方一律经 style_suffix_for() 拿，
+# 不要再各自拼字符串——原来三处各写一份完全相同的常量，改一处就和另两处不一致。
 #
 # 不再强制黑白：`mostly black and white` 把每张图都压成灰的，场景之间失去区分度——
 # 煤油灯的暖黄、地窖的霉绿、雪夜的冷蓝本该是各自最有辨识度的东西，也是场景氛围底赖以
 # 成立的前提（见 index.css 的 --scene-backdrop-*：它拿配图当色调来源，源图没颜色就没色调）。
 # 改成「低饱和的有限色调」：仍是阴郁墨线漫画质感，但允许每个场景有自己的主色倾向。
 # 尾部那句 fully clothed 是内容红线的一部分，见 SAFETY_PROMPT_RULE。
-IMAGE_STYLE_SUFFIX = (
-    "moody manga illustration, bold ink lineart, cross-hatching and screentone shading, "
-    "limited desaturated palette with one dominant color cast from the scene's own light source, "
-    "muted low-saturation tones, gritty dark comic style, fully clothed, non-sexual, sfw"
-)
+#: 未选画风时的后缀（= style_presets 的默认档 + 内容红线），与本特性上线前逐字等价。
+IMAGE_STYLE_SUFFIX = style_presets.image_style_suffix()
 _STYLE_SUFFIX = IMAGE_STYLE_SUFFIX   # 兼容本模块内既有引用
+
+
+def style_suffix_for(module=None, session=None) -> str:
+    """本次出图该用的画风后缀：会话 > 模组 > 默认档，内容红线永远在最后。
+
+    模组配图（场景/NPC 立绘）没有会话语境，只传 module；对局内插画两者都传。
+    """
+    return style_presets.image_style_suffix(
+        getattr(session, "image_style", "") if session is not None else "",
+        getattr(module, "default_image_style", "") if module is not None else "",
+    )
 
 #: 写提示词的那个模型要守的内容红线，拼进每个 *_PROMPT_SYS。
 #:
@@ -231,7 +240,7 @@ async def regenerate_module_image(
         prompt = (raw or "").strip().splitlines()[0].strip()[:500] if raw else ""
         if not prompt:
             return None
-        b64 = await image_llm.generate_image(f"{prompt}, {_STYLE_SUFFIX}")
+        b64 = await image_llm.generate_image(f"{prompt}, {style_suffix_for(module)}")
         if not b64:
             return None
         url = image_store.save_image_b64(b64)

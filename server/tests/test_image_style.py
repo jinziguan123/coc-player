@@ -4,15 +4,14 @@ from app.services import human_kp_service, illustration_service, module_image_se
 
 
 def test_style_suffix_has_single_source():
-    """三处配图（模组图 / 局内插图 / 真人 KP 发图）必须共用同一段画风文案。
+    """三处配图（模组图 / 局内插图 / 真人 KP 发图）必须经同一个 style_suffix_for() 取画风。
 
-    原先各写一份完全相同的字符串，改一处另两处就悄悄不一致——同一局里模组图和局内插图
-    会是两种画风。
+    原先各存一份常量，改一处另两处就悄悄不一致——同一局里模组图和局内插图会是两种画风。
+    现在画风还可以按模组/按局改，各存一份的后果从「文案不同步」升级成「设置根本不生效」。
     """
-    suffix = module_image_service.IMAGE_STYLE_SUFFIX
-    assert illustration_service._ILLUST_STYLE_SUFFIX is suffix
-    assert human_kp_service._IMAGE_STYLE is suffix
-    assert module_image_service._STYLE_SUFFIX is suffix
+    assert not hasattr(illustration_service, "_ILLUST_STYLE_SUFFIX")
+    assert not hasattr(human_kp_service, "_IMAGE_STYLE")
+    assert module_image_service._STYLE_SUFFIX is module_image_service.IMAGE_STYLE_SUFFIX
 
 
 def test_style_does_not_force_black_and_white():

@@ -40,6 +40,10 @@ class GameSession(Base, UUIDMixin, TimestampMixin):
         JSON, default=dict, server_default="{}",
     )
     turn_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 本局的文风 / 画风（预设 id 或自定义原文，取值约定见 services.style_presets）。
+    # ""=继承模组的默认值；模组也没设时，文风不注入、画风回落到默认那一档。
+    narrative_style: Mapped[str] = mapped_column(default="", server_default="")
+    image_style: Mapped[str] = mapped_column(default="", server_default="")
 
     participants: Mapped[list["SessionParticipant"]] = relationship(
         "SessionParticipant",

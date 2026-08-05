@@ -24,8 +24,8 @@ _make_chunk = make_chunk
 _scene_name = turn_context._scene_name
 _apply_world_memory = turn_context._apply_world_memory
 
-# 画风后缀的唯一出处在 module_image_service，三处共用同一段文案（原先各写一份，改一处就散）。
-_ILLUST_STYLE_SUFFIX = module_image_service.IMAGE_STYLE_SUFFIX
+# 画风一律经 module_image_service.style_suffix_for() 取：本局设了用本局的，否则继承模组，
+# 都没设回落默认档；内容红线由它无条件追加。原先三处各写一份常量，改一处就和另两处散了。
 
 _HANDOUT_PROMPT_SYS = (
     "你是文生图提示词工程师。把给定的 TRPG 手书（信件/报纸/日记/便条）转成一行**英文**"
@@ -34,6 +34,23 @@ _HANDOUT_PROMPT_SYS = (
     "不要出现人物面孔与真实人名，不要引号，只输出提示词本身。"
     + module_image_service.SAFETY_PROMPT_RULE
 )
+
+def _style_suffix(session_id: str) -> str:
+    """本局生效的画风后缀。读不到会话/模组（已删档等）时回落默认档，绝不让配图因此失败。"""
+    from app.database import SessionLocal
+    from app.models import GameSession, Module
+
+    db = SessionLocal()
+    try:
+        game_session = db.get(GameSession, session_id)
+        module = db.get(Module, game_session.module_id) if game_session else None
+        return module_image_service.style_suffix_for(module, game_session)
+    except Exception:  # noqa: BLE001 — 画风是锦上添花，取不到就用默认档
+        logger.exception("取画风失败，回落默认档：session=%s", session_id)
+        return module_image_service.style_suffix_for()
+    finally:
+        db.close()
+
 
 async def _illustrate_event(
     session_id: str,
@@ -64,7 +81,7 @@ async def _illustrate_event(
         sd_prompt = (raw or "").strip().splitlines()[0].strip()[:500] if isinstance(raw, str) and raw.strip() else ""
         if not sd_prompt:
             return
-        sd_prompt = f"{sd_prompt}, {_ILLUST_STYLE_SUFFIX}"
+        sd_prompt = f"{sd_prompt}, {_style_suffix(session_id)}"
         b64 = await get_image_llm().generate_image(sd_prompt)
         if not b64:
             return

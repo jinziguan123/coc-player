@@ -574,6 +574,8 @@ def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
         handouts=data.get("handouts", []),
         truth=str(data.get("truth") or ""),
         character_guidance=data.get("character_guidance") or {},
+        default_narrative_style=str(data.get("default_narrative_style") or "").strip(),
+        default_image_style=str(data.get("default_image_style") or "").strip(),
     )
     db.add(module)
     db.commit()
@@ -616,6 +618,10 @@ def update_module(db: Session, module_id: str, data: dict) -> Module | None:
     # 房主可以改写 AI 给的车卡建议——AI 出初稿，KP 才是最终裁量。
     if "character_guidance" in data and data["character_guidance"] is not None:
         module.character_guidance = normalize_character_guidance(data["character_guidance"])
+    # 本模组推荐的文风 / 画风（开局继承到会话，玩家仍可一局一局地改）
+    for field in ("default_narrative_style", "default_image_style"):
+        if data.get(field) is not None:
+            setattr(module, field, str(data[field]).strip())
     db.commit()
     db.refresh(module)
     return module

@@ -22,6 +22,7 @@ from app.schemas.session import (
     SessionCreate,
     SessionRead,
     SessionStatusUpdate,
+    SessionStyleUpdate,
 )
 from app.services import session_service
 from app.services.event_protocol import make_chunk as _make_chunk
@@ -291,6 +292,18 @@ def typing(
     return {"ok": True}
 
 
+@router.get("/style-options")
+def style_options():
+    """文风 / 画风的预设清单（供前端下拉）。自定义不在此列——直接填原文即可。
+
+    **必须注册在 `/{session_id}` 之前**：FastAPI 按注册顺序匹配，排在后面的话
+    `GET /api/sessions/style-options` 会先命中 `/{session_id}`，被当成一个会话 id 去查。
+    """
+    from app.services import style_presets
+
+    return style_presets.style_options()
+
+
 @router.get("/{session_id}")
 def get_session(
     session_id: str,
@@ -479,6 +492,28 @@ def update_status(
         db, session_id, token, detail="只有房主可以变更会话状态",
     )
     session = session_service.update_session_status(db, session_id, data.status)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    return session
+
+
+@router.put("/{session_id}/style", response_model=SessionRead)
+def update_style(
+    session_id: str,
+    data: SessionStyleUpdate,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """改本局的文风 / 画风。空串=改回继承模组默认；None=本次不动该项。
+
+    按房主授权：风格是整桌共享的观感，不该让任一玩家单方面改掉别人的体验。
+    """
+    require_session_manager(
+        db, session_id, token, detail="只有房主可以变更本局的文风与画风",
+    )
+    session = session_service.update_session_style(
+        db, session_id, data.narrative_style, data.image_style,
+    )
     if not session:
         raise HTTPException(404, "会话不存在")
     return session

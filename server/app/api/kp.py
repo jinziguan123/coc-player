@@ -134,9 +134,11 @@ async def preview_image(
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    _kp_context(db, session_id, token)
+    game_session, module = _kp_context(db, session_id, token)
     try:
-        return await human_kp_service.generate_image_preview(data.prompt, data.title)
+        return await human_kp_service.generate_image_preview(
+            data.prompt, data.title, module=module, session=game_session,
+        )
     except Exception as error:  # noqa: BLE001
         raise _advisor_error(error) from error
 

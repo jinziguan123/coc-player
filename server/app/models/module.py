@@ -35,6 +35,10 @@ class Module(Base, UUIDMixin, TimestampMixin):
     truth: Mapped[str] = mapped_column(Text, default="")
     # 原文 RAG 索引状态：""=未建（存量模组）/ indexing / ready / failed，与规则书状态机同形
     rag_status: Mapped[str] = mapped_column(default="")
+    # 本模组推荐的文风 / 画风（预设 id 或自定义原文，取值约定见 services.style_presets）。
+    # 这是**默认值**：开局会继承到会话上，玩家仍可一局一局地改。""=不指定。
+    default_narrative_style: Mapped[str] = mapped_column(default="", server_default="")
+    default_image_style: Mapped[str] = mapped_column(default="", server_default="")
 
 
 class ModuleChunk(Base, UUIDMixin):
