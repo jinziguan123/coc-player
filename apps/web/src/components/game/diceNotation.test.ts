@@ -89,3 +89,49 @@ describe('diceSpecsOf：一条事件要播哪几段骰', () => {
     expect(diceSpecsOf({ blind: true })).toEqual([])
   })
 })
+
+describe('奖惩骰理由', () => {
+  const base = { kind: 'check' as const, result: 35, tens: [30, 60], tens_kept: 30, units: 5 }
+
+  it('把同向的来由列进 caption', () => {
+    const cap = buildCheckCaption({
+      ...base, penalty: 1,
+      modifiers: [{ kind: 'penalty', n: 1, reason: '目标有半掩体遮挡' }],
+    })
+    expect(cap?.reasons).toEqual(['目标有半掩体遮挡'])
+  })
+
+  it('多条来由都列出来（战斗几何可能同时超程 + 掩体）', () => {
+    const cap = buildCheckCaption({
+      ...base, penalty: 2,
+      modifiers: [
+        { kind: 'penalty', n: 1, reason: '超出武器基础射程' },
+        { kind: 'penalty', n: 1, reason: '目标有半掩体遮挡' },
+      ],
+    })
+    expect(cap?.reasons).toEqual(['超出武器基础射程', '目标有半掩体遮挡'])
+  })
+
+  it('只列与最终净效果同向的来由', () => {
+    // 抵近 +1 与掩体 -1 抵消后净剩惩罚：把「抵近射击」也列出来，玩家会算不明白这一掷怎么了
+    const cap = buildCheckCaption({
+      ...base, penalty: 1,
+      modifiers: [
+        { kind: 'bonus', n: 1, reason: '抵近射击' },
+        { kind: 'penalty', n: 2, reason: '目标有半掩体遮挡' },
+      ],
+    })
+    expect(cap?.kind).toBe('penalty')
+    expect(cap?.reasons).toEqual(['目标有半掩体遮挡'])
+  })
+
+  it('后端没给理由时是空数组，标注照常显示数量', () => {
+    const cap = buildCheckCaption({ ...base, penalty: 1 })
+    expect(cap?.title).toBe('惩罚骰 ×1')
+    expect(cap?.reasons).toEqual([])
+  })
+
+  it('没有奖惩骰仍然不标注', () => {
+    expect(buildCheckCaption({ ...base, modifiers: [] })).toBeNull()
+  })
+})

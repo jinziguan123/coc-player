@@ -77,24 +77,38 @@ def _regular_budget(mov: int) -> int:
 
 
 def _attack_geometry(state: dict, actor: dict, target: dict, weapon: str,
-                     ranged: bool) -> tuple[int, int, bool, str]:
-    """方格几何折算 →（命中奖励骰, 命中惩罚骰, 是否可达, 不可达原因）。
+                     ranged: bool) -> tuple[int, int, bool, str, list[dict]]:
+    """方格几何折算 →（命中奖励骰, 命中惩罚骰, 是否可达, 不可达原因, 奖惩骰来由）。
     无 grid 或缺坐标 → 视为可达、无奖惩（向后兼容旧战斗态/无方格场景）。
-    近战须相邻、火器超基础射程 -1 惩罚 / 超 2× 不可及；火器抵近（≤2 格）+1 奖励骰（P-Grid-2）。"""
+    近战须相邻、火器超基础射程 -1 惩罚 / 超 2× 不可及；火器抵近（≤2 格）+1 奖励骰（P-Grid-2）。
+
+    第五个返回值是给玩家看的**来由**：这些奖惩骰全由几何算出，玩家在战场上看不到算式，
+    只显示「惩罚骰 ×1」会让人以为被针对了。"""
     grid = state.get("grid")
+    notes: list[dict] = []
     if not grid or not actor.get("pos") or not target.get("pos"):
-        return 0, 0, True, ""
+        return 0, 0, True, "", notes
     dist = positioning.cell_distance(actor, target)
     range_cells = positioning.range_in_cells(weapon, grid.get("cell_m", _GRID_CELL_M))
     bonus, penalty, reachable = positioning.range_check(dist, range_cells, ranged)
-    bonus += positioning.point_blank_bonus(dist, ranged)   # 抵近射击奖励骰
+    if penalty:
+        notes.append({"kind": "penalty", "n": penalty, "reason": "超出武器基础射程"})
+    pb = positioning.point_blank_bonus(dist, ranged)   # 抵近射击奖励骰
+    if pb:
+        notes.append({"kind": "bonus", "n": pb, "reason": "抵近射击"})
+    bonus += pb
     if not reachable:
-        return bonus, penalty, False, ("目标超出射程" if ranged else "目标不在近战范围，需先移动接近")
+        return bonus, penalty, False, (
+            "目标超出射程" if ranged else "目标不在近战范围，需先移动接近"
+        ), notes
     if ranged:   # 射击：视线被墙/全掩体挡断 → 不可命中；半掩体 → -1 惩罚骰
         if not positioning.has_line_of_sight(actor, target, grid):
-            return bonus, penalty, False, "没有射击视线（被遮挡）"
-        penalty += positioning.cover_penalty(actor, target, grid)
-    return bonus, penalty, True, ""
+            return bonus, penalty, False, "没有射击视线（被遮挡）", notes
+        cover = positioning.cover_penalty(actor, target, grid)
+        if cover:
+            penalty += cover
+            notes.append({"kind": "penalty", "n": cover, "reason": "目标有半掩体遮挡"})
+    return bonus, penalty, True, "", notes
 
 
 def _flank_penalty(state: dict, defender: dict) -> int:
@@ -463,9 +477,13 @@ async def _begin_player_attack(
     defense = None if ranged else (
         action.get("defense")
         or engine.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
-    g_bonus, g_penalty, reachable, reason = _attack_geometry(state, actor, target, weapon, ranged)
+    g_bonus, g_penalty, reachable, reason, g_notes = _attack_geometry(
+        state, actor, target, weapon, ranged,
+    )
     if not reachable:
         raise ValueError(reason)   # 够不着 → 不结算、不推进，前端提示先移动接近或换目标
+    if aim_bonus:
+        g_notes = [{"kind": "bonus", "n": aim_bonus, "reason": "上一轮瞄准"}] + g_notes
     res = engine.resolve_attack(
         _char_data(actor), actor.get("db", "0"), weapon,
         defender_data=_char_data(target), defense=defense, ranged=ranged,
@@ -477,7 +495,8 @@ async def _begin_player_attack(
 
     # 第一段：把命中检定作为 3D 骰事件下发（玩家亲手触发的这一掷），并附对抗卡数据
     hit_content = _combat_dice_content(actor, target, weapon, res)
-    out = [_combat_roll_event(db, session_id, hit_content, _hit_dice_detail(res["attacker_check"]),
+    out = [_combat_roll_event(db, session_id, hit_content,
+                              _hit_dice_detail(res["attacker_check"], g_notes),
                               opposed=_opposed_detail(res, actor["name"], target["name"]))]
 
     if res["hit"] and res["damage"] and res.get("damage_to"):
@@ -1003,7 +1022,7 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             tgt = _find(state, action.get("target_id"))
             if tgt and engine.is_active(tgt):
                 wpn = action.get("weapon") or actor.get("weapon") or "徒手格斗"
-                _, _, reachable, _ = _attack_geometry(state, actor, tgt, wpn, _weapon_is_firearm(wpn))
+                _, _, reachable, _, _ = _attack_geometry(state, actor, tgt, wpn, _weapon_is_firearm(wpn))
                 if not reachable:
                     occ = {f'{p["pos"]["x"]},{p["pos"]["y"]}' for p in (state.get("initiative") or [])
                            if p.get("pos") and p["id"] != actor["id"] and engine.is_active(p)}
@@ -1129,10 +1148,16 @@ def _combat_dice(db: Session, session_id: str, actor: dict, target: dict, weapon
     return _chunk("dice", content, id=ev.id, metadata={"combat_log": True, "combat_attack": True, "hit": res["hit"]})
 
 
-def _hit_dice_detail(chk) -> dict:
-    """命中检定（d100）→ 前端 3D 骰契约（kind=check），与主线技能检定同一口径。"""
-    return {"kind": "check", "result": chk.roll, "tens": list(chk.tens), "tens_kept": chk.tens_kept,
-            "units": chk.units, "bonus": chk.bonus, "penalty": chk.penalty}
+def _hit_dice_detail(chk, modifiers: list[dict] | None = None) -> dict:
+    """命中检定（d100）→ 前端 3D 骰契约（kind=check），与主线技能检定同一口径。
+
+    ``modifiers``：奖惩骰的来由（超程/掩体/抵近/瞄准）。战斗里的奖惩骰全是几何算出来的，
+    玩家看不到算式，不标来由就只剩一个「惩罚骰 ×1」，像是被针对了。"""
+    detail = {"kind": "check", "result": chk.roll, "tens": list(chk.tens), "tens_kept": chk.tens_kept,
+              "units": chk.units, "bonus": chk.bonus, "penalty": chk.penalty}
+    if modifiers:
+        detail["modifiers"] = list(modifiers)
+    return detail
 
 
 def _check_side(chk, name: str) -> dict:

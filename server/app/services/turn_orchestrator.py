@@ -1273,9 +1273,22 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         char_data, disp_name, _is_npc, _cid = _resolve_check_actor(
             check.get("char_ref", ""), skill, player_char, party_others, module,
         )
+        # 奖惩骰的来龙去脉：KP 判的理由 + 系统自己加的（临时疯狂），一并摆给玩家看。
+        # 只显示最终数量而不说凭什么，玩家就只能猜是不是被针对了。
+        modifiers = dice_runtime.modifier_notes(
+            bonus, penalty, str(check.get("modifier_reason") or ""),
+        )
         # 临时疯狂：症状波及该技能域 → 自动加惩罚骰（确定性，不问 KP 当初有没有标 penalty）。
         from app.rules.coc import madness as coc_madness
-        penalty += coc_madness.check_penalty((char_data.get("system_data") or {}).get("madness"), skill)
+        madness_state = (char_data.get("system_data") or {}).get("madness")
+        madness_penalty = coc_madness.check_penalty(madness_state, skill)
+        if madness_penalty:
+            penalty += madness_penalty
+            label = str((madness_state or {}).get("label") or "").strip()
+            modifiers.append({
+                "kind": "penalty", "n": madness_penalty,
+                "reason": f"临时疯狂{f'·{label}' if label else ''}影响了这项技能",
+            })
         engine = get_engine(module.rule_system)
         result = engine.resolve_check(char_data, skill, difficulty, bonus=bonus, penalty=penalty)
         tier_cn = TIER_LABEL.get(result.tier, result.tier)
@@ -1286,7 +1299,7 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         dice_meta = {
             "skill": skill, "skill_value": result.skill_value, "roll": result.roll,
             "target": result.target, "outcome": result.outcome, "tier": result.tier,
-            "actor": disp_name, "dice": _check_dice_detail(result),
+            "actor": disp_name, "dice": _check_dice_detail(result, modifiers),
         }
         ev = session_service.add_event(
             db, session_id, "dice", dice_content, actor_name="系统", metadata=dice_meta,

@@ -1826,6 +1826,8 @@ export function GameSessionPage() {
               const noteChips = (
                 <>
                   {checkCap && (
+                    // 理由直接写进标签，不藏在 tooltip 里：奖惩骰实打实地改了成败概率，
+                    // 「凭什么」得和「有」一样显眼——触屏上根本没有 hover 这一说。
                     <span className="chip font-semibold"
                       title={`${checkCap.rule}；${checkCap.breakdown} → 结果 ${checkCap.result}`}
                       style={{
@@ -1833,6 +1835,11 @@ export function GameSessionPage() {
                         borderColor: checkCap.kind === 'bonus' ? 'var(--color-dice-gold)' : 'var(--color-dice-fumble)',
                       }}>
                       {checkCap.title}
+                      {checkCap.reasons.length > 0 && (
+                        <span className="font-normal" style={{ opacity: 0.85 }}>
+                          {' · '}{checkCap.reasons.join('、')}
+                        </span>
+                      )}
                     </span>
                   )}
                   {diceFlags.map((f) => {

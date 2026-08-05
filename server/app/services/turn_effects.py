@@ -549,6 +549,8 @@ async def _exec_dice_check(
         blind = True
     source = (kv.get("source") or "").strip()
     bonus, penalty = _parse_bonus_penalty(kv)
+    # 奖惩骰的理由：奖惩骰实打实地改了成败概率，玩家有权知道凭什么加。
+    modifier_reason = (kv.get("modifier_reason") or "").strip()
 
     # 群检：char=在场/全体 或 chars=<名单> → 在场成员各自检定。公开骰遵守控制权：
     # AI 席立即自动投，真人席逐人挂待投；暗投仍全部自动结算，避免无人可见却卡住流程。
@@ -582,7 +584,7 @@ async def _exec_dice_check(
             }
             rc, rd, succeeded, fumbled = await _auto_roll_check(
                 db, session_id, game_session, module, cdata, c.name, False,
-                skill_name, difficulty, blind, source, bonus, penalty,
+                skill_name, difficulty, blind, source, bonus, penalty, modifier_reason,
             )
             chunks += rc
             descs += rd
@@ -605,13 +607,16 @@ async def _exec_dice_check(
                 "source": source,
                 "bonus": bonus,
                 "penalty": penalty,
+                "modifier_reason": modifier_reason,
                 "check_batch_id": batch_id,
                 "check_results": list(descs),
                 "check_any_success": group_any_success,
                 "check_any_fumble": group_any_fumble,
             }
             session_service.add_pending_check(db, session_id, pending)
-            prompt_text = _check_prompt_text(c.name, skill_name, difficulty)
+            prompt_text = _check_prompt_text(
+                c.name, skill_name, difficulty, bonus, penalty, modifier_reason,
+            )
             meta = {"check_request": True, **pending}
             ev = session_service.add_event(
                 db, session_id, "system", prompt_text, actor_name="系统", metadata=meta,
@@ -642,6 +647,7 @@ async def _exec_dice_check(
             "id": check_id, "skill": skill_name, "difficulty": difficulty,
             "char_ref": char_ref, "char_id": char_id, "actor_name": disp_name,
             "source": source, "bonus": bonus, "penalty": penalty,
+            "modifier_reason": modifier_reason,
         }
         # 治疗类检定：确定被治疗者（KP 显式 target 优先；缺失/误写成施救者自己 → 推断濒死/受伤队友），
         # 投骰成功后由系统确定性回血——不再依赖 KP 记得写 target。
@@ -653,7 +659,9 @@ async def _exec_dice_check(
             if heal_target is not None:
                 pending["heal_target_id"] = heal_target.id
         session_service.add_pending_check(db, session_id, pending)
-        prompt_text = _check_prompt_text(disp_name, skill_name, difficulty)
+        prompt_text = _check_prompt_text(
+            disp_name, skill_name, difficulty, bonus, penalty, modifier_reason,
+        )
         meta = {"check_request": True, **pending}
         ev = session_service.add_event(
             db, session_id, "system", prompt_text, actor_name="系统", metadata=meta,
@@ -666,7 +674,7 @@ async def _exec_dice_check(
 
     rc, rd, _succeeded, _fumbled = await _auto_roll_check(
         db, session_id, game_session, module, char_data, disp_name, is_npc,
-        skill_name, difficulty, blind, source, bonus, penalty,
+        skill_name, difficulty, blind, source, bonus, penalty, modifier_reason,
     )
     return chunks + rc, descs + rd, False
 
@@ -675,7 +683,7 @@ async def _auto_roll_check(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     char_data: dict, disp_name: str, is_npc: bool,
     skill_name: str, difficulty: str, blind: bool, source: str,
-    bonus: int, penalty: int,
+    bonus: int, penalty: int, modifier_reason: str = "",
 ) -> tuple[list[str], list[str], bool, bool]:
     """系统自动掷一次检定并落库（不挂 pending）。单人自动路径与群检各成员共用。
 
@@ -708,7 +716,9 @@ async def _auto_roll_check(
             "outcome": result.outcome,
             "tier": result.tier,
             "actor": disp_name,
-            "dice": _check_dice_detail(result),
+            "dice": _check_dice_detail(
+                result, dice_runtime.modifier_notes(bonus, penalty, modifier_reason),
+            ),
         }
         descs.append(
             f"{disp_name} {skill_name}（{difficulty}），达成 {tier_cn}"

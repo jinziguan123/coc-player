@@ -85,12 +85,36 @@ def _canonical_san_source(
         return _san_mechanism_source_key(str(scene_id), matches[0])
     return source
 
-def _check_prompt_text(actor_name: str, skill: str, difficulty: str) -> str:
-    """req 1：系统主动给出的检定提示语。"""
+def _check_prompt_text(
+    actor_name: str, skill: str, difficulty: str,
+    bonus: int = 0, penalty: int = 0, modifier_reason: str = "",
+) -> str:
+    """req 1：系统主动给出的检定提示语。
+
+    带奖惩骰时把「几个 + 凭什么」写进提示本身——这句话是玩家**投骰之前**唯一能看到的说明，
+    结果卡上的标注要等骰子落定才出现，那时再解释「你刚才吃了个惩罚骰」已经晚了。
+    """
     diff = DIFFICULTY_LABEL.get(difficulty, "")
-    if diff:
-        return f"请 {actor_name} 进行一次「{diff}」难度的「{skill}」检定"
-    return f"请 {actor_name} 进行一次「{skill}」检定"
+    head = (
+        f"请 {actor_name} 进行一次「{diff}」难度的「{skill}」检定" if diff
+        else f"请 {actor_name} 进行一次「{skill}」检定"
+    )
+    return head + modifier_suffix(bonus, penalty, modifier_reason)
+
+
+def modifier_suffix(bonus: int, penalty: int, reason: str = "") -> str:
+    """奖惩骰的一句话标注，如「（奖励骰 ×1：手电筒照明充足）」；没有奖惩骰则空串。
+
+    理由缺失仍标出数量——玩家至少该知道这一掷被动了手脚，哪怕 KP 没说清为什么。
+    """
+    if bonus > 0:
+        label, count = "奖励骰", bonus
+    elif penalty > 0:
+        label, count = "惩罚骰", penalty
+    else:
+        return ""
+    reason = (reason or "").strip()
+    return f"（{label} ×{count}{'：' + reason if reason else ''}）"
 
 # 成功等级排序（对抗骰比较用）：大成功 > 困难/极难成功 > 普通成功 > 失败 > 大失败。
 _OUTCOME_RANK = {
@@ -166,13 +190,33 @@ def _parse_bonus_penalty(kv: dict, prefix: str = "") -> tuple[int, int]:
     return _n("bonus"), _n("penalty")
 
 
-def _check_dice_detail(result) -> dict:
+def modifier_notes(bonus: int, penalty: int, reason: str) -> list[dict]:
+    """把「几个奖励/惩罚骰 + 一句理由」折成 modifiers 条目；没有奖惩或没有理由则空。
+
+    理由缺失时**不造条目**：宁可只显示「奖励骰 ×1」这个既有标注，也不要编一个理由——
+    玩家看到的解释必须是真的有人给出的。
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        return []
+    if bonus > 0:
+        return [{"kind": "bonus", "n": bonus, "reason": reason}]
+    if penalty > 0:
+        return [{"kind": "penalty", "n": penalty, "reason": reason}]
+    return []
+
+
+def _check_dice_detail(result, modifiers: list[dict] | None = None) -> dict:
     """把 CheckResult 的逐骰明细组装成前端契约的 dice 对象（kind=check）。
 
     供 3D 骰子动画严格还原：tens 含所有掷出的十位、tens_kept 是采用值、units 个位、
     bonus/penalty 数量。result 由 tens_kept + units 合成（十位00+个位0=100）。
+
+    ``modifiers``：这些奖惩骰**因何而来**，形如 [{kind: bonus|penalty, n: 1, reason: "手电筒照明"}]。
+    KP 判的理由由它自己给，战斗几何算的（超程/掩体/夹击/抵近）由代码自己填——两条路汇到
+    同一个字段，前端一处渲染即可。为空时整个键不出现，旧事件与旧前端行为不变。
     """
-    return {
+    detail = {
         "kind": "check",
         "result": result.roll,
         "tens": list(result.tens),
@@ -181,6 +225,9 @@ def _check_dice_detail(result) -> dict:
         "bonus": result.bonus,
         "penalty": result.penalty,
     }
+    if modifiers:
+        detail["modifiers"] = list(modifiers)
+    return detail
 
 
 def _pool_dice_detail(roll_result) -> dict:

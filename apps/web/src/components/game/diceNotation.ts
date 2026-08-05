@@ -10,6 +10,15 @@ export interface DiceCheck {
   units: number         // 个位 0..9
   bonus?: number
   penalty?: number
+  /** 这些奖惩骰**因何而来**：KP 判的理由、或战斗几何算出的（超程/掩体/抵近/瞄准）。
+   *  后端 dice_runtime._check_dice_detail 产出；旧事件没有这个字段。 */
+  modifiers?: DiceModifier[]
+}
+/** 一条奖惩骰的来由。 */
+export interface DiceModifier {
+  kind: 'bonus' | 'penalty'
+  n: number
+  reason: string
 }
 // 骰池（SAN 损失 / 伤害 NdM+K）
 export interface DicePool {
@@ -29,6 +38,8 @@ export interface CheckCaption {
   rule: string        // 「多掷的十位取更有利者」/「…更不利者」
   breakdown: string   // 「十位 00/30 → 采用 00 · 个位 5」
   result: number      // 最终 d100 点数
+  /** 凭什么加的，如 ["抵近射击", "目标有半掩体遮挡"]。后端没给理由时为空数组。 */
+  reasons: string[]
 }
 
 // d100 十位面文本：值 0 即“00”面（按个位可为 100 或 0X），原样显示 "00"。
@@ -45,9 +56,15 @@ export function buildCheckCaption(spec: DiceSpec): CheckCaption | null {
   const isBonus = bonus > 0
   const count = isBonus ? bonus : penalty
   const tensList = spec.tens && spec.tens.length > 0 ? spec.tens : [spec.tens_kept]
+  // 只取与最终净效果同向的那些来由：奖惩骰互相抵消，若净结果是惩罚，把「抵近射击 +1」
+  // 也列出来会让玩家算不明白这一掷到底怎么了。
+  const reasons = (spec.modifiers || [])
+    .filter((m) => m.kind === (isBonus ? 'bonus' : 'penalty') && m.reason)
+    .map((m) => m.reason)
   return {
     kind: isBonus ? 'bonus' : 'penalty',
     title: `${isBonus ? '奖励骰' : '惩罚骰'} ×${count}`,
+    reasons,
     rule: isBonus ? '多掷的十位取更有利者' : '多掷的十位取更不利者',
     breakdown: `十位 ${tensList.map(tensFace).join('/')} → 采用 ${tensFace(spec.tens_kept)} · 个位 ${spec.units}`,
     result: spec.result,

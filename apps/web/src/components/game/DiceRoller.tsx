@@ -229,6 +229,18 @@ export const DiceRoller = forwardRef<DiceRollerHandle, Record<never, never>>(fun
             <GiRollingDices /> {caption.title}
             <span style={{ opacity: 0.75, fontWeight: 400, fontSize: '0.75rem' }}>· {caption.rule}</span>
           </span>
+          {/* 凭什么加这个奖惩骰。放在骰子还在滚的时候就给出来——这是玩家注意力最集中的一刻，
+              等结果卡出来再解释，那口「凭什么」的气已经憋过去了。 */}
+          {caption.reasons.length > 0 && (
+            <span
+              style={{
+                fontSize: '0.8rem', color: '#f0e6d0', background: 'rgba(0,0,0,0.5)',
+                borderRadius: '0.4rem', padding: '0.15rem 0.7rem',
+              }}
+            >
+              {caption.reasons.join('、')}
+            </span>
+          )}
           <span
             style={{
               fontSize: '0.8rem', color: '#f0e6d0', background: 'rgba(0,0,0,0.5)',
