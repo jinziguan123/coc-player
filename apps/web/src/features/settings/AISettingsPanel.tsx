@@ -169,12 +169,13 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
     }
   }
 
-  /* 标记/取消快模型（结构化副任务：裁定 planner、AI 队友、滚动摘要走它，省时提速） */
+  /* 标记/取消快模型（结构化副任务：裁定 planner、滚动摘要、生图提示词走它，省时提速；
+     AI 队友与 KP 叙事一样直接摆在玩家面前，走主模型） */
   const handleToggleFast = async (id: string) => {
     try {
       const res = await localApi.post<{ is_fast: boolean }>(`/settings/ai/profiles/${id}/set-fast`)
       toast.success(
-        res.is_fast ? '已设为快模型（裁定/队友/摘要将走它）' : '已取消快模型，这些任务改用主模型',
+        res.is_fast ? '已设为快模型（裁定/摘要等副任务将走它）' : '已取消快模型，这些任务改用主模型',
       )
       await fetchProfiles()
     } catch {
@@ -364,7 +365,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
                   onClick={() => handleToggleFast(p.id)}
                   aria-label={`${p.is_fast ? '取消' : '设为'}快模型 ${p.name}`}
-                  title="快模型：裁定 planner、AI 队友、滚动摘要等结构化副任务改走此配置（KP 叙事仍走激活配置）；再点一次取消"
+                  title="快模型：裁定 planner、滚动摘要等结构化副任务改走此配置（KP 叙事与 AI 队友言行仍走激活配置）；再点一次取消"
                 >
                   {p.is_fast ? '取消快模型' : '设为快模型'}
                 </button>
@@ -583,7 +584,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                           这是唯一能真正提速的开关。思考模式<strong>默认是开的</strong>，而思考内容
                           会被丢弃、只有耗时留下——实测一个回合 91% 的输出是思考，落到正文的只有
                           1.1k。跑团的裁定与队友决策并不需要长篇思考，
-                          <strong>建议给「快模型」勾上</strong>（planner / AI 队友 / 校验走的都是它）。
+                          <strong>建议给「快模型」勾上</strong>（planner / 摘要 / 校验走的都是它）。
                           不认这个参数的服务会忽略它。
                         </span>
                       </span>

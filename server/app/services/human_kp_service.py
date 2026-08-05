@@ -492,7 +492,8 @@ async def run_human_team_turn_generation(session_id: str) -> None:
         marker = current_player_turn_marker(db, session_id)
         if module is not None and teammates and has_unprocessed_player_turn(db, session_id, game_session):
             async for chunk in _run_team_turn(
-                db, session_id, game_session, module, player, teammates, get_fast_llm(),
+                # 与 AI KP 路径一致：队友的台词直接摆在玩家面前，走主模型（见 turn_orchestrator）
+                db, session_id, game_session, module, player, teammates, get_llm(),
             ):
                 room_hub.broadcast(session_id, chunk)
             state = _private_state(game_session)

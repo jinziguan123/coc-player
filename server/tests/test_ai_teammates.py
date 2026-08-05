@@ -727,3 +727,50 @@ def test_kp_context_injects_truth_section(db_factory):
     assert "幕后真相（守秘人专属）" in joined
     assert "真凶是列车长" in joined
     assert "绝不向玩家直接透露" in joined
+
+
+def test_team_turn_uses_main_model_not_fast(db_factory, monkeypatch):
+    """AI 队友走**主模型**：他们的台词和真人玩家一样是直接摆在玩家面前的成品，
+    和 KP 叙事吃同一份文笔与分寸感。早先图快让队友走快模型（通常关思考、档次也低），
+    演出来明显发木。快模型只留给 planner 那类「产结构、玩家看不到」的副任务。"""
+    import app.database as database
+    from app.services import turn_orchestrator
+    from app.services.room_hub import room_hub
+
+    monkeypatch.setattr(database, "SessionLocal", db_factory)
+    monkeypatch.setattr(room_hub, "broadcast", lambda *a, **k: None)
+    used = {}
+
+    class _Marker:
+        def __init__(self, tag):
+            self.tag = tag
+
+    monkeypatch.setattr(turn_orchestrator, "get_llm", lambda: _Marker("main"))
+    monkeypatch.setattr(turn_orchestrator, "get_fast_llm", lambda: _Marker("fast"))
+
+    async def fake_team_turn(db, session_id, game_session, module, player, mates, llm, **kw):
+        used["tag"] = llm.tag
+        return
+        yield   # 不可达；只为让本函数成为异步生成器
+
+    async def fake_planner(llm, messages):
+        used["planner_tag"] = llm.tag
+        return None
+
+    monkeypatch.setattr(turn_orchestrator, "_run_team_turn", fake_team_turn)
+    monkeypatch.setattr(turn_orchestrator.turn_planner, "run_turn_planner", fake_planner)
+
+    async def noop_generation(*a, **kw):
+        pass
+
+    monkeypatch.setattr(turn_orchestrator, "_run_generation", noop_generation)
+
+    db = db_factory()
+    module, hero, mates, session = _seed(db)
+    session_service.add_event(
+        db, session.id, "action", "我推开门", actor_id=hero.id, actor_name=hero.name,
+    )
+    asyncio.run(turn_orchestrator.run_chat_generation(session.id))
+
+    assert used["tag"] == "main"          # 队友：主模型
+    assert used["planner_tag"] == "fast"  # planner：仍是快模型

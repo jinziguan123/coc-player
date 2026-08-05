@@ -165,8 +165,8 @@ def _spawn_housekeeping(session_id: str) -> None:
     """启动独立数据库会话中的摘要与幕后推演。
 
     **走快模型**：滚动摘要与幕后推演都是结构化副任务（浓缩既往事件、按 NPC 动机推演），
-    不吃文笔，正是「快模型」这档的既定职责（设置页写的就是「裁定 planner、AI 队友、
-    滚动摘要走它」）。此前误传主模型：主模型往往开着思考换文笔，实测收尾因此要 30.9s。
+    不吃文笔，正是「快模型」这档的既定职责。此前误传主模型：主模型往往开着思考换文笔，
+    实测收尾因此要 30.9s。
 
     而这 30.9s 不只是后台慢——**下一回合开头与投骰后的 KP 续写都要等它 drain 完**才能动
     world_state，于是它直接变成玩家的等待。
@@ -879,7 +879,10 @@ async def run_chat_generation(session_id: str) -> None:
         if ai_teammates:
             t_team = time.monotonic(); u_team = usage_tracker.snapshot()
             async for chunk in _run_team_turn(
-                db, session_id, game_session, module, player_char, ai_teammates, fast_llm,
+                # 队友走**主模型**：他们的产出是直接摆在玩家面前的台词与行动，和 KP 叙事一样
+                # 吃文笔与分寸感，不是 planner 那种「产结构、玩家看不到」的副任务。快模型
+                # （通常关思考、档次也更低）演出来明显发木，同桌感立刻塌掉。慢一点也认。
+                db, session_id, game_session, module, player_char, ai_teammates, get_llm(),
                 blind_results=team_blind,
                 team_guidance=_team_guidance_from_plan(plan),
             ):
@@ -1043,7 +1046,7 @@ async def _run_kp_turn(
     if then_team_turn:
         db.refresh(game_session)  # 叙事里可能有 [SCENE_CHANGE]/[MOVE] 改了位置，重取再判分头
         async for chunk in _run_team_turn(
-            db, session_id, game_session, module, player_char, then_team_turn, get_fast_llm(),
+            db, session_id, game_session, module, player_char, then_team_turn, get_llm(),
         ):
             room_hub.broadcast(session_id, chunk)
 
