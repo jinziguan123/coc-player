@@ -96,6 +96,28 @@ def handout_issued(ws: dict, handout_id: str) -> bool:
     return str(handout_id or "") in set((ws or {}).get("handouts_issued") or [])
 
 
+def travel_suggested(ws: dict, scene_id: str) -> bool:
+    """某地点是否已经给玩家挂过「要不要去」的建议卡（幂等真源）。"""
+    return str(scene_id or "") in set((ws or {}).get("travel_suggested") or [])
+
+
+def record_travel_suggestion(ws: dict, scene_id: str) -> dict:
+    """记下「已经问过要不要去某处」。纯函数，重复记为 no-op。
+
+    去重按整局而非按回合：同一个地方反复弹卡是最烦人的形态，而玩家真想去时大地图一直都在，
+    问过一次就够了。
+    """
+    scene_id = str(scene_id or "").strip()
+    if not scene_id:
+        return dict(ws or {})
+    out = dict(ws or {})
+    suggested = list(out.get("travel_suggested") or [])
+    if scene_id not in suggested:
+        suggested.append(scene_id)
+    out["travel_suggested"] = suggested
+    return out
+
+
 def record_handout_issue(
     ws: dict,
     handout_id: str,

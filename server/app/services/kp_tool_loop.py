@@ -48,6 +48,7 @@ SAN_CHECK_RE = command_protocol.SAN_CHECK_RE
 HP_CHANGE_RE = command_protocol.HP_CHANGE_RE
 NPC_ACT_RE = command_protocol.NPC_ACT_RE
 SCENE_CHANGE_RE = command_protocol.SCENE_CHANGE_RE
+TRAVEL_SUGGEST_RE = command_protocol.TRAVEL_SUGGEST_RE
 RULE_LOOKUP_RE = command_protocol.RULE_LOOKUP_RE
 MODULE_LOOKUP_RE = command_protocol.MODULE_LOOKUP_RE
 SET_FLAG_RE = command_protocol.SET_FLAG_RE
@@ -76,6 +77,7 @@ _exec_dice_check = turn_effects._exec_dice_check
 _exec_scene_change = turn_effects._exec_scene_change
 _exec_flag = turn_effects._exec_flag
 _exec_handout = turn_effects._exec_handout
+_travel_suggest_event = turn_effects.travel_suggest_event
 
 
 def _rule_lookup_passages(
@@ -148,7 +150,8 @@ def _merge_step_result(result: list, step: list) -> None:
 # 裸值容错的单参数指令（[SET_FLAG hint_x] 这类漏写键名的旧习惯）→ 对应参数键
 _SOLO_ARG_KEY = {
     "set_flag": "flag", "clear_flag": "flag", "handout": "id",
-    "scene_change": "scene_id", "rule_lookup": "query", "module_lookup": "query",
+    "scene_change": "scene_id", "travel_suggest": "scene_id",
+    "rule_lookup": "query", "module_lookup": "query",
 }
 
 _TEXT_TAG_RE = re.compile(r"\[([A-Z_]{3,})(?:[:：\s]([^\]]*))?\]")
@@ -203,6 +206,7 @@ _STEP_NOTES: dict[str, str] = {
     "start_combat": "战斗即将开始…",
     "start_chase": "追逐即将开始…",
     "scene_change": "守秘人正在带你们前往新的地方…",
+    "travel_suggest": "守秘人正在指一条路…",
     "handout": "守秘人正在准备要给你们的东西…",
     "rule_lookup": "守秘人正在翻阅规则书…",
     "module_lookup": "守秘人正在翻阅剧本…",
@@ -385,6 +389,15 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome("ok", chunks=chunks)
         return kp_tools.ToolOutcome("未结算（target 当前仅支持 player，且 delta 须为整数）。")
 
+    async def _h_travel_suggest(name, kv):
+        ref = (kv.get("scene_id") or "").strip()
+        if not ref:
+            return kp_tools.ToolOutcome("参数缺失：scene_id 为必填。")
+        chunks, note = _travel_suggest_event(
+            db, session_id, game_session, module, ref, kv.get("reason", ""),
+        )
+        return kp_tools.ToolOutcome(note, chunks=chunks)
+
     async def _h_handout(name, kv):
         hid = kv.get("id", "").strip()
         if not hid:
@@ -408,6 +421,7 @@ def _build_kp_tool_executor(
         "set_flag": _h_flag,
         "clear_flag": _h_flag,
         "hp_change": _h_hp_change,
+        "travel_suggest": _h_travel_suggest,
         "handout": _h_handout,
     }
 
@@ -728,6 +742,16 @@ async def _process_commands(
             player_char, teammates,
         )
         for chunk in scene_chunks:
+            yield chunk
+
+    # 建议前往：不搬人，只挂一张「要不要去」的卡；玩家点了才进他自己的暂存动作。
+    for match in TRAVEL_SUGGEST_RE.finditer(kp_text):
+        kv = _parse_tag_kv(match.group(1))
+        suggest_chunks, _note = _travel_suggest_event(
+            db, session_id, game_session, module,
+            kv.get("scene_id") or match.group(1).strip(), kv.get("reason", ""),
+        )
+        for chunk in suggest_chunks:
             yield chunk
 
     # 剧情状态推进：置/清标志后，刷新内存里的 game_session.world_state，使本次生成的后续

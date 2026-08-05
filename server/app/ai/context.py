@@ -11,6 +11,7 @@ from app.models.session import GameSession
 from app.ai.prompts.kp_system import (
     KP_SYSTEM_PROMPT,
     NARRATIVE_STYLE_SECTION,
+    TRAVEL_SUGGEST_INSTRUCTION,
     KP_OPENING_PROMPT,
     HANDOUT_INSTRUCTION,
     MODULE_EXCERPT_SECTION,
@@ -869,6 +870,11 @@ def build_kp_context(
     )
     if style_prompt:
         system_content += NARRATIVE_STYLE_SECTION.format(style=style_prompt)
+
+    # 「建议前往」能力：本子有多个 location 场景（真有地方可去）才广告——只有一处的本子
+    # 广告了也只会诱导 KP 发无效指令。与「有规则书才广告 [RULE_LOOKUP]」同一取舍。
+    if sum(1 for x in scenes if (x.get("kind") or "location") == "location") > 1:
+        system_content += TRAVEL_SUGGEST_INSTRUCTION
 
     # 幕后真相（守秘人专属）：模组解析出的全局真相，KP 据此裁定与铺垫（带守密措辞）。
     truth = (getattr(module, "truth", "") or "").strip()

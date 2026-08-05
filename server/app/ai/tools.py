@@ -252,6 +252,26 @@ REGISTRY: tuple[ToolSpec, ...] = (
         kind="state",
     ),
     ToolSpec(
+        name="travel_suggest",
+        tag="TRAVEL_SUGGEST",
+        description=(
+            "建议前往某地：**不搬人**，只给玩家一张「要不要去」的卡片，点了才会进他自己的暂存动作。"
+            "用在你已经把某处的存在与通路描述清楚、而玩家没表态要不要去的时候——尤其是他们明显"
+            "卡住、在原地打转、或刚拿到指向某处的线索时。与 scene_change 互补：玩家**已经动了**"
+            "用 scene_change 把人搬过去，还**没表态**才用本工具问一句。"
+            "克制使用：一轮至多一次，同一个地方被拒绝过就别再问；也绝不用它替玩家决定路线"
+            "（问是可以的，催不行）。玩家已明确说要去某处时不要用——那是 scene_change 的活。"
+        ),
+        parameters=_params({
+            "scene_id": {"type": "string", "description": "建议前往的场景 id（或场景名，系统会解析）"},
+            "reason": {
+                "type": "string",
+                "description": "一句话理由，直接展示给玩家，如「铁门后传来水声」。可省略",
+            },
+        }, ["scene_id"]),
+        kind="state",
+    ),
+    ToolSpec(
         name="rule_lookup",
         tag="RULE_LOOKUP",
         description=(

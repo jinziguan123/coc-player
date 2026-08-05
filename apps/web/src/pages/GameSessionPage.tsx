@@ -46,6 +46,7 @@ import { GrowthModal } from '../components/game/GrowthModal'
 import { InvestigationBoard } from '../components/game/InvestigationBoard'
 import { HexSandbox } from '../components/game/HexSandbox'
 import { ImprovisedNpcModal } from '../components/game/ImprovisedNpcModal'
+import { loadHandledSuggestions, markSuggestionHandled } from '../lib/travelSuggest'
 import { SessionStyleModal } from '../components/game/SessionStyleModal'
 import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntry, type CombatResultView } from '../components/game/CombatStage'
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
@@ -279,6 +280,9 @@ export function GameSessionPage() {
   // 若此时按 pending_checks 判定会先显示「已投骰」再翻成「投骰」按钮。用本地集先认它是待投，消除闪烁。
   const [optimisticPending, setOptimisticPending] = useState<Set<string>>(new Set())
   const [confirmTravel, setConfirmTravel] = useState<KnownLocation | null>(null)  // 前往二次确认
+  // 已处理过的「要不要去」建议卡（同意或拒绝都算）：本机记，因为这是个人决定——
+  // 多人同桌时同一张卡全桌可见，甲拒绝不该让乙的也消失。
+  const [handledSuggests, setHandledSuggests] = useState<Set<string>>(() => new Set())
   const [splitView, setSplitView] = useState(true)            // 分头行动分栏（检测到多组时生效）
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set())  // 被收起的分组
   const [combat, setCombat] = useState<CombatState | null>(null)  // 当前战斗态（非空时显示战斗面板）
@@ -931,6 +935,34 @@ export function GameSessionPage() {
       toast.success('已把「前往」加入本回合，点「推进本回合」后一起执行')
     } catch { /* 已在该地点 / 不可前往 等，由后端校验 */ }
     finally { setConfirmTravel(null) }
+  }
+
+  // 「要不要去某处」建议卡：同意 → 走的就是暂存式「前往」那条路（与大地图点选完全同一条），
+  // 拒绝 → 只把卡片标记为已处理，不产生任何事件，正是「不同意则无事发生」。
+  const acceptTravelSuggest = async (eventId: string, sceneId: string, sceneName: string) => {
+    if (!currentSession || streaming) {
+      if (streaming) toast.error('KP 正在叙事，请稍候')
+      return
+    }
+    try {
+      await api.post(`/sessions/${currentSession.id}/travel`,
+        { scene_id: sceneId, acting_character_id: myCharId, stash: true })
+      setHandledSuggests(markSuggestionHandled(currentSession.id, eventId))
+      toast.success(`已把「前往${sceneName}」加入本回合，点「推进本回合」后一起执行`)
+    } catch (e: unknown) {
+      // 与大地图不同，这里要把失败讲出来：卡片是系统主动递到玩家面前的，
+      // 点了没反应会让人以为是卡住了。
+      toast.error(e instanceof Error ? e.message : '暂时无法前往该地点')
+    }
+  }
+  useEffect(() => {
+    // 换局/刷新时载入本机记录，免得已经点过的卡片又冒出来一次
+    setHandledSuggests(currentSession?.id ? loadHandledSuggestions(currentSession.id) : new Set())
+  }, [currentSession?.id])
+
+  const declineTravelSuggest = (eventId: string) => {
+    if (!currentSession) return
+    setHandledSuggests(markSuggestionHandled(currentSession.id, eventId))
   }
 
   // 初次加载/刷新落底：此刻 markdown 等内容布局会在随后一段时间里持续膨胀，单次（甚至两帧）
@@ -1842,6 +1874,46 @@ export function GameSessionPage() {
               )
             }
             if (msg.type === 'system') {
+              // 「要不要去某处」建议卡：KP 主动建议、或玩家嘴上说了要去却没点地图时挂出来。
+              // 同意 → 前往进本回合暂存（和大地图点选同一条路）；不同意 → 什么都不发生。
+              if (msg.metadata?.kind === 'travel_suggest') {
+                const sceneId = String(msg.metadata?.scene_id || '')
+                const sceneName = String(msg.metadata?.scene_name || '')
+                // 已点过、或人已经到了那儿（自己走过去了）→ 卡片退成一行历史记录
+                const done = (msg.id ? handledSuggests.has(msg.id) : false)
+                  || currentSession?.current_scene_id === sceneId
+                return (
+                  <div key={msg.id} className={`chat-msg py-1 flex justify-center ${isFresh(msg) ? 'anim-enter' : ''}`}>
+                    <div className="rounded-md px-3 py-2 text-sm flex items-center gap-3 flex-wrap"
+                      style={{ background: 'var(--color-bg-tertiary)', borderLeft: '3px solid var(--color-accent)', maxWidth: '100%' }}>
+                      <GiTreasureMap style={{ color: 'var(--color-accent)', fontSize: '1.1rem', flexShrink: 0 }} />
+                      <span className="whitespace-pre-wrap">{msg.content}</span>
+                      {done ? (
+                        <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-text-secondary)', opacity: 0.6 }}>已处理</span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => void acceptTravelSuggest(msg.id || '', sceneId, sceneName)}
+                            disabled={streaming || !myCharId}
+                            className="btn-primary text-xs !px-2.5 !py-1 flex items-center gap-1"
+                            style={streaming || !myCharId ? { opacity: 0.5 } : undefined}
+                            title="把「前往」加入本回合暂存，和你这一轮的发言一起交给 KP"
+                          >
+                            <GiTreasureMap size={13} /> 前往
+                          </button>
+                          <button
+                            onClick={() => declineTravelSuggest(msg.id || '')}
+                            className="btn-secondary text-xs !px-2.5 !py-1"
+                            title="不去（什么都不会发生）"
+                          >
+                            不去
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              }
               // 手书卡（Handout）：KP 发放的信件/报纸/日记/便条原文，渲染成信笺样式卡片
               if (msg.metadata?.kind === 'handout') {
                 const hk = String(msg.metadata?.handout_kind || '')

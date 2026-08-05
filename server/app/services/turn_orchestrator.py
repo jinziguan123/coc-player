@@ -936,6 +936,13 @@ async def run_chat_generation(session_id: str) -> None:
             "耗时|KP 叙事 %.1fs（%s）session=%s",
             time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
         )
+        # 叙事之后再判「玩家说了要去、但人没动」：位置可能已被本轮的 [SCENE_CHANGE] 改掉，
+        # 先判会对着旧位置问一句「要不要去你已经到了的地方」。
+        db.refresh(game_session)
+        for chunk in _spoken_travel_intent(
+            db, session_id, game_session, module, player_text,
+        ):
+            room_hub.broadcast(session_id, chunk)
         # 对账用：各环节之和应约等于总时长，对不上说明还有没埋点的环节在吃时间。
         turn_usage = usage_tracker.snapshot()
         logger.info(
@@ -951,6 +958,41 @@ async def run_chat_generation(session_id: str) -> None:
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
+
+
+def _spoken_travel_intent(
+    db, session_id: str, game_session, module, player_text: str,
+) -> list:
+    """玩家嘴上说了要去某地、却没点大地图 → 挂一张「要不要去」的卡（确定性，不走 LLM）。
+
+    这是本功能最常撞上的那个具体形态：玩家打「我们去图书馆看看」，KP 顺着叙述了一段，
+    人却还留在原地——因为场景切换一向要玩家显式发起（杜绝「说句话就被自动搬走」）。
+    与其让玩家自己想起来去点地图，不如就地问一句。
+
+    只认**已知且连通**的地点，且只认玩家自己这一轮的文本（KP 的叙述不算——那会变成
+    「KP 提一嘴某地就弹卡」，正是要避免的 nag）。已经问过的地方由 travel_suggest_event
+    自己去重。同一轮命中多个地点时只问最后一个：那通常是玩家话里的落点。
+    """
+    text = (player_text or "").strip()
+    if not text or not module:
+        return []
+    here = game_session.current_scene_id
+    events = session_service.get_session_events(db, session_id)
+    known = session_service.known_scene_ids(module, game_session, events)
+    hit = ""
+    for scene in (module.scenes or []):
+        sid = scene.get("id")
+        if not sid or sid == here or sid not in known:
+            continue
+        if any(kw in text for kw in session_service.scene_unlock_keywords(scene)):
+            hit = sid
+    if not hit:
+        return []
+    chunks, _note = turn_effects.travel_suggest_event(
+        db, session_id, game_session, module, hit,
+        reason="你刚才提到了这里",
+    )
+    return chunks
 
 
 async def _run_kp_turn(

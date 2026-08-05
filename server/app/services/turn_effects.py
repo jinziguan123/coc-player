@@ -788,6 +788,59 @@ async def _exec_scene_change(
     return [], None, "已身处该场景，未发生切换。"
 
 
+def travel_suggest_event(
+    db: Session, session_id: str, game_session: GameSession, module: Module,
+    ref: str, reason: str = "",
+) -> tuple[list[str], str]:
+    """建议前往某地：**不搬人**，只落一张「要不要去」的卡片，玩家点了才进他自己的暂存动作。
+
+    返回 (chunks, 给 KP 的结果说明)。校验不过就只回说明、不落卡——宁可不问，也不要
+    给玩家挂一个点了会 400 的按钮。
+
+    与 _exec_scene_change 的分工：那个是「玩家已经动了，把人搬过去」，这个是「玩家还没
+    表态，问一句」。所以这里**刻意不做任何状态变更**，连 visited_scenes 都不碰。
+
+    去重按「本局至今」而非「本回合」：同一个地方反复弹卡是最烦人的形态，而玩家真想去时
+    大地图一直都在。玩家自己去过之后卡片自然失去意义（目标即当前场景，下面第一道就挡掉）。
+    """
+    sid = turn_context._resolve_scene_ref(module, ref)
+    if not sid:
+        logger.warning("TRAVEL_SUGGEST 无法解析场景引用（跳过）：%r", ref)
+        return [], f"场景引用无法解析：{ref!r}，未给出建议。"
+    here = game_session.current_scene_id
+    if sid == here:
+        return [], "玩家已身处该场景，无需建议前往。"
+    if session_service.find_scene_path(module, here, sid) is None:
+        return [], (
+            f"{_scene_name(module, sid)} 与当前位置不连通，未给出建议。"
+            "别让玩家看到一个走不通的去处。"
+        )
+    if world_memory.travel_suggested(game_session.world_state or {}, sid):
+        return [], f"本局已经建议过前往 {_scene_name(module, sid)}，不再重复问。"
+
+    name = _scene_name(module, sid)
+    why = (reason or "").strip()
+    meta = {
+        "kind": "travel_suggest",
+        "scene_id": sid,
+        "scene_name": name,
+        "reason": why,
+    }
+    content = f"要前往【{name}】吗？" + (f"（{why}）" if why else "")
+    ev = session_service.add_event(
+        db, session_id, "system", content, actor_name="系统", metadata=meta,
+    )
+    _apply_world_memory(
+        db, game_session,
+        lambda ws, _sid=sid: world_memory.record_travel_suggestion(ws, _sid),
+    )
+    chunks = [_make_chunk("system", content, metadata=meta, event_id=ev.id)]
+    return chunks, (
+        f"已给玩家挂出「前往 {name}」的建议卡（去不去由他们自己点，你不要替他们决定，"
+        "也不要在叙述里追问）。"
+    )
+
+
 def _exec_flag(
     db: Session, session_id: str, game_session: GameSession, flag: str, value: bool,
 ) -> list[str]:
