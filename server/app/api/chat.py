@@ -535,10 +535,22 @@ async def travel(
         s = next((x for x in (module.scenes or []) if x.get("id") == sid), None)
         return (s or {}).get("title") or (s or {}).get("name") or sid
 
-    # 场景连通校验：目标须沿 connections 连通图可达（不相邻但连通 → 允许，KP 叙述途经；
-    # 确实不连通 → 拒绝）。模组没建图时 find_scene_path 返回平凡路径，行为与从前一致。
-    path = session_service.find_scene_path(module, cur, scene_id)
+    # 场景连通校验：目标须沿 connections 连通图可达，且**途经的场景必须是去过的**
+    # （不相邻但沿已到访路径连通 → 允许，KP 叙述途经；否则拒绝）。
+    # 只判图上连通会放行「取道从没去过的 2 号车厢抵达先头车厢」，而抵达叙述又写明
+    # 「途经不停留、不触发事件」——合起来就是无视沿途的怪物凭空穿过去。
+    # 模组没建图时 find_scene_path 返回平凡路径，行为与从前一致。
+    path = session_service.find_scene_path(
+        module, cur, scene_id, via_allowed=session_service.visited_scene_ids(game_session),
+    )
     if path is None:
+        blocker = session_service.travel_blocker(module, game_session, cur, scene_id)
+        if blocker:
+            raise HTTPException(
+                400,
+                f"去{_sname(scene_id)}要先经过{_sname(blocker)}——那儿你们还没去过，"
+                "得一段一段走过去。",
+            )
         reachable = [
             _sname(n) for n in session_service.scene_neighbors(module, cur) if n in known
         ]

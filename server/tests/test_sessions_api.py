@@ -807,7 +807,9 @@ def test_human_kp_travel_commits_location_without_ai_generation(client):
 
 def test_travel_connectivity_gate(tmp_path, monkeypatch):
     """大地图前往的连通校验：不连通的已知地点 → 400 并提示可直达邻居；
-    不相邻但连通（多跳）→ 放行（KP 会叙述途经）；模组没建图时行为不变（另有既有测试覆盖）。"""
+    多跳**途经已到访的场景** → 放行（KP 会叙述途经）；
+    多跳**途经没去过的场景** → 400 并点名是哪一段挡着（否则等于无视沿途的怪物穿过去）；
+    模组没建图时行为不变（另有既有测试覆盖）。"""
     import app.api.chat as chat_module
 
     scenes = [
@@ -831,7 +833,21 @@ def test_travel_connectivity_gate(tmp_path, monkeypatch):
         assert "不连通" in r.json()["detail"]
         assert started["n"] == 0
 
-        # 不相邻但沿车厢连通（六号 → 二号，途经四号）→ 放行
+        # 途经没去过的四号车厢 → 拒绝，并点名挡在哪一段。
+        # 抵达叙述写明「途经不停留、不触发事件」，放行等于让队伍凭空穿过没探索的车厢。
+        r_skip = c.post(f"/api/sessions/{sid}/travel", json={"scene_id": "c"})
+        assert r_skip.status_code == 400, r_skip.text
+        assert "四号车厢" in r_skip.json()["detail"]
+        assert started["n"] == 0
+
+        # 四号车厢去过之后，同一条多跳路线放行
+        gen = app.dependency_overrides[get_db]()
+        db = next(gen)
+        sess = db.get(GameSession, sid)
+        sess.world_state = {**(sess.world_state or {}), "visited_scenes": ["a", "b", "c", "d"]}
+        db.commit()
+        gen.close()
+
         r2 = c.post(f"/api/sessions/{sid}/travel", json={"scene_id": "c"})
         assert r2.status_code == 200, r2.text
         assert started["n"] == 1

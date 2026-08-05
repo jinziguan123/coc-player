@@ -820,7 +820,15 @@ def travel_suggest_event(
     here = game_session.current_scene_id
     if sid == here:
         return [], "玩家已身处该场景，无需建议前往。"
-    if session_service.find_scene_path(module, here, sid) is None:
+    if session_service.find_scene_path(
+        module, here, sid, via_allowed=session_service.visited_scene_ids(game_session),
+    ) is None:
+        blocker = session_service.travel_blocker(module, game_session, here, sid)
+        if blocker:
+            return [], (
+                f"去{_scene_name(module, sid)}得先经过{_scene_name(module, blocker)}，"
+                "而那儿玩家还没去过——未给出建议。要引导他们过去，请建议先去中间那一处。"
+            )
         return [], (
             f"{_scene_name(module, sid)} 与当前位置不连通，未给出建议。"
             "别让玩家看到一个走不通的去处。"

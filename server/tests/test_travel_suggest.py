@@ -194,3 +194,77 @@ def test_capability_advertised_only_when_there_is_somewhere_to_go(seeded):
     module.scenes = [SCENES[0]]
     only_one = ctx.build_kp_context(session, module, hero, [])[0]["content"]
     assert "TRAVEL_SUGGEST" not in only_one
+
+
+# 常暗之箱实测复现：六节车厢一字排开，先头车厢（关键词含「驾驶室」）只能经 2 号车厢抵达。
+# 玩家说「我们要带着这家伙一起进驾驶室」，2 号车厢却还没去过——此前系统照样挂出建议卡，
+# 点下去还会放行，而抵达叙述写明「途经不停留、不触发事件」= 无视 2 号车厢的怪物穿过去。
+TRAIN = [
+    {"id": "s6", "title": "6号车厢", "connections": ["s5"], "keywords": ["6号车厢"]},
+    {"id": "s5", "title": "5号车厢", "connections": ["s6", "s4"], "keywords": ["5号车厢"]},
+    {"id": "s4", "title": "4号车厢", "connections": ["s5", "s3"], "keywords": ["4号车厢"]},
+    {"id": "s3", "title": "3号车厢", "connections": ["s4", "s2"], "keywords": ["3号车厢"]},
+    {"id": "s2", "title": "2号车厢", "connections": ["s3", "head"], "keywords": ["2号车厢"]},
+    {"id": "head", "title": "先头车厢", "connections": ["s2"], "keywords": ["先头车厢", "驾驶室"]},
+]
+
+
+@pytest.fixture
+def train(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'train.db'}", connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    module = Module(title="常暗之箱", rule_system="coc", npcs=[], scenes=TRAIN)
+    hero = Character(name="江户川龙牙", rule_system="coc", is_player=True)
+    db.add_all([module, hero]); db.commit()
+    session = session_service.create_session(
+        db, module.id, [{"character_id": hero.id, "is_primary": True}],
+    )
+    session.current_scene_id = "s3"
+    # 一路从 6 号走到 3 号；2 号车厢有怪物挡着，没进去过
+    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3"]}
+    db.commit()
+    yield db, module, session, hero
+    db.close()
+
+
+def test_no_suggestion_for_place_behind_an_unvisited_leg(train):
+    """先头车厢在图上与 3 号车厢连通，但唯一通路 2 号车厢没去过 → 不挂卡。"""
+    db, module, session, _hero = train
+    chunks, note = turn_effects.travel_suggest_event(db, session.id, session, module, "head")
+    assert chunks == []
+    assert "2号车厢" in note      # 点名是哪一段挡着，KP 才知道该改建议去中间那处
+
+    # 玩家嘴上说「进驾驶室」同样不该弹卡——这正是实测碰到的那一下
+    from app.services import turn_orchestrator
+
+    session_service.add_event(
+        db, session.id, "action", "我们要带着这家伙一起进驾驶室，至于后面怎么说再议",
+        actor_id=_hero_id(session), actor_name="江户川龙牙",
+    )
+    assert turn_orchestrator._spoken_travel_intent(
+        db, session.id, session, module, "我们要带着这家伙一起进驾驶室",
+    ) == []
+
+
+def _hero_id(session):
+    return session.player_character_id
+
+
+def test_suggestion_allowed_for_the_next_leg(train):
+    """挡路的那一节本身可以建议——一段一段走过去正是我们要引导的。"""
+    db, module, session, _hero = train
+    chunks, _note = turn_effects.travel_suggest_event(db, session.id, session, module, "s2")
+    assert len(chunks) == 1
+    assert chunks[0].metadata["scene_id"] == "s2"
+
+
+def test_far_place_becomes_reachable_once_the_leg_is_visited(train):
+    """2 号车厢去过之后，先头车厢就是正常的多跳目标了。"""
+    db, module, session, _hero = train
+    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3", "s2"]}
+    db.commit()
+    chunks, _note = turn_effects.travel_suggest_event(db, session.id, session, module, "head")
+    assert len(chunks) == 1

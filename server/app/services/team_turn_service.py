@@ -236,10 +236,14 @@ async def _run_team_turn(
             sid = _resolve_scene_ref(module, decision.get("target") or content)
             known = session_service.known_scene_ids(module, game_session, events)
             cur = session_service.get_char_location(game_session, teammate.id)
-            # 连通校验与玩家 travel 同规则：不连通的目标不搬（模组没建图时恒可达）
+            # 连通校验与玩家 travel 同规则：途经必须是去过的场景，不连通/绕不过去都不搬
+            # （模组没建图时恒可达）
             if (
                 sid and sid in known and sid != cur
-                and session_service.find_scene_path(module, cur, sid) is not None
+                and session_service.find_scene_path(
+                    module, cur, sid,
+                    via_allowed=session_service.visited_scene_ids(game_session),
+                ) is not None
             ):
                 session_service.set_char_location(db, session_id, teammate.id, sid)
                 db.refresh(game_session)

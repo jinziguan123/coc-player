@@ -1225,10 +1225,13 @@ def build_team_context(
     # 可前往的已知地点（对话提及/已访问；排除当前所在与**不连通**的地点），供 travel 选 target。
     # 连通过滤与 travel 的确定性校验同一张图：不让队友「想去」一个系统必然拒绝的地方。
     known = session_service.list_known_locations(module, session, char_id=teammate.id, events=events)
+    _visited = session_service.visited_scene_ids(session)
     known_locations = "、".join(
         loc["name"] for loc in known
         if not loc["current"]
-        and session_service.find_scene_path(module, viewer_scene_id, loc["id"]) is not None
+        and session_service.find_scene_path(
+            module, viewer_scene_id, loc["id"], via_allowed=_visited,
+        ) is not None
     ) or "（暂无其他已知地点）"
 
     mode_guidance = (

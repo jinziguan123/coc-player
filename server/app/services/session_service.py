@@ -1599,7 +1599,9 @@ def scene_neighbors(module, scene_id: str | None) -> list[str]:
     return sorted(_scene_adjacency(module).get(scene_id, ()))
 
 
-def find_scene_path(module, start: str | None, dest: str) -> list[str] | None:
+def find_scene_path(
+    module, start: str | None, dest: str, via_allowed: set[str] | None = None,
+) -> list[str] | None:
     """沿场景连通图找 ``start → dest`` 的最短路径（BFS，路径含两端点）。
 
     返回场景 id 列表；**确实不连通**返回 None（调用方据此拒绝切换）。
@@ -1607,6 +1609,11 @@ def find_scene_path(module, start: str | None, dest: str) -> list[str] | None:
     - 模组任何场景都没填 connections（旧/手工模组，没建图，不能把它们走死）；
     - start 缺失（无当前位置可依据）；
     - start 或 dest 自身没有任何边（作者没为该地点建边，无拓扑可循）。
+
+    ``via_allowed`` 给定时，**途经**的场景必须落在这个集合里（终点不受此限——终点正是要
+    去的新地方）。玩家发起的移动一律带上它并传「已到访场景」：光看图上连通会放行「取道
+    一个从没去过的车厢抵达先头车厢」这种路线，而抵达叙述又明确「途经不停留、不触发事件」，
+    合起来就是**无视沿途的怪物与门锁凭空穿过去**。想去更远的地方，就得一段一段真的走过去。
     """
     dest = (dest or "").strip()
     if not dest:
@@ -1630,8 +1637,41 @@ def find_scene_path(module, start: str | None, dest: str) -> list[str] | None:
             if nxt == dest:
                 return path + [nxt]
             seen.add(nxt)
+            # 只有允许途经的场景才继续往下扩；起点永远算数（人就站在那儿）。
+            if via_allowed is not None and nxt not in via_allowed:
+                continue
             queue.append(path + [nxt])
     return None
+
+
+def travel_blocker(module, session: GameSession, start: str | None, dest: str) -> str | None:
+    """玩家为什么去不了 ``dest``：返回**挡在路上的那个场景 id**；能去则 None。
+
+    只在 find_scene_path(..., via_allowed=已到访) 判定去不了时才有意义——用图上连通的
+    完整路径反查第一个没去过的途经点，好把「不连通」这种没头没脑的报错换成
+    「要去先头车厢，得先过 2 号车厢」。真的完全不连通时返回 None（那是另一种拒绝）。
+    """
+    full = find_scene_path(module, start, dest)
+    if not full:
+        return None
+    visited = visited_scene_ids(session)
+    return next((sid for sid in full[1:-1] if sid not in visited), None)
+
+
+def visited_scene_ids(session: GameSession) -> set[str]:
+    """队伍真正到过的场景（含当前所在）——「能否途经」的唯一判据。
+
+    与 known_scene_ids 的区别是本文件里最容易混的一处：``known`` 含「叙述里被提到过」的
+    地点（它们要在大地图上看得见、可作为**终点**），``visited`` 只含真正去过的
+    （只有这些能当**途经点**）。玩家听说过驾驶室，不等于知道怎么绕过中间那节车厢。
+    """
+    out = set((session.world_state or {}).get("visited_scenes") or [])
+    if session.current_scene_id:
+        out.add(session.current_scene_id)
+    for sid in ((session.world_state or {}).get("party_locations") or {}).values():
+        if sid:
+            out.add(str(sid))
+    return out
 
 
 def list_known_locations(
