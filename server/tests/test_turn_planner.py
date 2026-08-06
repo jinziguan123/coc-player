@@ -575,3 +575,58 @@ def test_planner_payload_把武器一并算进随身清单(db_factory):
         session, module, hero, [], teammates=[], rules_lookup_enabled=False,
     ))
     assert "撬棍" in text and "手电筒" in text
+
+
+# ── 模组结局：判定「已抵达终局」的机制信号 ──────────────────────────────
+
+_ENDINGS = [
+    {"id": "ending_a", "name": "结局A：冲出隧道", "when": "把油门拉杆推到底让电车加速",
+     "description": "电车撞碎黑暗冲出隧道，幸存者在晨光里瘫坐"},
+    {"id": "ending_b", "name": "结局B：停在黑暗里", "when": "拉下拉杆减速停车"},
+]
+
+
+def test_turn_plan_messages_include_endings(db_factory):
+    """结局条件要进规划器输入——否则玩家拉下加速杆和推开一扇门在系统眼里没有区别。"""
+    db = db_factory()
+    module, hero, session = _seed(db)
+    module.endings = _ENDINGS
+    db.commit()
+    text = "\n".join(m["content"] for m in turn_planner.build_turn_plan_messages(
+        session, module, hero, [], teammates=[], rules_lookup_enabled=False,
+    ))
+    assert "把油门拉杆推到底让电车加速" in text
+    assert "ending_a" in text
+
+
+def test_turn_plan_messages_drop_endings_once_reached(db_factory):
+    """已经抵达过结局就不再重复判定，省得每轮都问一遍。"""
+    db = db_factory()
+    module, hero, session = _seed(db)
+    module.endings = _ENDINGS
+    session.world_state = dict(session.world_state or {}) | {
+        "ending_reached": {"id": "ending_a", "name": "结局A：冲出隧道"},
+    }
+    db.commit()
+    text = "\n".join(m["content"] for m in turn_planner.build_turn_plan_messages(
+        session, module, hero, [], teammates=[], rules_lookup_enabled=False,
+    ))
+    assert "把油门拉杆推到底让电车加速" not in text
+
+
+def test_plan_directive_renders_ending_block():
+    """抵达终局要在 KP 的裁定计划里成为一段显式指令，不能只在系统内部记一笔。"""
+    plan = turn_planner.TurnPlan(
+        ending=turn_planner.EndingVerdict(
+            reached_id="ending_a", reason="玩家把油门推到底",
+            name="结局A：冲出隧道", description="电车冲出隧道",
+        ),
+    )
+    text = turn_planner.build_turn_plan_message(plan)["content"]
+    assert "已抵达终局" in text and "结局A：冲出隧道" in text
+    assert "不要替玩家宣布本模组结束" in text
+
+
+def test_plan_directive_without_ending_has_no_block():
+    text = turn_planner.build_turn_plan_message(turn_planner.TurnPlan())["content"]
+    assert "已抵达终局" not in text

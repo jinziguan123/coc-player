@@ -111,6 +111,21 @@ class ScenePolicy(BaseModel):
     clear_flags: StrList = Field(default_factory=list)
 
 
+class EndingVerdict(BaseModel):
+    """本轮是否已抵达模组写明的某个结局。
+
+    reached_id 命中模组 endings 里的 id 才算数（上层会校验，编不出来的 id 一律忽略）。
+    这是「模组该不该收场」的唯一机制信号——没有它，玩家把电车油门推到底和推开一扇门
+    在系统眼里毫无区别，KP 永远等不到收尾的时机。
+    """
+
+    reached_id: str = ""
+    reason: str = ""
+    # 下面两项由上层按 reached_id 从模组回填（不问规划器要，避免它自由发挥改写结局内容）
+    name: str = ""
+    description: str = ""
+
+
 class CombatPlan(BaseModel):
     """本轮是否必须从自由叙事切入结构化战斗。"""
 
@@ -271,6 +286,7 @@ class TurnPlan(BaseModel):
     npc_policy: NpcPolicy = Field(default_factory=NpcPolicy)
     scene_policy: ScenePolicy = Field(default_factory=ScenePolicy)
     combat: CombatPlan = Field(default_factory=CombatPlan)
+    ending: EndingVerdict = Field(default_factory=EndingVerdict)  # 本轮是否抵达模组结局
     narration_brief: StrList = Field(default_factory=list)
     safety: SafetyPolicy = Field(default_factory=SafetyPolicy)
     sanity: SanityPolicy = Field(default_factory=SanityPolicy)
@@ -459,6 +475,17 @@ def build_turn_plan_messages(
         ],
         # 幕后真相：全局裁定依据（线索该不该给、NPC 反应、危险判断都以真相为锚）
         "truth": (getattr(module, "truth", "") or "").strip(),
+        # 结局分支：判「本轮是否已抵达终局」的唯一依据（空 = 该模组没写结局，永远不判）。
+        # 已抵达过的不再重复判（world_state.ending_reached 幂等）。
+        "endings": [
+            {
+                "id": e.get("id", ""),
+                "name": e.get("name", ""),
+                "when": e.get("when", ""),
+            }
+            for e in (getattr(module, "endings", None) or [])
+            if isinstance(e, dict) and e.get("id")
+        ] if not (session.world_state or {}).get("ending_reached") else [],
         "player": _compact_player(player_char),
         "teammates": [_compact_player(teammate) for teammate in teammates],
         "recent_events": _compact_events(events),
@@ -523,7 +550,7 @@ def build_turn_plan_messages(
             "content": (
                 "你是 TRPG 的 KP 回合规划器。你的任务不是写叙事，而是先判断本轮裁定："
                 "玩家意图、是否需要检定、可揭示线索、NPC 反应、场景变化、安全边界，"
-                "是否必须切入结构化战斗，"
+                "是否必须切入结构化战斗，是否已抵达模组结局，"
                 "以及导演层的节奏经营 direction。direction 的字段格式必须严格遵守："
                 "pacing 只能是 \"hold\"/\"tighten\"/\"release\" 三者之一（不是句子）；"
                 "spotlight 是角色名的**数组**（如 [\"伊芙琳\"]，无则 []）；"
@@ -544,6 +571,11 @@ def build_turn_plan_messages(
                 "clue_ledger 是玩家已掌握线索的台账：status=known（或 discovered=true）"
                 "的线索已完全揭示，不得再进入 candidate_clue_ids；"
                 "status=partial 的仅在玩家行动继续深入时可作为升级揭示的 candidate。"
+                "endings 是模组写明的结局分支：**只有**玩家本轮的行动或本轮已发生的事实"
+                "确凿地满足了其中某条的 when 条件时，才填 ending.reached_id 为那条的 id "
+                "并在 ending.reason 里一句话说清凭什么算达成；不确定、只是接近、或玩家只是"
+                "在讨论/犹豫，一律留空。id 必须来自 endings 列表，不得自创。endings 为空 → "
+                "永远留空。判定抵达结局不影响本轮其他裁定（该掷的骰照掷、该开的战照开）。"
                 "check.skill 除技能名外也可以是九维属性中文名"
                 "（力量/体质/体型/敏捷/外貌/智力/意志/教育/幸运；灵感=智力、知识=教育）——"
                 "玩家行动没有贴切技能时选最相关的属性。"
@@ -846,6 +878,21 @@ def build_turn_plan_message(plan: TurnPlan) -> dict:
             )
         )
 
+    # 模组结局：玩家的行动满足了某条 endings 的 when（reached_id 已由上层校验过、name 已回填）。
+    # 没有这一段，「抵达终局」就只是系统内部记了一笔，KP 那边照旧当成普通一轮往下讲。
+    ending_block = ""
+    if plan.ending.reached_id and plan.ending.name:
+        ending_block = (
+            "\n\n【模组结局——本轮已抵达终局】\n"
+            f"结局：{plan.ending.name}\n"
+            + (f"达成缘由：{plan.ending.reason}\n" if plan.ending.reason else "")
+            + (f"该结局的收场：{plan.ending.description}\n" if plan.ending.description else "")
+            + "请把本轮当作**终局**来演：给出有分量的收场叙述，交代调查员们的下场与余韵，"
+            "别再抛新悬念、别开新场景、别发起新检定。\n"
+            "叙事末尾可以点明故事到此告一段落，但**不要替玩家宣布本模组结束**——"
+            "是否就此收桌由玩家自己决定（系统会给他们结束入口）。\n"
+        )
+
     combat_block = ""
     if plan.combat.should_start:
         enemies = "、".join(plan.combat.enemies) or "（必须填写实际敌方名字）"
@@ -882,6 +929,7 @@ def build_turn_plan_message(plan: TurnPlan) -> dict:
             + false_claim_block
             + check_block
             + auto_block
+            + ending_block
             + combat_block
         ),
     }

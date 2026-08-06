@@ -30,6 +30,10 @@ class Module(Base, UUIDMixin, TimestampMixin):
     # 手书（Handouts）：模组原文里的信件/报纸/日记/便条等一等公民实体，
     # 形如 [{id, title, kind(letter|news|diary|note), content(原文), location, trigger_condition}]
     handouts: Mapped[list] = mapped_column(JSON, default=list)
+    # 结局：模组写明的收场分支，形如 [{id, name, when(达成条件), description, is_good}]。
+    # 没有它，「玩家已经抵达终局」这件事就只存在于场景 events 的自然语言备注里，
+    # 系统无从知晓——拉下加速杆和推开一扇门在机制上没有任何区别，KP 自然也不会收尾。
+    endings: Mapped[list] = mapped_column(JSON, default=list)
     # 幕后真相（守秘人资讯）：整个事件的来龙去脉/真凶/时间线，KP 专属参考，玩家永不可见。
     # 注入 KP/planner/幕后推演上下文；空串 = 模组无此段或旧模组未重导。
     truth: Mapped[str] = mapped_column(Text, default="")

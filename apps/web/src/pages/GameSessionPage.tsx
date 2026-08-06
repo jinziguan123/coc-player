@@ -1175,6 +1175,11 @@ export function GameSessionPage() {
     }
   }
 
+  // 已抵达模组结局：规划器判定玩家的行动命中了某条 endings.when 时后端落的账。
+  // 只做提示——结束与否仍由玩家自己投票决定（KP 没有结束模组的权力）。
+  const endingReached = (currentSession?.world_state as Record<string, unknown> | undefined)
+    ?.ending_reached as { id?: string; name?: string } | undefined
+
   // 结束模组（全体真人共识）：任一真人发起/同意；全票通过后端置 ended 并广播 status，各端刷新
   // → 成长结算与最终战报入口出现。未满票则更新投票进度提示，待其他玩家确认。
   const voteEndModule = async () => {
@@ -1456,10 +1461,12 @@ export function GameSessionPage() {
                   {(open) => (
                     <button
                       onClick={open}
-                      className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
-                      title="结束本模组：需全体真人玩家一致同意"
+                      className={`text-xs !px-2 !py-0.5 flex items-center gap-1 ${endingReached ? 'btn-primary' : 'btn-secondary'}`}
+                      title={endingReached
+                        ? `已抵达结局：${endingReached.name || ''}。全体真人玩家一致同意即可结束本局`
+                        : '结束本模组：需全体真人玩家一致同意'}
                     >
-                      <GiUpgrade size={13} /> 结束模组
+                      <GiUpgrade size={13} /> {endingReached ? '结束模组（已抵达结局）' : '结束模组'}
                     </button>
                   )}
                 </ConfirmDialog>

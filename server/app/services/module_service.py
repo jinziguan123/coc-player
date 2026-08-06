@@ -98,6 +98,15 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
       "location": "scene_1",
       "trigger_condition": "玩家如何拿到这份手书（如 搜查书房抽屉、验尸后从口袋发现）"
     }}
+  ],
+  "endings": [
+    {{
+      "id": "ending_a",
+      "name": "结局名（照抄原文的叫法，如 结局A：冲出隧道）",
+      "when": "**达成条件**，写成可判定的一句话：玩家做了什么/发生了什么就算抵达这个结局（如『把油门拉杆推到底让电车加速』『全员在天亮前逃出宅邸』『调查员全部死亡或发疯』）",
+      "description": "这个结局如何收场：会发生什么、调查员的下场、留下什么余韵（KP 据此演出终局）",
+      "is_good": true
+    }}
   ]
 }}
 
@@ -160,6 +169,12 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     别把「匕首 (65%, 1D6)」这样的整句塞进 weapon——那样武器表查不到，战斗引擎无从结算。
     skills 的技能名用规则书的标准写法：格斗(斗殴)、射击(手枪)、射击(步枪)、图书馆使用……
     半角括号标专精，不要写「战斗」「射击：手枪」这类自创名或全角标点。
+17. endings 收齐模组写明的**全部**收场分支（原文常写作「结局A/B」「尾声」「失败结局」）：
+    包括成功逃脱/达成目的的好结局、代价惨重的坏结局，以及全员死亡/发疯这类失败结局。
+    **when 是这一条最要紧的字段**——必须写成「玩家做了什么就算抵达这个结局」的可判定条件，
+    而不是结局的描述。原文只在某个场景的选择里交代了结局（如「加速：结局A；减速：结局B」）时，
+    也要把它们提成独立的 endings 条目，when 写清那个动作。原文确实没有明确结局分支的模组，
+    给空数组，不要编造。
 
 模组文本：
 {content}"""
@@ -254,7 +269,8 @@ SUPPLEMENT_PROMPT_TEMPLATE = """你是 {rule_system} 模组解析的质检员。
   "scenes": ["仅两种条目：①整个被遗漏的场景（完整场景对象，字段同首轮）；②已有场景遗漏了机制点时，给 {{\\"id\\": \\"已有场景id\\", \\"events\\": [仅遗漏的机制点]}}——events 数值照抄原文（如 0/1d3）"],
   "npcs": ["仅两种条目：①整个被遗漏的 NPC/怪物（完整对象，含 attributes/skills/hp/armor/weapon/damage/goals；怪物的自创攻击方式要有同名技能与 damage）；②已有 NPC 遗漏关键字段时，给 {{\\"id\\": \\"已有id\\", 仅补缺的字段}}"],
   "clues": ["仅整个被遗漏的线索（完整对象）"],
-  "handouts": ["仅整个被遗漏的手书（完整对象，content 逐字照抄原文）"]
+  "handouts": ["仅整个被遗漏的手书（完整对象，content 逐字照抄原文）"],
+  "endings": ["仅整个被遗漏的结局分支（完整对象，含 when 达成条件）；首轮已收齐则空数组"]
 }}
 
 铁律：只补遗漏，**绝不重复、改写或删改已收录的内容**；没有遗漏就输出全空（空串/空数组）。
@@ -331,8 +347,8 @@ def _merge_supplement(parsed: dict, patch: dict) -> dict:
                 target[key] = val
     out["npcs"] = npcs
 
-    # clues / handouts：只追加新 id
-    for key in ("clues", "handouts"):
+    # clues / handouts / endings：只追加新 id
+    for key in ("clues", "handouts", "endings"):
         items = list(out.get(key) or [])
         have = _by_id(items)
         for item in (patch or {}).get(key) or []:
@@ -580,6 +596,7 @@ def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
         clues=data.get("clues", []),
         triggers=data.get("triggers", []),
         handouts=data.get("handouts", []),
+        endings=data.get("endings") or [],
         truth=str(data.get("truth") or ""),
         character_guidance=data.get("character_guidance") or {},
         default_narrative_style=str(data.get("default_narrative_style") or "").strip(),
@@ -621,6 +638,8 @@ def update_module(db: Session, module_id: str, data: dict) -> Module | None:
         module.triggers = data["triggers"]
     if "handouts" in data and data["handouts"] is not None:
         module.handouts = data["handouts"]
+    if "endings" in data and data["endings"] is not None:
+        module.endings = data["endings"]
     if "truth" in data and data["truth"] is not None:
         module.truth = str(data["truth"])
     # 房主可以改写 AI 给的车卡建议——AI 出初稿，KP 才是最终裁量。
