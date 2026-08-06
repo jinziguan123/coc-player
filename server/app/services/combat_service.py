@@ -159,8 +159,9 @@ def _npc_participant(npc: dict, side: str = "enemy") -> dict:
         "dex": attrs.get("DEX", 50), "hp": max_hp, "max_hp": max_hp, "status": "ok",
         "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon),
         # damage：怪物卡上写明的攻击伤害骰（如「撕咬 1D6」）。自创攻击方式不在人类武器表里，
-        # 没有它就只能按徒手 1D3+DB 估伤。
-        "damage": (npc.get("damage") or "").strip() or None,
+        # 没有它就只能按徒手 1D3+DB 估伤。解析出来的值不保证是字符串（模型可能给 6 这种数字），
+        # 统一转字符串再用——直接 .strip() 会在建参战方时炸掉整场战斗。
+        "damage": str(npc.get("damage") or "").strip() or None,
         "skills": npc.get("skills") or {}, "base_attributes": attrs, "system_data": {},
         "db": db, "armor": _coerce_armor(npc.get("armor")), "combat_ai": npc.get("combat_ai"),
         "pos": None, "mov": _coerce_mov(npc.get("mov")),

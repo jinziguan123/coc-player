@@ -292,6 +292,9 @@ def test_monster_damage_dice_from_npc_card(db_factory):
     assert combat_service._attack_weapon(npc, "徒手格斗") == "徒手格斗"
     bare = combat_service._npc_participant({"id": "e2", "name": "杂兵", "weapon": "撕咬"})
     assert bare["damage"] is None and combat_service._attack_weapon(bare, "撕咬") == "撕咬"
+    # 解析出来的 damage 不保证是字符串（模型可能给数字）→ 归一化而不是抛异常
+    odd = combat_service._npc_participant({"id": "e3", "name": "怪", "weapon": "撕咬", "damage": 6})
+    assert odd["damage"] == "6" and combat_service._attack_weapon(odd, "撕咬")["dam"] == "6"
 
 
 def test_monster_damage_overrides_table_weapon(db_factory):
