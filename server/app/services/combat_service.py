@@ -158,6 +158,9 @@ def _npc_participant(npc: dict, side: str = "enemy") -> dict:
         "npc_id": npc.get("id"), "name": npc.get("name") or "敌人", "side": side,
         "dex": attrs.get("DEX", 50), "hp": max_hp, "max_hp": max_hp, "status": "ok",
         "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon),
+        # damage：怪物卡上写明的攻击伤害骰（如「撕咬 1D6」）。自创攻击方式不在人类武器表里，
+        # 没有它就只能按徒手 1D3+DB 估伤。
+        "damage": (npc.get("damage") or "").strip() or None,
         "skills": npc.get("skills") or {}, "base_attributes": attrs, "system_data": {},
         "db": db, "armor": _coerce_armor(npc.get("armor")), "combat_ai": npc.get("combat_ai"),
         "pos": None, "mov": _coerce_mov(npc.get("mov")),
@@ -169,6 +172,20 @@ def _npc_participant(npc: dict, side: str = "enemy") -> dict:
         # P2 主动动作集：正交条件 / 瞄准 / 该处伤是否已急救
         "conditions": [], "aim": False, "first_aid_used": False,
     }
+
+
+def _attack_weapon(actor: dict, weapon: str) -> str | dict:
+    """这次攻击喂给引擎的武器：参战方卡上写了 damage（怪物的「撕咬 1D6」）且这次用的正是那件
+    攻击方式 → 造一件以它命名、按它伤害结算的武器；否则原样给名字、走武器表。
+
+    被缴械/临时换武器时 weapon 与卡上那件不符，就不能再套怪物卡的伤害，故要比对名字。
+    """
+    dam = actor.get("damage")
+    dam = dam.strip() if isinstance(dam, str) else ""
+    if not dam or (weapon or "").strip() != (actor.get("weapon") or "").strip():
+        return weapon
+    base = engine.lookup_weapon(weapon) or {"tho": 0, "range": "接触", "round": "1"}
+    return {**base, "name": weapon, "dam": dam}
 
 
 def _char_data(p: dict) -> dict:
@@ -489,7 +506,7 @@ async def _begin_player_attack(
     if aim_bonus:
         g_notes = [{"kind": "bonus", "n": aim_bonus, "reason": "上一轮瞄准"}] + g_notes
     res = engine.resolve_attack(
-        _char_data(actor), actor.get("db", "0"), weapon,
+        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon),
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus + g_bonus, penalty=g_penalty,
         defense_penalty=_flank_penalty(state, target),   # 目标被我方夹击 → 其闪避吃惩罚
@@ -779,7 +796,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
         atk_pb = (positioning.point_blank_bonus(positioning.cell_distance(attacker, defender), pr["ranged"])
                   if state.get("grid") else 0)
         res = engine.resolve_attack(
-            _char_data(attacker), attacker.get("db", "0"), pr["weapon"],
+            _char_data(attacker), attacker.get("db", "0"), _attack_weapon(attacker, pr["weapon"]),
             defender_data=_char_data(defender), defense=choice, ranged=pr["ranged"],
             attacker_disarmed=atk_disarmed, bonus=atk_pb,
             defense_penalty=_flank_penalty(state, defender),
@@ -957,7 +974,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
         action.get("defense")
         or engine.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
     res = engine.resolve_attack(
-        _char_data(actor), actor.get("db", "0"), weapon,
+        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon),
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus,
     )

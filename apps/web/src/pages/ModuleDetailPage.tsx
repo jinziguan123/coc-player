@@ -35,7 +35,7 @@ interface SceneEvent { trigger?: string; kind?: string; san_loss?: string; skill
 interface SceneMap { q?: number; r?: number; biome: string }
 interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; kind?: string; connections?: string[]; events?: SceneEvent[]; states?: SceneState[]; image?: string; map?: SceneMap | null }
 interface MapNode { id: string; q: number; r: number; biome: string; scene_id?: string | null }
-interface NPC { id: string; name?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
+interface NPC { id: string; name?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; damage?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
 interface Clue { id: string; name?: string; description?: string; location?: string; trigger_condition?: string; image?: string }
 interface Trigger { id: string; when?: string; set_flags?: string[]; clear_flags?: string[]; description?: string }
 interface ModuleData {
@@ -948,12 +948,21 @@ export function ModuleDetailPage() {
                     style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
                     onChange={(e) => updNpc(i, { weapon: e.target.value })} />
                 </label>
+                {/* 伤害骰：怪物的自创攻击方式（撕咬/触手）不在武器表里，不填就只能按徒手 1D3 估伤 */}
+                <label className="flex items-center gap-1 flex-1 min-w-32"
+                  title="怪物自创攻击方式必填，否则按徒手 1D3+DB 估伤；常规武器留空即按武器表结算">
+                  <span style={{ color: 'var(--color-text-secondary)' }}>伤害</span>
+                  <input value={n.damage || ''} placeholder="如 1D6（常规武器可留空）" className="w-full px-1 py-0.5 rounded"
+                    style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
+                    onChange={(e) => updNpc(i, { damage: e.target.value })} />
+                </label>
               </div>
             ) : (
               <span className="text-xs">{[
                 n.hp != null ? `HP ${n.hp}` : '',
                 n.armor != null ? `护甲 ${n.armor}` : '',
                 n.weapon ? `武器 ${n.weapon}` : '',
+                n.damage ? `伤害 ${n.damage}` : '',
               ].filter(Boolean).join('、') || '—'}</span>
             )}</Row>
             <Row label="目标">{edit ? <TextInput value={(n.goals || []).join('\n')} onChange={(v) => updNpc(i, { goals: v.split('\n') })} multiline placeholder="每行一条：该 NPC 想达成什么（幕后推演据此让其行动）" /> : <span className="whitespace-pre-wrap text-xs">{(n.goals || []).join('\n') || '—'}</span>}</Row>

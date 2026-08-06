@@ -280,6 +280,28 @@ def test_char_data_carries_named_attack_for_monster(db_factory):
     assert coc.attack_skill_of(data, npc["weapon"]) == "撕咬"
 
 
+def test_monster_damage_dice_from_npc_card(db_factory):
+    """怪物卡写了 damage（撕咬 1D6）→ 按它掷伤害，不再按徒手 1D3+DB 估。"""
+    npc = combat_service._npc_participant(
+        {"id": "e", "name": "循声者", "weapon": "撕咬", "damage": "1D6",
+         "skills": {"撕咬": 60}, "attributes": {"STR": 100, "SIZ": 60}})
+    assert npc["damage"] == "1D6"
+    w = combat_service._attack_weapon(npc, "撕咬")
+    assert isinstance(w, dict) and w["name"] == "撕咬" and w["dam"] == "1D6"
+    # 被缴械改徒手 / 卡上没写 damage → 原样走武器表
+    assert combat_service._attack_weapon(npc, "徒手格斗") == "徒手格斗"
+    bare = combat_service._npc_participant({"id": "e2", "name": "杂兵", "weapon": "撕咬"})
+    assert bare["damage"] is None and combat_service._attack_weapon(bare, "撕咬") == "撕咬"
+
+
+def test_monster_damage_overrides_table_weapon(db_factory):
+    """人类武器也认卡上的 damage（覆盖武器表伤害），但射程/连发等其余字段仍取自武器表。"""
+    npc = combat_service._npc_participant(
+        {"id": "e", "name": "持刀者", "weapon": "大型刀(甘蔗刀等)", "damage": "1D10"})
+    w = combat_service._attack_weapon(npc, "大型刀(甘蔗刀等)")
+    assert w["dam"] == "1D10" and w["tho"] == 1 and w["range"] == "接触"
+
+
 def test_impale_damage_flags_penetration():
     """贯穿武器大成功/极难加伤时，flags 带『贯穿』供前端标注；非贯穿武器不带。"""
     from app.rules.coc import combat as coc
