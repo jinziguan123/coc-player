@@ -172,9 +172,13 @@ def _npc_participant(npc: dict, side: str = "enemy") -> dict:
 
 
 def _char_data(p: dict) -> dict:
-    """参战方 → resolve_skill_check 需要的 character_data。"""
+    """参战方 → resolve_skill_check 需要的 character_data。
+
+    额外带上 `_weapon`（自己的武器/攻击方式名）：引擎据此认出「撕咬」这类**与技能同名**的
+    怪物攻击方式（反击/擒抱等默认用近战技能的地方也要认），否则怪物会掉到它根本没有的
+    「格斗(斗殴)」上、按 0 结算。"""
     return {"skills": p.get("skills") or {}, "base_attributes": p.get("base_attributes") or {},
-            "system_data": p.get("system_data") or {}}
+            "system_data": p.get("system_data") or {}, "_weapon": p.get("weapon")}
 
 
 def get_combat(session: GameSession) -> dict | None:

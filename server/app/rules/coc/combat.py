@@ -34,17 +34,25 @@ _FIGHT_PREFIXES = ("格斗", "斗殴")
 _SHOOT_PREFIXES = ("射击", "枪")
 
 
-def resolve_weapon(name: str | None) -> dict:
-    """按名字取武器数据：精确 → 子串 → 回落徒手。名字可为 KP 给的通俗名（如「匕首」）。"""
+def lookup_weapon(name: str | None) -> dict | None:
+    """在武器表里查武器：精确 → 子串。**查不到返回 None**（区别于 resolve_weapon 的回落徒手）。
+
+    调用方需要区分「这是人类武器表里的东西」与「这是怪物自己的攻击方式（撕咬/触手/爪击）」时用它。
+    """
     if not name:
-        return _UNARMED
+        return None
     n = name.strip()
     if n in WEAPON_BY_NAME:
         return WEAPON_BY_NAME[n]
     for w in COC_WEAPONS:
         if n in w["name"] or w["name"] in n:
             return w
-    return _UNARMED
+    return None
+
+
+def resolve_weapon(name: str | None) -> dict:
+    """按名字取武器数据：精确 → 子串 → 回落徒手。名字可为 KP 给的通俗名（如「匕首」）。"""
+    return lookup_weapon(name) or _UNARMED
 
 
 def burst_capacity(weapon: str | dict) -> int:
@@ -125,10 +133,13 @@ def roll_weapon_damage(weapon: str | dict, db: str = "0", *, impale: bool = Fals
 
 
 def combat_skill_value(p: dict) -> int:
-    """参战方最高的战斗技能值（格斗/射击），用于先攻平手比较。"""
+    """参战方最高的战斗技能值（格斗/射击/自己的攻击方式），用于先攻平手比较。"""
     skills = p.get("skills") or {}
     vals = [v for k, v in skills.items()
             if any(k.startswith(pre) for pre in _FIGHT_PREFIXES + _SHOOT_PREFIXES)]
+    own = _named_attack_skill(skills, p.get("weapon"))   # 怪物的「撕咬 60」也是战斗技能
+    if own:
+        vals.append(skills[own])
     return max(vals) if vals else 0
 
 
@@ -161,12 +172,47 @@ def compare_checks(a, b) -> str:
     return "tie"
 
 
+def _named_attack_skill(skills: dict, weapon: str | dict | None) -> str | None:
+    """技能表里有没有与这件武器/攻击方式**同名**的技能项。有则返回该技能名，否则 None。
+
+    CoC 的怪物卡就是这么写的：循声者「撕咬 60%」、猎犬「爪击 45%」——攻击方式名即技能名，
+    它们不在人类武器表里，也没有「格斗(斗殴)」这一项。
+    """
+    name = weapon.get("name") if isinstance(weapon, dict) else weapon
+    name = (name or "").strip() if isinstance(name, str) else ""
+    return name if name and (skills or {}).get(name) else None
+
+
 def _fight_skill_of(data: dict) -> str:
-    """角色的近战技能名（用于反击默认）：优先已有的格斗(X)，否则回落 格斗(斗殴)。"""
-    for k in (data.get("skills") or {}):
+    """角色的近战技能名（用于反击/机动默认）：优先与自己攻击方式同名的技能（怪物的「撕咬」），
+    再取已有的格斗(X)，否则回落 格斗(斗殴)。攻击方式名由上层塞在 `_weapon` 里（可缺省）。"""
+    skills = data.get("skills") or {}
+    own = _named_attack_skill(skills, data.get("_weapon"))
+    if own:
+        return own
+    for k in skills:
         if any(k.startswith(pre) for pre in _FIGHT_PREFIXES):
             return k
     return "格斗(斗殴)"
+
+
+def attack_skill_of(data: dict, weapon: str | dict | None) -> str:
+    """这次攻击该掷哪一项技能。
+
+    ① 攻击者技能表里有与这件武器/攻击方式同名的技能 → 用它（怪物的「撕咬」「触手」）；
+    ② 武器在人类武器表里 → 用武器登记的技能（格斗(斗殴) / 射击(手枪) …）；
+    ③ 都不是 → 回落到攻击者自己的近战技能。
+
+    ①必须排在②前面：怪物的攻击方式查不到武器表，只按②取技能会一路掉成「格斗(斗殴)」，
+    而怪物卡上根本没有这一项 → 技能值按 0 结算 → 除非掷出 01 否则永远打不中。
+    """
+    skills = data.get("skills") or {}
+    own = _named_attack_skill(skills, weapon)
+    if own:
+        return own
+    if isinstance(weapon, dict):
+        return weapon.get("skill") or _fight_skill_of(data)
+    return (lookup_weapon(weapon) or {}).get("skill") or _fight_skill_of(data)
 
 
 def allowed_reactions(is_firearm: bool, defender_grappled: bool = False) -> list[str]:
@@ -262,7 +308,9 @@ def resolve_attack(
     if attacker_disarmed:
         weapon = _UNARMED
     w = resolve_weapon(weapon) if isinstance(weapon, str) else weapon
-    atk_skill = w.get("skill") or "格斗(斗殴)"
+    # 注意用原始入参 weapon（可能是「撕咬」这类怪物攻击方式）取技能，不能用回落后的 w——
+    # w 已经是徒手格斗了，取出来只会是 格斗(斗殴)。
+    atk_skill = attack_skill_of(attacker_data, weapon)
     atk = resolve_skill_check(attacker_data, atk_skill, difficulty, bonus=bonus, penalty=penalty)
 
     result: dict = {

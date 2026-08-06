@@ -269,6 +269,17 @@ def test_participant_reads_armor_from_sheet_and_npc(db_factory):
     assert combat_service._npc_participant({"id": "e2", "name": "裸奔"})["armor"] == 0
 
 
+def test_char_data_carries_named_attack_for_monster(db_factory):
+    """怪物 NPC 的攻击方式名随 _char_data 下传，命中检定掷它自己的「撕咬」而非格斗(斗殴)。"""
+    from app.rules.coc import combat as coc
+    npc = combat_service._npc_participant(
+        {"id": "e", "name": "循声者", "weapon": "撕咬",
+         "skills": {"撕咬": 60, "聆听": 80}, "attributes": {"STR": 100, "SIZ": 60}})
+    data = combat_service._char_data(npc)
+    assert data["_weapon"] == "撕咬"
+    assert coc.attack_skill_of(data, npc["weapon"]) == "撕咬"
+
+
 def test_impale_damage_flags_penetration():
     """贯穿武器大成功/极难加伤时，flags 带『贯穿』供前端标注；非贯穿武器不带。"""
     from app.rules.coc import combat as coc

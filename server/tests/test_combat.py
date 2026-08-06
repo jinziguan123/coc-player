@@ -102,6 +102,61 @@ def test_fight_back_winner_damages_loser(monkeypatch):
     assert r["hit"] is True and r["damage_to"] == "attacker"
 
 
+# ── 怪物的自有攻击方式（撕咬/触手：攻击方式名即技能名，不在人类武器表里）─────────
+
+# 循声者式怪物卡：只有「撕咬 60」，根本没有「格斗(斗殴)」这一项
+_CLICKER = {"skills": {"撕咬": 60, "聆听": 80}, "base_attributes": {"STR": 100, "SIZ": 60},
+            "_weapon": "撕咬"}
+
+
+def test_monster_attack_uses_its_own_named_skill(monkeypatch):
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([43, 80]))
+    _fix_randint(monkeypatch, 3)
+    r = combat.resolve_attack(_CLICKER, "0", "撕咬", defender_data=_DEF, defense="dodge")
+    chk = r["attacker_check"]
+    # 掷的是「撕咬 60」，不是查不到武器时回落的「格斗(斗殴)」（怪物没这项 → 技能值 0 → 必失手）
+    assert chk.skill_name == "撕咬" and chk.skill_value == 60
+    assert r["hit"] is True
+
+
+def test_human_weapon_still_uses_weapon_table_skill():
+    # 人类武器不受影响：仍按武器表登记的技能取
+    hum = {"skills": {"格斗(斗殴)": 50, "射击(手枪)": 45}, "base_attributes": {}}
+    assert combat.attack_skill_of(hum, "大棒(棒球棒、拨火棍)") == "格斗(斗殴)"
+    assert combat.attack_skill_of(hum, ".32(7.65mm)左轮") == "射击(手枪)"
+
+
+def test_disarmed_monster_falls_back_to_brawl(monkeypatch):
+    # 被缴械 → 强制徒手，此时不该再走「撕咬」
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([43, 80]))
+    r = combat.resolve_attack(_CLICKER, "0", "撕咬", defender_data=_DEF, defense="dodge",
+                              attacker_disarmed=True)
+    assert r["attacker_check"].skill_name == "格斗(斗殴)"
+
+
+def test_monster_fight_back_and_maneuver_use_named_skill(monkeypatch):
+    # 反击：守方是怪物 → 用「撕咬」招架，而不是 0 值的格斗(斗殴)
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([80, 30]))
+    _fix_randint(monkeypatch, 2)
+    r = combat.resolve_attack(_ATK, "0", "徒手格斗", defender_data=_CLICKER, defense="fight_back")
+    assert r["defender_check"].skill_name == "撕咬" and r["damage_to"] == "attacker"
+    # 擒抱等格斗机动同理
+    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([20, 90]))
+    m = combat.resolve_maneuver(_CLICKER, _DEF, kind="grapple")
+    assert m["success"] is True
+
+
+def test_initiative_tiebreak_counts_monster_named_attack():
+    parts = [
+        {"id": "human", "dex": 50, "has_firearm": False, "side": "player",
+         "skills": {"格斗(斗殴)": 40}},
+        {"id": "clicker", "dex": 50, "has_firearm": False, "side": "enemy",
+         "weapon": "撕咬", "skills": {"撕咬": 60}},
+    ]
+    # 同 DEX 比战斗技能：怪物的「撕咬 60」也要算数（此前按 0 处理，怪物永远排在后面）
+    assert [p["id"] for p in combat.roll_initiative(parts)] == ["clicker", "human"]
+
+
 def test_ranged_hit_on_meeting_difficulty(monkeypatch):
     monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([30]))
     _fix_randint(monkeypatch, 3)
