@@ -281,6 +281,37 @@ REGISTRY: tuple[ToolSpec, ...] = (
         kind="state",
     ),
     ToolSpec(
+        name="block_path",
+        tag="BLOCK_PATH",
+        description=(
+            "标记某个场景**此刻过不去**：怪物堵着门、舱门锁死、通道塌方等。"
+            "系统据此让玩家的『前往』**绕开**这个场景——但仍允许他们把它本身当目的地"
+            "（走进危险是玩家的自由，被拦住的只是借道穿过去）。"
+            "只在叙事中确实出现了这种阻碍时调用；玩家清掉威胁/打开门之后，"
+            "**记得用 unblock_path 解除**，否则那条路会一直断着。"
+        ),
+        parameters=_params({
+            "scene_id": {"type": "string", "description": "过不去的场景 id（或场景名）"},
+            "reason": {
+                "type": "string",
+                "description": "一句话原因，会原样告诉玩家，如「那东西还堵在车厢里」",
+            },
+        }, ["scene_id"]),
+        kind="state",
+    ),
+    ToolSpec(
+        name="unblock_path",
+        tag="UNBLOCK_PATH",
+        description=(
+            "解除某个场景的阻断：威胁被清除、门被打开、路被挖通。与 block_path 相对，"
+            "同样只在剧情确实发生时调用。"
+        ),
+        parameters=_params({
+            "scene_id": {"type": "string", "description": "恢复通行的场景 id（或场景名）"},
+        }, ["scene_id"]),
+        kind="state",
+    ),
+    ToolSpec(
         name="rule_lookup",
         tag="RULE_LOOKUP",
         description=(

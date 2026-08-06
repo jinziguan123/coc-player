@@ -19,7 +19,7 @@ from app.models.session import GameSession
 from app.rules.coc import combat as engine
 from app.rules.coc import positioning
 from app.rules.coc.weapons import WEAPON_CATEGORY_ORDER
-from app.services import session_service, world_state
+from app.services import session_service, world_memory, world_state
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
@@ -1110,6 +1110,10 @@ def _end_combat(db: Session, session_id: str, state: dict, outcome: str) -> list
     ws = dict(session.world_state or {})
     ws["combat_result"] = summary
     ws.pop("combat", None)
+    # 打赢了就自动解除此处的封路：「靠 KP 记得 [UNBLOCK_PATH]」是这套机制最容易塌的一环——
+    # 忘一次，那条路就永久断着，玩家再也走不过去且不知道为什么。打输/逃走不解除（东西还在）。
+    if outcome == "players_win" and session.current_scene_id:
+        ws = world_memory.record_unblock(ws, session.current_scene_id)
     session.world_state = ws
     db.commit()
     label = {"players_win": "战斗结束：敌方被击溃。", "players_defeated": "战斗结束：调查员一方倒下。",

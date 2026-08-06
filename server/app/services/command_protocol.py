@@ -25,6 +25,9 @@ SCENE_CHANGE_RE = re.compile(
 # 建议前往（不搬人，只给玩家一张可点的卡）：与 SCENE_CHANGE 是**互补**关系——
 # 后者是「玩家已经动了，把人搬过去」，前者是「玩家还没表态，问一句要不要去」。
 TRAVEL_SUGGEST_RE = re.compile(r"\[TRAVEL_SUGGEST:([^\]]*)\]")
+# 此路不通 / 恢复通行：connections 只说物理相连，说不了「现在能不能过」。
+BLOCK_PATH_RE = re.compile(r"\[BLOCK_PATH:([^\]]*)\]")
+UNBLOCK_PATH_RE = re.compile(r"\[UNBLOCK_PATH:([^\]]*)\]")
 RULE_LOOKUP_RE = re.compile(r"\[RULE_LOOKUP:\s*query=([^\]]+)\]")
 MODULE_LOOKUP_RE = re.compile(r"\[MODULE_LOOKUP:\s*query=([^\]]+)\]")
 SET_FLAG_RE = re.compile(r"\[SET_FLAG[:：\s]\s*(?:flag=)?\s*([^\]]+?)\s*\]")
@@ -40,6 +43,8 @@ CMD_TAG_PREFIXES = (
     "NPC_ACT:",
     "SCENE_CHANGE:",
     "TRAVEL_SUGGEST:",
+    "BLOCK_PATH:",
+    "UNBLOCK_PATH:",
     "RULE_LOOKUP:",
     "MODULE_LOOKUP:",
     "SET_FLAG:",

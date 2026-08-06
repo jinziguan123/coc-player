@@ -96,6 +96,40 @@ def handout_issued(ws: dict, handout_id: str) -> bool:
     return str(handout_id or "") in set((ws or {}).get("handouts_issued") or [])
 
 
+def blocked_scenes(ws: dict) -> dict:
+    """当前被判定「过不去」的场景 → 原因。KP 用 [BLOCK_PATH] 标、[UNBLOCK_PATH] 解。
+
+    ``connections`` 只说物理上相连，说不了「现在能不能过」——怪物堵着门、锁死的舱门、
+    塌方，都是只有 KP 知道的故事事实。寻路据此**绕开**这些场景（但仍可把它们当终点：
+    走进危险是玩家的自由，被拦住的是「借道穿过去」）。
+    """
+    raw = (ws or {}).get("blocked_scenes") or {}
+    return {str(k): str(v or "") for k, v in raw.items() if k}
+
+
+def record_block(ws: dict, scene_id: str, reason: str) -> dict:
+    """标记某场景此刻过不去。纯函数；重复标记只更新原因。"""
+    scene_id = str(scene_id or "").strip()
+    if not scene_id:
+        return dict(ws or {})
+    out = dict(ws or {})
+    blocked = dict(blocked_scenes(out))
+    blocked[scene_id] = (reason or "").strip()
+    out["blocked_scenes"] = blocked
+    return out
+
+
+def record_unblock(ws: dict, scene_id: str) -> dict:
+    """解除阻断（威胁被清掉、门被打开）。纯函数；本来就没标记则 no-op。"""
+    scene_id = str(scene_id or "").strip()
+    out = dict(ws or {})
+    blocked = dict(blocked_scenes(out))
+    if blocked.pop(scene_id, None) is None:
+        return out
+    out["blocked_scenes"] = blocked
+    return out
+
+
 def travel_suggested(ws: dict, scene_id: str) -> bool:
     """某地点是否已经给玩家挂过「要不要去」的建议卡（幂等真源）。"""
     return str(scene_id or "") in set((ws or {}).get("travel_suggested") or [])

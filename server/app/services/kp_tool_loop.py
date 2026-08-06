@@ -49,6 +49,8 @@ HP_CHANGE_RE = command_protocol.HP_CHANGE_RE
 NPC_ACT_RE = command_protocol.NPC_ACT_RE
 SCENE_CHANGE_RE = command_protocol.SCENE_CHANGE_RE
 TRAVEL_SUGGEST_RE = command_protocol.TRAVEL_SUGGEST_RE
+BLOCK_PATH_RE = command_protocol.BLOCK_PATH_RE
+UNBLOCK_PATH_RE = command_protocol.UNBLOCK_PATH_RE
 RULE_LOOKUP_RE = command_protocol.RULE_LOOKUP_RE
 MODULE_LOOKUP_RE = command_protocol.MODULE_LOOKUP_RE
 SET_FLAG_RE = command_protocol.SET_FLAG_RE
@@ -78,6 +80,7 @@ _exec_scene_change = turn_effects._exec_scene_change
 _exec_flag = turn_effects._exec_flag
 _exec_handout = turn_effects._exec_handout
 _travel_suggest_event = turn_effects.travel_suggest_event
+_set_path_block = turn_effects.set_path_block
 
 
 def _rule_lookup_passages(
@@ -151,6 +154,7 @@ def _merge_step_result(result: list, step: list) -> None:
 _SOLO_ARG_KEY = {
     "set_flag": "flag", "clear_flag": "flag", "handout": "id",
     "scene_change": "scene_id", "travel_suggest": "scene_id",
+    "block_path": "scene_id", "unblock_path": "scene_id",
     "rule_lookup": "query", "module_lookup": "query",
 }
 
@@ -207,6 +211,8 @@ _STEP_NOTES: dict[str, str] = {
     "start_chase": "追逐即将开始…",
     "scene_change": "守秘人正在带你们前往新的地方…",
     "travel_suggest": "守秘人正在指一条路…",
+    "block_path": "守秘人正在确认这条路通不通…",
+    "unblock_path": "守秘人正在确认这条路通不通…",
     "handout": "守秘人正在准备要给你们的东西…",
     "rule_lookup": "守秘人正在翻阅规则书…",
     "module_lookup": "守秘人正在翻阅剧本…",
@@ -398,6 +404,16 @@ def _build_kp_tool_executor(
         )
         return kp_tools.ToolOutcome(note, chunks=chunks)
 
+    async def _h_block_path(name, kv):
+        ref = (kv.get("scene_id") or "").strip()
+        if not ref:
+            return kp_tools.ToolOutcome("参数缺失：scene_id 为必填。")
+        _chunks, note = _set_path_block(
+            db, session_id, game_session, module, ref, kv.get("reason", ""),
+            blocked=(name == "block_path"),
+        )
+        return kp_tools.ToolOutcome(note)
+
     async def _h_handout(name, kv):
         hid = kv.get("id", "").strip()
         if not hid:
@@ -422,6 +438,8 @@ def _build_kp_tool_executor(
         "clear_flag": _h_flag,
         "hp_change": _h_hp_change,
         "travel_suggest": _h_travel_suggest,
+        "block_path": _h_block_path,
+        "unblock_path": _h_block_path,
         "handout": _h_handout,
     }
 
@@ -743,6 +761,20 @@ async def _process_commands(
         )
         for chunk in scene_chunks:
             yield chunk
+
+    # 此路不通 / 恢复通行：只改寻路看的状态，不搬人、不出卡片。
+    for match in BLOCK_PATH_RE.finditer(kp_text):
+        kv = _parse_tag_kv(match.group(1))
+        _set_path_block(
+            db, session_id, game_session, module,
+            kv.get("scene_id") or match.group(1).strip(), kv.get("reason", ""), blocked=True,
+        )
+    for match in UNBLOCK_PATH_RE.finditer(kp_text):
+        kv = _parse_tag_kv(match.group(1))
+        _set_path_block(
+            db, session_id, game_session, module,
+            kv.get("scene_id") or match.group(1).strip(), "", blocked=False,
+        )
 
     # 建议前往：不搬人，只挂一张「要不要去」的卡；玩家点了才进他自己的暂存动作。
     for match in TRAVEL_SUGGEST_RE.finditer(kp_text):

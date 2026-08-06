@@ -242,7 +242,7 @@ async def _run_team_turn(
                 sid and sid in known and sid != cur
                 and session_service.find_scene_path(
                     module, cur, sid,
-                    via_allowed=session_service.visited_scene_ids(game_session),
+                    via_allowed=session_service.passable_scene_ids(game_session),
                 ) is not None
             ):
                 session_service.set_char_location(db, session_id, teammate.id, sid)

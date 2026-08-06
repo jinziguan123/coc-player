@@ -268,3 +268,103 @@ def test_far_place_becomes_reachable_once_the_leg_is_visited(train):
     db.commit()
     chunks, _note = turn_effects.travel_suggest_event(db, session.id, session, module, "head")
     assert len(chunks) == 1
+
+
+# ── 此路不通（KP 显式标记）─────────────────────────────────────────────
+#
+# 「途经必须去过」堵不住这一类：队伍进过 2 号车厢又退回来，怪物还在那儿，
+# 但 2 号车厢已经算「去过」了，路线又通了。connections 只说物理相连，
+# 说不了「现在能不能过」——这是只有 KP 知道的故事事实，得由它标出来。
+
+def test_blocked_scene_is_not_a_valid_leg(train):
+    """标记为过不去之后，取道该处的更远目标不再可达，且拒绝理由带上 KP 给的原因。"""
+    db, module, session, _hero = train
+    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3", "s2"]}
+    db.commit()
+    # 先确认没标记时是通的
+    assert len(turn_effects.travel_suggest_event(db, session.id, session, module, "head")[0]) == 1
+
+    session.world_state = {**session.world_state, "travel_suggested": []}
+    turn_effects.set_path_block(
+        db, session.id, session, module, "s2", "那东西还堵在车厢里", blocked=True,
+    )
+    chunks, note = turn_effects.travel_suggest_event(db, session.id, session, module, "head")
+    assert chunks == []
+    assert "那东西还堵在车厢里" in note
+
+
+def test_blocked_scene_is_still_a_valid_destination(train):
+    """封的是「借道穿过去」，不是「不许去」——走进危险是玩家的自由。"""
+    db, module, session, _hero = train
+    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3"]}
+    db.commit()
+    turn_effects.set_path_block(db, session.id, session, module, "s2", "怪物", blocked=True)
+
+    assert session_service.find_scene_path(
+        module, "s3", "s2", via_allowed=session_service.passable_scene_ids(session),
+    ) == ["s3", "s2"]
+
+
+def test_unblock_restores_the_route(train):
+    db, module, session, _hero = train
+    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3", "s2"]}
+    db.commit()
+    turn_effects.set_path_block(db, session.id, session, module, "s2", "怪物", blocked=True)
+    assert "s2" not in session_service.passable_scene_ids(session)
+
+    turn_effects.set_path_block(db, session.id, session, module, "s2", "", blocked=False)
+    assert "s2" in session_service.passable_scene_ids(session)
+
+
+def test_block_state_is_pure_and_idempotent():
+    ws = {"visited_scenes": ["a"]}
+    out = world_memory.record_block(ws, "s2", "怪物")
+    assert "blocked_scenes" not in ws                 # 入参没被就地改写
+    assert world_memory.blocked_scenes(out) == {"s2": "怪物"}
+    again = world_memory.record_block(out, "s2", "换了个原因")
+    assert world_memory.blocked_scenes(again) == {"s2": "换了个原因"}
+    assert world_memory.blocked_scenes(world_memory.record_unblock(again, "s2")) == {}
+    assert world_memory.record_unblock(ws, "不存在") == ws
+
+
+def test_kp_context_lists_currently_blocked_paths(train):
+    """封着的路要摆进 KP 上下文：不给它这份清单，威胁解除时它就想不起来解封，
+    那条路会一直断着——这是「靠 KP 记得解」最容易塌的地方。"""
+    from app.ai import context as ctx
+
+    db, module, session, hero = train
+    turn_effects.set_path_block(
+        db, session.id, session, module, "s2", "那东西还堵在车厢里", blocked=True,
+    )
+    system = ctx.build_kp_context(session, module, hero, [])[0]["content"]
+    assert "当前封着的路" in system
+    assert "2号车厢" in system and "那东西还堵在车厢里" in system
+    assert "UNBLOCK_PATH" in system
+
+
+def test_winning_a_fight_auto_unblocks_that_scene(train):
+    """打赢就自动解封：忘一次 unblock，那条路就永久断着且没人知道为什么。"""
+    from app.services import combat_service
+
+    db, module, session, _hero = train
+    session.current_scene_id = "s2"
+    db.commit()
+    turn_effects.set_path_block(db, session.id, session, module, "s2", "怪物", blocked=True)
+
+    combat_service._end_combat(db, session.id, {"participants": [], "round": 1}, "players_win")
+    db.refresh(session)
+    assert world_memory.blocked_scenes(session.world_state) == {}
+
+
+def test_losing_a_fight_keeps_the_block(train):
+    """打输/逃走不解封——那东西还在。"""
+    from app.services import combat_service
+
+    db, module, session, _hero = train
+    session.current_scene_id = "s2"
+    db.commit()
+    turn_effects.set_path_block(db, session.id, session, module, "s2", "怪物", blocked=True)
+
+    combat_service._end_combat(db, session.id, {"participants": [], "round": 1}, "players_defeated")
+    db.refresh(session)
+    assert "s2" in world_memory.blocked_scenes(session.world_state)

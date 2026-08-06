@@ -877,7 +877,19 @@ def build_kp_context(
     # 「建议前往」能力：本子有多个 location 场景（真有地方可去）才广告——只有一处的本子
     # 广告了也只会诱导 KP 发无效指令。与「有规则书才广告 [RULE_LOOKUP]」同一取舍。
     if sum(1 for x in scenes if (x.get("kind") or "location") == "location") > 1:
-        system_content += TRAVEL_SUGGEST_INSTRUCTION
+        # 当前封着的路一并告诉 KP：不给它这份清单，它就没法在威胁解除时想起来解封，
+        # 那条路会一直断着——这是「靠 KP 记得解」这个设计最容易塌的地方。
+        blocked = world_memory.blocked_scenes(session.world_state or {})
+        blocked_now = ""
+        if blocked:
+            by_id = {x.get("id"): x for x in scenes if x.get("id")}
+            items = "；".join(
+                f"{(by_id.get(sid) or {}).get('title') or (by_id.get(sid) or {}).get('name') or sid}"
+                f"（{why or '未说明'}）"
+                for sid, why in blocked.items()
+            )
+            blocked_now = f"\n\n**当前封着的路**：{items}。条件一旦解除，立刻 [UNBLOCK_PATH]。"
+        system_content += TRAVEL_SUGGEST_INSTRUCTION.format(blocked_now=blocked_now)
 
     # 幕后真相（守秘人专属）：模组解析出的全局真相，KP 据此裁定与铺垫（带守密措辞）。
     truth = (getattr(module, "truth", "") or "").strip()
@@ -1225,12 +1237,12 @@ def build_team_context(
     # 可前往的已知地点（对话提及/已访问；排除当前所在与**不连通**的地点），供 travel 选 target。
     # 连通过滤与 travel 的确定性校验同一张图：不让队友「想去」一个系统必然拒绝的地方。
     known = session_service.list_known_locations(module, session, char_id=teammate.id, events=events)
-    _visited = session_service.visited_scene_ids(session)
+    _passable = session_service.passable_scene_ids(session)
     known_locations = "、".join(
         loc["name"] for loc in known
         if not loc["current"]
         and session_service.find_scene_path(
-            module, viewer_scene_id, loc["id"], via_allowed=_visited,
+            module, viewer_scene_id, loc["id"], via_allowed=_passable,
         ) is not None
     ) or "（暂无其他已知地点）"
 

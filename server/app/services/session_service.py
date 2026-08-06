@@ -12,6 +12,7 @@ from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant
+from app.services import world_memory
 
 # 「仅 KP 可见」的 visibility 哨兵：带此哨兵的事件（如幕后推演）只进 KP 上下文，
 # 对一切玩家侧出口（历史/重连分页、搜索、AI 队友上下文、NPC 上下文、广播）全部不可见。
@@ -1644,18 +1645,36 @@ def find_scene_path(
     return None
 
 
-def travel_blocker(module, session: GameSession, start: str | None, dest: str) -> str | None:
-    """玩家为什么去不了 ``dest``：返回**挡在路上的那个场景 id**；能去则 None。
+def travel_blocker(
+    module, session: GameSession, start: str | None, dest: str,
+) -> tuple[str, str] | None:
+    """玩家为什么去不了 ``dest``：返回 (挡路的场景 id, 原因)；能去则 None。
 
-    只在 find_scene_path(..., via_allowed=已到访) 判定去不了时才有意义——用图上连通的
-    完整路径反查第一个没去过的途经点，好把「不连通」这种没头没脑的报错换成
+    只在 find_scene_path(..., via_allowed=可通行) 判定去不了时才有意义——用图上连通的
+    完整路径反查第一个过不去的途经点，好把「不连通」这种没头没脑的报错换成
     「要去先头车厢，得先过 2 号车厢」。真的完全不连通时返回 None（那是另一种拒绝）。
     """
     full = find_scene_path(module, start, dest)
     if not full:
         return None
     visited = visited_scene_ids(session)
-    return next((sid for sid in full[1:-1] if sid not in visited), None)
+    blocked = world_memory.blocked_scenes(session.world_state or {})
+    for sid in full[1:-1]:
+        if sid in blocked:
+            return sid, blocked[sid] or "那边过不去"
+        if sid not in visited:
+            return sid, "那儿你们还没去过"
+    return None
+
+
+def passable_scene_ids(session: GameSession) -> set[str]:
+    """可作为**途经点**的场景：去过的，减去当前被 KP 判定过不去的。
+
+    终点不受此限——走进一个危险或封锁的地方是玩家的自由，被拦住的是「借道穿过去」。
+    """
+    return visited_scene_ids(session) - set(
+        world_memory.blocked_scenes(session.world_state or {})
+    )
 
 
 def visited_scene_ids(session: GameSession) -> set[str]:

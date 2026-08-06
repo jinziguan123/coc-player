@@ -821,13 +821,14 @@ def travel_suggest_event(
     if sid == here:
         return [], "玩家已身处该场景，无需建议前往。"
     if session_service.find_scene_path(
-        module, here, sid, via_allowed=session_service.visited_scene_ids(game_session),
+        module, here, sid, via_allowed=session_service.passable_scene_ids(game_session),
     ) is None:
         blocker = session_service.travel_blocker(module, game_session, here, sid)
         if blocker:
+            bid, why = blocker
             return [], (
-                f"去{_scene_name(module, sid)}得先经过{_scene_name(module, blocker)}，"
-                "而那儿玩家还没去过——未给出建议。要引导他们过去，请建议先去中间那一处。"
+                f"去{_scene_name(module, sid)}得先经过{_scene_name(module, bid)}（{why}）"
+                "——未给出建议。要引导他们过去，请改成建议先去中间那一处。"
             )
         return [], (
             f"{_scene_name(module, sid)} 与当前位置不连通，未给出建议。"
@@ -857,6 +858,35 @@ def travel_suggest_event(
         f"已给玩家挂出「前往 {name}」的建议卡（去不去由他们自己点，你不要替他们决定，"
         "也不要在叙述里追问）。"
     )
+
+
+def set_path_block(
+    db: Session, session_id: str, game_session: GameSession, module: Module,
+    ref: str, reason: str, blocked: bool,
+) -> tuple[list[str], str]:
+    """标记/解除某场景「此刻过不去」。返回 (chunks, 给 KP 的结果说明)。
+
+    只改状态、不搬人、不出卡片：这是给寻路看的一条事实，玩家在叙事里已经知道路被堵了。
+    """
+    sid = turn_context._resolve_scene_ref(module, ref)
+    if not sid:
+        logger.warning("BLOCK_PATH 无法解析场景引用（跳过）：%r", ref)
+        return [], f"场景引用无法解析：{ref!r}。"
+    name = _scene_name(module, sid)
+    why = (reason or "").strip()
+    _apply_world_memory(
+        db, game_session,
+        lambda ws, _sid=sid, _why=why: (
+            world_memory.record_block(ws, _sid, _why) if blocked
+            else world_memory.record_unblock(ws, _sid)
+        ),
+    )
+    if blocked:
+        return [], (
+            f"已记下{name}此刻过不去（{why or '未说明原因'}）：玩家的『前往』会绕开它，"
+            "但仍可以直接去那儿。威胁解除后记得 unblock_path。"
+        )
+    return [], f"已恢复{name}的通行。"
 
 
 def _exec_flag(

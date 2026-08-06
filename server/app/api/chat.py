@@ -541,16 +541,13 @@ async def travel(
     # 「途经不停留、不触发事件」——合起来就是无视沿途的怪物凭空穿过去。
     # 模组没建图时 find_scene_path 返回平凡路径，行为与从前一致。
     path = session_service.find_scene_path(
-        module, cur, scene_id, via_allowed=session_service.visited_scene_ids(game_session),
+        module, cur, scene_id, via_allowed=session_service.passable_scene_ids(game_session),
     )
     if path is None:
         blocker = session_service.travel_blocker(module, game_session, cur, scene_id)
         if blocker:
-            raise HTTPException(
-                400,
-                f"去{_sname(scene_id)}要先经过{_sname(blocker)}——那儿你们还没去过，"
-                "得一段一段走过去。",
-            )
+            bid, why = blocker
+            raise HTTPException(400, f"去{_sname(scene_id)}要先经过{_sname(bid)}——{why}。")
         reachable = [
             _sname(n) for n in session_service.scene_neighbors(module, cur) if n in known
         ]
