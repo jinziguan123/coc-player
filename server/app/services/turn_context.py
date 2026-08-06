@@ -229,11 +229,15 @@ def record_clue_ledger_from_plan(
 
     discovered_by 取「与主角同场景」的玩家角色——分头行动下另一队并不知情，信息不共享。
     ``module`` 给定时，对**首次进台账**的线索追加一张发现配图卡（增强件，缺省不出卡）。
+
+    **要掷骰才能拿到的线索走暂存**：规划器裁定「这次行动匹配该线索、但成败未定」时只能写
+    reveal_level=none（写别的就是提前泄底），于是此前直接 return——而检定落地后再没有人记账。
+    结果是绝大多数线索（都要过检定）永远进不了台账，`ending_ready`、卡关检测、复盘全跟着失灵。
+    这里把候选暂存到 world_state.pending_clue_reveals，由投骰结算按成败兑现（见
+    ``planned_effects.settle_pending_clue_reveals``），与「先检定、后发货」的物品收益同一范式。
     """
     policy = plan.clue_policy
     if not policy.candidate_clue_ids:
-        return
-    if world_memory.reveal_status(policy.reveal_level) is None:
         return
     anchor = session_service.get_char_location(game_session, player_char.id)
     present = [player_char.id]
@@ -245,11 +249,22 @@ def record_clue_ledger_from_plan(
         if getattr(e, "sequence_num", None):
             seq = e.sequence_num
             break
+    if world_memory.reveal_status(policy.reveal_level) is None:
+        # 本轮不揭示：匹配上了就暂存等骰子，没匹配上（只是列了候选）则清掉旧暂存不留隔夜账
+        _apply_world_memory(db, game_session, lambda ws: world_memory.stage_clue_reveal(
+            ws,
+            list(policy.candidate_clue_ids) if policy.action_matches_clue else [],
+            present, seq, note=policy.notes,
+        ))
+        return
     # 记账前先取台账快照：新旧对比才知道哪些线索是**本轮首次**触碰（配图卡只出一次）
     before = set((game_session.world_state or {}).get("clue_ledger") or {})
-    _apply_world_memory(db, game_session, lambda ws: world_memory.record_clue_reveal(
-        ws, policy.candidate_clue_ids, policy.reveal_level, present, seq,
-        note=policy.notes,
+    _apply_world_memory(db, game_session, lambda ws: world_memory.stage_clue_reveal(
+        world_memory.record_clue_reveal(
+            ws, policy.candidate_clue_ids, policy.reveal_level, present, seq,
+            note=policy.notes,
+        ),
+        [], present, seq,   # 已当场入账 → 清掉暂存，别让旧候选被下一次投骰误兑现
     ))
     if module is not None:
         for cid in policy.candidate_clue_ids:

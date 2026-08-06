@@ -289,6 +289,84 @@ def test_record_clue_ledger_from_plan_none_level_noop(db_factory):
     assert not (session.world_state or {}).get("clue_ledger")
 
 
+def _search_plan(matches: bool = True):
+    """典型「搜查+侦查检定」轮的裁定：匹配上了线索，但成败未定 → 本轮不可揭示。"""
+    return turn_planner.TurnPlan(
+        requires_check=True,
+        clue_policy=turn_planner.CluePolicy(
+            action_matches_clue=matches,
+            candidate_clue_ids=["clue_key"],
+            reveal_level="none",
+            notes="检定成功才揭示暗格",
+        ),
+    )
+
+
+def test_gated_clue_is_staged_then_settled_on_success(db_factory):
+    """要掷骰才能拿到的线索：挂检定那轮先暂存，骰子成功后才入台账。
+
+    这是台账此前恒空的根因——规划器在挂检定的那轮只能写 reveal_level=none
+    （写别的就是提前泄底），而检定落地后再没有人记账。
+    """
+    from app.services import planned_effects
+
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    events = [EventLog(
+        session_id=session.id, sequence_num=7, event_type="action",
+        actor_id=player.id, actor_name=player.name, content="我敲击书桌侧板找暗格",
+    )]
+    chat_service._record_clue_ledger_from_plan(db, session, _search_plan(), events, player, [mate])
+    # 本轮不入台账（还没掷骰），但候选已暂存
+    assert not (session.world_state or {}).get("clue_ledger")
+    staged = (session.world_state or {}).get("pending_clue_reveals")
+    assert staged and staged["ids"] == ["clue_key"] and staged["seq"] == 7
+
+    planned_effects.settle_pending_clue_reveals(db, session.id, session, succeeded=True)
+    entry = (session.world_state or {}).get("clue_ledger", {}).get("clue_key")
+    assert entry and entry["status"] == "known"
+    assert player.id in entry["discovered_by"] and mate.id in entry["discovered_by"]
+    assert entry["seq"] == 7
+    assert not (session.world_state or {}).get("pending_clue_reveals")   # 兑现即清空
+
+
+def test_gated_clue_discarded_on_failed_check(db_factory):
+    from app.services import planned_effects
+
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    chat_service._record_clue_ledger_from_plan(db, session, _search_plan(), [], player, [mate])
+    planned_effects.settle_pending_clue_reveals(db, session.id, session, succeeded=False)
+    assert not (session.world_state or {}).get("clue_ledger")
+    assert not (session.world_state or {}).get("pending_clue_reveals")
+
+
+def test_unmatched_candidates_are_not_staged(db_factory):
+    """只是列在候选里、行动并没匹配上 → 不暂存，别让下一次投骰白捡一条线索。"""
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    chat_service._record_clue_ledger_from_plan(
+        db, session, _search_plan(matches=False), [], player, [mate],
+    )
+    assert not (session.world_state or {}).get("pending_clue_reveals")
+
+
+def test_direct_reveal_clears_stale_stage(db_factory):
+    """当场揭示的那轮要清掉旧暂存——否则下一次投骰会把上一轮没掷的候选一并兑现。"""
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    chat_service._record_clue_ledger_from_plan(db, session, _search_plan(), [], player, [mate])
+    assert (session.world_state or {}).get("pending_clue_reveals")
+    direct = turn_planner.TurnPlan(
+        clue_policy=turn_planner.CluePolicy(
+            action_matches_clue=True, candidate_clue_ids=["clue_other"], reveal_level="direct",
+        ),
+    )
+    chat_service._record_clue_ledger_from_plan(db, session, direct, [], player, [mate])
+    assert (session.world_state or {}).get("clue_ledger", {}).get("clue_other", {}).get("status") == "known"
+    assert not (session.world_state or {}).get("pending_clue_reveals")
+
+
 def test_record_npc_say_memory_hook(db_factory):
     db = db_factory()
     session, module, player, mate = _seed(db)
@@ -655,3 +733,64 @@ def test_maybe_roll_story_summary_below_threshold_noop(db_factory):
     asyncio.run(chat_service._maybe_roll_story_summary(db, session.id, _Counting("{}")))
     assert called["n"] == 0                # 未攒够阈值：零 LLM 调用
     assert "story_summary" not in (session.world_state or {})
+
+
+# ── 模组结局：抵达终局的确定性记录 ──────────────────────────────────
+
+_ENDINGS = [{"id": "ending_a", "name": "结局A：冲出隧道", "when": "把油门推到底",
+             "description": "电车冲出隧道"}]
+
+
+def _ending_plan(reached: str):
+    return turn_planner.TurnPlan(
+        ending=turn_planner.EndingVerdict(reached_id=reached, reason="玩家把油门推到底"),
+    )
+
+
+def test_settle_plan_ending_records_and_backfills(db_factory):
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    module.endings = _ENDINGS
+    db.commit()
+    plan = _ending_plan("ending_a")
+    chat_service._settle_plan_ending(db, session.id, session, module, plan)
+    reached = (session.world_state or {}).get("ending_reached")
+    assert reached and reached["id"] == "ending_a" and "冲出隧道" in reached["name"]
+    # 结局名/收场回填进 plan → KP 的裁定计划里才会有「本轮当终局演」那一段
+    assert plan.ending.name == "结局A：冲出隧道" and plan.ending.description == "电车冲出隧道"
+    # 落一条系统事件供玩家看到收束提示
+    ev = db.query(EventLog).filter_by(session_id=session.id).all()[-1]
+    assert (ev.metadata_ or {}).get("ending_reached") is True
+
+
+def test_settle_plan_ending_ignores_hallucinated_id(db_factory):
+    """规划器编出模组里没有的结局 id → 一律忽略，绝不据此收场。"""
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    module.endings = _ENDINGS
+    db.commit()
+    plan = _ending_plan("ending_zzz")
+    chat_service._settle_plan_ending(db, session.id, session, module, plan)
+    assert not (session.world_state or {}).get("ending_reached")
+    assert plan.ending.reached_id == ""     # 清掉，别让它渲染进 KP 指令
+
+
+def test_settle_plan_ending_is_idempotent(db_factory):
+    """已抵达过就不再重复记账/重复提示（后续回合仍可继续演尾声）。"""
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    module.endings = _ENDINGS + [{"id": "ending_b", "name": "结局B"}]
+    db.commit()
+    chat_service._settle_plan_ending(db, session.id, session, module, _ending_plan("ending_a"))
+    n = db.query(EventLog).filter_by(session_id=session.id).count()
+    chat_service._settle_plan_ending(db, session.id, session, module, _ending_plan("ending_b"))
+    assert (session.world_state or {}).get("ending_reached", {})["id"] == "ending_a"
+    assert db.query(EventLog).filter_by(session_id=session.id).count() == n
+
+
+def test_settle_plan_ending_noop_without_endings(db_factory):
+    """模组没写结局 → 永不判定（存量模组维持原样）。"""
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    chat_service._settle_plan_ending(db, session.id, session, module, _ending_plan("ending_a"))
+    assert not (session.world_state or {}).get("ending_reached")

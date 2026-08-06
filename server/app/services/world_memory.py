@@ -91,6 +91,28 @@ def record_clue_reveal(
     return ws
 
 
+def stage_clue_reveal(
+    ws: dict, clue_ids: list[str], discovered_by: list[str], seq: int, note: str = "",
+) -> dict:
+    """暂存「等这次检定落地才算数」的线索候选（world_state.pending_clue_reveals）。
+
+    传空 ``clue_ids`` 即清空暂存。纯函数，返回更新后的拷贝。每轮只保留最新一批——
+    玩家换了个行动，上一轮没掷的候选就不该再被下一次投骰兑现。
+    """
+    ws = dict(ws or {})
+    ids = [str(c).strip() for c in (clue_ids or []) if str(c or "").strip()]
+    if not ids:
+        ws.pop("pending_clue_reveals", None)
+        return ws
+    ws["pending_clue_reveals"] = {
+        "ids": ids,
+        "discovered_by": list(discovered_by or []),
+        "seq": int(seq or 0),
+        "note": _truncate(note),
+    }
+    return ws
+
+
 def handout_issued(ws: dict, handout_id: str) -> bool:
     """某手书是否已发放过（幂等判定的唯一真源：world_state.handouts_issued）。"""
     return str(handout_id or "") in set((ws or {}).get("handouts_issued") or [])

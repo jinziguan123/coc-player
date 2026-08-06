@@ -41,6 +41,7 @@ from app.services import (
     turn_context,
     turn_effects,
     turn_event_order,
+    world_state,
 )
 from app.services.room_hub import room_hub
 
@@ -198,6 +199,52 @@ def _persist_narration(
     )
 
 
+def _settle_plan_ending(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module | None,
+    plan: turn_planner.TurnPlan | None,
+) -> None:
+    """规划器判定本轮抵达模组结局 → 落 world_state.ending_reached + 广播一条系统提示。
+
+    id 必须命中模组 endings（编出来的一律忽略），并把结局名/收场回填进 plan.ending——
+    KP 的裁定计划里据此多出一段「本轮当终局演」的指令，不然「抵达终局」就只是系统自己记了
+    一笔，KP 那边照旧当普通一轮往下讲。
+
+    **只记录与提示，绝不代替玩家结束模组**：结束仍须全体真人投票（/end-vote）。幂等：
+    已抵达过就不再重复（此后的回合仍可继续演尾声）。
+    """
+    verdict = getattr(plan, "ending", None)
+    eid = str(getattr(verdict, "reached_id", "") or "").strip()
+    if not eid or (game_session.world_state or {}).get("ending_reached"):
+        return
+    endings = getattr(module, "endings", None) or []
+    match = next(
+        (e for e in endings if isinstance(e, dict) and str(e.get("id") or "") == eid), None,
+    )
+    if match is None:
+        logger.info("规划器给了模组里没有的结局 id=%s，忽略 session=%s", eid, session_id)
+        verdict.reached_id = ""
+        return
+    name = str(match.get("name") or eid).strip()
+    verdict.name = name
+    verdict.description = str(match.get("description") or "").strip()
+    world_state.set_key(db, game_session, "ending_reached", {
+        "id": eid, "name": name, "reason": str(verdict.reason or "").strip(),
+    })
+    content = f"（本模组已抵达结局：{name}。演完这一幕后，全体玩家一致同意即可结束本局。）"
+    ev = session_service.add_event(
+        db, session_id, "system", content, actor_name="系统",
+        metadata={"ending_reached": True, "ending_id": eid, "ending_name": name},
+    )
+    room_hub.broadcast(session_id, _make_chunk(
+        "system", content, actor_name="系统", event_id=ev.id,
+        metadata={"ending_reached": True, "ending_id": eid, "ending_name": name},
+    ))
+    room_hub.broadcast(session_id, _make_chunk("status", metadata={"ending_reached": True}))
+
+
 def _record_clue_ledger_from_plan(
     db: Session,
     game_session: GameSession,
@@ -342,6 +389,7 @@ async def _run_generation(
             _record_clue_ledger_from_plan(
                 db, game_session, plan, events, player_char, teammates, module=module,
             )
+            _settle_plan_ending(db, session_id, game_session, module, plan)
 
     # 幕后推演 → validator 预筛：最近幕后事件文本挂进 plan.safety.do_not_reveal，
     # 防 KP 把「玩家不可见」的幕后动态直接复述进旁白（单场景与分头路径共用此 plan）。
@@ -857,6 +905,7 @@ async def run_chat_generation(session_id: str) -> None:
                     db, game_session, plan, pre_events, player_char, party_others,
                     module=module,
                 )
+                _settle_plan_ending(db, session_id, game_session, module, plan)
 
         # 玩家明确申请检定 → 直接走确定性检定裁定（避免被 KP 当叙事顺过去），不走常规叙事。
         # 战斗宣言不走此路。
@@ -936,6 +985,7 @@ async def run_chat_generation(session_id: str) -> None:
                     db, game_session, generation_plan, events, player_char, party_others,
                     module=module,
                 )
+                _settle_plan_ending(db, session_id, game_session, module, generation_plan)
         elif ai_teammates:
             logger.info(
                 "耗时|二次 planner 已跳过（队友本轮只有对白）session=%s", session_id,
@@ -1386,6 +1436,11 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
             db, session_id, game_session, succeeded,
         ):
             room_hub.broadcast(session_id, chunk)
+        # 同理「先检定、后记账」：这次检定门控的线索，骰子落地才决定进不进台账。
+        planned_effects.settle_pending_clue_reveals(
+            db, session_id, game_session, succeeded,
+            module=module, on_first_clue=_maybe_clue_illustration,
+        )
         if game_session.kp_mode == "human":
             # 真人 KP 模式下掷骰只完成确定性结算，不自动生成后续叙事；KP 可据结果手动发布。
             room_hub.broadcast(

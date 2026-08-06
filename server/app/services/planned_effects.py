@@ -20,6 +20,7 @@ from app.services import (
     session_service,
     turn_context,
     turn_effects,
+    world_memory,
 )
 from app.services.event_protocol import make_chunk as _make_chunk
 
@@ -837,6 +838,39 @@ def settle_pending_item_gains(
     game_session.world_state = ws
     db.commit()
     return chunks
+
+
+def settle_pending_clue_reveals(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    succeeded: bool,
+    module: Module | None = None,
+    on_first_clue=None,
+) -> None:
+    """检定落地后兑现暂存的线索候选：成功记入台账（known），失败丢弃。
+
+    「先检定、后记账」——与 `settle_pending_item_gains` 同一范式。规划器在挂检定的那一轮
+    只能写 reveal_level=none（写别的就是提前泄底），所以线索是否被掌握只有骰子知道。
+    台账不是给玩家看的通知（线索内容由 KP 叙事给出），是喂给结局判定/卡关检测/复盘的账本，
+    因此这里不广播 chunk，只在**首次入账**时补一张发现配图卡。
+    """
+    ws = dict(game_session.world_state or {})
+    staged = ws.get("pending_clue_reveals") or {}
+    ids = [str(c) for c in (staged.get("ids") or []) if str(c or "").strip()]
+    ws.pop("pending_clue_reveals", None)
+    before = set(ws.get("clue_ledger") or {})
+    if ids and succeeded:
+        ws = world_memory.record_clue_reveal(
+            ws, ids, "direct", list(staged.get("discovered_by") or []),
+            int(staged.get("seq") or 0), note=str(staged.get("note") or ""),
+        )
+    game_session.world_state = ws
+    db.commit()
+    if ids and succeeded and module is not None and on_first_clue:
+        for cid in ids:
+            if cid not in before:
+                on_first_clue(db, session_id, module, cid)
 
 
 async def _ensure_planned_combat_damage(
