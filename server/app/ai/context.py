@@ -411,6 +411,8 @@ def _compact_npcs(
             item["attributes"] = n.get("attributes")
         if n.get("alive") is False:  # 剧情变体可将 NPC 标记为已死亡
             item["status"] = "已死亡（不可再开口或行动）"
+        if n.get("goals"):  # 行为动机：这个 NPC 此刻想干什么，决定它主动做什么而非只会应答
+            item["goals"] = n.get("goals")
         if not hide_secrets:
             # 生平含 KP 视角的过往，可能涉剧情 → 与 secrets 同样仅运行时给、开场剥离
             if n.get("background"):

@@ -470,6 +470,10 @@ def build_turn_plan_messages(
                 "personality": npc.get("personality", ""),
                 "secrets": npc.get("secrets", []),
                 "location": npc.get("location") or npc.get("initial_location", ""),
+                # goals 是模组写明的**行为动机**（「攻击并杀死一切发出声音的活物」），
+                # 也是判断「这东西此刻该不该动手」的唯一依据。此前只喂给幕后推演，
+                # 玩家在场的当轮反而看不到——于是怪物永远只会被动挨打。
+                "goals": npc.get("goals", []),
             }
             for npc in visible_npcs
         ],
@@ -563,8 +567,12 @@ def build_turn_plan_messages(
                 "有理有据的现实话术说服对方——应 bonus / 降档，足够精彩则 auto_outcome=success 免检。\n"
                 "auto_outcome 只用于结果**真的没有悬念**时；只要还有翻盘余地就掷骰——好 RP 给奖励骰 / 降档，"
                 "而非直接判成功，尤其高风险场景别让口才碾平一切。\n"
-                "combat.should_start 只在玩家或 NPC 已明确发起会造成伤害的攻击、双方即刻进入敌对交锋时为 true；"
-                "威胁、戒备、瞄准、谈判或尚未接敌时保持 false。开战时 enemies 必须列出本轮实际参战敌方的名字，"
+                "combat.should_start 在两类情形为 true：① 玩家或 NPC 已明确发起会造成伤害的攻击、"
+                "双方即刻进入敌对交锋；② **在场敌对 NPC 的开战条件被本轮行动满足**——照 visible_npcs 的 "
+                "goals / description 判断（如目标写着「攻击一切发出声音的活物」而玩家弄出了巨响、"
+                "写着「见到闯入者即扑杀」而玩家撞进了它的地盘）。**别等玩家先动手**：怪物有它自己的动机，"
+                "条件成立就该由它发起。"
+                "威胁、戒备、瞄准、谈判，或敌对 NPC 的条件并未被满足时，保持 false。开战时 enemies 必须列出本轮实际参战敌方的名字，"
                 "优先使用 visible_npcs 中的原名，trigger 用一句话说明开战原因。结构化战斗会自行结算攻击，"
                 "因此规划开战时不要再把本次攻击裁定为普通 dice_check。\n"
                 "combat_damage.trigger 在**战斗中玩家用引擎没建模的非常规/范围攻击命中敌人**时为 true："
