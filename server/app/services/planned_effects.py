@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -378,6 +379,199 @@ async def _ensure_planned_combat(
     )
     for chunk in chunks:
         yield chunk
+
+
+def _narrated_turn_text(db: Session, session_id: str, pre_gen_seq: int) -> str:
+    """本轮新生成的叙事与 NPC 台词——守卫据此核对「文字里到底发生了什么」。"""
+    texts = []
+    for ev in session_service.get_session_events(db, session_id):
+        if int(ev.sequence_num or 0) <= pre_gen_seq:
+            continue
+        if ev.event_type in ("narration", "dialogue"):
+            content = (ev.content or "").strip()
+            if content:
+                texts.append(content)
+    return "\n".join(texts)
+
+
+def _npcs_present(module: Module | None, game_session: GameSession) -> list[dict]:
+    """当前场景在场（或无固定位置）的存活 NPC 简况，供判定认名字、认动机。"""
+    if module is None:
+        return []
+    scene_id = str(game_session.current_scene_id or "").strip()
+    present = []
+    for npc in (module.npcs or []):
+        loc = str(npc.get("initial_location") or "").strip()
+        if loc and scene_id and loc != scene_id:
+            continue
+        if npc.get("alive") is False:
+            continue
+        name = str(npc.get("name") or "").strip()
+        if not name:
+            continue
+        present.append({
+            "name": name,
+            "description": (str(npc.get("description") or ""))[:80],
+            "goals": npc.get("goals") or [],
+        })
+    return present
+
+
+# 「叙事已交战、机制没跟上」的预筛词表：KP 把怪物写成扑上来了，却既没调 start_combat、
+# planner 也判了不开战——玩家读到「它扑过来了」，却没有先攻队列可打，它下一轮咬没咬到人
+# 全看 KP 心情。词表只做**免费预筛**：不含这些词的轮次直接零成本跳过，命中才花一次快模型
+# 确认。因此这里只收**实际接触到人的攻击动作**，「逼近/冲向/堵住」这类光靠移动的词不要——
+# 它们在恐怖叙事里几乎每轮都有，收进来等于每轮都多掏一次调用。
+# 单字词一律不收：「撕」会被撕开信封命中、「咬」会被咬紧牙关命中、「牙」更是直接被
+# 「江户川龙牙」这样的角色名每轮命中——白掏一次调用。宁可靠 KP 几乎必写的扑/爪/咬住
+# 这类词兜住，漏掉的生僻写法（「攫住」）等真遇上了再往词表里加。
+_ENGAGE_MARKERS = (
+    "扑来", "扑向", "扑上", "扑击", "猛扑", "扑倒", "扑咬", "咬住", "咬向", "咬穿",
+    "撕咬", "撕碎", "獠牙", "利爪", "挥爪", "抓向", "掐住", "钳住", "袭来", "袭向",
+    "拖走", "拽住", "砸向", "刺向", "劈向", "捅进", "捅向", "开枪", "射向",
+    "挥拳", "挥刀", "命中", "打中",
+)
+
+_ENGAGE_CONFIRM_PROMPT = """\
+你在核对一段刚刚生成的 TRPG 叙事：它有没有已经写出「打起来了」这个既成事实。
+只看叙事文本本身，不要推测接下来会发生什么，也不要考虑「应不应该」开打。
+
+先在叙事里找出**挨打的是谁**：这一下攻击落在谁身上、朝谁扑过去。把这个人填进 target。
+engaged=true 仅当：叙事里已有一方**实际做出了会造成伤害的攻击动作**，且 target 是
+party 里的玩家角色或队友、交锋已经开始——扑击、撕咬、挥击、开枪、抓住对方等，
+怪物先动手或玩家先动手都算。
+
+以下一律 false（从严）：
+- 只是威胁、咆哮、逼近、盯住、缓慢靠近、堵住去路，还没真动手；
+- 玩家只是在计划、提议、准备动手，或正屏息潜行、伺机而动；
+- 攻击发生在回忆、假设、梦境、幻觉、比喻、他人转述的往事里；
+- **挨打的不是 party 里的人**——两个 NPC 扭打成一团、怪物在啃早已死去的尸体，
+  哪怕场面再激烈、party 就站在旁边看着，都是 false；
+- 叙事只写了声响、动静、拖痕、血迹这些痕迹。
+
+enemies 只填**这段叙事里确实动了手**的那一方，优先照抄 npcs_present 里的原名。
+npcs_present 只是给你对名字用的花名册，**不是可以随手拉进来的参战名单**：叙事没写到的
+NPC 一律不许填进 enemies，更不许替它编一个「它也被声音引来了」的理由。玩家角色和队友
+绝不是敌方。trigger 用一句话说明因何打起来。
+
+只输出 JSON：
+{"engaged": true/false, "target": "挨打的人名", "enemies": ["名字"], "trigger": "一句话"}\
+"""
+
+
+def _is_party_member(target: str, party: list[str]) -> bool:
+    """target 是否是玩家这一方的人。叙事里常用简称（「龙牙」之于「江户川龙牙」），故双向包含。"""
+    target = (target or "").strip().casefold()
+    if not target:
+        return False
+    for name in party:
+        name = (name or "").strip().casefold()
+        if name and (name in target or target in name):
+            return True
+    return False
+
+
+async def _confirm_narrated_engagement(payload: dict) -> dict | None:
+    """快模型二次确认：叙事是否真的已经进入交战。失败一律返回 None（宁可不开战）。"""
+    from app.ai.llm_factory import get_fast_llm
+
+    messages = [
+        {"role": "system", "content": _ENGAGE_CONFIRM_PROMPT},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+    try:
+        # 不设 max_tokens：推理模型的 reasoning 会把输出预算吃光，content 返回空串。
+        raw = await get_fast_llm().complete(
+            messages, temperature=0, response_format={"type": "json_object"},
+        )
+    except Exception:
+        logger.exception("交战确认调用失败，本轮不补开战")
+        return None
+    data = turn_planner._extract_json_object(raw)
+    if not isinstance(data, dict):
+        logger.warning("交战确认输出无法解析为 JSON，本轮不补开战；原始片段：%s", str(raw)[:200])
+        return None
+    return data
+
+
+async def _ensure_narrated_combat(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module,
+    player_char: Character,
+    teammates: list[Character] | None,
+    llm,
+    plan: turn_planner.TurnPlan | None,
+    pre_gen_seq: int,
+) -> AsyncIterator[str]:
+    """叙事已经打起来、机制却没跟上 → 确定性补开战。
+
+    与 ``_ensure_planned_combat`` 的分工：那道守卫兜的是「计划裁定了开战、KP 漏落地」，
+    这道兜的是**计划自己判错**——怪物按 goals 该扑上来、KP 也照着写了它扑上来，但
+    combat.should_start 仍是 false，于是交战只存在于文字里：没有先攻、没有回合，玩家
+    没法还手。叙事与机制在这里脱节，比谁对谁错更伤——世界说它咬过来了，规则却当无事发生。
+
+    判定分两段：免费词表预筛挡掉绝大多数轮次，命中才花一次快模型确认；确认从严，
+    宁可漏判（维持现状）也不凭空开战——凭空开战会直接打断玩家正在进行的潜行/谈判。
+    """
+    if plan is not None and plan.combat.should_start:
+        return  # 计划已裁定开战，交给 _ensure_planned_combat，别开两次
+
+    from app.services import combat_service
+
+    current = combat_service.get_combat(db.get(GameSession, session_id))
+    if current and current.get("active"):
+        return
+
+    narration = _narrated_turn_text(db, session_id, pre_gen_seq)
+    if not narration or not any(marker in narration for marker in _ENGAGE_MARKERS):
+        return
+
+    party = [player_char.name] + [t.name for t in (teammates or [])]
+    verdict = await _confirm_narrated_engagement({
+        "party": party,
+        "npcs_present": _npcs_present(module, game_session),
+        "player_input": _turn_evidence_text(db, session_id, pre_gen_seq)[:1500],
+        "narration": narration[-3000:],
+    })
+    if not verdict or not verdict.get("engaged"):
+        return
+
+    # 确定性护栏：挨打的必须是玩家这一方。判定光靠 prompt 约束不住「两个 NPC 扭打、
+    # party 在旁边看着」这种场面——实测它会判成开战，还顺手把叙事里根本没出场的怪物
+    # 拉进来凑敌人。战斗轮是玩家的战斗轮，打不到玩家头上就不该起。
+    target = str(verdict.get("target") or "").strip()
+    if not _is_party_member(target, party):
+        logger.info(
+            "叙事判定已交战，但挨打的不是玩家一方（target=%s），不补开战: session=%s",
+            target or "未给出", session_id,
+        )
+        return
+
+    party_lower = {name.strip().casefold() for name in party if name.strip()}
+    enemies = [
+        str(name).strip() for name in (verdict.get("enemies") or [])
+        if str(name).strip() and str(name).strip().casefold() not in party_lower
+    ]
+    if not enemies:
+        # 判定说打起来了却给不出敌方，多半是它把玩家一方当成了「敌人」——凭空造一个
+        # 杂兵比不开战更糟（玩家会被拉进一场跟谁打都不知道的战斗），直接放弃。
+        logger.warning("叙事判定已交战但未给出敌方名字，本轮不补开战: session=%s", session_id)
+        return
+
+    trigger = str(verdict.get("trigger") or "").strip() or "交战在叙事中已经开始"
+    logger.info(
+        "叙事已交战但战斗态未起，守卫补开战: session=%s 敌方=%s 因由=%s",
+        session_id, "，".join(enemies), trigger,
+    )
+    chunks = await _exec_start_combat(
+        db, session_id, game_session, module, player_char, teammates, llm,
+        "，".join(enemies), trigger,
+    )
+    for chunk in chunks:
+        yield chunk
+
 
 def _san_rolled_this_turn(db: Session, session_id: str, pre_gen_seq: int) -> bool:
     """本轮是否已结算或发起过 SAN；防止确定性守卫重复发检定。"""

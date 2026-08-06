@@ -280,6 +280,7 @@ SPLIT_FOCUS_PROMPT = (
 
 # 兼容既有调用；规划副作用的单一实现位于 planned_effects。
 _ensure_planned_combat = planned_effects._ensure_planned_combat
+_ensure_narrated_combat = planned_effects._ensure_narrated_combat
 _san_rolled_this_turn = planned_effects._san_rolled_this_turn
 _ensure_planned_sanity = planned_effects._ensure_planned_sanity
 _hp_changed_this_turn = planned_effects._hp_changed_this_turn
@@ -469,6 +470,12 @@ async def _run_generation(
     ):
         room_hub.broadcast(session_id, chunk)
 
+    # 叙事—机制脱节守卫：计划判了不开战，KP 却把怪物写成已经扑上来 → 补开战（预筛后才判）。
+    async for chunk in _ensure_narrated_combat(
+        db, session_id, game_session, module, player_char, teammates, llm, plan, pre_gen_seq,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
     # 确定性场景守卫先执行：真实进入目标场景后，后续 SAN 守卫才能读取该场景的模组机制。
     async for chunk in _ensure_planned_scene(
         db, session_id, game_session, module, player_char, teammates, plan,
@@ -631,6 +638,12 @@ async def _run_split_generation(
 
     async for chunk in _ensure_planned_combat(
         db, session_id, game_session, module, player_char, teammates, llm, plan,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
+    # 叙事—机制脱节守卫：分头行动同样可能被某一组写出交战却没落成战斗态。
+    async for chunk in _ensure_narrated_combat(
+        db, session_id, game_session, module, player_char, teammates, llm, plan, pre_gen_seq,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -1047,6 +1060,13 @@ async def _run_kp_turn(
     async for chunk in _process_commands(
         db, session_id, res[1], module, player_char, game_session, llm,
         teammates=party_others,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
+    # 叙事—机制脱节守卫：检定后续写最容易写出「潜行失败 → 它扑上来了」，而这条路径回合
+    # 起点根本没有 plan（开战裁定无从谈起），叙事里打起来了却没有战斗态就全靠这里兜。
+    async for chunk in _ensure_narrated_combat(
+        db, session_id, game_session, module, player_char, party_others, llm, None, pre_gen_seq,
     ):
         room_hub.broadcast(session_id, chunk)
 
