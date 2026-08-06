@@ -1,8 +1,10 @@
 """CoC 7th Edition 检定逻辑"""
 
 import random
+import re
 
 from app.rules.base import CheckResult
+from app.rules.coc.character import COC_DEFAULT_SKILLS
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile
 
 
@@ -20,6 +22,86 @@ _CHARACTERISTIC_ALIAS = {
 
 # 理智检定的写法：SAN 不在技能表也不在属性表，需单独回落到 system_data.sanity.current
 _SANITY_ALIAS = ("理智", "san", "SAN", "Sanity", "sanity", "理智值")
+
+# 技能名的书写变体：全角括号/冒号统一成半角括号形式（「射击：手枪」→「射击(手枪)」）。
+# AI 解析模组时怎么写全看它心情，而技能查表是精确匹配——不归一就取不到值、按 0 结算。
+_SKILL_PUNCT = str.maketrans({"（": "(", "）": ")", "：": ":", "﹕": ":", "　": "", " ": ""})
+_SKILL_SPEC_RE = re.compile(r"^([^(:]+)[:(]([^)]*)\)?$")
+
+# 同一项技能的俗称/简写 → 规范名。「战斗」是解析提示词早年示例带出来的写法，库里有一批。
+_SKILL_ALIAS = {
+    "战斗": "格斗(斗殴)", "斗殴": "格斗(斗殴)", "格斗": "格斗(斗殴)", "近战": "格斗(斗殴)",
+    "射击": "射击(手枪)", "枪械": "射击(手枪)",
+}
+
+
+def _normalize_punct(name: str) -> str:
+    """只做写法归一（不套别名）：「射击：手枪」「射击（手枪）」「射击 : 手枪」→「射击(手枪)」。"""
+    s = (name or "").strip().translate(_SKILL_PUNCT)
+    m = _SKILL_SPEC_RE.match(s)
+    if m:
+        base, spec = m.group(1), m.group(2)
+        s = f"{base}({spec})" if spec else base
+    return s
+
+
+def normalize_skill_name(name: str) -> str:
+    """技能名归一：写法归一后再套俗称别名。「战斗」→「格斗(斗殴)」。"""
+    s = _normalize_punct(name)
+    return _SKILL_ALIAS.get(s, s)
+
+
+def _base_skill_value(skill_name: str, attrs: dict) -> int:
+    """技能的规则基础值（角色卡没写这项时的底线）。
+
+    CoC 里技能都有基础值：格斗(斗殴) 25、射击(手枪) 20、闪避 DEX/2……「没写」不等于 0。
+    玩家角色卡是完整的所以照不出问题，模组 NPC 卡是稀疏的——不给底线，一个没写格斗的
+    平民 NPC 挥拳就是必失败。属性派生的母语/闪避静态表里预置不了，这里按属性现算。
+    """
+    if skill_name == "闪避":
+        return attrs.get("DEX", 0) // 2
+    if skill_name == "母语":
+        return attrs.get("EDU", 0)
+    return COC_DEFAULT_SKILLS.get(skill_name, 0)
+
+
+def resolve_skill_value(character_data: dict, skill_name: str) -> int:
+    """取一次检定的技能值。查找顺序：精确 → 归一化 → 专精基础名 → 属性(含别名) → 幸运/理智 → 规则基础值。"""
+    skills = character_data.get("skills") or {}
+    attrs = character_data.get("base_attributes") or {}
+
+    value = skills.get(skill_name) or attrs.get(skill_name, 0)
+    if not value:
+        # 归一化后再比一次：卡上写「射击：手枪」而检定要「射击(手枪)」时也能对上
+        want = normalize_skill_name(skill_name)
+        by_norm = {normalize_skill_name(k): v for k, v in skills.items()}
+        value = by_norm.get(want) or 0
+        if not value and "(" in want:
+            # 卡上只写了不带专精的基础名（「射击: 60」）→ 拿来当该专精的值。只认卡上**本就没写
+            # 专精**的条目：写了「射击(手枪) 70」的人拿步枪不该也按 70 算（RAW 各专精独立）。
+            bare = {b: v for k, v in skills.items()
+                    if "(" not in (b := _normalize_punct(k))}
+            value = bare.get(want.split("(")[0]) or 0
+    # 技能表/同名属性都没命中时，按属性骰别名回落到英文属性键（如 灵感→INT、智力→INT）
+    if not value and skill_name in _CHARACTERISTIC_ALIAS:
+        value = attrs.get(_CHARACTERISTIC_ALIAS[skill_name], 0)
+    # 幸运骰的两种存法：手动建卡写 system_data.luck，AI 生成与 Excel 导入写
+    # base_attributes.LUCK（上面的属性别名已覆盖后者）。这里补前者。
+    # 漏掉任一处都会让「幸运」检定以 0 结算 —— 必失败，且提示写着「(34 > 0)」，
+    # 玩家完全看不出是数据取错了位置。
+    if not value and skill_name in ("幸运", "运气"):
+        value = (character_data.get("system_data") or {}).get("luck") or 0
+    # 理智骰同理：SAN 存于 system_data.sanity.current，既不在技能表也不在属性表。
+    # KP 若发的是 [DICE_CHECK: skill=理智] 而非 [SAN_CHECK]，此前会以 0 结算 → 必失败
+    # （实测一局里三名角色同时掷出「失败 (34 > 0)」就是这么来的）。
+    # 注意：这里只修正**判定基数**；理智损失与疯狂发作仍只由 SAN_CHECK 路径处理，
+    # 裸的理智检定不扣 SAN——这与手册一致（不是每次理智骰都伴随损失）。
+    if not value and skill_name in _SANITY_ALIAS:
+        sanity = (character_data.get("system_data") or {}).get("sanity") or {}
+        value = sanity.get("current") or 0
+    if not value:   # 都没有 → 该技能的规则基础值（而不是 0）
+        value = _base_skill_value(normalize_skill_name(skill_name), attrs)
+    return value
 
 # 「达成等级」中文标签：纯按骰值算出的六档（与要求难度无关），用于检定提示与分层反馈。
 TIER_LABEL_CN = {
@@ -64,27 +146,7 @@ def resolve_skill_check(
     奖励/惩罚骰（bonus/penalty，缺省 0，均为 0 时行为与旧版完全一致）：净奖惩>0 多掷十位
     取最有利、<0 取最不利，明细透传到 CheckResult 的 tens/tens_kept/units/bonus/penalty。
     """
-    skills = character_data.get("skills", {})
-    attrs = character_data.get("base_attributes", {})
-
-    skill_value = skills.get(skill_name) or attrs.get(skill_name, 0)
-    # 技能表/同名属性都没命中时，按属性骰别名回落到英文属性键（如 灵感→INT、智力→INT）
-    if not skill_value and skill_name in _CHARACTERISTIC_ALIAS:
-        skill_value = attrs.get(_CHARACTERISTIC_ALIAS[skill_name], 0)
-    # 幸运骰的两种存法：手动建卡写 system_data.luck，AI 生成与 Excel 导入写
-    # base_attributes.LUCK（上面的属性别名已覆盖后者）。这里补前者。
-    # 漏掉任一处都会让「幸运」检定以 0 结算 —— 必失败，且提示写着「(34 > 0)」，
-    # 玩家完全看不出是数据取错了位置。
-    if not skill_value and skill_name in ("幸运", "运气"):
-        skill_value = (character_data.get("system_data") or {}).get("luck") or 0
-    # 理智骰同理：SAN 存于 system_data.sanity.current，既不在技能表也不在属性表。
-    # KP 若发的是 [DICE_CHECK: skill=理智] 而非 [SAN_CHECK]，此前会以 0 结算 → 必失败
-    # （实测一局里三名角色同时掷出「失败 (34 > 0)」就是这么来的）。
-    # 注意：这里只修正**判定基数**；理智损失与疯狂发作仍只由 SAN_CHECK 路径处理，
-    # 裸的理智检定不扣 SAN——这与手册一致（不是每次理智骰都伴随损失）。
-    if not skill_value and skill_name in _SANITY_ALIAS:
-        sanity = (character_data.get("system_data") or {}).get("sanity") or {}
-        skill_value = sanity.get("current") or 0
+    skill_value = resolve_skill_value(character_data, skill_name)
 
     if difficulty == "hard":
         target = skill_value // 2

@@ -296,6 +296,47 @@ class TestCharacteristicRolls:
         assert resolve_skill_check(cd, "理智").skill_value == 70
 
 
+class TestSkillNameLookup:
+    """技能名书写变体与缺省基础值：模组 NPC 卡是稀疏且写法随意的，取不到值就等于必失败。"""
+
+    def test_normalizes_punctuation_variants(self):
+        """全角冒号/括号写法要能对上规则里的「基础名(专精)」。"""
+        cd = {"skills": {"射击：手枪": 70, "语言（英语）": 50}, "base_attributes": {}}
+        assert resolve_skill_check(cd, "射击(手枪)").skill_value == 70
+        assert resolve_skill_check(cd, "语言(英语)").skill_value == 50
+
+    def test_colloquial_alias_maps_to_standard_skill(self):
+        """「战斗」是早年解析提示词示例带出来的写法，库里有一批 NPC 这么写。"""
+        cd = {"skills": {"战斗": 55}, "base_attributes": {}}
+        assert resolve_skill_check(cd, "格斗(斗殴)").skill_value == 55
+        assert resolve_skill_check({"skills": {"斗殴": 45}}, "格斗(斗殴)").skill_value == 45
+
+    def test_bare_base_name_covers_specialization(self):
+        """卡上只写不带专精的「射击: 60」→ 任一射击专精都按 60。"""
+        assert resolve_skill_check({"skills": {"射击": 60}}, "射击(步枪)").skill_value == 60
+        # 反之写明了专精就不串：会打手枪不等于会打步枪（RAW 各专精独立）
+        assert resolve_skill_check({"skills": {"射击(手枪)": 70}}, "射击(步枪)").skill_value == 25
+
+    def test_missing_skill_falls_back_to_rule_base_value(self):
+        """技能没写不等于 0：格斗(斗殴) 基础 25、闪避 DEX/2。
+
+        玩家角色卡是完整的所以照不出问题；模组 NPC 只写几项技能，按 0 结算意味着
+        一个没写格斗的平民 NPC 挥拳必失败、没写闪避的怪物永远躲不掉。
+        """
+        cd = {"skills": {"急救": 60}, "base_attributes": {"DEX": 60, "EDU": 70}}
+        assert resolve_skill_check(cd, "格斗(斗殴)").skill_value == 25
+        assert resolve_skill_check(cd, "闪避").skill_value == 30      # DEX//2
+        assert resolve_skill_check(cd, "母语").skill_value == 70      # EDU
+        assert resolve_skill_check(cd, "克苏鲁神话").skill_value == 0  # 基础值本就是 0
+        assert resolve_skill_check(cd, "撕咬").skill_value == 0        # 表里没有的自创技能仍是 0
+
+    def test_explicit_skill_still_wins_over_base(self):
+        """卡上写了就以卡为准，基础值只兜底。"""
+        cd = {"skills": {"格斗(斗殴)": 80, "闪避": 15}, "base_attributes": {"DEX": 60}}
+        assert resolve_skill_check(cd, "格斗(斗殴)").skill_value == 80
+        assert resolve_skill_check(cd, "闪避").skill_value == 15
+
+
 class TestOccupationWeaponData:
     """112 职业 / 106 武器 / 专精数据完整性。"""
 
