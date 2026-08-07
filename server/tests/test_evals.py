@@ -660,3 +660,49 @@ class TestJudgeParsing:
         joined = "\n".join(m["content"] for m in msgs)
         assert "scene_texture" in joined and "pacing" in joined
         assert "【观测】" in joined and "仅在缺陷明显时判不通过" in joined
+
+
+class TestEvalsCallSignatures:
+    """evals/run.py 调用点的关键字参数静态校验。
+
+    回归：曾把 `recall_enabled` 误传给 `build_turn_plan_messages`（它只接受
+    `build_kp_context` 的参数），而 `--smoke` 只走「能否重建 fixture」那条路径、
+    结构上覆盖不到真实生成路径，于是直到真跑（花钱）才炸。这条用签名做静态校验，
+    免费且能抓住任何「参数名传给了错误函数」的情况。
+    """
+
+    def test_关键字参数都被目标函数接受(self):
+        import ast
+        import inspect
+        import pathlib
+
+        from evals import run as evals_run
+
+        def resolve(dotted: str):
+            obj = evals_run
+            for part in dotted.split("."):
+                obj = getattr(obj, part, None)
+                if obj is None:
+                    return None
+            return obj if callable(obj) else None
+
+        src = pathlib.Path(evals_run.__file__).read_text(encoding="utf-8")
+        problems: list[str] = []
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = resolve(ast.unparse(node.func))
+            if fn is None:
+                continue                      # 局部变量/闭包等解析不到的跳过
+            try:
+                params = inspect.signature(fn).parameters
+            except (TypeError, ValueError):
+                continue
+            if any(p.kind is p.VAR_KEYWORD for p in params.values()):
+                continue                      # 接 **kwargs 的一律放行
+            for kw in (k.arg for k in node.keywords if k.arg):
+                if kw not in params:
+                    problems.append(
+                        f"{ast.unparse(node.func)}() 第 {node.lineno} 行不接受 {kw!r}"
+                    )
+        assert not problems, "evals/run.py 调用点参数不合法：\n" + "\n".join(problems)
