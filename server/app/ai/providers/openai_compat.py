@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.ai import usage_tracker
-from app.ai.provider import LLMProvider, StreamDelta, ToolCall
+from app.ai.provider import LLMProvider, StreamDelta, ToolCall, strip_provider_keys
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ class OpenAICompatProvider(LLMProvider):
         # 对外仍是「给完整结果」的语义。stream_options.include_usage 让流式收尾块带真实 usage。
         payload: dict = {
             "model": self.model,
-            "messages": messages,
+            "messages": strip_provider_keys(messages),
             "temperature": temperature,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -294,7 +294,7 @@ class OpenAICompatProvider(LLMProvider):
     ) -> AsyncIterator[StreamDelta]:
         payload: dict = {
             "model": self.model,
-            "messages": messages,
+            "messages": strip_provider_keys(messages),
             "temperature": temperature,
             "stream": True,
             "stream_options": {"include_usage": True},   # 收尾块附真实 usage
@@ -347,7 +347,7 @@ class OpenAICompatProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         payload: dict = {
             "model": self.model,
-            "messages": messages,
+            "messages": strip_provider_keys(messages),
             "temperature": temperature,
             "stream": True,
             "stream_options": {"include_usage": True},   # 收尾块附真实 usage

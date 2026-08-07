@@ -16,11 +16,18 @@ interface ContextEstimate {
   usage_ratio: number
   status: 'ok' | 'warn' | 'critical'
   excludes_rag_excerpts: boolean
+  /** 估算口径的在线校准系数（1.0 = 尚未校准）。见后端 context.update_budget_scale。 */
+  budget_scale: number
+  /** 上一回合的 prompt caching 表现；Provider 不支持或首轮时 hit_ratio 为 null。 */
+  cache: { read_tokens: number; write_tokens: number; hit_ratio: number | null }
   session_usage: {
     prompt_tokens: number
     completion_tokens: number
     total_tokens: number
     calls: number
+    /** 本局累计命中缓存的输入 token（按约 0.1× 计费）。旧存档无此字段。 */
+    cache_read_tokens?: number
+    cache_write_tokens?: number
   }
 }
 
@@ -62,10 +69,19 @@ export function ContextUsageBadge({
 
   const su = est.session_usage
 
+  // 缓存命中的那部分输入只按约 0.1× 计费，是这套上下文方案最大的一笔成本杠杆——
+  // 累计消耗里混着它却不标出来，会让人误以为花的钱比实际多得多。命中为 0 时不显示
+  // （多数 Provider 不支持缓存，恒挂一行「0%」只是噪音）。
+  const cacheRead = su.cache_read_tokens ?? 0
+  const cacheLines = cacheRead > 0
+    ? ['', `· 其中 ${fmt(cacheRead)} 输入命中提示词缓存（按约 1/10 计费）`]
+    : []
+
   const cumTitle = [
     `本局累计 token 消耗：${fmt(su.total_tokens)}`,
     `· 输入 ${fmt(su.prompt_tokens)} + 输出 ${fmt(su.completion_tokens)}`,
     `· 共 ${su.calls} 次 LLM 调用（含 planner/主叙事/校验/队友/子代理/战斗等）`,
+    ...cacheLines,
     '',
     '随游戏推进单调累增，对应本局真实 API 花费的趋势。',
   ].join('\n')

@@ -19,7 +19,13 @@ logger = logging.getLogger(__name__)
 #: reasoning_tokens 单独记：思考型模型把它算进 completion_tokens，但内容会被丢弃
 #: （complete() 只收 delta.content）。不拆开看，就分不清「模型话多」和「模型在空想」——
 #: 前者要改提示词，后者只需把思考等级调低，解法完全不同。
-_FIELDS = ("prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens", "calls")
+#: cache_read / cache_write 同理单独记：命中的部分只按约 0.1× 计费、写入按 1.25~2×，
+#: 不拆开就看不出 prompt caching 到底有没有生效。命中率长期为 0 = 提示词前缀里混进了
+#: 每轮都变的内容（见 app.ai.context 的分段装配）。无缓存能力的 Provider 恒为 0。
+_FIELDS = (
+    "prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens",
+    "cache_read_tokens", "cache_write_tokens", "calls",
+)
 _acc: contextvars.ContextVar[dict | None] = contextvars.ContextVar("llm_usage_acc", default=None)
 
 
@@ -41,6 +47,12 @@ def add(usage: dict | None) -> None:
     details = usage.get("completion_tokens_details")
     if isinstance(details, dict):
         acc["reasoning_tokens"] += int(details.get("reasoning_tokens") or 0)
+    # prompt caching 用量：Anthropic 直接下发这两个字段；OpenAI 兼容端（如 DeepSeek 的
+    # 自动上下文缓存）用 prompt_cache_hit/miss_tokens，命中口径相同，一并归一。
+    acc["cache_read_tokens"] += int(
+        usage.get("cache_read_input_tokens") or usage.get("prompt_cache_hit_tokens") or 0
+    )
+    acc["cache_write_tokens"] += int(usage.get("cache_creation_input_tokens") or 0)
     acc["calls"] += 1
 
 
@@ -72,7 +84,10 @@ def fmt(d: dict) -> str:
     pt, ct = int(d.get("prompt_tokens") or 0), int(d.get("completion_tokens") or 0)
     rt = int(d.get("reasoning_tokens") or 0)
     tail = f"（思考 {rt / 1000:.1f}k）" if rt else ""
-    return f"{calls} 次调用，入 {pt / 1000:.1f}k / 出 {ct / 1000:.1f}k{tail}"
+    # 命中率按「命中 / 总输入」算：入量本身已含命中部分（见 provider 的 _set_usage 归一）。
+    cr = int(d.get("cache_read_tokens") or 0)
+    cache = f"，缓存命中 {cr / max(pt, 1) * 100:.0f}%" if cr else ""
+    return f"{calls} 次调用，入 {pt / 1000:.1f}k / 出 {ct / 1000:.1f}k{tail}{cache}"
 
 
 #: 触发提醒要**同时**满足比例与绝对量两个条件。

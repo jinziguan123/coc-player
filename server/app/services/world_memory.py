@@ -672,3 +672,91 @@ def format_npc_self_memory(ws: dict, npc_id: str) -> str:
     if interactions:
         lines.append("最近与你有关的事（从旧到新）：" + "；".join(interactions))
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+# ── 滚动剧情摘要的分层章节（LSM 式）──────────────────────────────────────
+#
+# 早先的做法是「既往摘要 + 新事件 → 全量重写」：第 N 次浓缩建立在第 N-1 次的产物上，
+# 误差**复利累积**，且每次重写都可能把仍然重要的旧内容挤掉。长局跑几十轮之后，开场的
+# 细节几乎必然模糊。
+#
+# 改成追加式章节后：每次浓缩只产出覆盖**本批新事件**的一章，直接追加；只有章节数攒够了
+# 才把最老的几章做一次二次合并。于是近期章节只被压过一次、保真度高，误差不再对整份摘要
+# 复利，只在被反复合并的老章节上累积——而那部分正好可以用 recall_history 把原文捞回来。
+#
+# 每章带 seq 区间，与 event_recall 的回捞联动：KP 知道「第三章覆盖 seq 100-124」，
+# 要细节时按那段去查。
+STORY_CHAPTERS_KEY = "story_chapters"
+#: 章节数超过这个数就把最老的一批合并成一章，避免章节无限增长。
+MAX_STORY_CHAPTERS = 6
+#: 每次二次合并吃掉几章。取 3：合并后仍留 4 章，不会一下子把中段历史压成一团。
+MERGE_CHAPTER_BATCH = 3
+
+
+def story_chapters(ws: dict) -> list[dict]:
+    """取分层章节列表（兼容旧存档：单串 story_summary 视作第一章）。"""
+    chapters = (ws or {}).get(STORY_CHAPTERS_KEY)
+    if isinstance(chapters, list) and chapters:
+        return [c for c in chapters if isinstance(c, dict) and (c.get("text") or "").strip()]
+    legacy = ((ws or {}).get("story_summary") or "").strip()
+    if legacy:
+        return [{"text": legacy, "from_seq": 0, "to_seq": (ws or {}).get("story_summary_seq") or 0}]
+    return []
+
+
+def story_summary_text(ws: dict) -> str:
+    """把各章按顺序拼成给 KP 看的完整剧情梗概。
+
+    只有一章时不加小标题——单章加标题反而像「文档」而不是前情提要。
+    """
+    chapters = story_chapters(ws)
+    if not chapters:
+        return ""
+    if len(chapters) == 1:
+        return chapters[0]["text"].strip()
+    return "\n\n".join(
+        f"【第 {i} 章】{c['text'].strip()}" for i, c in enumerate(chapters, start=1)
+    )
+
+
+def append_story_chapter(ws: dict, text: str, from_seq: int, to_seq: int) -> dict:
+    """追加一章（纯函数，返回新 ws）。空文本原样返回。
+
+    同时保留 ``story_summary`` 的拼接快照：前端「上下文占用」与回放等旧读取口径仍看它，
+    换成章节制不该要求它们同步改。
+    """
+    text = (text or "").strip()
+    if not text:
+        return ws
+    chapters = list(story_chapters(ws))
+    chapters.append({"text": text, "from_seq": int(from_seq), "to_seq": int(to_seq)})
+    new_ws = dict(ws or {})
+    new_ws[STORY_CHAPTERS_KEY] = chapters
+    new_ws["story_summary"] = story_summary_text(new_ws)
+    return new_ws
+
+
+def chapters_to_merge(ws: dict) -> list[dict]:
+    """章节数超限时返回该被二次合并的最老几章；否则空列表。"""
+    chapters = story_chapters(ws)
+    if len(chapters) <= MAX_STORY_CHAPTERS:
+        return []
+    return chapters[:MERGE_CHAPTER_BATCH]
+
+
+def replace_merged_chapters(ws: dict, merged_text: str, count: int) -> dict:
+    """用一段合并结果替换最老的 ``count`` 章（纯函数）。合并失败/空文本时原样返回。"""
+    merged_text = (merged_text or "").strip()
+    chapters = story_chapters(ws)
+    if not merged_text or count <= 0 or len(chapters) < count:
+        return ws
+    head, tail = chapters[:count], chapters[count:]
+    merged = {
+        "text": merged_text,
+        "from_seq": head[0].get("from_seq", 0),
+        "to_seq": head[-1].get("to_seq", 0),
+    }
+    new_ws = dict(ws or {})
+    new_ws[STORY_CHAPTERS_KEY] = [merged, *tail]
+    new_ws["story_summary"] = story_summary_text(new_ws)
+    return new_ws

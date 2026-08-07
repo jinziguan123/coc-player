@@ -59,6 +59,9 @@ class ReplayCase:
     teammates: list[Character]
     events: list[EventLog]
     rules_lookup_enabled: bool = False
+    # 是否向 KP 广告 [RECALL_HISTORY]（线上由 event_recall.is_enabled 按「是否已有剧情被
+    # 浓缩」判定）。长局 fixture 要靠它才能测到「记忆被压缩时 KP 该回查而不是现编」。
+    recall_enabled: bool = False
     plan: TurnPlan | None = None  # fixture 预存的裁定计划；None 则重放时现跑 planner
     tags: list[str] = field(default_factory=list)
     note: str = ""
@@ -100,6 +103,7 @@ def load_fixture(path: Path) -> ReplayCase:
         teammates=[dict_to_model(Character, t) for t in payload.get("teammates") or []],
         events=events,
         rules_lookup_enabled=bool(payload.get("rules_lookup_enabled")),
+        recall_enabled=bool(payload.get("recall_enabled")),
         plan=TurnPlan.model_validate(plan_data) if plan_data else None,
         tags=list(meta.get("tags") or []),
         note=meta.get("note") or "",

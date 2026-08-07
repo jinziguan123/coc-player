@@ -492,8 +492,11 @@ def test_maybe_roll_story_summary_updates_and_advances_cursor(db_factory, monkey
 
     db = db_factory()
     module, hero, teammates, session = _seed(db)
-    for i in range(30):  # > STORY_SUMMARY_TRIGGER(24)
-        session_service.add_event(db, session.id, "narration", f"第{i}段", actor_name="KP")
+    # 摘要按 token 触发：得攒够体量，不是攒够条数
+    for i in range(50):
+        session_service.add_event(
+            db, session.id, "narration", f"第{i}段" + "灯火在长廊尽头摇晃，墙上的影子跟着一同起伏，脚步声被地毯吃掉了大半。" * 13, actor_name="KP",
+        )
 
     asyncio.run(chat_service._maybe_roll_story_summary(db, session.id, llm=object()))
     ws = (db.get(GameSession, session.id).world_state) or {}
@@ -502,7 +505,8 @@ def test_maybe_roll_story_summary_updates_and_advances_cursor(db_factory, monkey
     assert cursor
     events = session_service.get_session_events(db, session.id, limit=0)
     uncovered = [e for e in events if (e.sequence_num or 0) > cursor]
-    assert len(uncovered) == chat_service.STORY_SUMMARY_KEEP_RECENT  # 只剩最近这些未并入
+    # 保留区按 token 算，条数不固定；关键是「浓缩了一大批、只留最近一小撮」
+    assert chat_service.STORY_SUMMARY_MIN_KEEP <= len(uncovered) < 25
 
     # 事件不足阈值 → 不滚动
     db2 = db_factory()

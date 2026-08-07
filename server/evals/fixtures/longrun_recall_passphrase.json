@@ -1,0 +1,1121 @@
+{
+  "meta": {
+    "name": "longrun_recall_passphrase",
+    "tags": [
+      "kp_core",
+      "memory",
+      "longrun"
+    ],
+    "note": "长局失忆探针：暗号原话在 seq 5（滚动摘要游标之前），剧情梗概刻意不含它。玩家直接问暗号，KP 手上只有梗概——正确行为是 [RECALL_HISTORY] 回查原文，而不是现编一句。现有 fixture 全是单轮的，测不出这个失效模式。"
+  },
+  "module": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "title": "渡口来信",
+    "rule_system": "coc",
+    "description": "民国背景的短篇调查本：主角替人送一封信，接头处在城北渡口。",
+    "theme": "民国·悬疑",
+    "raw_content": "",
+    "world_setting": {
+      "intro": "连日阴雨的江城，码头上的人比往常少。"
+    },
+    "scenes": [
+      {
+        "id": "scene_pawnshop",
+        "name": "当铺后堂",
+        "title": "当铺后堂",
+        "kind": "location",
+        "description": "闷热、油灯昏黄，帘子隔开前后。",
+        "connections": [
+          "scene_alley"
+        ]
+      },
+      {
+        "id": "scene_alley",
+        "name": "北巷",
+        "title": "北巷",
+        "kind": "location",
+        "description": "湿滑的青石板，两侧都是上闩的门板。",
+        "connections": [
+          "scene_pawnshop",
+          "scene_dock"
+        ]
+      },
+      {
+        "id": "scene_dock",
+        "name": "城北渡口",
+        "title": "城北渡口",
+        "kind": "location",
+        "description": "泡得发黑的木桩，芦苇丛在风里倒伏。",
+        "connections": [
+          "scene_alley"
+        ]
+      }
+    ],
+    "npcs": [
+      {
+        "id": "npc_pawnbroker",
+        "name": "当铺老板",
+        "initial_location": "scene_pawnshop",
+        "description": "干瘦、话少，收当时从不抬眼。",
+        "personality": "谨慎，怕惹事",
+        "secrets": "他替对面的人递了三年信。"
+      },
+      {
+        "id": "npc_contact",
+        "name": "芦苇丛里的人",
+        "initial_location": "scene_dock",
+        "description": "看不清脸，只露出一截湿透的裤脚。",
+        "personality": "警惕，听错一个字就走",
+        "secrets": "他是收信人的替身。"
+      }
+    ],
+    "clues": [
+      {
+        "id": "clue_passphrase",
+        "name": "接头暗号",
+        "location": "scene_pawnshop",
+        "description": "当铺老板口述的一句话，说错一个字对方就走。"
+      }
+    ],
+    "triggers": [],
+    "maps": [],
+    "handouts": [],
+    "rag_status": "none",
+    "created_at": "2026-08-07T10:00:00",
+    "updated_at": "2026-08-07T10:00:00"
+  },
+  "session": {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "module_id": "00000000-0000-0000-0000-000000000001",
+    "player_character_id": "00000000-0000-0000-0000-000000000003",
+    "status": "active",
+    "room_code": "RECALL",
+    "current_scene_id": "scene_dock",
+    "turn_state": null,
+    "world_state": {
+      "visited_scenes": [
+        "scene_pawnshop",
+        "scene_alley",
+        "scene_dock"
+      ],
+      "story_summary_seq": 60,
+      "story_chapters": [
+        {
+          "from_seq": 1,
+          "to_seq": 60,
+          "text": "沈砚受托送一封信，在当铺后堂见了老板。老板确认了他的来路，谈妥了在城北渡口接头的方式，并再三叮嘱不可出错，随后让他从后门离开。沈砚冒雨沿北巷一路向北，途中未遇阻拦，最终抵达渡口。"
+        }
+      ],
+      "story_summary": "沈砚受托送一封信，在当铺后堂见了老板。老板确认了他的来路，谈妥了在城北渡口接头的方式，并再三叮嘱不可出错，随后让他从后门离开。沈砚冒雨沿北巷一路向北，途中未遇阻拦，最终抵达渡口。"
+    },
+    "created_at": "2026-08-07T10:00:00",
+    "updated_at": "2026-08-07T10:00:00"
+  },
+  "player_char": {
+    "id": "00000000-0000-0000-0000-000000000003",
+    "module_id": "00000000-0000-0000-0000-000000000001",
+    "name": "沈砚",
+    "rule_system": "coc",
+    "is_player": true,
+    "owner_token": "eval",
+    "status": "alive",
+    "base_attributes": {
+      "str": 55,
+      "con": 60,
+      "siz": 55,
+      "dex": 65,
+      "app": 60,
+      "int": 75,
+      "pow": 60,
+      "edu": 70,
+      "luck": 55
+    },
+    "skills": {
+      "侦查": 60,
+      "话术": 55,
+      "聆听": 50
+    },
+    "system_data": {
+      "hp": 11,
+      "mp": 12,
+      "san": 60
+    },
+    "backstory": "报馆的校对员，欠了当铺老板一个人情。",
+    "created_at": "2026-08-07T10:00:00",
+    "updated_at": "2026-08-07T10:00:00"
+  },
+  "teammates": [],
+  "events": [
+    {
+      "id": "00000000-0000-0000-0000-0000000003e9",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 1,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "当铺后堂的油灯只剩一线光。老板把当票推回来，压低了嗓子。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003ea",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 2,
+      "event_type": "action",
+      "actor_id": null,
+      "actor_name": "沈砚",
+      "content": "我问他，接头的时候怎么认人。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003eb",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 3,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "他四下看了看，确认帘子后头没人。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003ec",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 4,
+      "event_type": "dialogue",
+      "actor_id": null,
+      "actor_name": "当铺老板",
+      "content": "记牢了，别写下来。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003ed",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 5,
+      "event_type": "dialogue",
+      "actor_id": null,
+      "actor_name": "当铺老板",
+      "content": "北风起时，渡口第三根桩子见。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003ee",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 6,
+      "event_type": "dialogue",
+      "actor_id": null,
+      "actor_name": "当铺老板",
+      "content": "说错一个字，那边掉头就走。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003ef",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 7,
+      "event_type": "action",
+      "actor_id": null,
+      "actor_name": "沈砚",
+      "content": "我把这句在心里默了两遍。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f0",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 8,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "老板吹熄了灯，示意他从后门出去。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_pawnshop"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f1",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 9,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第9拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f2",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 10,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第10拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f3",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 11,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第11拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f4",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 12,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第12拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f5",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 13,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第13拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f6",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 14,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第14拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f7",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 15,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第15拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f8",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 16,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第16拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003f9",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 17,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第17拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003fa",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 18,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第18拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003fb",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 19,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第19拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003fc",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 20,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第20拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003fd",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 21,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第21拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003fe",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 22,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第22拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-0000000003ff",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 23,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第23拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000400",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 24,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第24拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000401",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 25,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第25拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000402",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 26,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第26拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000403",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 27,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第27拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000404",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 28,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第28拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000405",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 29,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第29拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000406",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 30,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第30拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000407",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 31,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第31拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000408",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 32,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第32拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000409",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 33,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第33拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000040a",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 34,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第34拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000040b",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 35,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第35拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000040c",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 36,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第36拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000040d",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 37,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第37拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000040e",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 38,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第38拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000040f",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 39,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第39拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000410",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 40,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第40拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000411",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 41,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第41拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000412",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 42,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第42拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000413",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 43,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第43拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000414",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 44,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第44拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000415",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 45,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第45拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000416",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 46,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第46拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000417",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 47,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第47拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000418",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 48,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第48拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000419",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 49,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第49拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000041a",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 50,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第50拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000041b",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 51,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第51拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000041c",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 52,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第52拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000041d",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 53,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第53拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000041e",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 54,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第54拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-00000000041f",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 55,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第55拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000420",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 56,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第56拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000421",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 57,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第57拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000422",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 58,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第58拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000423",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 59,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第59拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000424",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 60,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "第60拍：巷子里的雨没停，沈砚沿墙根往北走，鞋底黏着煤灰。沿途的门板都上了闩，只有远处一盏灯还亮着。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_alley"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000425",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 61,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "渡口的风比城里冷得多，木桩在水里泡得发黑。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_dock"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000426",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 62,
+      "event_type": "action",
+      "actor_id": null,
+      "actor_name": "沈砚",
+      "content": "我数了数桩子，走到该去的那根旁边。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_dock"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000427",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 63,
+      "event_type": "narration",
+      "actor_id": null,
+      "actor_name": "KP",
+      "content": "对面芦苇丛里有人影动了动，像是在等一句话。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_dock"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000428",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "sequence_num": 64,
+      "event_type": "action",
+      "actor_id": null,
+      "actor_name": "沈砚",
+      "content": "接头的暗号是什么来着？我得一字不差地说出来。",
+      "visibility": [],
+      "metadata": {
+        "scene_id": "scene_dock"
+      },
+      "summary": null,
+      "created_at": "2026-08-07T10:00:00"
+    }
+  ],
+  "rules_lookup_enabled": false,
+  "recall_enabled": true,
+  "plan": null,
+  "narration_expect": {
+    "note": "暗号原话已被摘要浓缩掉（seq 5 < 游标 60），KP 必须回查原文而不是现编一句",
+    "any_of": [
+      {
+        "regex": "\\[RECALL_HISTORY:"
+      }
+    ]
+  }
+}

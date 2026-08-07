@@ -26,6 +26,7 @@ from app.services import (
     chat_event_writer,
     command_protocol,
     dice_runtime,
+    event_recall,
     event_protocol,
     generation_lifecycle,
     generation_housekeeping,
@@ -134,8 +135,9 @@ TeamAgent = team_turn_service.TeamAgent
 _classify_llm_error = generation_lifecycle.classify_llm_error
 _housekeeping_manager = generation_lifecycle.HousekeepingManager()
 _housekeeping_tasks = _housekeeping_manager.tasks
-STORY_SUMMARY_KEEP_RECENT = generation_housekeeping.STORY_SUMMARY_KEEP_RECENT
-STORY_SUMMARY_TRIGGER = generation_housekeeping.STORY_SUMMARY_TRIGGER
+STORY_SUMMARY_TRIGGER_RATIO = generation_housekeeping.STORY_SUMMARY_TRIGGER_RATIO
+STORY_SUMMARY_KEEP_RATIO = generation_housekeeping.STORY_SUMMARY_KEEP_RATIO
+STORY_SUMMARY_MIN_KEEP = generation_housekeeping.STORY_SUMMARY_MIN_KEEP
 BACKSTAGE_TURN_INTERVAL = generation_housekeeping.BACKSTAGE_TURN_INTERVAL
 BACKSTAGE_DO_NOT_REVEAL_MAX = generation_housekeeping.BACKSTAGE_DO_NOT_REVEAL_MAX
 _maybe_roll_story_summary = generation_housekeeping._maybe_roll_story_summary
@@ -426,6 +428,7 @@ async def _run_generation(
         ),
         module_lookup_enabled=module_rag_enabled,
         rule_excerpts=rule_excerpts,
+        recall_enabled=event_recall.is_enabled(game_session),
     )
     # 战斗结果摘要已注入本轮上下文 → 清除，避免下一轮重复注入（读一次）。
     if (game_session.world_state or {}).get("combat_result"):
@@ -470,7 +473,7 @@ async def _run_generation(
             _persist_narration(db, session_id, result, event_order)
             _reorder_turn_events(db, session_id, event_order, base_seq)
             raise
-        _record_turn_usage(db, game_session, llm, events)   # validator 前，趁 last_usage 仍是主叙事那次
+        _record_turn_usage(db, game_session, llm, events, messages)   # validator 前，趁 last_usage 仍是主叙事那次
         await _validate_and_patch_narration(
             llm, plan, result, event_order, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
@@ -496,7 +499,7 @@ async def _run_generation(
             # CancelledError(继承 BaseException) 与普通异常都先把已生成片段落库再上抛
             _persist_narration(db, session_id, result)
             raise
-        _record_turn_usage(db, game_session, llm, events)   # validator 前，趁 last_usage 仍是主叙事那次
+        _record_turn_usage(db, game_session, llm, events, messages)   # validator 前，趁 last_usage 仍是主叙事那次
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
@@ -648,6 +651,7 @@ async def _run_split_generation(
             module_lookup_enabled=module_rag_enabled,
             # 规则要点不依赖场景：各分组共用调用方预取的同一份（与模组摘录注入现状对齐）
             rule_excerpts=rule_excerpts,
+            recall_enabled=event_recall.is_enabled(game_session),
         )
         if plan_message is not None:
             messages.append(plan_message)
@@ -1088,6 +1092,7 @@ async def _run_kp_turn(
             db, module, game_session, events, party_ids,
         ),
         module_lookup_enabled=module_rag_enabled,
+        recall_enabled=event_recall.is_enabled(game_session),
     )
     messages.append({"role": "user", "content": user_prompt})
 

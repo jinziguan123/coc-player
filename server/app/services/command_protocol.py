@@ -30,6 +30,10 @@ BLOCK_PATH_RE = re.compile(r"\[BLOCK_PATH:([^\]]*)\]")
 UNBLOCK_PATH_RE = re.compile(r"\[UNBLOCK_PATH:([^\]]*)\]")
 RULE_LOOKUP_RE = re.compile(r"\[RULE_LOOKUP:\s*query=([^\]]+)\]")
 MODULE_LOOKUP_RE = re.compile(r"\[MODULE_LOOKUP:\s*query=([^\]]+)\]")
+# 回想本局往事：与上面两个 lookup 同一套「终止性指令 + 回灌续写」模式，区别在于查的是
+# 「本局已经发生过的事」而非外部资料——那部分记忆被滚动摘要压缩过，凭印象编会与玩家的
+# 记录冲突。共享同一份单轮查阅配额。
+RECALL_HISTORY_RE = re.compile(r"\[RECALL_HISTORY:\s*query=([^\]]+)\]")
 SET_FLAG_RE = re.compile(r"\[SET_FLAG[:：\s]\s*(?:flag=)?\s*([^\]]+?)\s*\]")
 CLEAR_FLAG_RE = re.compile(r"\[CLEAR_FLAG[:：\s]\s*(?:flag=)?\s*([^\]]+?)\s*\]")
 HANDOUT_RE = re.compile(r"\[HANDOUT[:：\s]\s*([^\]]+?)\s*\]")
@@ -47,6 +51,7 @@ CMD_TAG_PREFIXES = (
     "UNBLOCK_PATH:",
     "RULE_LOOKUP:",
     "MODULE_LOOKUP:",
+    "RECALL_HISTORY:",
     "SET_FLAG:",
     "CLEAR_FLAG:",
     "HANDOUT:",

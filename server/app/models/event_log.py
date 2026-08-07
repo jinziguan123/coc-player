@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Enum, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Enum,
+    ForeignKey,
+    LargeBinary,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, UUIDMixin
@@ -33,4 +41,7 @@ class EventLog(Base, UUIDMixin):
     visibility: Mapped[list] = mapped_column(JSON, default=list)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: 事件正文的 float32 向量（BLOB），供 recall_history 把被摘要浓缩掉的早期剧情原文
+    #: 检索回来。NULL = 尚未索引；由 generation_housekeeping 在浓缩窗口批量补齐。
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

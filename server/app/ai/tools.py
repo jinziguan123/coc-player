@@ -340,6 +340,24 @@ REGISTRY: tuple[ToolSpec, ...] = (
         kind="lookup",
     ),
     ToolSpec(
+        name="recall_history",
+        tag="RECALL_HISTORY",
+        description=(
+            "回想本局早前发生的事：当玩家提起你记不清的往事（某个 NPC 说过的原话、某处发现的"
+            "细节、某个已经做过的承诺），或你要引用早期剧情却只剩梗概时调用，系统按语义"
+            "把当时的原文片段找回来。**你对早期剧情的记忆是压缩过的**，凭印象编造往事会与"
+            "玩家的记录冲突——拿不准就查。只查已经发生过的事，不能用它预知未发展的剧情；"
+            "这是内部动作，不要把「我回想一下」讲给玩家听。"
+        ),
+        parameters=_params({
+            "query": {
+                "type": "string",
+                "description": "要回想的人/事/物关键词，如「当铺老板提过的暗号」",
+            },
+        }, ["query"]),
+        kind="lookup",
+    ),
+    ToolSpec(
         name="set_flag",
         tag="SET_FLAG",
         description=(

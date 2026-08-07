@@ -467,9 +467,9 @@ def test_isolation_f_story_summary_excludes_backstage(db_factory):
     db = db_factory()
     session, module, player, kp_ev = _seed_with_backstage_event(db)
     # 攒够触发阈值的普通事件
-    for i in range(chat_service.STORY_SUMMARY_TRIGGER + chat_service.STORY_SUMMARY_KEEP_RECENT + 2):
+    for i in range(50):
         session_service.add_event(
-            db, session.id, "narration", f"剧情推进第{i}拍。", actor_name="KP",
+            db, session.id, "narration", f"剧情推进第{i}拍。" + "灯火在长廊尽头摇晃，墙上的影子跟着一同起伏，脚步声被地毯吃掉了大半。" * 13, actor_name="KP",
         )
     llm = _StubLLM("")                            # 摘要失败静默，无所谓返回值
     asyncio.run(chat_service._maybe_roll_story_summary(db, session.id, llm))

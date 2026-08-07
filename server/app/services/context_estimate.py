@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 from app.ai.context import (
     RESERVE_FOR_OUTPUT,
     _estimate_tokens,
+    budget_scale,
     build_kp_context,
+    effective_context_budget,
     resolve_context_budget,
 )
 from app.models.character import Character
@@ -56,9 +58,13 @@ def estimate_session_context(db: Session, session_id: str) -> dict | None:
     module_rag_enabled = bool(events) and getattr(module, "rag_status", "") == "ready"
 
     # 先解析当前模型窗口 → 自适应组装预算，让预估与实际跑团用同一套预算（否则事件裁剪口径不一致）。
+    # 展示的是**校准后**的实际生效预算：build_kp_context 内部同样会乘这个系数，
+    # 显示未校准的基准值会和真实裁剪行为对不上。
     profile = load_active_profile()
     context_window = resolve_context_window(profile)
-    context_budget = resolve_context_budget(context_window)
+    base_budget = resolve_context_budget(context_window)
+    ws_for_scale = session.world_state or {}
+    context_budget = effective_context_budget(ws_for_scale, base_budget)
 
     messages = build_kp_context(
         session, module, player_char, events,
@@ -102,10 +108,21 @@ def estimate_session_context(db: Session, session_id: str) -> dict | None:
     total_events = len(events)
     summarized_events = sum(1 for e in events if (e.sequence_num or 0) <= cursor)
 
+    # prompt caching 命中率（按上一回合实测算）：命中的那部分只按约 0.1× 计费，是这套
+    # 上下文方案最大的一笔成本杠杆。ratio 为 None = 上一回合没有可用实测（首轮 / Provider
+    # 不支持）；长期为 0 则说明稳定前缀被污染了，去 app.ai.context 的分段装配里查。
+    cache_read = tu.get("cache_read_tokens") or 0
+    cache_write = tu.get("cache_write_tokens") or 0
+    cache_ratio = (
+        round(cache_read / measured, 4)
+        if measured and (cache_read or cache_write) else None
+    )
+
     return {
         "model": profile.model_name if profile else "unknown",
         "context_window": context_window,
-        "context_budget": context_budget,         # 组装硬上限（按模型窗口自适应）：超出即摘要/截断
+        "context_budget": context_budget,         # 组装硬上限（窗口自适应 × 在线校准）：超出即摘要/截断
+        "budget_scale": budget_scale(ws_for_scale),  # 估算口径的在线校准系数（1.0 = 尚未校准）
         "output_reserve": RESERVE_FOR_OUTPUT,
         "input_tokens": input_tokens,             # 启发式分项估算（下一回合的粗估）
         "measured_input_tokens": measured,        # 上一回合服务端真实输入 token（无则 None）
@@ -119,6 +136,12 @@ def estimate_session_context(db: Session, session_id: str) -> dict | None:
             "total": total_events,
             "summarized": summarized_events,        # 已并入滚动摘要（非逐条）
             "verbatim_candidates": total_events - summarized_events,
+        },
+        # 上一回合的 prompt caching 表现（Provider 不支持或首轮时 hit_ratio 为 None）
+        "cache": {
+            "read_tokens": cache_read,
+            "write_tokens": cache_write,
+            "hit_ratio": cache_ratio,
         },
         "usage_ratio": ratio,                       # (有效输入+输出预留)/窗口
         "status": _status(ratio),

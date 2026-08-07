@@ -3,19 +3,25 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import NamedTuple
 
+from app.ai.provider import CACHE_BLOCKS_KEY
 from app.models.character import Character
 from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
 from app.ai.prompts.kp_system import (
-    KP_SYSTEM_PROMPT,
+    KP_IDENTITY_SECTION,
+    KP_MANUAL_SECTION,
+    KP_MODULE_DATA_SECTION,
+    BLOCKED_PATHS_SECTION,
     NARRATIVE_STYLE_SECTION,
     TRAVEL_SUGGEST_INSTRUCTION,
     KP_OPENING_PROMPT,
     HANDOUT_INSTRUCTION,
     MODULE_EXCERPT_SECTION,
     MODULE_LOOKUP_INSTRUCTION,
+    RECALL_HISTORY_INSTRUCTION,
     GROUP_INSTRUCTION,
     RULE_EXCERPT_SECTION,
     RULE_LOOKUP_INSTRUCTION,
@@ -59,6 +65,53 @@ def resolve_context_budget(context_window: int) -> int:
     return max(CONTEXT_TOKEN_BUDGET, min(scaled, CONTEXT_BUDGET_CEIL))
 
 
+# ── 估算口径的在线校准 ──────────────────────────────────────────────────
+# `_estimate_tokens` 的启发式（中文 1.5 token/字）系统性高估真实 BPE（中文约 1 token/字）
+# 约 50%。固定系数的好处是有安全垫，代价是**永远只用到窗口的约 40%**——而逐字记忆恰恰是
+# 对抗有损摘要的唯一资源，省在这里最不划算。
+#
+# 既然每回合都能拿到服务端真实 usage（world_state.turn_usage），就用「同轮估算 / 实测」的
+# 比值把预算放大回去，而不是继续拍一个常数。校准做在**预算侧**而非 `_estimate_tokens` 里：
+# 后者是无状态纯函数、被到处调用，给它加全局状态会让各处估算随会话漂移，难以推理。
+CALIBRATION_KEY = "budget_scale"
+#: EMA 系数：单轮实测会因 RAG 摘录长短起伏，取 0.3 让系数几轮内收敛又不被单轮带偏。
+CALIBRATION_ALPHA = 0.3
+#: 夹取范围。上限 2.5 兜住「估算高估 2.5 倍以上」这种只可能来自 bug 的比值；下限 0.6 允许
+#: 在估算**低估**时收缩预算——那种情况下不收缩就会真的溢出窗口。
+CALIBRATION_MIN, CALIBRATION_MAX = 0.6, 2.5
+
+
+def update_budget_scale(ws: dict, measured: int, estimated: int) -> dict:
+    """用一轮的（实测, 估算）更新预算放大系数，返回新的 world_state（纯函数）。
+
+    入参非法（任一 ≤0）时原样返回：宁可继续用旧系数，也不让一次坏数据把预算带飞。
+    """
+    if measured <= 0 or estimated <= 0:
+        return ws
+    ratio = estimated / measured
+    prev = (ws or {}).get(CALIBRATION_KEY)
+    scale = ratio if not isinstance(prev, (int, float)) or prev <= 0 else (
+        prev * (1 - CALIBRATION_ALPHA) + ratio * CALIBRATION_ALPHA
+    )
+    new_ws = dict(ws or {})
+    new_ws[CALIBRATION_KEY] = round(max(CALIBRATION_MIN, min(scale, CALIBRATION_MAX)), 4)
+    return new_ws
+
+
+def budget_scale(ws: dict | None) -> float:
+    """当前会话的预算放大系数（未校准过则为 1.0，行为与校准前完全一致）。"""
+    v = (ws or {}).get(CALIBRATION_KEY)
+    if not isinstance(v, (int, float)) or v <= 0:
+        return 1.0
+    return float(max(CALIBRATION_MIN, min(v, CALIBRATION_MAX)))
+
+
+def effective_context_budget(ws: dict | None, context_budget: int | None = None) -> int:
+    """解析出本会话实际生效的组装预算（估算 token 口径）＝ 基准预算 × 在线校准系数。"""
+    base = context_budget if context_budget is not None else _active_context_budget()
+    return int(base * budget_scale(ws))
+
+
 def _active_context_budget() -> int:
     """按「当前激活模型」的窗口解析组装预算；任何异常一律回落下限（放宽前行为）。
 
@@ -79,7 +132,12 @@ RESERVE_FOR_OUTPUT = 7000
 # 2026-08-05 由 16000 抬到 17000：静态手册已长到 ~10000，撞上「留 6000 给下游注入」的护栏
 # （见 tests/test_kp_rulebook）。抬的是**总预算**而不是放松护栏——模组数据 / RAG 原文摘录 /
 # 线索台账 / NPC 记忆这些下游内容的余量必须原样保住，被挤掉的是玩家真正需要的剧本细节。
-MAX_SYSTEM_TOKENS = 17000
+# 2026-08-07 由 17000 抬到 20000：换成分段装配后，超预算从「无声地从尾部截字符」变成了
+# 显式的按优先级丢段 + 告警，于是看清了一件一直存在、只是没人看见的事——**大模组的必留段
+# 本身就装不下**：静态手册 10.4k + 大模组数据 6k + 能力广告 1.7k ≈ 18k，台账/NPC 记忆/
+# 幕后动态这些「玩家直接可感」的内容每轮都在被挤掉（实测 evals 的 manor_multiplayer_npc）。
+# 20000 估算 ≈ 13000 真实 token，对 64K 窗口仍只占两成，且事件区有在线校准补偿。
+MAX_SYSTEM_TOKENS = 20000
 MAX_SUMMARY_TOKENS = 2000
 MIN_RECENT_EVENTS = 10
 MAX_RECENT_EVENTS = 60
@@ -112,6 +170,70 @@ def _truncate_to_tokens(text: str, max_tokens: int) -> str:
     ratio = max_tokens / max(_estimate_tokens(text), 1)
     cut = int(len(text) * ratio * 0.9)
     return text[:cut] + "\n…（内容过长，已截断）"
+
+
+# ── 系统提示的分段装配 ────────────────────────────────────────────────────
+# 系统提示不再是一根拼出来的长字符串，而是一组带「稳定性」与「重要度」标注的段：
+# · tier 决定**排列顺序**。prompt caching 是前缀匹配，前缀里任何字节变了其后全部失效，
+#   所以整场不变的段必须排在会变的段前面。三档按 tier 常量分组成 3 条 system 消息，
+#   provider 层在前两块末尾打缓存断点（见 providers/anthropic.py）。
+# · priority 决定**超预算时的丢弃顺序**（越大越先丢，0 = 绝不丢）。整段丢弃而非按字符
+#   截断：模组数据是紧凑 JSON，从尾部切一刀就是半截非法 JSON，模型会读到残缺的 NPC 列表。
+SYS_TIER_STATIC = 0      # 整场会话逐字不变：身份 + 裁定手册 + 文风 + 能力广告
+SYS_TIER_SEMI = 1        # 随场景/进度变，同一轮内稳定：模组数据、幕后真相
+SYS_TIER_VOLATILE = 2    # 每轮都可能变：摘录、台账、记忆、幕后动态、封路清单
+_SYS_TIERS = (SYS_TIER_STATIC, SYS_TIER_SEMI, SYS_TIER_VOLATILE)
+
+# 分块结果挂在 system 消息的 CACHE_BLOCKS_KEY 上（契约定义见 app.ai.provider）。
+
+
+class _Seg(NamedTuple):
+    """系统提示的一个段落。``label`` 仅用于超预算丢弃时的日志与测试断言。"""
+    text: str
+    tier: int
+    priority: int
+    label: str
+
+
+def _assemble_system(segs: list[_Seg], max_tokens: int) -> tuple[list[str], int]:
+    """把段落按 tier 分组拼成 3 个文本块，超预算时按 priority 整段丢弃。
+
+    返回 ``([静态块, 半静态块, 易变块], 估算 token)``。空块由调用方过滤。
+    priority=0 的段永不丢弃——若它们本身就超预算，宁可超也不切碎裁定手册或模组 JSON，
+    代价由事件区预算吸收（event_budget 相应变小，历史少给几条）。
+    """
+    kept = list(segs)
+    total = sum(_estimate_tokens(s.text) for s in kept)
+    if total > max_tokens:
+        # 同 priority 内保持原始顺序（sorted 稳定），使丢弃行为可预测、可测试。
+        for seg in sorted((s for s in kept if s.priority > 0), key=lambda s: -s.priority):
+            if total <= max_tokens:
+                break
+            kept.remove(seg)
+            total -= _estimate_tokens(seg.text)
+            logger.warning("系统提示超预算，丢弃段落：%s", seg.label)
+        if total > max_tokens:
+            logger.warning("系统提示仍超预算（%s > %s），保留全部必留段", total, max_tokens)
+    blocks = ["".join(s.text for s in kept if s.tier == t) for t in _SYS_TIERS]
+    return blocks, total
+
+
+def system_text(messages: list[dict]) -> str:
+    """把**开头连续**的 system 消息拼回完整的系统提示。
+
+    系统提示按缓存稳定性拆成多条 system 消息，但「系统提示里有没有某段内容」这个问题
+    与拆法无关，调用方（测试、用量估算、provider）一律走这里。
+
+    「开头连续」是关键：夹在历史消息之间的 system 消息（滚动摘要、回合边界提示、格式
+    提醒、文风纠偏）是**位置敏感**的——它们靠所处位置表达「这段已展示」「接下来该
+    生成」，被抽到系统提示里就失去了意义。
+    """
+    out: list[str] = []
+    for m in messages:
+        if m.get("role") != "system":
+            break
+        out.append(m.get("content") or "")
+    return "".join(out)
 
 
 def _format_json(data) -> str:
@@ -376,6 +498,41 @@ def _compact_scenes(scenes: list[dict] | None, current_scene_id: str | None) -> 
                 "description": s.get("description", "")[:60],
             })
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+
+# 场景可见性的时间窗：除当前场景外，最近去过的这么多个场景仍留在上下文里。
+# `visited_scenes` 只进不出——走过 30 个场景后，30 个场景的 NPC 与线索会全部常驻系统提示，
+# 而 KP 此刻只在第 30 个。防剧透的目的早已达到，省 token 的目的却在长局里彻底失效。
+# 窗口之外的场景并非一律丢弃：**尚有未了结线索**的场景一律保留（见 _visible_scenes）——
+# 玩家随时可能回头追那条线，把它的资料抽走会让 KP 对自己埋过的伏笔失忆。
+VISITED_SCENE_WINDOW = 6
+
+
+def _visible_scenes(session: GameSession, scene_id: str | None, module: Module) -> set[str]:
+    """解析本轮该给 KP 看哪些场景的 NPC / 线索资料。
+
+    = 当前场景 + 最近 N 个去过的场景 + 任何还挂着未了结线索的场景。
+    """
+    visited = list((session.world_state or {}).get("visited_scenes") or [])
+    visible = set(visited[-VISITED_SCENE_WINDOW:])
+    if scene_id:
+        visible.add(scene_id)
+
+    # 未了结 = 线索台账里没记成「已完全掌握」。台账异常时 fail-open 退回全量可见
+    # （宁可多给资料，也不能让 KP 突然看不见自己埋过的线索）。
+    try:
+        ledger = (session.world_state or {}).get("clue_ledger") or {}
+        visited_set = set(visited)
+        for clue in (module.clues or []):
+            loc = clue.get("location")
+            if not loc or loc not in visited_set or loc in visible:
+                continue
+            if (ledger.get(clue.get("id")) or {}).get("status") != "known":
+                visible.add(loc)
+    except Exception:
+        logger.exception("解析未了结线索场景失败，退回全量可见")
+        return set(visited) | ({scene_id} if scene_id else set())
+    return visible
 
 
 def _compact_npcs(
@@ -736,6 +893,7 @@ def build_kp_context(
     module_lookup_enabled: bool = False,
     rule_excerpts: list[dict] | None = None,
     context_budget: int | None = None,
+    recall_enabled: bool = False,
 ) -> list[dict]:
     # 本函数保持纯粹（不触数据库）：module_excerpts 是调用方（turn_orchestrator）检索好的
     # 模组原文片段（[{"text", ...}]），未建索引/检索失败时传 None → 行为与无此特性时完全一致。
@@ -814,9 +972,7 @@ def build_kp_context(
     else:
         # 运行时分层：只把玩家已到达区域的 NPC / 线索喂给 KP，减少中途泄露未抵达
         # 区域的内容。无固定位置的 NPC / 线索照常给。
-        visible_scene_ids = set((session.world_state or {}).get("visited_scenes") or [])
-        if scene_id:
-            visible_scene_ids.add(scene_id)
+        visible_scene_ids = _visible_scenes(session, scene_id, module)
         npcs_info = _compact_npcs(npcs, visible_scene_ids=visible_scene_ids)
         clues_info = _compact_clues(module.clues, visible_scene_ids=visible_scene_ids)
 
@@ -853,36 +1009,71 @@ def build_kp_context(
         if biome:
             current_scene_text += f"\n【场景地貌】{biome}——环境细节与出入动线应与地貌相符。"
 
-    system_content = KP_SYSTEM_PROMPT.format(
-        rule_system=module.rule_system.upper(),
-        module_title=module.title,
-        module_description=module.description,
-        world_setting=_format_json_compact(module.world_setting),
-        scenes_info=_compact_scenes(scenes, scene_id),
-        current_scene=current_scene_text,
-        plot_state=_format_plot_state(flags, module.triggers),
-        npcs_info=npcs_info,
-        clues_info=clues_info,
-        player_info=player_info,
-    )
+    # ── 分段装配（顺序 = 缓存稳定性，不是阅读顺序）────────────────────────
+    # 静态段先入列：身份 + 裁定手册整场逐字不变，是缓存命中的主体（约 1.5 万估算 token）。
+    segs: list[_Seg] = [
+        _Seg(KP_IDENTITY_SECTION.format(rule_system=module.rule_system.upper()),
+             SYS_TIER_STATIC, 0, "identity"),
+        _Seg(KP_MANUAL_SECTION, SYS_TIER_STATIC, 0, "manual"),
+    ]
 
-    # 文风（玩家指定）：本局 > 模组默认 > 不指定。放在最前面追加是有意的——下面的模组原文
-    # 摘录可能很长，超预算时 _truncate_to_tokens 从**尾部**截；文风若排在它们之后会被整段截掉，
-    # 表现成「设置有时生效有时不生效」这种最难查的样子。
+    # 文风（玩家指定）：本局 > 模组默认 > 不指定。本局内不变，故归静态段；
+    # 紧跟手册之后是有意的——段内那句「上文的全部叙事纪律优先级更高」要指得着手册。
     style_prompt = style_presets.narrative_style_prompt(
         getattr(session, "narrative_style", ""),
         getattr(module, "default_narrative_style", ""),
     )
     if style_prompt:
-        system_content += NARRATIVE_STYLE_SECTION.format(style=style_prompt)
+        segs.append(_Seg(NARRATIVE_STYLE_SECTION.format(style=style_prompt),
+                         SYS_TIER_STATIC, 0, "narrative-style"))
 
     # 「建议前往」能力：本子有多个 location 场景（真有地方可去）才广告——只有一处的本子
     # 广告了也只会诱导 KP 发无效指令。与「有规则书才广告 [RULE_LOOKUP]」同一取舍。
-    if sum(1 for x in scenes if (x.get("kind") or "location") == "location") > 1:
-        # 当前封着的路一并告诉 KP：不给它这份清单，它就没法在威胁解除时想起来解封，
-        # 那条路会一直断着——这是「靠 KP 记得解」这个设计最容易塌的地方。
+    # 广告本身整场不变（静态）；当前封着的路每轮都可能变，拆成独立的易变段。
+    has_multi_location = sum(
+        1 for x in scenes if (x.get("kind") or "location") == "location"
+    ) > 1
+    if has_multi_location:
+        segs.append(_Seg(TRAVEL_SUGGEST_INSTRUCTION, SYS_TIER_STATIC, 0, "travel-suggest"))
+
+    # 能力广告：是否广告取决于本场配置（有无规则书 / 索引 / 队友），会话内恒定 → 静态段。
+    if rules_lookup_enabled:
+        segs.append(_Seg(RULE_LOOKUP_INSTRUCTION, SYS_TIER_STATIC, 0, "rule-lookup-ad"))
+    if module_lookup_enabled:
+        segs.append(_Seg(MODULE_LOOKUP_INSTRUCTION, SYS_TIER_STATIC, 0, "module-lookup-ad"))
+    # 只在**确实已经有剧情被浓缩掉**时才广告回想能力：局刚开始时全部历史都还逐字躺在
+    # 上下文里，广告了只会诱导 KP 去查它眼前就有的东西。
+    if recall_enabled:
+        segs.append(_Seg(RECALL_HISTORY_INSTRUCTION, SYS_TIER_STATIC, 0, "recall-ad"))
+    if not is_opening and _has_plot_state(module):
+        segs.append(_Seg(PLOT_FLAG_INSTRUCTION, SYS_TIER_STATIC, 0, "plot-flag-ad"))
+    if not is_opening and teammates:
+        segs.append(_Seg(GROUP_INSTRUCTION, SYS_TIER_STATIC, 0, "group-ad"))
+
+    # ── 半静态段：模组数据随已访问场景/剧情推进而变，同一轮内稳定 ──────────
+    segs.append(_Seg(
+        KP_MODULE_DATA_SECTION.format(
+            module_title=module.title,
+            module_description=module.description,
+            world_setting=_format_json_compact(module.world_setting),
+            scenes_info=_compact_scenes(scenes, scene_id),
+            current_scene=current_scene_text,
+            plot_state=_format_plot_state(flags, module.triggers),
+            npcs_info=npcs_info,
+            clues_info=clues_info,
+            player_info=player_info,
+        ),
+        SYS_TIER_SEMI, 0, "module-data",
+    ))
+
+    # 幕后真相（守秘人专属）：模组解析出的全局真相，KP 据此裁定与铺垫（带守密措辞）。
+    truth = (getattr(module, "truth", "") or "").strip()
+    if truth:
+        segs.append(_Seg(TRUTH_SECTION.format(truth=truth), SYS_TIER_SEMI, 0, "truth"))
+
+    # ── 易变段：每轮都可能变，排在最后，不污染上面两块的缓存前缀 ───────────
+    if has_multi_location:
         blocked = world_memory.blocked_scenes(session.world_state or {})
-        blocked_now = ""
         if blocked:
             by_id = {x.get("id"): x for x in scenes if x.get("id")}
             items = "；".join(
@@ -890,47 +1081,32 @@ def build_kp_context(
                 f"（{why or '未说明'}）"
                 for sid, why in blocked.items()
             )
-            blocked_now = f"\n\n**当前封着的路**：{items}。条件一旦解除，立刻 [UNBLOCK_PATH]。"
-        system_content += TRAVEL_SUGGEST_INSTRUCTION.format(blocked_now=blocked_now)
-
-    # 幕后真相（守秘人专属）：模组解析出的全局真相，KP 据此裁定与铺垫（带守密措辞）。
-    truth = (getattr(module, "truth", "") or "").strip()
-    if truth:
-        system_content += TRUTH_SECTION.format(truth=truth)
+            segs.append(_Seg(BLOCKED_PATHS_SECTION.format(blocked_list=items),
+                             SYS_TIER_VOLATILE, 15, "blocked-paths"))
 
     # 模组原文摘录（被动注入）：调用方检索好才有，独立小节、带泄密警示措辞。
+    # priority 较高（先丢）：丢了 KP 还能用 [MODULE_LOOKUP] 主动查回来，是可恢复的损失。
     if module_excerpts:
         excerpt_body = _format_module_excerpts(module_excerpts)
         if excerpt_body:
-            system_content += MODULE_EXCERPT_SECTION.format(excerpts=excerpt_body)
+            segs.append(_Seg(MODULE_EXCERPT_SECTION.format(excerpts=excerpt_body),
+                             SYS_TIER_VOLATILE, 40, "module-excerpts"))
 
     # 规则要点（被动注入）：调用方按本轮回合类型检索好的规则书片段，裁定时优先遵此执行。
     # 截断/编号复用模组摘录逻辑，单块上限见 RULE_EXCERPT_MAX_CHARS（top-3 合计 ≈1800 token）。
+    # 同样可被 [RULE_LOOKUP] 找回，故与模组摘录同档先丢。
     if rule_excerpts:
         rule_body = _format_module_excerpts(rule_excerpts, max_chars=RULE_EXCERPT_MAX_CHARS)
         if rule_body:
-            system_content += RULE_EXCERPT_SECTION.format(excerpts=rule_body)
-
-    # 仅在挂载了规则书时广告 [RULE_LOOKUP] 能力（无书时不让 KP 发空查询）。
-    if rules_lookup_enabled:
-        system_content += RULE_LOOKUP_INSTRUCTION
-
-    # 仅在模组原文索引就绪时广告 [MODULE_LOOKUP] 能力（未建索引不让 KP 发空查询）。
-    if module_lookup_enabled:
-        system_content += MODULE_LOOKUP_INSTRUCTION
-
-    # 仅当模组确有「随剧情改变」的场景/NPC 时，且非开场，才广告 [SET_FLAG]/[CLEAR_FLAG] 推进能力。
-    if not is_opening and _has_plot_state(module):
-        system_content += PLOT_FLAG_INSTRUCTION
-
-    # 队伍可能分头（有队友）时，广告 [GROUP] 分组标记，便于分头行动分栏展示。
-    if not is_opening and teammates:
-        system_content += GROUP_INSTRUCTION
+            segs.append(_Seg(RULE_EXCERPT_SECTION.format(excerpts=rule_body),
+                             SYS_TIER_VOLATILE, 40, "rule-excerpts"))
 
     # 刚结束的战斗/追逐：把结果摘要注入，供 KP 续写余波（读一次后由生成流程清除 combat_result）。
+    # priority=0：一次性内容，本轮不给就永远没了，KP 无从续写余波。
     combat_result = (session.world_state or {}).get("combat_result")
     if combat_result:
-        system_content += _format_combat_result(combat_result)
+        segs.append(_Seg(_format_combat_result(combat_result),
+                         SYS_TIER_VOLATILE, 0, "combat-result"))
 
     # 手书（Handouts）：仅当模组尚有未发放的手书、且非开场时，广告 [HANDOUT] 发放能力，
     # 附「id｜类型｜标题｜发放条件」清单（正文不进上下文——发放时才由系统展开成卡片）。
@@ -939,7 +1115,8 @@ def build_kp_context(
         try:
             handout_list = _format_handout_list(module, session)
             if handout_list:
-                system_content += HANDOUT_INSTRUCTION.format(handout_list=handout_list)
+                segs.append(_Seg(HANDOUT_INSTRUCTION.format(handout_list=handout_list),
+                                 SYS_TIER_VOLATILE, 25, "handouts"))
         except Exception:
             logger.exception("手书清单注入 KP 上下文失败（忽略）")
 
@@ -947,6 +1124,7 @@ def build_kp_context(
     # 线索台账：玩家已 known/partial 的线索清单 + 「已列出的不要重复安排发现桥段、
     # 未列出的一律视为未发现」的硬指示；NPC 记忆：各 NPC 的态度/承诺/谎言/最近互动，
     # 保证 NPC 言行跨回合一致。台账/记忆为空时不注入任何小节（与现状完全一致）。
+    # 台账 priority 最低（最后才丢）：丢了 KP 会重复安排已发现线索的发现桥段，玩家直接可感。
     if not is_opening:
         try:
             ws_mem = session.world_state or {}
@@ -960,10 +1138,12 @@ def build_kp_context(
                 ws_mem, clue_names, char_names,
             )
             if ledger_section:
-                system_content += "\n\n" + ledger_section
+                segs.append(_Seg("\n\n" + ledger_section,
+                                 SYS_TIER_VOLATILE, 5, "clue-ledger"))
             npc_memory_section = world_memory.format_npc_memory_section(ws_mem, npcs)
             if npc_memory_section:
-                system_content += "\n\n" + npc_memory_section
+                segs.append(_Seg("\n\n" + npc_memory_section,
+                                 SYS_TIER_VOLATILE, 10, "npc-memory"))
         except Exception:
             logger.exception("世界记忆注入 KP 上下文失败（忽略）")
 
@@ -973,7 +1153,8 @@ def build_kp_context(
         try:
             backstage_section = _format_backstage_section(events)
             if backstage_section:
-                system_content += "\n\n" + backstage_section
+                segs.append(_Seg("\n\n" + backstage_section,
+                                 SYS_TIER_VOLATILE, 30, "backstage"))
         except Exception:
             logger.exception("幕后动态注入 KP 上下文失败（忽略）")
 
@@ -983,18 +1164,25 @@ def build_kp_context(
         try:
             improv_section = _improvised_npc_section(session)
             if improv_section:
-                system_content += "\n\n" + improv_section
+                segs.append(_Seg("\n\n" + improv_section,
+                                 SYS_TIER_VOLATILE, 35, "improvised-npcs"))
         except Exception:
             logger.exception("临场角色名单注入 KP 上下文失败（忽略）")
 
     party_char_ids = {player_char.id} | {t.id for t in teammates}
 
-    system_tokens = _estimate_tokens(system_content)
-    if system_tokens > MAX_SYSTEM_TOKENS:
-        system_content = _truncate_to_tokens(system_content, MAX_SYSTEM_TOKENS)
-        system_tokens = MAX_SYSTEM_TOKENS
-
-    messages = [{"role": "system", "content": system_content}]
+    # 装配：超预算按 priority 整段丢弃（不再从尾部切字符——那会切碎模组 JSON）。
+    #
+    # 系统提示仍是**一条** system 消息，`content` 是完整正文（下游一切读取口径不变）；
+    # 分块结果另挂在 CACHE_BLOCKS_KEY 上，供支持 prompt caching 的 provider 拆成
+    # system blocks 并在稳定块末尾打断点。不认这个键的 provider 直接用 content 即可，
+    # 行为与放宽前完全一致。**provider 必须在发请求前剔除该键**（见 _strip_cache_blocks）。
+    sys_blocks, system_tokens = _assemble_system(segs, MAX_SYSTEM_TOKENS)
+    messages = [{
+        "role": "system",
+        "content": "".join(sys_blocks),
+        CACHE_BLOCKS_KEY: [b for b in sys_blocks if b],
+    }]
 
     if not events:
         ws = module.world_setting or {}
@@ -1038,7 +1226,9 @@ def build_kp_context(
         messages.append({"role": "user", "content": opening})
     else:
         # 组装预算：调用方显式传入优先；否则按当前激活模型窗口自适应（≤64K 回落下限）。
-        budget = context_budget if context_budget is not None else _active_context_budget()
+        # 再乘以本会话的在线校准系数——启发式估算相对真实 BPE 有系统性偏差，不校准就等于
+        # 白扔掉近一半可用窗口（见 update_budget_scale）。
+        budget = effective_context_budget(session.world_state or {}, context_budget)
         event_budget = budget - system_tokens - RESERVE_FOR_OUTPUT
 
         # 滚动剧情摘要：已被浓缩进 world_state.story_summary 的老事件（seq ≤ 游标）不再逐条进
@@ -1046,7 +1236,8 @@ def build_kp_context(
         # 游标默认 0（无摘要）→ recent_pool 即全部事件，与旧行为一致（向后兼容）。
         ws = session.world_state or {}
         cursor = ws.get("story_summary_seq") or 0
-        persist_summary = (ws.get("story_summary") or "").strip()
+        # 分层章节按序拼成完整梗概（兼容旧的单串存档，见 world_memory.story_chapters）。
+        persist_summary = world_memory.story_summary_text(ws)
         recent_pool = [e for e in events if (e.sequence_num or 0) > cursor]
 
         all_msgs = _events_to_messages(
@@ -1327,26 +1518,52 @@ def _format_recent_events_digest(
     return "\n".join(lines) if lines else "（暂无）"
 
 
+# 兜底骨架里各类事件保留的正文字数。检定给得最宽——它本身就短，且成败直接决定后续
+# 走向，截掉等于丢了结论；旁白给得最窄——环境描写越往后信息密度越低。
+_SKELETON_CHARS = {"dice": 200, "system": 80, "narration": 90, "dialogue": 70, "action": 70}
+#: 无「行动者」概念的事件类型，用固定标签而非 actor_name。
+_SKELETON_LABEL = {"dice": "检定", "system": "系统", "narration": "旁白"}
+
+
+def _event_skeleton(ev: EventLog) -> str:
+    """把一条事件压成一行骨架：保住「谁做了什么、结果如何」，丢掉措辞。"""
+    if ev.summary:
+        # 目前没有写入方，留作扩展点。注意必须**逐条**使用：早先的实现是「找到任意一条
+        # 带 summary 的事件就拿它当整批的摘要返回」，那等于用一条事件代表几十条。
+        return f"- {ev.summary.strip()}"
+    content = (ev.content or "").replace("\n", " ").strip()
+    if not content:
+        return ""
+    etype = ev.event_type or ""
+    body = content[:_SKELETON_CHARS.get(etype, 90)]
+    label = _SKELETON_LABEL.get(etype)
+    if label:
+        return f"- {label}：{body}"
+    return f"- {ev.actor_name or '某人'}{'说' if etype == 'dialogue' else ''}：{body}"
+
+
 def _summarize_old_events(events: list[EventLog], max_tokens: int = 1500) -> str:
+    """把放不下全文的老事件压成结构化骨架——**兜底**路径，正常不该走到。
+
+    按 token 触发的滚动摘要（见 generation_housekeeping）会在撞上组装预算之前就把老事件
+    交给 LLM 浓缩掉；真走到这里，说明单轮涌入的事件量异常大（例如一场长战斗的逐轮回放）。
+    此时保住「发生过什么」比保住原文措辞重要，故按事件类型给不同骨架，而不是无差别截字符。
+
+    收集方向刻意从近到远：旧实现从最早开始塞，长局后摘要会永远停在开场附近、丢掉中段与
+    近段剧情，表现为 KP 记忆停滞、原地打转、复读开场式内容。
+    """
     if not events:
         return ""
-    for ev in reversed(events):
-        if ev.summary:
-            return _truncate_to_tokens(ev.summary, max_tokens)
-
-    # 从「离当前最近」的老事件往前收集，预算用尽即停。旧实现从最早开始塞，长局后摘要会
-    # 永远停留在开场附近、丢掉中段与近段剧情，导致 KP 记忆停滞、原地打转、复读开场式内容。
-    lines = []
+    lines: list[str] = []
     token_count = 0
     for ev in reversed(events):
-        prefix = ev.actor_name or ev.event_type
-        snippet = (ev.content or "")[:120].replace("\n", " ")
-        line = f"- [{prefix}] {snippet}"
+        line = _event_skeleton(ev)
+        if not line:
+            continue
         line_tokens = _estimate_tokens(line)
         if token_count + line_tokens > max_tokens:
             break
         lines.append(line)
         token_count += line_tokens
     lines.reverse()  # 收集是倒序，输出恢复为时间正序
-
-    return "\n".join(lines) if lines else ""
+    return "\n".join(lines)

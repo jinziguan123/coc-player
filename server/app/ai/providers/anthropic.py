@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.ai import usage_tracker
-from app.ai.provider import LLMProvider, StreamDelta, ToolCall
+from app.ai.provider import CACHE_BLOCKS_KEY, LLMProvider, StreamDelta, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -83,17 +83,28 @@ class AnthropicProvider(LLMProvider):
         self.last_usage: dict | None = None
 
     def _set_usage(self, u: dict | None) -> None:
-        """把 Anthropic 的 {input_tokens, output_tokens} 归一为 OpenAI 形态，下游统一读 prompt_tokens。"""
+        """把 Anthropic 的 {input_tokens, output_tokens} 归一为 OpenAI 形态，下游统一读 prompt_tokens。
+
+        缓存读写量一并带出（``cache_read_input_tokens`` / ``cache_creation_input_tokens``）：
+        没有命中率可观测的缓存等于没接——命中率长期为 0 就说明前缀里混进了每轮都变的东西。
+        注意 Anthropic 的 ``input_tokens`` 只含**未命中缓存**的部分，故真实输入总量是三者之和；
+        下游的占用估算要的是总量，这里就把 prompt_tokens 归一成总量，免得每个调用方各算一次。
+        """
         if not u:
             return
         pt = u.get("input_tokens")
         ct = u.get("output_tokens")
         if pt is None and ct is None:
             return
+        cache_read = u.get("cache_read_input_tokens") or 0
+        cache_write = u.get("cache_creation_input_tokens") or 0
+        prompt_total = (pt or 0) + cache_read + cache_write
         self.last_usage = {
-            "prompt_tokens": pt or 0,
+            "prompt_tokens": prompt_total,
             "completion_tokens": ct or 0,
-            "total_tokens": (pt or 0) + (ct or 0),
+            "total_tokens": prompt_total + (ct or 0),
+            "cache_read_input_tokens": cache_read,
+            "cache_creation_input_tokens": cache_write,
         }
         usage_tracker.add(self.last_usage)   # 累进本局用量（此前只写 last_usage、系统性漏记）
 
@@ -106,21 +117,48 @@ class AnthropicProvider(LLMProvider):
 
     def _split_system(
         self, messages: list[dict],
-    ) -> tuple[str | None, list[dict]]:
-        """将 system 消息从 messages 中分离出来。
+    ) -> tuple[list[dict] | None, list[dict]]:
+        """把**开头连续**的 system 消息拆成 Anthropic 的 system blocks。
 
-        Anthropic API 要求 system 消息通过独立的 system 参数传递，
-        而非放在 messages 列表中。
+        两个要点：
+
+        1. **只有开头连续的 system 消息才是「系统提示」。** 夹在历史中间的 system 消息是
+           位置敏感的（滚动剧情摘要、回合边界提示、格式提醒、文风纠偏）——它们靠所处位置
+           表达「这段已展示」「接下来该生成」。此前的实现把**每一条** system 消息都 join
+           到顶部，上下文层精心设计的插入位置在 Anthropic 路径上一律失效。现在它们留在
+           原位，转成 user 消息（Anthropic 的 messages 只收 user/assistant，连续同 role
+           由服务端合并成一轮，不破坏交替）。
+
+        2. **prompt caching 断点。** 上下文层把系统提示按稳定性切好挂在 CACHE_BLOCKS_KEY 上
+           （静态手册 → 半静态模组数据 → 每轮变的台账/记忆）。缓存是前缀匹配，故只给前两块
+           打断点：第三块每轮都变，打了也永远不命中。断点上限是每请求 4 个，这里用 2 个。
+           块太小（不足模型的最小可缓存前缀）时服务端静默不缓存、也不计缓存写入费，
+           因此无需按大小判断要不要打。
         """
-        system_parts: list[str] = []
-        user_messages: list[dict] = []
+        system_blocks: list[dict] = []
+        rest: list[dict] = []
+        in_leading_system = True
         for msg in messages:
             if msg.get("role") == "system":
-                system_parts.append(msg.get("content", ""))
-            else:
-                user_messages.append(msg)
-        system_text = "\n".join(system_parts) if system_parts else None
-        return system_text, user_messages
+                if in_leading_system:
+                    blocks = msg.get(CACHE_BLOCKS_KEY) or [msg.get("content", "")]
+                    system_blocks.extend(
+                        {"type": "text", "text": b} for b in blocks if b
+                    )
+                else:
+                    rest.append({"role": "user", "content": msg.get("content", "")})
+                continue
+            in_leading_system = False
+            rest.append(msg)
+
+        if not system_blocks:
+            return None, rest
+        # 跑团回合间隔常以分钟计（玩家思考、打字、掷骰），5 分钟的默认 TTL 会让缓存在
+        # 回合之间大量过期——那样每轮都是一次缓存写入（1.25×），比不缓存还贵。故用 1h：
+        # 写入 2×、读取 0.1×，一局几十轮下来净省极多。
+        for block in system_blocks[:2]:
+            block["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+        return system_blocks, rest
 
     async def complete(
         self,
@@ -129,7 +167,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int | None = None,
         response_format: dict | None = None,
     ) -> str:
-        system_text, user_messages = self._split_system(messages)
+        system_blocks, user_messages = self._split_system(messages)
         payload: dict = {
             "model": self.model,
             "messages": user_messages,
@@ -138,8 +176,8 @@ class AnthropicProvider(LLMProvider):
             # 输出天花板，不按上限计费），避免对正常生成造成限制。
             "max_tokens": max_tokens if max_tokens is not None else 8192,
         }
-        if system_text:
-            payload["system"] = system_text
+        if system_blocks:
+            payload["system"] = system_blocks
 
         resp = await self._client.post(
             self._api_url, headers=self._headers(), json=payload,
@@ -182,7 +220,7 @@ class AnthropicProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[StreamDelta]:
-        system_text, user_messages = self._split_system(messages)
+        system_blocks, user_messages = self._split_system(messages)
         payload: dict = {
             "model": self.model,
             "messages": messages_to_anthropic(user_messages),
@@ -190,15 +228,18 @@ class AnthropicProvider(LLMProvider):
             "max_tokens": max_tokens if max_tokens is not None else 8192,
             "stream": True,
         }
-        if system_text:
-            payload["system"] = system_text
+        if system_blocks:
+            payload["system"] = system_blocks
         if tools:
             payload["tools"] = tools_to_anthropic(tools)
 
         # tool_use 块的聚合状态：content_block_start 记 id/name，input_json_delta 累积
         # partial_json，content_block_stop 时产出完整调用。
         pending: dict | None = None
-        u_in = u_out = 0
+        # 保留 message_start 的整个 usage：除 input_tokens 外还带缓存读写量，
+        # 只摘一个字段会让流式路径（主叙事都走这条）永远看不到缓存命中。
+        u_start: dict = {}
+        u_out = 0
         async with self._client.stream(
             "POST", self._api_url, headers=self._headers(), json=payload,
         ) as resp:
@@ -215,7 +256,7 @@ class AnthropicProvider(LLMProvider):
                     continue
                 event_type = chunk.get("type", "")
                 if event_type == "message_start":
-                    u_in = ((chunk.get("message") or {}).get("usage") or {}).get("input_tokens") or u_in
+                    u_start = ((chunk.get("message") or {}).get("usage") or {}) or u_start
                 elif event_type == "message_delta":
                     u_out = (chunk.get("usage") or {}).get("output_tokens") or u_out
                 if event_type == "content_block_start":
@@ -247,7 +288,7 @@ class AnthropicProvider(LLMProvider):
                     ))
                     pending = None
                 elif event_type == "message_stop":
-                    self._set_usage({"input_tokens": u_in, "output_tokens": u_out})
+                    self._set_usage({**u_start, "output_tokens": u_out})
                     break
 
     async def stream(
@@ -256,7 +297,7 @@ class AnthropicProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
-        system_text, user_messages = self._split_system(messages)
+        system_blocks, user_messages = self._split_system(messages)
         payload: dict = {
             "model": self.model,
             "messages": user_messages,
@@ -264,10 +305,13 @@ class AnthropicProvider(LLMProvider):
             "max_tokens": max_tokens if max_tokens is not None else 8192,
             "stream": True,
         }
-        if system_text:
-            payload["system"] = system_text
+        if system_blocks:
+            payload["system"] = system_blocks
 
-        u_in = u_out = 0
+        # 保留 message_start 的整个 usage：除 input_tokens 外还带缓存读写量，
+        # 只摘一个字段会让流式路径（主叙事都走这条）永远看不到缓存命中。
+        u_start: dict = {}
+        u_out = 0
         async with self._client.stream(
             "POST", self._api_url, headers=self._headers(), json=payload,
         ) as resp:
@@ -284,7 +328,7 @@ class AnthropicProvider(LLMProvider):
                     continue
                 event_type = chunk.get("type", "")
                 if event_type == "message_start":
-                    u_in = ((chunk.get("message") or {}).get("usage") or {}).get("input_tokens") or u_in
+                    u_start = ((chunk.get("message") or {}).get("usage") or {}) or u_start
                 elif event_type == "message_delta":
                     u_out = (chunk.get("usage") or {}).get("output_tokens") or u_out
                 if event_type == "content_block_delta":
@@ -293,5 +337,5 @@ class AnthropicProvider(LLMProvider):
                     if text:
                         yield text
                 elif event_type == "message_stop":
-                    self._set_usage({"input_tokens": u_in, "output_tokens": u_out})
+                    self._set_usage({**u_start, "output_tokens": u_out})
                     break

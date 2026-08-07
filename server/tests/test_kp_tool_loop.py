@@ -584,7 +584,8 @@ def test_registry_covers_all_regex_commands():
     tags = {spec.tag for spec in kp_tools.REGISTRY}
     assert tags == {
         "DICE_CHECK", "OPPOSED_CHECK", "SAN_CHECK", "HP_CHANGE", "NPC_ACT",
-        "SCENE_CHANGE", "RULE_LOOKUP", "MODULE_LOOKUP", "SET_FLAG", "CLEAR_FLAG",
+        "SCENE_CHANGE", "RULE_LOOKUP", "MODULE_LOOKUP", "RECALL_HISTORY",
+        "SET_FLAG", "CLEAR_FLAG",
         "HANDOUT", "SAY", "START_COMBAT", "START_CHASE", "TRAVEL_SUGGEST",
         "BLOCK_PATH", "UNBLOCK_PATH",
     }

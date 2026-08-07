@@ -664,11 +664,17 @@ def _record_rag(
         db.rollback()
 
 
-def _record_turn_usage(db: Session, game_session: GameSession, llm, events: list) -> None:
+def _record_turn_usage(
+    db: Session, game_session: GameSession, llm, events: list,
+    messages: list[dict] | None = None,
+) -> None:
     """把主叙事那次调用的服务端真实 usage 落到 world_state.turn_usage，供「上下文占用」显示实测值。
 
     **必须在主叙事流结束后、validator/摘要等后续 complete 覆盖 llm.last_usage 之前**调用。
     fail-open：无 usage（Provider 不支持）或异常都静默跳过，徽标回落启发式估算。
+
+    给了 ``messages``（本轮真正送进模型的那份）时，顺带用「估算 / 实测」更新本会话的预算
+    校准系数：两者口径一致（都含 RAG 摘录等一切实际内容），是校准唯一可靠的取样点。
     """
     u = getattr(llm, "last_usage", None)
     if not isinstance(u, dict):
@@ -682,8 +688,18 @@ def _record_turn_usage(db: Session, game_session: GameSession, llm, events: list
             "prompt_tokens": pt,
             "completion_tokens": u.get("completion_tokens") or 0,
             "total_tokens": u.get("total_tokens") or 0,
+            # prompt caching 读写量（无缓存能力的 Provider 恒为 0）。带上它，前端的
+            # 「上下文占用」才能显示命中率——命中率长期为 0 就说明提示词前缀里混进了
+            # 每轮都变的内容，那是要去 app.ai.context 的分段装配里查的。
+            "cache_read_tokens": u.get("cache_read_input_tokens") or 0,
+            "cache_write_tokens": u.get("cache_creation_input_tokens") or 0,
             "at_seq": (events[-1].sequence_num if events else 0) or 0,
         }
+        if messages:
+            from app.ai.context import _estimate_tokens, update_budget_scale
+            estimated = sum(_estimate_tokens(m.get("content") or "") for m in messages)
+            ws["turn_usage"]["estimated_tokens"] = estimated
+            ws = update_budget_scale(ws, pt, estimated)
         game_session.world_state = ws
         db.commit()
     except Exception:

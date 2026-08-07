@@ -17,6 +17,7 @@ from app.ai.context import build_kp_context
 from app.ai.prompts.kp_system import (
     KP_DICE_CONTINUATION_PROMPT,
     KP_MODULE_CONTINUATION_PROMPT,
+    KP_RECALL_CONTINUATION_PROMPT,
     KP_RULE_CONTINUATION_PROMPT,
 )
 from app.ai.provider import ToolCall
@@ -28,6 +29,7 @@ from app.services import (
     chat_event_writer,
     command_protocol,
     dice_runtime,
+    event_recall,
     illustration_service,
     kp_actions,
     module_rag_service,
@@ -53,6 +55,7 @@ BLOCK_PATH_RE = command_protocol.BLOCK_PATH_RE
 UNBLOCK_PATH_RE = command_protocol.UNBLOCK_PATH_RE
 RULE_LOOKUP_RE = command_protocol.RULE_LOOKUP_RE
 MODULE_LOOKUP_RE = command_protocol.MODULE_LOOKUP_RE
+RECALL_HISTORY_RE = command_protocol.RECALL_HISTORY_RE
 SET_FLAG_RE = command_protocol.SET_FLAG_RE
 CLEAR_FLAG_RE = command_protocol.CLEAR_FLAG_RE
 HANDOUT_RE = command_protocol.HANDOUT_RE
@@ -92,6 +95,23 @@ def _rule_lookup_passages(
     if hits:
         return "\n\n".join(f"[第 {h['page']} 页] {h['text']}" for h in hits)
     return "（未在规则书中找到直接匹配的内容，请依据《裁定手册》与你的经验处理。）"
+
+
+def _recall_history_passages(
+    db: Session, session_id: str, game_session: GameSession, query: str,
+) -> str:
+    """按语义把本局早前的事件原文找回来（fail-open：查不到给降级文案）。
+
+    只在滚动摘要游标**之前**的事件里找：游标之后的事件本来就在上下文里逐字躺着，
+    再检索一遍纯属浪费，还会把 KP 的注意力从眼前拉走。
+    """
+    cursor = (game_session.world_state or {}).get("story_summary_seq") or 0
+    hits = event_recall.recall(
+        db, session_id, query, k=3,
+        scene_id=game_session.current_scene_id,
+        before_seq=cursor or None,
+    )
+    return event_recall.format_recall(hits)
 
 
 def _module_lookup_passages(
@@ -155,7 +175,7 @@ _SOLO_ARG_KEY = {
     "set_flag": "flag", "clear_flag": "flag", "handout": "id",
     "scene_change": "scene_id", "travel_suggest": "scene_id",
     "block_path": "scene_id", "unblock_path": "scene_id",
-    "rule_lookup": "query", "module_lookup": "query",
+    "rule_lookup": "query", "module_lookup": "query", "recall_history": "query",
 }
 
 _TEXT_TAG_RE = re.compile(r"\[([A-Z_]{3,})(?:[:：\s]([^\]]*))?\]")
@@ -216,6 +236,7 @@ _STEP_NOTES: dict[str, str] = {
     "handout": "守秘人正在准备要给你们的东西…",
     "rule_lookup": "守秘人正在翻阅规则书…",
     "module_lookup": "守秘人正在翻阅剧本…",
+    "recall_history": "守秘人正在回想早前的事…",
     "set_flag": "守秘人正在推进剧情…",
     "clear_flag": "守秘人正在推进剧情…",
     # say / npc_act 不单列：它们之后紧接着往往就是正文，用通用措辞即可。
@@ -314,6 +335,12 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome(
                 KP_RULE_CONTINUATION_PROMPT.format(query=query, passages=passages),
                 chunks=[_make_chunk("system", "守秘人翻阅规则书……")],
+            )
+        if name == "recall_history":
+            passages = _recall_history_passages(db, session_id, game_session, query)
+            return kp_tools.ToolOutcome(
+                KP_RECALL_CONTINUATION_PROMPT.format(query=query, passages=passages),
+                chunks=[_make_chunk("system", "守秘人回想早前的事……")],
             )
         passages = _module_lookup_passages(db, module, game_session, query)
         return kp_tools.ToolOutcome(
@@ -429,6 +456,7 @@ def _build_kp_tool_executor(
         "san_check": _h_san_check,
         "rule_lookup": _h_lookup,
         "module_lookup": _h_lookup,
+        "recall_history": _h_lookup,
         "say": _h_say,
         "start_combat": _h_start_combat,
         "start_chase": _h_start_chase,
@@ -655,6 +683,17 @@ async def _process_commands(
         if mlookup:
             async for chunk in _handle_module_lookup(
                 db, session_id, mlookup.group(1).strip(), module, player_char,
+                game_session, llm, teammates=teammates, lookup_depth=lookup_depth,
+            ):
+                yield chunk
+            return
+
+    # 回想本局往事：同为终止性指令，共享同一开关与配额
+    if allow_rule_lookup and lookup_depth < MAX_RULE_LOOKUPS:
+        rlookup = RECALL_HISTORY_RE.search(kp_text)
+        if rlookup:
+            async for chunk in _handle_recall_history(
+                db, session_id, rlookup.group(1).strip(), module, player_char,
                 game_session, llm, teammates=teammates, lookup_depth=lookup_depth,
             ):
                 yield chunk
@@ -924,6 +963,60 @@ async def _handle_module_lookup(
             _attach_npc_portrait(db, session_id, module, ev)
 
     # 续写里可能含查完原文后发起的检定/场景切换等，照常处理（但禁止再次查阅）
+    async for chunk in _process_commands(
+        db, session_id, cont_result[1], module, player_char, game_session, llm,
+        teammates=teammates, allow_rule_lookup=False, lookup_depth=lookup_depth + 1,
+    ):
+        yield chunk
+
+
+async def _handle_recall_history(
+    db: Session,
+    session_id: str,
+    query: str,
+    module: Module,
+    player_char: Character,
+    game_session: GameSession,
+    llm,
+    teammates: list[Character] | None = None,
+    lookup_depth: int = 0,
+) -> AsyncIterator[str]:
+    """KP 发起 [RECALL_HISTORY] 后：回捞本局早前的事件原文 → 回灌让 KP 据此续写。
+
+    与 [RULE_LOOKUP]/[MODULE_LOOKUP] 同一套处理模式并共享 lookup_depth 配额，区别在于
+    查的是「本局已经发生过的事」：那部分记忆被滚动摘要压缩过，凭梗概编造出来的往事会
+    与玩家的记录冲突。检索不到时给降级文案，让 KP 当作确实没发生过（fail-open）。
+    """
+    yield _make_chunk("system", "守秘人回想早前的事……")
+
+    passages = _recall_history_passages(db, session_id, game_session, query)
+    continuation = KP_RECALL_CONTINUATION_PROMPT.format(query=query, passages=passages)
+    events = session_service.get_session_events(db, session_id)
+    messages = build_kp_context(
+        game_session, module, player_char, events, teammates=teammates,
+        rules_lookup_enabled=False,  # 续写阶段不再广告查阅，避免长链
+    )
+    messages.append({"role": "user", "content": continuation})
+
+    kp = KPAgent(llm)
+    cont_result = ["", "", [], [], []]
+    try:
+        async for chunk in _stream_narration_filtered(
+            kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
+        ):
+            yield chunk
+    finally:
+        cont_narration = cont_result[0].rstrip()
+        if cont_narration:
+            session_service.add_event(
+                db, session_id, "narration", cont_narration, actor_name="KP",
+            )
+        for npc_name, dialogue_text in cont_result[2]:
+            ev = session_service.add_event(
+                db, session_id, "dialogue", dialogue_text, actor_name=npc_name,
+            )
+            _attach_npc_portrait(db, session_id, module, ev)
+
     async for chunk in _process_commands(
         db, session_id, cont_result[1], module, player_char, game_session, llm,
         teammates=teammates, allow_rule_lookup=False, lookup_depth=lookup_depth + 1,

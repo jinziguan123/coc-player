@@ -683,7 +683,8 @@ def _seed_long_session(db, n_events: int):
     for i in range(1, n_events + 1):
         db.add(EventLog(
             session_id=session.id, sequence_num=i, event_type="narration",
-            content=f"第{i}段旁白。",
+            # 触发按 token 算（不按条数），每条得是一段真实体量的旁白才攒得够阈值
+            content=f"第{i}段旁白。" + "灯火在长廊尽头摇晃，墙上的影子跟着一同起伏，脚步声被地毯吃掉了大半。" * 13,
         ))
     db.commit()
     return session
@@ -691,8 +692,8 @@ def _seed_long_session(db, n_events: int):
 
 def test_maybe_roll_story_summary_applies_delta(db_factory):
     db = db_factory()
-    # TRIGGER=24：需 >24 条未并入事件才触发
-    session = _seed_long_session(db, chat_service.STORY_SUMMARY_TRIGGER + 5)
+    # 按 token 触发：50 条 × 约 300 字 ≈ 2.2 万估算 token，稳过阈值
+    session = _seed_long_session(db, 50)
     llm = _FakeLLM(json.dumps({
         "summary": "剧情梗概正文。",
         "npc_updates": {"npc_butler": {"attitude": "wary",
@@ -711,7 +712,7 @@ def test_maybe_roll_story_summary_applies_delta(db_factory):
 
 def test_maybe_roll_story_summary_fail_open_keeps_memory(db_factory):
     db = db_factory()
-    session = _seed_long_session(db, chat_service.STORY_SUMMARY_TRIGGER + 5)
+    session = _seed_long_session(db, 50)
     before = dict(session.world_state or {})
     asyncio.run(chat_service._maybe_roll_story_summary(db, session.id, _FakeLLM(boom=True)))
     ws = session.world_state or {}
@@ -794,3 +795,110 @@ def test_settle_plan_ending_noop_without_endings(db_factory):
     session, module, player, mate = _seed(db)
     chat_service._settle_plan_ending(db, session.id, session, module, _ending_plan("ending_a"))
     assert not (session.world_state or {}).get("ending_reached")
+
+
+# ── 分层章节（LSM 式滚动摘要）──────────────────────────────
+
+
+def test_章节为空时梗概为空串():
+    assert world_memory.story_summary_text({}) == ""
+    assert world_memory.story_chapters({}) == []
+
+
+def test_旧单串存档视作第一章():
+    """换成章节制不该让在途存档丢掉已有的摘要。"""
+    ws = {"story_summary": "前情若干。", "story_summary_seq": 30}
+    chapters = world_memory.story_chapters(ws)
+    assert len(chapters) == 1
+    assert chapters[0]["text"] == "前情若干。" and chapters[0]["to_seq"] == 30
+    assert world_memory.story_summary_text(ws) == "前情若干。"
+
+
+def test_追加章节不重写既有章节():
+    """这是分层的全部意义：老章节逐字保留，误差不再逐次复利。"""
+    ws = world_memory.append_story_chapter({}, "第一段剧情。", 1, 20)
+    ws = world_memory.append_story_chapter(ws, "第二段剧情。", 21, 44)
+    chapters = world_memory.story_chapters(ws)
+    assert [c["text"] for c in chapters] == ["第一段剧情。", "第二段剧情。"]
+    assert chapters[0]["from_seq"] == 1 and chapters[1]["to_seq"] == 44
+
+
+def test_多章拼接带章节号_单章不带():
+    ws = world_memory.append_story_chapter({}, "只有一段。", 1, 10)
+    assert world_memory.story_summary_text(ws) == "只有一段。"
+    ws = world_memory.append_story_chapter(ws, "第二段。", 11, 20)
+    text = world_memory.story_summary_text(ws)
+    assert "【第 1 章】只有一段。" in text and "【第 2 章】第二段。" in text
+
+
+def test_追加是纯函数_不就地改():
+    ws = {"other": 1}
+    out = world_memory.append_story_chapter(ws, "一段。", 1, 10)
+    assert world_memory.STORY_CHAPTERS_KEY not in ws
+    assert out["other"] == 1
+
+
+def test_空章节不追加():
+    ws = world_memory.append_story_chapter({}, "   ", 1, 10)
+    assert world_memory.story_chapters(ws) == []
+
+
+def test_story_summary_字段保持同步():
+    """前端「上下文占用」等旧读取口径仍看 story_summary，换章节制不该要求它们同步改。"""
+    ws = world_memory.append_story_chapter({}, "一段。", 1, 10)
+    assert ws["story_summary"] == world_memory.story_summary_text(ws)
+
+
+def test_未超限时不触发下沉合并():
+    ws = {}
+    for i in range(world_memory.MAX_STORY_CHAPTERS):
+        ws = world_memory.append_story_chapter(ws, f"第{i}段。", i * 10, i * 10 + 9)
+    assert world_memory.chapters_to_merge(ws) == []
+
+
+def test_超限时下沉最老的一批():
+    ws = {}
+    for i in range(world_memory.MAX_STORY_CHAPTERS + 1):
+        ws = world_memory.append_story_chapter(ws, f"第{i}段。", i * 10, i * 10 + 9)
+    head = world_memory.chapters_to_merge(ws)
+    assert len(head) == world_memory.MERGE_CHAPTER_BATCH
+    assert head[0]["text"] == "第0段。"          # 吃的是最老的，不是最新的
+
+
+def test_合并替换保留_seq_区间与后续章节():
+    ws = {}
+    for i in range(5):
+        ws = world_memory.append_story_chapter(ws, f"第{i}段。", i * 10, i * 10 + 9)
+    out = world_memory.replace_merged_chapters(ws, "前三段的合并。", 3)
+    chapters = world_memory.story_chapters(out)
+    assert [c["text"] for c in chapters] == ["前三段的合并。", "第3段。", "第4段。"]
+    assert chapters[0]["from_seq"] == 0 and chapters[0]["to_seq"] == 29  # 区间跨越被合并的三章
+
+
+def test_合并失败时原样返回():
+    """合并压坏了比章节多几段糟得多——LLM 没给出结果就保持原样。"""
+    ws = world_memory.append_story_chapter({}, "一段。", 1, 10)
+    assert world_memory.replace_merged_chapters(ws, "", 1) == ws
+    assert world_memory.replace_merged_chapters(ws, "合并结果", 0) == ws
+    assert world_memory.replace_merged_chapters(ws, "合并结果", 99) == ws
+
+
+def test_浓缩落库走追加而非重写(db_factory):
+    """接线验证：一次浓缩产出一章，既往章节逐字保留。"""
+    db = db_factory()
+    session = _seed_long_session(db, 50)
+    # 先塞一章既有历史，模拟此前已浓缩过
+    ws0 = world_memory.append_story_chapter(
+        dict(session.world_state or {}), "既有的第一章。", 1, 5,
+    )
+    session.world_state = ws0
+    db.commit()
+
+    llm = _FakeLLM(json.dumps({"summary": "新的一章。", "npc_updates": {}, "clue_notes": {}},
+                              ensure_ascii=False))
+    asyncio.run(chat_service._maybe_roll_story_summary(db, session.id, llm))
+
+    ws = db.get(GameSession, session.id).world_state or {}
+    texts = [c["text"] for c in world_memory.story_chapters(ws)]
+    assert texts == ["既有的第一章。", "新的一章。"]   # 老章节没被重写
+    assert ws["story_summary_seq"] > 0

@@ -10,7 +10,7 @@ from app.ai import story_summarizer
 from app.ai.agents import backstage_agent
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import session_service, turn_context, world_memory
+from app.services import event_recall, session_service, turn_context, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_hub import room_hub
 
@@ -19,10 +19,72 @@ _make_chunk = make_chunk
 _apply_world_memory = turn_context._apply_world_memory
 _scene_name = turn_context._scene_name
 
-# 滚动剧情摘要：最近这些事件始终保留全文、不并入摘要；「未并入摘要的事件」超过触发阈值时，
+# 滚动剧情摘要：最近一批事件始终保留全文、不并入摘要；「未并入摘要」的部分超过触发阈值时，
 # 才把其中较老的一批与既往摘要合并浓缩一次，推进游标。控制长局上下文规模、防 KP 原地打转。
-STORY_SUMMARY_KEEP_RECENT = 12
-STORY_SUMMARY_TRIGGER = 24
+#
+# 触发与保留都按 **token** 算，不按条数。条数是很差的 proxy：一条 KP 长旁白可能 1500 token，
+# 一条「我搜查桌子」20 token，差两个数量级。按条数触发的惩罚是双向的——短交互密集的局被
+# 过早压缩（本可全文保留），长旁白的局压缩不足、撞上组装预算后掉进兜底的即时摘要，而那个
+# 兜底只是「每条截 120 字拼行」，质量断崖。两个比例都相对**事件区预算**，故随模型窗口自适应。
+STORY_SUMMARY_TRIGGER_RATIO = 0.6
+STORY_SUMMARY_KEEP_RATIO = 0.3
+# 保留区的条数下限：防极端长事件（长战斗回放）把保留区压到只剩一两条——那样 KP 会失去
+# 紧邻的上下文，比多留几条 token 更亏。
+STORY_SUMMARY_MIN_KEEP = 6
+
+
+def _event_budget() -> int:
+    """事件区可用预算（估算 token 口径）。
+
+    按「系统提示满载」保守估计，与 build_kp_context 里 event_budget 的算法同源，
+    这样摘要触发点与事件区真正撑不下的点对齐——不会出现「还没触发摘要就已经溢出」。
+    """
+    from app.ai.context import (
+        MAX_SYSTEM_TOKENS,
+        RESERVE_FOR_OUTPUT,
+        _active_context_budget,
+    )
+    return max(_active_context_budget() - MAX_SYSTEM_TOKENS - RESERVE_FOR_OUTPUT, 4000)
+
+
+def _events_tokens(events: list) -> int:
+    from app.ai.context import _estimate_tokens
+    return sum(_estimate_tokens(e.content or "") for e in events)
+
+
+def _split_for_summary(events: list, keep_tokens: int) -> int:
+    """从尾部往回保留 ``keep_tokens`` 的事件全文，返回切分下标 i（``events[:i]`` 进摘要）。
+
+    返回 0 表示全部保留（不该发生——调用方已用触发阈值保证总量足够大）。
+    """
+    from app.ai.context import _estimate_tokens
+    kept = 0
+    for i in range(len(events) - 1, -1, -1):
+        kept += _estimate_tokens(events[i].content or "")
+        if kept >= keep_tokens and (len(events) - i) >= STORY_SUMMARY_MIN_KEEP:
+            return i
+    return 0
+
+
+async def _maybe_merge_chapters(db: Session, session: GameSession, llm) -> None:
+    """章节数超限时把最老的几章下沉合并成一章（fail-open：失败保持原样）。
+
+    这是分层摘要里唯一会让同一段剧情被压第二次的地方，所以只在真攒够了才做，
+    且一次只吃最老的一小批——被反复合并的老章节正是最容易失真的部分。
+    """
+    try:
+        ws = dict(session.world_state or {})
+        head = world_memory.chapters_to_merge(ws)
+        if not head:
+            return
+        merged = await story_summarizer.merge_chapters(llm, [c["text"] for c in head])
+        if not merged:
+            return
+        session.world_state = world_memory.replace_merged_chapters(ws, merged, len(head))
+        db.commit()
+        logger.info("剧情章节下沉合并：session=%s 合并 %s 章", session.id, len(head))
+    except Exception:
+        logger.exception("剧情章节合并失败（忽略）: session=%s", session.id)
 
 
 async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
@@ -48,9 +110,12 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
             if (e.sequence_num or 0) > cursor
             and not session_service.is_kp_only_event(e)
         ]
-        if len(uncovered) <= STORY_SUMMARY_TRIGGER:
+        budget = _event_budget()
+        if _events_tokens(uncovered) <= budget * STORY_SUMMARY_TRIGGER_RATIO:
             return
-        to_summ = uncovered[: len(uncovered) - STORY_SUMMARY_KEEP_RECENT]
+        to_summ = uncovered[:_split_for_summary(
+            uncovered, int(budget * STORY_SUMMARY_KEEP_RATIO),
+        )]
         if not to_summ:
             return
         # MemoryKeeper 抽取器与摘要合并为一次调用（同一批事件 + 既往摘要 + 当前 NPC 记忆摘要）
@@ -69,18 +134,27 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
         # 叙事主流已停但仍持锁做收尾：给前端一个可读状态，别让玩家对着无声脉冲点干等。
         room_hub.broadcast(session_id, _make_chunk("housekeeping", "KP 正在整理笔记…"))
         result = await story_summarizer.summarize_and_extract(
-            llm, ws.get("story_summary") or "", to_summ,
+            llm, world_memory.story_summary_text(ws), to_summ,
             world_memory.format_npc_memory_all_brief(ws, npc_names),
             team_memory_brief=team_brief,
         )
         if not result:
             return
-        new_summary, npc_updates, clue_notes, team_updates = result
-        ws2 = dict(session.world_state or {})
-        ws2["story_summary"] = new_summary
+        new_chapter, npc_updates, clue_notes, team_updates = result
+        # 追加一章而非重写整份：重写会让误差在每一次浓缩上复利累积，长局后开场细节必然模糊。
+        ws2 = world_memory.append_story_chapter(
+            dict(session.world_state or {}), new_chapter,
+            from_seq=to_summ[0].sequence_num, to_seq=to_summ[-1].sequence_num,
+        )
         ws2["story_summary_seq"] = to_summ[-1].sequence_num
         session.world_state = ws2
         db.commit()
+        # 章节攒够了才把最老的几章下沉合并一次（LSM 式）。合并失败保持原样：
+        # 章节多一点只是上下文长一点，比压坏了强。
+        await _maybe_merge_chapters(db, session, llm)
+        # 这批事件刚失去逐字原文（只剩梗概），正是给它们建索引的时刻——之后 KP 要引用
+        # 其中的确切内容，只能靠 recall_history 查回来。fail-open：索引失败不影响摘要。
+        event_recall.index_pending(db, session_id)
         # 差量合并：只改 attitude/reason/promises/lies 与已存在线索的 note，绝不碰台账 status；
         # 队友差量另经 apply_team_memory_delta（白名单 = 本会话真实 AI 队友 id）。
         if npc_updates or clue_notes or team_updates:

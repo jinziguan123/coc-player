@@ -2,6 +2,32 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
+# ── 上下文装配 → Provider 的进程内契约 ──────────────────────────────────────
+# 上下文组装方（app.ai.context）可以在**开头的** system 消息上挂这个键，值是把该条系统
+# 提示按「稳定性」切开的文本块列表（静态手册 → 半静态模组数据 → 每轮变的台账/记忆）。
+# 支持 prompt caching 的 Provider 据此在稳定块末尾打缓存断点；不支持的直接读 content，
+# 行为完全不变。
+#
+# **这不是 API 字段**：Provider 必须在构造请求体前用 strip_provider_keys 剔除，
+# 否则会作为未知字段发给服务端（OpenAI 兼容端点会 400）。
+CACHE_BLOCKS_KEY = "_cache_blocks"
+
+# 仅供 Provider 内部消费、不得出现在请求体里的键（未来新增同类元数据一并加到这里）。
+_PROVIDER_ONLY_KEYS = (CACHE_BLOCKS_KEY,)
+
+
+def strip_provider_keys(messages: list[dict]) -> list[dict]:
+    """剔除消息上的进程内元数据键，返回可直接序列化发给服务端的消息列表。
+
+    只在确有该键时才复制 dict，正常路径零额外开销。
+    """
+    out = []
+    for msg in messages:
+        if any(k in msg for k in _PROVIDER_ONLY_KEYS):
+            msg = {k: v for k, v in msg.items() if k not in _PROVIDER_ONLY_KEYS}
+        out.append(msg)
+    return out
+
 
 @dataclass
 class ToolCall:

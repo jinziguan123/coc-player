@@ -113,7 +113,8 @@ def build_memory_keeper_messages(
             "content": (
                 "你身兼 TRPG 剧情书记员与世界记忆守护者。基于既往摘要、本轮新事件与当前记忆，"
                 "同时完成两件事，**只输出一个 JSON 对象**（不要解释、不要 markdown 围栏）：\n"
-                "1. summary：把既往摘要与新事件合并浓缩成一份连贯、客观的剧情梗概正文。\n"
+                "1. summary：把**本轮新事件**浓缩成一段连贯、客观的剧情梗概正文——"
+                "这是接在既往梗概后面的新一段，不要把既往内容并进来。\n"
                 "2. 其余字段：从新事件里抽取各类记忆的**差量**。"
             ),
         },
@@ -121,11 +122,12 @@ def build_memory_keeper_messages(
             "role": "user",
             "content": (
                 "【summary 要求】\n"
+                "- **只写这一段新事件**：既往梗概仅供你理解前情与人物指代，既不要复述它，"
+                "也不要把它的内容并进产出——系统会按时间顺序把各段拼成完整梗概。\n"
                 "- 保留对后续推进重要的事实：去过哪些地点、见过哪些 NPC、已揭示的线索与结论、"
                 "已做出的关键决定与承诺、尚未了结的悬念/待办、当前处境。\n"
                 "- 舍弃寒暄与重复的氛围描写；按时间顺序、紧凑成段。\n"
-                "- 线索与 NPC 关系已有专门台账维护，摘要侧重剧情脉络与因果，不必逐条保留线索细节。\n"
-                "- 以既往摘要为基础做增量更新，不要丢失其中仍然重要的内容。\n\n"
+                "- 线索与 NPC 关系已有专门台账维护，摘要侧重剧情脉络与因果，不必逐条保留线索细节。\n\n"
                 "【npc_updates 要求】对象，key 只能是下面 NPC 记忆里**已列出的 NPC id**"
                 "（不得凭空新增 NPC），value 形如："
                 '{"attitude": "hostile|wary|neutral|warming|trusting", '
@@ -209,3 +211,45 @@ async def summarize_and_extract(
         clue_notes if isinstance(clue_notes, dict) else {},
         team_updates if isinstance(team_updates, dict) else {},
     )
+
+
+def build_merge_messages(chapters: list[str]) -> list[dict]:
+    """二次合并：把最老的几章压成一章（分层摘要的下沉步骤）。
+
+    只有这一步会让同一段剧情被压第二次，所以提示词要求偏向**保住事实骨架**而非文采——
+    这些老章节离当前剧情最远、最可能被彻底遗忘，压坏了就只能靠 recall_history 捞原文。
+    """
+    body = "\n\n".join(f"【第 {i} 段】{c}" for i, c in enumerate(chapters, start=1))
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是 TRPG 剧情书记员。把下面几段**早期**剧情梗概合并浓缩成一段连贯、客观的"
+                "梗概。只输出正文，不要解释、不要标题、不要分段编号。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "要求：\n"
+                "- 这是全局最早的一段历史，之后不会再有机会补充——**宁可保守，不要漏掉事实**："
+                "去过的地点、见过的 NPC、已揭示的结论、做出的承诺与决定、尚未了结的悬念。\n"
+                "- 可以压缩措辞与重复的氛围描写，但不要为了简短而丢事实。\n"
+                "- 按时间顺序，紧凑成段。\n\n"
+                f"{body}\n\n请输出合并后的梗概："
+            ),
+        },
+    ]
+
+
+async def merge_chapters(llm: Any, chapters: list[str]) -> str | None:
+    """把几段早期梗概合并成一段；任何失败返回 None（调用方保持章节原样）。"""
+    if llm is None or not chapters:
+        return None
+    try:
+        raw = await llm.complete(build_merge_messages(chapters), temperature=0.2)
+    except Exception:
+        logger.exception("章节二次合并失败，保持原样")
+        return None
+    text = (raw or "").strip() if isinstance(raw, str) else ""
+    return text or None

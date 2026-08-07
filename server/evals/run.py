@@ -56,6 +56,7 @@ def build_replay_messages(case: ReplayCase) -> list[dict]:
         case.session, case.module, case.player_char, case.events,
         teammates=case.teammates or None,
         rules_lookup_enabled=case.rules_lookup_enabled,
+        recall_enabled=case.recall_enabled,
     )
     if case.plan is not None:
         messages.append(turn_planner.build_turn_plan_message(case.plan))
@@ -120,6 +121,7 @@ async def run_case(case: ReplayCase, llm, use_judge: bool, tool_loop: bool = Fal
             case.session, case.module, case.player_char, case.events,
             teammates=case.teammates or None,
             rules_lookup_enabled=case.rules_lookup_enabled,
+            recall_enabled=case.recall_enabled,
         )
         messages.append({
             "role": "user",
@@ -157,6 +159,7 @@ async def run_case(case: ReplayCase, llm, use_judge: bool, tool_loop: bool = Fal
             case.session, case.module, case.player_char, case.events,
             teammates=case.teammates or None,
             rules_lookup_enabled=case.rules_lookup_enabled,
+            recall_enabled=case.recall_enabled,
         )
         plan = await turn_planner.run_turn_planner(llm, plan_messages)
 
@@ -164,6 +167,7 @@ async def run_case(case: ReplayCase, llm, use_judge: bool, tool_loop: bool = Fal
         case.session, case.module, case.player_char, case.events,
         teammates=case.teammates or None,
         rules_lookup_enabled=case.rules_lookup_enabled,
+        recall_enabled=case.recall_enabled,
     )
     if plan is not None:
         messages.append(turn_planner.build_turn_plan_message(plan))

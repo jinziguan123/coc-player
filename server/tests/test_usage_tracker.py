@@ -18,7 +18,8 @@ def test_accumulate_is_monotonic_pure():
                                        "total_tokens": 60, "calls": 1})
     assert ws["session_usage"] == {
         "prompt_tokens": 150, "completion_tokens": 30, "reasoning_tokens": 0,
-        "total_tokens": 180, "calls": 3,
+        "total_tokens": 180, "cache_read_tokens": 0, "cache_write_tokens": 0,
+        "calls": 3,
     }
 
 
@@ -37,7 +38,8 @@ def test_add_snapshot_scoped_to_task():
         return usage_tracker.snapshot()
     snap = asyncio.run(run())
     assert snap == {"prompt_tokens": 10, "completion_tokens": 3, "reasoning_tokens": 0,
-                    "total_tokens": 13, "calls": 2}
+                    "total_tokens": 13, "cache_read_tokens": 0, "cache_write_tokens": 0,
+                    "calls": 2}
 
 
 def test_add_without_accumulator_is_ignored():
@@ -45,7 +47,8 @@ def test_add_without_accumulator_is_ignored():
         usage_tracker.add({"total_tokens": 999})   # 无 begin/tracked → 忽略
         return usage_tracker.snapshot()
     assert asyncio.run(run()) == {"prompt_tokens": 0, "completion_tokens": 0,
-                                  "reasoning_tokens": 0, "total_tokens": 0, "calls": 0}
+                                  "reasoning_tokens": 0, "total_tokens": 0,
+                                  "cache_read_tokens": 0, "cache_write_tokens": 0, "calls": 0}
 
 
 @pytest.fixture
