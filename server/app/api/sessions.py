@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -31,10 +33,13 @@ from app.services.rate_limit import limiter
 from app.services.room_events import RoomEvent
 from app.services.turn_orchestrator import (
     initialize_human_session,
+    run_epilogue_generation,
     run_opening_generation,
 )
 from app.services.generation_manager import generation_manager
 from app.services.room_hub import encode_sse, room_hub, stream_room
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -520,7 +525,7 @@ def update_style(
 
 
 @router.post("/{session_id}/end-vote")
-def vote_end_module(
+async def vote_end_module(
     session_id: str,
     data: EndVoteRequest | None = None,
     db: Session = Depends(get_db),
@@ -548,6 +553,16 @@ def vote_end_module(
             _make_chunk("status", "（全体玩家一致同意，本模组已结束，可进行成长结算与最终战报。）",
                         actor_name="系统"),
         )
+        # 收场：尾声叙事 + 真相揭晓 + 幕间休息。只翻个状态就散场太虎头蛇尾——玩家刚演完终局，
+        # 该有人把故事讲完、把他们没查到的真相说透。真人 KP 的局不代劳（那是 KP 自己的话）。
+        #
+        # 排不上就算了：模组**已经结束**是既成事实，绝不能因为配额用尽或恰好有生成在跑
+        # 就把这次投票响应变成 429/500。收场是锦上添花，不是结束的前置条件。
+        if session.kp_mode == "ai" and not generation_manager.is_generating(session_id):
+            try:
+                generation_manager.start(session_id, run_epilogue_generation(session_id))
+            except Exception:
+                logger.exception("收场生成未能启动: session=%s", session_id)
     else:
         # 投票进行中：广播公开投票态，各端更新「已同意 N/M」提示。
         room_hub.broadcast(session_id, _make_chunk("end_vote", metadata={"end_vote": vote}))

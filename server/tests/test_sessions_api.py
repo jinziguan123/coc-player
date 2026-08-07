@@ -908,3 +908,50 @@ def test_locations_backdrop_empty_when_module_has_none(client):
     c, ids = client
     sid = _make_session(c, ids)
     assert c.get(f"/api/sessions/{sid}/locations").json()["map_backdrop"] == ""
+
+
+def test_end_vote_triggers_epilogue_generation(client, monkeypatch):
+    """结束模组要触发收场生成（尾声 + 真相揭晓 + 幕间），不能只翻个状态就散场。"""
+    import app.api.sessions as sessions_module
+
+    captured = {}
+
+    def fake_start(session_id, coro, prelude=None):
+        captured["session_id"] = session_id
+        coro.close()   # 不真正生成（不碰 LLM），只验证 HTTP 层确实把收场排上了
+
+    monkeypatch.setattr(sessions_module.generation_manager, "start", fake_start)
+
+    c, ids = client
+    host = {"X-Player-Token": "host-tok"}
+    sid = c.post("/api/sessions", json={
+        "module_id": ids["module"],
+        "participants": [{"character_id": ids["hero"], "role": "human", "is_primary": True}],
+    }, headers=host).json()["id"]
+    r = c.post(f"/api/sessions/{sid}/end-vote",
+               json={"acting_character_id": ids["hero"]}, headers=host)
+    assert r.status_code == 200 and r.json()["ended"] is True
+    assert captured.get("session_id") == sid
+
+
+def test_end_vote_skips_epilogue_for_human_kp(client, monkeypatch):
+    """真人 KP 的局不代劳收场——那是 KP 自己要讲的话。"""
+    import app.api.sessions as sessions_module
+
+    started = []
+    monkeypatch.setattr(
+        sessions_module.generation_manager, "start",
+        lambda sid, coro, prelude=None: (started.append(sid), coro.close()),
+    )
+    c, ids = client
+    host = {"X-Player-Token": "host-tok"}
+    created = c.post("/api/sessions", json={
+        "module_id": ids["module"], "kp_mode": "human",
+        "participants": [{"character_id": ids["hero"], "role": "human", "is_primary": True}],
+    }, headers=host)
+    assert created.status_code == 200, created.text
+    sid = created.json()["id"]
+    r = c.post(f"/api/sessions/{sid}/end-vote",
+               json={"acting_character_id": ids["hero"]}, headers=host)
+    assert r.status_code == 200 and r.json()["ended"] is True
+    assert started == []

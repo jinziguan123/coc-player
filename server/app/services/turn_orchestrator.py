@@ -16,6 +16,7 @@ from app.ai.prompts.kp_system import (
     CHECK_REQUEST_PROMPT,
     COMBAT_AFTERMATH_PROMPT,
     KP_DICE_CONTINUATION_PROMPT,
+    KP_EPILOGUE_PROMPT,
 )
 from app.models.character import Character
 from app.models.module import Module
@@ -1562,6 +1563,84 @@ async def run_opening_generation(session_id: str) -> None:
         _persist_error_notice(db, session_id, msg)
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
+        db.close()
+
+
+async def run_epilogue_generation(session_id: str) -> None:
+    """模组结束时的**终场收尾**：尾声叙事 + 真相揭晓 + 幕间收束语，一次生成、落成旁白进历史。
+
+    此前「结束模组」只翻个状态、播一行系统提示就没了——玩家刚演完终局，回头看只有一句
+    「本模组已结束」，虎头蛇尾。这里补上真正的收场：故事怎么落幕、每个调查员的下场、
+    以及他们**没查到**的真相（模组 truth 与线索台账都在 KP 上下文里，散场时正该讲透）。
+
+    与常规回合不同：**不处理任何指令、不跑任何守卫**。收尾就该只是一段叙述——
+    不能因为尾声里写了「怪物追来」就又开一场战斗，也不能再挂检定。
+    fail-open：生成失败只落一句提示，绝不影响已经结束的会话状态。
+    """
+    await _drain_housekeeping(session_id)
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        game_session = db.get(GameSession, session_id)
+        if game_session is None:
+            return
+        ws = game_session.world_state or {}
+        if ws.get("epilogue_done"):          # 幂等：一局只收一次场
+            room_hub.broadcast(session_id, _make_chunk("done"))
+            return
+        module = db.get(Module, game_session.module_id)
+        player_char = db.get(Character, game_session.player_character_id)
+        events = session_service.get_session_events(db, session_id)
+        if module is None or player_char is None or not events:
+            room_hub.broadcast(session_id, _make_chunk("done"))
+            return
+        party_others = session_service.get_party_members(
+            db, session_id, exclude_id=game_session.player_character_id,
+        )
+        reached = ws.get("ending_reached") or {}
+        ending_line = ""
+        if reached.get("name"):
+            ending = next(
+                (e for e in (getattr(module, "endings", None) or [])
+                 if isinstance(e, dict) and str(e.get("id") or "") == str(reached.get("id") or "")),
+                {},
+            )
+            desc = str(ending.get("description") or "").strip()
+            ending_line = (
+                f"本局抵达的结局是「{reached['name']}」"
+                + (f"：{desc}" if desc else "")
+                + "。尾声必须落在这个结局上，不要写成别的收场。\n"
+            )
+        messages = build_kp_context(
+            game_session, module, player_char, events, teammates=party_others,
+        )
+        messages.append({
+            "role": "user",
+            "content": KP_EPILOGUE_PROMPT.format(ending_line=ending_line),
+        })
+        room_hub.broadcast(session_id, _make_chunk("generating"))
+        res = ["", "", [], [], []]
+        kp = KPAgent(get_llm())
+        try:
+            async for chunk in _stream_narration_filtered(
+                kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
+            ):
+                room_hub.broadcast(session_id, chunk)
+        except asyncio.CancelledError:
+            _persist_narration(db, session_id, res)
+            raise
+        _persist_narration(db, session_id, res)
+        world_state.set_key(db, db.get(GameSession, session_id), "epilogue_done", True)
+    except asyncio.CancelledError:
+        logger.info("收场生成被取消: session=%s", session_id)
+    except Exception:
+        logger.exception("收场生成失败: session=%s", session_id)
+        _persist_error_notice(
+            db, session_id, "（收场叙述生成失败，本模组仍已结束，可直接进行成长结算或查看战报。）",
+        )
+    finally:
+        room_hub.broadcast(session_id, _make_chunk("done"))
         db.close()
 
 

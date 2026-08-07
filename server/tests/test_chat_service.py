@@ -1562,3 +1562,93 @@ def test_inline_say_text_not_synthesized_as_tool_call():
     # 但真正的终止型指令仍会被合成
     tc = chat_service._tool_call_from_text("[SET_FLAG: door_open]")
     assert tc is not None and tc.name == "set_flag"
+
+
+# ── 收场：模组结束后的尾声 + 真相揭晓 + 幕间 ────────────────────────────
+
+def _seed_ended_session(db) -> str:
+    """一局已经演过内容、刚被投票结束的会话（收场生成需要有事件可承接）。"""
+    session_id = _seed_session(db)
+    session_service.add_event(
+        db, session_id, "narration", "电车冲进黑暗，一切归于寂静。", actor_name="KP",
+    )
+    return session_id
+
+
+def test_epilogue_writes_closing_narration(db_factory, monkeypatch):
+    """结束模组要真的把故事讲完：收场叙述落成旁白进历史，而不是只剩一句「已结束」。"""
+    _patch_runtime(monkeypatch, db_factory)
+    prompts: list[str] = []
+
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
+        prompts.append(messages[-1]["content"])
+        result[0] = "晨光照进车厢，活下来的人各自散去。"
+        yield chat_service._make_chunk("narration", result[0], actor_name="KP")
+
+    monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+    db = db_factory()
+    session_id = _seed_ended_session(db)
+    asyncio.run(chat_service.run_epilogue_generation(session_id))
+
+    contents = [e.content for e in _narrations(db_factory, session_id)]
+    assert "晨光照进车厢，活下来的人各自散去。" in contents
+    # 收场提示词三段俱全：尾声 / 真相揭晓 / 幕间
+    assert "尾声" in prompts[0] and "真相揭晓" in prompts[0] and "幕间休息" in prompts[0]
+    assert "守密约束，到这一刻正式解除" in prompts[0]   # 收场要讲真相，不能还捂着
+    assert "不要输出任何指令" in prompts[0]   # 收场只是一段叙述：不掷骰、不开战、不切场景
+
+
+def test_epilogue_is_idempotent(db_factory, monkeypatch):
+    """一局只收一次场：重复触发不再生成第二段收尾。"""
+    _patch_runtime(monkeypatch, db_factory)
+    calls = []
+
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
+        calls.append(1)
+        result[0] = "收场"
+        yield chat_service._make_chunk("narration", "收场", actor_name="KP")
+
+    monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+    db = db_factory()
+    session_id = _seed_ended_session(db)
+    asyncio.run(chat_service.run_epilogue_generation(session_id))
+    asyncio.run(chat_service.run_epilogue_generation(session_id))
+    assert len(calls) == 1
+
+
+def test_epilogue_mentions_reached_ending(db_factory, monkeypatch):
+    """抵达过结局的局，收场必须落在那个结局上，不能另写一个收尾。"""
+    _patch_runtime(monkeypatch, db_factory)
+    prompts: list[str] = []
+
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
+        prompts.append(messages[-1]["content"])
+        result[0] = "收场"
+        yield chat_service._make_chunk("narration", "收场", actor_name="KP")
+
+    monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+    db = db_factory()
+    session_id = _seed_ended_session(db)
+    session = db.get(GameSession, session_id)
+    module = db.get(Module, session.module_id)
+    module.endings = [{"id": "ending_a", "name": "结局A：冲出隧道", "description": "电车撞碎黑暗"}]
+    session.world_state = {"ending_reached": {"id": "ending_a", "name": "结局A：冲出隧道"}}
+    db.commit()
+    asyncio.run(chat_service.run_epilogue_generation(session_id))
+    assert "结局A：冲出隧道" in prompts[0] and "电车撞碎黑暗" in prompts[0]
+
+
+def test_epilogue_survives_generation_failure(db_factory, monkeypatch):
+    """收场生成失败不能影响「已结束」这件事，只落一句提示。"""
+    _patch_runtime(monkeypatch, db_factory)
+
+    async def boom(kp, messages, result, npcs=None, **kwargs):
+        raise RuntimeError("provider down")
+        yield  # pragma: no cover — 让它是异步生成器
+
+    monkeypatch.setattr(chat_service, "_stream_narration_filtered", boom)
+    db = db_factory()
+    session_id = _seed_ended_session(db)
+    asyncio.run(chat_service.run_epilogue_generation(session_id))   # 不抛
+    texts = [e.content for e in session_service.get_session_events(db_factory(), session_id)]
+    assert any("收场叙述生成失败" in t for t in texts)
