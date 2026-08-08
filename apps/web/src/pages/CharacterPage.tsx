@@ -785,10 +785,10 @@ export function CharacterPage() {
   })
 
   return (
-    <div className="flex h-full gap-0">
-      <div className="flex-1 min-w-0 overflow-auto p-4">
-        {/* 建卡流程是线性表单，窄栏更易读；列表是并列卡片，放宽让网格铺开 */}
-        <div className={inCreateFlow ? 'max-w-3xl' : 'max-w-[100rem]'}>
+    <div className="flex h-full min-h-0 flex-col p-4">
+      {/* 建卡流程是线性表单，窄栏更易读、自己滚；名录+详情是一本摊开的书，占满剩余高度 */}
+      <div className={`flex min-h-0 flex-1 flex-col ${inCreateFlow ? 'max-w-3xl overflow-auto' : ''}`}>
+        <div className="contents">
           <div className="flex items-center gap-3 mb-6">
             <button onClick={() => navigate(-1)} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
               <GiReturnArrow /> 返回
@@ -1510,30 +1510,35 @@ export function CharacterPage() {
 
           )}
 
-          {/* 角色列表（默认视图）：条件查询 + 分页 */}
+          {/* 默认视图：一本摊开的书——左页名录、右页详情，中间一道书脊 */}
           {!inCreateFlow && (
-            <CharacterList
-              characters={characters}
-              selectedId={selectedChar?.id ?? null}
-              onSelect={(character) => setSelectedChar(
-                selectedChar?.id === character.id ? null : character,
-              )}
-              onEdit={setEditingChar}
-              onDelete={deleteCharacter}
-            />
+            <div className="tome min-h-0 flex-1">
+              <div className="tome-page tome-page--left">
+                <CharacterList
+                  characters={characters}
+                  selectedId={selectedChar?.id ?? null}
+                  onSelect={(character) => setSelectedChar(
+                    selectedChar?.id === character.id ? null : character,
+                  )}
+                  onEdit={setEditingChar}
+                  onDelete={deleteCharacter}
+                />
+              </div>
+              <div className="tome-page tome-page--right">
+                {selectedChar ? (
+                  <CharacterPanel key={selectedChar.id} character={selectedChar} />
+                ) : (
+                  /* 书摊开着，只是还没翻到某个人 */
+                  <div className="tome-empty">
+                    <GiCharacter size={30} style={{ opacity: 0.5 }} />
+                    <p className="text-xs">从左页名录里挑一个人</p>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
-
-      {/* 右侧角色详情面板 */}
-      {selectedChar && (
-        <aside
-          className="w-72 flex-shrink-0 border-l overflow-y-auto"
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}
-        >
-          <CharacterPanel character={selectedChar} />
-        </aside>
-      )}
 
       {editingChar && (
         <CharacterEditModal

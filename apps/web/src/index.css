@@ -355,6 +355,181 @@ body {
   .character-card .character-card-actions,
   .entity-card .entity-card-actions { opacity: 1; }
 }
+/* ===== 书本：角色管理的跨页外壳 =====
+   左页名录、右页详情，中间一道书脊。质感全部由既有的哥特暗色 + 琥珀金变量推出来——
+   真正的「纸黄」只属于 light 主题，暗色下照搬会变成一块脏黄，所以这里用的是
+   「暗色纸面 + 琥珀描边 + 中缝阴影」这套写法。 */
+.tome {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background:
+    /* 中缝：两侧向内压暗，装订处最深 */
+    linear-gradient(90deg,
+      transparent 0%,
+      transparent calc(var(--tome-spine, 300px) - 26px),
+      rgba(0, 0, 0, 0.22) calc(var(--tome-spine, 300px) - 2px),
+      rgba(0, 0, 0, 0.30) var(--tome-spine, 300px),
+      rgba(0, 0, 0, 0.22) calc(var(--tome-spine, 300px) + 2px),
+      transparent calc(var(--tome-spine, 300px) + 26px),
+      transparent 100%),
+    var(--color-bg-secondary);
+  box-shadow:
+    0 10px 30px var(--shadow-color-strong),
+    inset 0 0 60px var(--card-inset),
+    /* 书口：左右各两道递弱的细线，模拟叠起来的纸边——没有这点厚度，
+       整块就只是个带中缝的面板，不像一本摊开的书。
+       负 spread 把阴影收成线，比画 border 更省一层 DOM。 */
+    inset 3px 0 0 -2px color-mix(in srgb, var(--color-border-strong) 55%, transparent),
+    inset 7px 0 0 -6px color-mix(in srgb, var(--color-border-strong) 35%, transparent),
+    inset -3px 0 0 -2px color-mix(in srgb, var(--color-border-strong) 55%, transparent),
+    inset -7px 0 0 -6px color-mix(in srgb, var(--color-border-strong) 35%, transparent);
+  overflow: hidden;
+}
+/* 纸面颗粒：与 .card 同一张噪点，保证两者是同一种材质 */
+.tome::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg width='100' height='100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: var(--card-noise-opacity);
+  pointer-events: none;
+  z-index: 0;
+}
+/* 书脊上的一线高光：让中缝看着是「折」而不是「缝」 */
+.tome::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--tome-spine, 300px);
+  width: 1px;
+  background: linear-gradient(to bottom,
+    transparent,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) 15%,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) 85%,
+    transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.tome-page {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tome-page--left {
+  width: var(--tome-spine, 300px);
+  flex-shrink: 0;
+  padding: 0.85rem 0.7rem 0.85rem 0.9rem;
+}
+.tome-page--right {
+  flex: 1;
+  min-width: 0;
+  padding: 0.85rem 0.9rem 0.85rem 1.1rem;
+}
+
+/* 页眉：书页顶端的栏目名 + 细划线，像章节标题 */
+.tome-page-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-title);
+  font-size: var(--text-sm);
+  color: var(--color-text-accent);
+  letter-spacing: 0.04em;
+}
+.tome-page-head-count {
+  margin-left: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.62rem;
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+}
+
+/* 名录条目：窄页里要塞下头像+姓名+职业+要害，所以一行到底、不换行 */
+.roster-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.42rem 0.5rem;
+  border-radius: 3px;
+  border-left: 2px solid transparent;
+  text-align: left;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.roster-item:hover { background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
+.roster-item[data-active='true'] {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-left-color: var(--color-accent);
+}
+.roster-name {
+  font-family: var(--font-title);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: 1.25;
+}
+.roster-item[data-active='true'] .roster-name { color: var(--color-text-accent); }
+.roster-sub {
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  line-height: 1.3;
+}
+/* 迷你要害条：两根细线，够看出「快没了」即可，不占竖向空间 */
+.roster-vital {
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--color-text-secondary) 22%, transparent);
+  overflow: hidden;
+}
+.roster-vital > i {
+  display: block;
+  height: 100%;
+  border-radius: 1px;
+}
+
+/* 翻页：tab 切换时右页像翻过去一张。
+   **用后代选择器限定在 .tome 内**——同一个 CharacterPanel 也用在游戏内的窄侧栏上，
+   那里翻页只会显得晃。 */
+@keyframes tome-leaf-turn {
+  from {
+    opacity: 0;
+    transform: perspective(1600px) rotateY(-16deg) translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(1600px) rotateY(0) translateX(0);
+  }
+}
+.tome [role='tabpanel'][data-state='active'] {
+  animation: tome-leaf-turn 0.3s cubic-bezier(0.2, 0.72, 0.28, 1);
+  transform-origin: left center;
+  backface-visibility: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tome [role='tabpanel'][data-state='active'] { animation: none; }
+}
+
+/* 右页空态：书摊开着，只是还没翻到某个人 */
+.tome-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--color-text-secondary);
+  opacity: 0.75;
+}
+
 /* ===== 调查员档案卡 =====
    角色卡的视觉母题是「一份卷宗」而不是「一条数据」：装订孔、档案编号、钢印。
    全部构件复用既有的哥特暗色 + 琥珀金变量，不引入新色板——这套语言在地图、
