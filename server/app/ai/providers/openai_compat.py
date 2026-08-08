@@ -129,6 +129,31 @@ class OpenAICompatProvider(LLMProvider):
             payload.pop("temperature", None)
         return payload
 
+    def _warn_empty_completion(self) -> None:
+        """流正常结束却一个字都没产出时，指出最可能的原因。
+
+        ``complete()`` 只收 ``delta.content``——``reasoning_content`` 按设计丢弃。于是遇上
+        「把话全说进思考里」的模型，结构化副任务（评估裁判、planner、摘要）拿到的就是空串，
+        在上层表现成「输出无法解析」，而那一层完全看不出根因在这儿。
+
+        判据是「产出了 completion_tokens、其中几乎全是 reasoning，但 content 为空」。
+        非思考模型返回空串则多半是供应商侧异常，另给一条中性提示。
+        """
+        u = self.last_usage or {}
+        details = u.get("completion_tokens_details") or {}
+        rt = int(details.get("reasoning_tokens") or 0)
+        ct = int(u.get("completion_tokens") or 0)
+        if rt > 0:
+            logger.warning(
+                "模型返回空内容，但产出了 %.1fk 思考 token（共 %.1fk 输出）——这些思考内容会被"
+                "丢弃，正文却是空的。结构化任务（评估裁判/planner/摘要）会因此拿到空串。"
+                "去「设置 → AI 配置 → 编辑配置 → 能力」勾上「关闭模型思考」；"
+                "注意「思考等级」只调强度、关不掉思考。model=%s",
+                rt / 1000, ct / 1000, self.model,
+            )
+        else:
+            logger.warning("模型返回空内容（无思考 token）：model=%s，多半是供应商侧异常", self.model)
+
     async def complete(
         self,
         messages: list[dict],
@@ -187,7 +212,10 @@ class OpenAICompatProvider(LLMProvider):
                         content = (choices[0].get("delta") or {}).get("content")
                         if content:
                             parts.append(content)
-                return "".join(parts)
+                text = "".join(parts)
+                if not text.strip():
+                    self._warn_empty_completion()
+                return text
             except _TRANSIENT_ERRORS as e:
                 last_exc = e
                 logger.warning("补全传输中断，重试 %d/3：%s", attempt + 1, e)

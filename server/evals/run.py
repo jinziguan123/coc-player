@@ -257,13 +257,23 @@ def aggregate_samples(name: str, tags: list[str], samples: list[dict]) -> dict:
         if s.get("run_error"):
             reasons["运行出错"] = reasons.get("运行出错", 0) + 1
     detail = "；".join(f"{k}×{n}" for k, n in sorted(reasons.items(), key=lambda kv: -kv[1]))
+    # 有效样本 = 排除「工具自己坏了」的那些（裁判调用/解析失败、生成阶段报错）。这类失败与
+    # 被测内容无关，混进通过率会系统性压低所有 fixture 的分数——实测见过一轮 5 次里 2 次
+    # 裁判失败，把 2/3 的真实表现显示成 1/5，两版对比因此得出相反的结论。
+    # 原始 pass_rate 照常保留：它是「这次跑下来实际过了几次」，做趋势对比时仍要用同一口径。
+    invalid = sum(1 for s in samples if s.get("judge_error") or s.get("run_error"))
+    valid = runs - invalid
     return {
         "fixture": name,
         "tags": tags,
         "runs": runs,
         "pass_count": pass_count,
         "pass_rate": pass_count / runs if runs else 0.0,
+        # 稳过判定仍按全部采样：工具失败也是「这次没能证明它是好的」，不该被抹掉。
         "passed": runs > 0 and pass_count == runs,
+        "valid_runs": valid,
+        "invalid_runs": invalid,
+        "valid_pass_rate": pass_count / valid if valid else None,
         "detail": detail,
         "samples": samples,
     }
@@ -277,14 +287,31 @@ def _print_summary(results: list[dict]) -> None:
         if r["runs"] > 1:
             rate += f" ({r['pass_rate'] * 100:.0f}%)"
         print(f"{r['fixture']:<28} {rate:<10} {r.get('detail') or '-'}")
+        # 有工具失败时另起一行给出有效样本口径——否则读者会把裁判抖动当成内容变差。
+        if r.get("invalid_runs"):
+            vp = r.get("valid_pass_rate")
+            shown = (
+                f"{r['pass_count']}/{r['valid_runs']} ({vp * 100:.0f}%)"
+                if vp is not None else "无有效样本"
+            )
+            print(
+                f"{'':<28} {'└ 有效':<10} {shown}"
+                f"（另有 {r['invalid_runs']} 次裁判/运行失败，与被测内容无关）"
+            )
     total_runs = sum(r["runs"] for r in results)
     total_pass = sum(r["pass_count"] for r in results)
+    total_invalid = sum(r.get("invalid_runs") or 0 for r in results)
     fully = sum(1 for r in results if r["passed"])
     print("-" * 72)
     print(
         f"共 {len(results)} 个 fixture、合计 {total_runs} 次采样；"
         f"总通过 {total_pass}/{total_runs}，稳过（全采样通过）{fully}/{len(results)}"
     )
+    if total_invalid:
+        print(
+            f"其中 {total_invalid} 次是裁判/运行失败（工具侧，非内容问题）；"
+            f"按有效样本计为 {total_pass}/{total_runs - total_invalid}"
+        )
 
 
 async def main_async(args: argparse.Namespace) -> int:

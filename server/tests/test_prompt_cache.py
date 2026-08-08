@@ -220,3 +220,43 @@ def test_低估时收缩预算():
     ws = ctx.update_budget_scale({}, measured=20_000, estimated=16_000)
     assert ws[ctx.CALIBRATION_KEY] == 0.8
     assert ctx.effective_context_budget(ws, 48_000) == 38_400
+
+
+# ── 空产出的根因诊断 ────────────────────────────────────────────────────
+
+
+def _compat_provider():
+    from app.ai.providers.openai_compat import OpenAICompatProvider
+    return OpenAICompatProvider(model="deepseek-v4-flash", base_url="http://x", api_key="k")
+
+
+def test_空产出且有思考时指向关思考开关(caplog):
+    """complete() 只收 delta.content，模型把话全说进思考里就会返回空串——
+    上层只看到「输出无法解析」，根因在这一层却完全静默过。"""
+    p = _compat_provider()
+    p.last_usage = {
+        "completion_tokens": 1200,
+        "completion_tokens_details": {"reasoning_tokens": 1200},
+    }
+    with caplog.at_level("WARNING"):
+        p._warn_empty_completion()
+    msg = caplog.text
+    assert "思考" in msg and "关闭模型思考" in msg
+    assert "deepseek-v4-flash" in msg          # 带上模型名，多档配置下才知道是哪个
+
+
+def test_空产出且无思考时给中性提示(caplog):
+    p = _compat_provider()
+    p.last_usage = {"completion_tokens": 0}
+    with caplog.at_level("WARNING"):
+        p._warn_empty_completion()
+    assert "供应商侧异常" in caplog.text
+    assert "关闭模型思考" not in caplog.text   # 不是这个原因就别乱指方向
+
+
+def test_无_usage_时不炸(caplog):
+    p = _compat_provider()
+    p.last_usage = None
+    with caplog.at_level("WARNING"):
+        p._warn_empty_completion()             # 诊断日志绝不能自己成为故障源
+    assert caplog.text

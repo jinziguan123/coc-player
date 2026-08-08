@@ -802,3 +802,41 @@ class TestJudgeRobustness:
         from evals.judge import _CONDITIONAL_KEYS, _REQUIRED_KEYS, RUBRIC
         assert not set(_REQUIRED_KEYS) & set(_CONDITIONAL_KEYS)
         assert set(_REQUIRED_KEYS) | set(_CONDITIONAL_KEYS) == set(RUBRIC)
+
+
+class TestValidSampleAccounting:
+    """通过率要把「工具坏了」和「内容不合格」分开算。
+
+    实测踩过：一轮 5 次采样里 2 次裁判失败，2/3 的真实表现被显示成 1/5，
+    与基线对比时得出了相反的结论。
+    """
+
+    @staticmethod
+    def _agg(samples):
+        from evals.run import aggregate_samples
+        return aggregate_samples("t", [], samples)
+
+    def test_工具失败被排除出有效样本(self):
+        r = self._agg([
+            {"passed": True}, {"passed": False},
+            {"passed": False, "judge_error": True},
+            {"passed": False, "run_error": True},
+        ])
+        assert r["runs"] == 4 and r["invalid_runs"] == 2 and r["valid_runs"] == 2
+        assert r["pass_rate"] == 0.25          # 原始口径保留，趋势对比仍用它
+        assert r["valid_pass_rate"] == 0.5     # 有效口径：1/2
+
+    def test_无工具失败时两个口径一致(self):
+        r = self._agg([{"passed": True}, {"passed": False}])
+        assert r["invalid_runs"] == 0
+        assert r["valid_pass_rate"] == r["pass_rate"] == 0.5
+
+    def test_全是工具失败时有效口径为_None(self):
+        """一次有效样本都没有 ≠ 内容 0 分，不能拿 0% 去比。"""
+        r = self._agg([{"passed": False, "judge_error": True}])
+        assert r["valid_runs"] == 0 and r["valid_pass_rate"] is None
+
+    def test_稳过判定仍按全部采样(self):
+        """工具失败也是「这次没能证明它是好的」，不该被抹掉。"""
+        r = self._agg([{"passed": True}, {"passed": False, "judge_error": True}])
+        assert r["passed"] is False
