@@ -24,6 +24,13 @@ class Character(Base, UUIDMixin, TimestampMixin):
     skills: Mapped[dict] = mapped_column(JSON, default=dict)
     system_data: Mapped[dict] = mapped_column(JSON, default=dict)
     backstory: Mapped[str] = mapped_column(Text, default="")
+    #: 头像图片路径（与 NPC 立绘同一套 image_store 落盘形态）。
+    #: 为空是**正常状态**，不是缺陷——前端回落到「姓名首字纹章」。
+    avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    #: 模组经历：跑完一个本就归档一条，形如 {"module_id", "module_title", "ending_name",
+    #: "session_id", "at", "survived", "story"}。story 是结局后 LLM 写的第三人称小传；
+    #: 其余元数据供档案卡计数、去重（同一会话只归档一次）与排序。
+    experiences: Mapped[list] = mapped_column(JSON, default=list)
     # 角色状态（应用层概念，取值见 app/rules/coc/status.py）：正常/重伤/昏迷/死亡/
     # 临时疯狂/不定期疯狂/永久疯狂。用普通字符串，避免 DB 枚举 CHECK 约束阻挡新增状态。
     status: Mapped[str] = mapped_column(Text, default="active")

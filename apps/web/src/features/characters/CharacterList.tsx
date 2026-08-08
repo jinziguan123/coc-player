@@ -1,7 +1,15 @@
 import { useState } from 'react'
-import { UserRound } from 'lucide-react'
+import { GiScrollUnfurled } from 'react-icons/gi'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { CharacterPortrait } from '@/components/character/CharacterPortrait'
 import type { Character } from './api'
+
+/** 档案编号：由角色 id 稳定派生，同一张卡每次看到的编号都一样（不是随机装饰）。 */
+function dossierNo(id: string): string {
+  let h = 0
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 10000
+  return String(h).padStart(4, '0')
+}
 
 const PAGE_SIZE = 8
 
@@ -128,11 +136,12 @@ export function CharacterList({
             max: number
           }) || { current: 0, max: 0 }
           const occupation = String(character.system_data?.occupation ?? '')
+          const archived = character.experiences?.length ?? 0
           const isActive = selectedId === character.id
           return (
             <div
               key={character.id}
-              className="card character-card cursor-pointer !p-0 overflow-hidden"
+              className="card character-card dossier cursor-pointer !p-0 overflow-hidden"
               style={{
                 borderColor: isActive ? 'var(--color-accent)' : undefined,
                 boxShadow: isActive
@@ -146,23 +155,31 @@ export function CharacterList({
               role="button"
               tabIndex={0}
             >
-              {/* 抬头：首字纹章 + 姓名 + 职业/规则，操作按钮 hover 才浮现，静息态更干净 */}
+              {/* 抬头：头像（无则首字纹章）+ 姓名 + 职业/规则，
+                  操作按钮 hover 才浮现，静息态更干净 */}
               <div
                 className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
                 style={{ borderBottom: '1px solid var(--color-border)' }}
               >
-                <span className="char-sigil" aria-hidden="true">
-                  {character.name.trim().charAt(0) || <UserRound className="h-4 w-4" />}
-                </span>
+                <CharacterPortrait name={character.name} avatarUrl={character.avatar_url} />
                 <div className="min-w-0 flex-1">
-                  <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]">
-                    {character.name}
-                  </h3>
+                  <div className="flex items-baseline gap-2">
+                    <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]">
+                      {character.name}
+                    </h3>
+                    <span className="dossier-no flex-shrink-0">NO.{dossierNo(character.id)}</span>
+                  </div>
                   <div className="flex flex-wrap items-center gap-1">
                     {occupation && <span className="chip">{occupation}</span>}
                     <span className="chip chip--accent">
                       {character.rule_system.toUpperCase()}
                     </span>
+                    {archived > 0 && (
+                      <span className="dossier-stamp" title={`已跑完 ${archived} 个模组`}>
+                        <GiScrollUnfurled size={10} />
+                        已归档 {archived} 篇
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="character-card-actions flex flex-shrink-0 items-center gap-1">

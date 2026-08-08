@@ -4,9 +4,11 @@ import { api } from '../../api/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { GiCancel, GiCheckMark } from 'react-icons/gi'
+import { AvatarEditor } from './AvatarEditor'
 import { SpecializationDialog } from './SpecializationDialog'
 import { WeaponsEditor } from './WeaponsEditor'
 import { useSpecializations, normalizeWeapon, type CharWeapon } from './useCocData'
+import type { CharacterExperience } from '@/features/characters/api'
 import {
   AssetsPanel, MythosEditor, RelationsEditor, ModuleHistoryEditor,
   readAssets, readMythos, readRelations, readModuleHistory,
@@ -21,6 +23,10 @@ interface CharacterData {
   system_data: Record<string, unknown>
   backstory: string
   status: string
+  /** 为空则回落姓名首字纹章，不是缺陷态。 */
+  avatar_url?: string | null
+  /** 系统自动归档的模组经历，只读。 */
+  experiences?: CharacterExperience[]
 }
 
 const ATTR_KEYS = ['STR', 'CON', 'SIZ', 'DEX', 'APP', 'INT', 'POW', 'EDU'] as const
@@ -97,16 +103,21 @@ function NumInput({ value, onChange }: { value: number; onChange: (v: number) =>
 }
 
 export function CharacterEditModal({
-  character, open, onOpenChange, onSaved,
+  character, open, onOpenChange, onSaved, onPatched,
 }: {
   character: CharacterData
   open: boolean
   onOpenChange: (v: boolean) => void
   onSaved: (c: CharacterData) => void
+  /** 角色在弹窗内被**就地**改动（目前只有头像）：同步给父组件，但不关闭弹窗。 */
+  onPatched?: (c: CharacterData) => void
 }) {
   const sd = character.system_data || {}
   const spec = useSpecializations()
   const [name, setName] = useState(character.name)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(character.avatar_url ?? null)
+  // 自动归档的经历：最近的排前面，与角色卡「档案」页同序
+  const archived = [...(character.experiences || [])].sort((a, b) => (b.at || '').localeCompare(a.at || ''))
   const [status, setStatus] = useState(STATUS_FALLBACK[character.status] || character.status || 'active')
   const [attrs, setAttrs] = useState<Record<string, number>>({ ...character.base_attributes })
   const [skills, setSkills] = useState<[string, number][]>(
@@ -231,6 +242,22 @@ export function CharacterEditModal({
             {/* 基本：名称、状态、派生数值、三维 */}
             <TabsContent value="基本">
               <div className="grid grid-cols-2 gap-3">
+                {/* 头像独立落库、不进「保存」那一批：它是独立资源，上传完就该看见，
+                    不该因为用户最后点了取消而丢失。 */}
+                <div className="col-span-2">
+                  <AvatarEditor
+                    characterId={character.id}
+                    name={name || character.name}
+                    avatarUrl={avatarUrl}
+                    onChange={(url) => {
+                      setAvatarUrl(url)
+                      // 头像已经落库了，父组件得马上知道——否则用户改完头像直接关掉弹窗，
+                      // 列表里还挂着旧头像，看着像没生效。走 onPatched 而不是 onSaved：
+                      // 后者是「保存并关闭」，换个头像就被踢出编辑页说不过去。
+                      onPatched?.({ ...character, avatar_url: url })
+                    }}
+                  />
+                </div>
                 <label className="text-sm col-span-2">
                   <span className="block mb-1" style={{ color: 'var(--color-text-secondary)' }}>角色名</span>
                   <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} style={inputStyle} />
@@ -365,6 +392,29 @@ export function CharacterEditModal({
 
             {/* 模组经历 */}
             <TabsContent value="经历">
+              {/* 系统自动归档的小传只读列出：不放在这里的话，用户跑完本回来编辑，
+                  会以为自动经历没生成——它其实在角色卡的「档案」页。
+                  刻意不做成可编辑：那是一局跑完的记录，改它等于改历史。 */}
+              {archived.length > 0 && (
+                <div className="mb-3">
+                  <p className="mb-1.5" style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}>
+                    以下是每局结束后自动归档的经历（不可编辑，可在角色卡「档案」页阅读）
+                  </p>
+                  {archived.map((e) => (
+                    <div key={e.session_id} className="chronicle-entry">
+                      <div className="mb-1 flex flex-wrap items-baseline gap-x-1.5">
+                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-accent)', fontWeight: 600 }}>
+                          {e.module_title}
+                        </span>
+                        {e.ending_name && <span className="chip">{e.ending_name}</span>}
+                        {!e.survived && <span className="chip chip--danger">殁</span>}
+                        <span className="dossier-no ml-auto">{e.at?.slice(0, 10)}</span>
+                      </div>
+                      <p className="chronicle-story">{e.story}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
               <ModuleHistoryEditor value={moduleHistory} onChange={setModuleHistory} />
             </TabsContent>
 

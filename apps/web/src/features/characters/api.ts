@@ -1,4 +1,4 @@
-import { api, localApi } from '@/api/client'
+import { api, localApi, uploadFileLocal } from '@/api/client'
 
 export interface Character {
   id: string
@@ -12,6 +12,22 @@ export interface Character {
   system_data: Record<string, unknown>
   backstory: string
   status: string
+  /** 头像图片 URL；为空是**正常状态**，前端回落姓名首字纹章（见 CharacterPortrait）。 */
+  avatar_url?: string | null
+  /** 模组经历：一局落幕后由后端归档，前端只读。 */
+  experiences?: CharacterExperience[]
+}
+
+/** 一条模组经历：story 是给人读的第三人称小传，其余是给档案卡计数/排序的元数据。 */
+export interface CharacterExperience {
+  session_id: string
+  module_id: string
+  module_title: string
+  ending_name: string
+  at: string
+  survived: boolean
+  final_status: string
+  story: string
 }
 
 export interface GenerateCharacterRequest {
@@ -42,4 +58,23 @@ export function createCharacter<T = Character>(payload: unknown) {
 
 export function removeCharacter(characterId: string) {
   return localApi.delete(`/characters/${characterId}`)
+}
+
+
+// ── 头像 ──────────────────────────────────────────────────────────────
+// 上传与 AI 生成走同一条落盘与回写路径，产出的头像在系统里毫无区别；
+// 都固定走本机（角色卡是本机资产，后端挂 require_local_client）。
+
+export function uploadCharacterAvatar(characterId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return uploadFileLocal<Character>(`/characters/${characterId}/avatar`, form)
+}
+
+export function generateCharacterAvatar(characterId: string) {
+  return localApi.post<Character>(`/characters/${characterId}/avatar/generate`)
+}
+
+export function clearCharacterAvatar(characterId: string) {
+  return localApi.delete<Character>(`/characters/${characterId}/avatar`)
 }

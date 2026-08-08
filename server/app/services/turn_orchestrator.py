@@ -25,6 +25,7 @@ from app.rules.registry import get_engine
 from app.services import (
     chat_event_writer,
     command_protocol,
+    character_chronicle,
     dice_runtime,
     event_recall,
     event_protocol,
@@ -1637,6 +1638,9 @@ async def run_epilogue_generation(session_id: str) -> None:
             raise
         _persist_narration(db, session_id, res)
         world_state.set_key(db, db.get(GameSession, session_id), "epilogue_done", True)
+        # 收场白落定之后再归档经历：这时故事真的讲完了，滚动摘要也已收进最后一批事件，
+        # 写小传的素材最全。fail-open——归档失败不影响已经结束的会话。
+        await character_chronicle.archive_session(db, session_id)
     except asyncio.CancelledError:
         logger.info("收场生成被取消: session=%s", session_id)
     except Exception:

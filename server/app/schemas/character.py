@@ -37,6 +37,9 @@ class CharacterRead(BaseModel):
     system_data: dict
     backstory: str
     status: str
+    avatar_url: str | None = None
+    # 模组经历：结局后由系统追加，前端只读（档案卡的「已归档 N 篇」与经历视图用它）
+    experiences: list = []
     created_at: datetime
     updated_at: datetime
 
@@ -50,6 +53,8 @@ class CharacterUpdate(BaseModel):
     system_data: dict | None = None
     backstory: str | None = None
     status: str | None = None
+    # 允许置空（摘掉头像回到首字纹章）；经历不在这里改，只由结局流程追加
+    avatar_url: str | None = None
 
 
 class RollAttributesResponse(BaseModel):

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { syncCharactersBackFromHost } from '@/features/characters/syncBack'
@@ -119,6 +119,13 @@ export function CharacterPage() {
   const [creating, setCreating] = useState(false)
   const [selectedChar, setSelectedChar] = useState<Character | null>(null)
   const [editingChar, setEditingChar] = useState<Character | null>(null)
+  /** 把角色的部分字段合并进列表与选中项（不影响弹窗开关）。
+   *  取 Partial 是因为调用方（编辑弹窗）持有的是更窄的视图类型，
+   *  它给的本来就是「要改的那几个字段」，不是一个完整角色。 */
+  const syncChar = useCallback((updated: Partial<Character> & { id: string }) => {
+    setCharacters((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)))
+    setSelectedChar((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev))
+  }, [])
   // 默认只展示列表；点「创建角色」进入创建流程
   const [inCreateFlow, setInCreateFlow] = useState(false)
   // 手动把参战结果取回本机（兜底；正常进出房间会自动同步，见 useSyncBack）。
@@ -1534,10 +1541,10 @@ export function CharacterPage() {
           open={!!editingChar}
           onOpenChange={(v) => { if (!v) setEditingChar(null) }}
           onSaved={(updated) => {
-            setCharacters((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)))
-            setSelectedChar((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev))
+            syncChar(updated)
             setEditingChar(null)
           }}
+          onPatched={syncChar}
         />
       )}
 

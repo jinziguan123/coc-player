@@ -355,6 +355,135 @@ body {
   .character-card .character-card-actions,
   .entity-card .entity-card-actions { opacity: 1; }
 }
+/* ===== 调查员档案卡 =====
+   角色卡的视觉母题是「一份卷宗」而不是「一条数据」：装订孔、档案编号、钢印。
+   全部构件复用既有的哥特暗色 + 琥珀金变量，不引入新色板——这套语言在地图、
+   骰子、气泡上已经建立，角色卡另起炉灶只会让产品看着像两个软件拼的。 */
+
+/* 头像：与首字纹章共用边框/圆角/描边，尺寸也一致。
+   「没有头像」是正常状态，不能做成一个等着被填的空框。 */
+.char-portrait { overflow: hidden; padding: 0; }
+.char-portrait-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.char-portrait--sm { width: 1.75rem; height: 1.75rem; font-size: var(--text-sm); }
+.char-portrait--lg {
+  width: 4.5rem;
+  height: 4.5rem;
+  font-size: var(--text-2xl);
+  border-radius: var(--radius-md);
+}
+
+/* 卷宗外壳：左侧装订边 + 两枚装订孔。孔用 radial-gradient 画，不占 DOM。 */
+.dossier {
+  position: relative;
+  padding-left: 0.95rem;
+}
+.dossier::before {
+  content: '';
+  position: absolute;
+  left: 0.42rem;
+  top: 0.9rem;
+  bottom: 0.9rem;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--color-border-strong) 12%,
+    var(--color-border-strong) 88%,
+    transparent
+  );
+  pointer-events: none;
+}
+.dossier::after {
+  content: '';
+  position: absolute;
+  left: 0.26rem;
+  top: 1.5rem;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-radius: 50%;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: 0 1.55rem 0 -0.02rem var(--color-bg-primary),
+              0 1.55rem 0 0 var(--color-border-strong);
+  pointer-events: none;
+}
+
+/* 档案编号：等宽小字，压在卡片右上角，像卷宗封皮上的登记号 */
+.dossier-no {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  opacity: 0.75;
+}
+
+/* 归档钢印：跑完的本数。0 篇时不渲染——空徽章比没有徽章更难看。 */
+.dossier-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  padding: 0.05rem 0.36rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--color-text-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  transform: rotate(-1.2deg);            /* 手盖的印章不会完全水平 */
+  transform-origin: center;
+}
+.dossier-stamp--none {
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+  background: transparent;
+  opacity: 0.7;
+}
+
+/* 属性条：数值 + 进度，比纯数字更快读出「强在哪」 */
+.attr-row {
+  display: grid;
+  grid-template-columns: 2.2rem 1.9rem 1fr;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-xs);
+}
+.attr-row-label { color: var(--color-text-secondary); }
+.attr-row-value {
+  font-family: var(--font-title);
+  color: var(--color-text-primary);
+  text-align: right;
+}
+.attr-row-track {
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-text-secondary) 18%, transparent);
+  overflow: hidden;
+}
+.attr-row-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--color-accent) 55%, transparent),
+    var(--color-accent));
+}
+
+/* 经历条目：卷宗内页 */
+.chronicle-entry {
+  position: relative;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--color-border-strong);
+  border-radius: 3px;
+  background: var(--surface-2, var(--color-bg-tertiary));
+}
+.chronicle-entry + .chronicle-entry { margin-top: 0.55rem; }
+.chronicle-story {
+  font-size: var(--text-sm);
+  line-height: 1.75;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+}
+
 /* 纹章内放图标时，字号继承会让 svg 过大 —— 收到与单字相当的尺寸 */
 .char-sigil svg { font-size: 1.05rem; }
 

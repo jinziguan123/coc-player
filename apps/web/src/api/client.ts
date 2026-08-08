@@ -151,6 +151,26 @@ export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
   return res.json()
 }
 
+/** 与 uploadFile 同款，但固定走**本机** /api。
+ *  角色卡是本机资产（后端挂 require_local_client），客人模式下也不该把它传到房主机器上。 */
+export async function uploadFileLocal<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: authHeaders('/api'),
+    body: form,
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    let msg = body
+    try {
+      const json = JSON.parse(body)
+      msg = json.detail || json.message || body
+    } catch { /* use raw text */ }
+    throw new Error(msg)
+  }
+  return res.json()
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>

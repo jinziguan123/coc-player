@@ -3,7 +3,9 @@ import { toast } from 'sonner'
 import { RadarChart } from './RadarChart'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ConfirmDialog } from '../ui/confirm-dialog'
+import { CharacterPortrait } from './CharacterPortrait'
 import { api } from '../../api/client'
+import type { CharacterExperience } from '@/features/characters/api'
 
 /** 模糊匹配：先看子串，再退化为「按顺序出现的子序列」（如「图使」命中「图书馆使用」）。 */
 function fuzzyMatch(query: string, target: string): boolean {
@@ -27,6 +29,10 @@ interface CharacterData {
   system_data: Record<string, unknown>
   backstory: string
   status: string
+  /** 为空则回落姓名首字纹章（见 CharacterPortrait），不是缺陷态。 */
+  avatar_url?: string | null
+  /** 模组经历：一局落幕后由后端归档，这里只读。 */
+  experiences?: CharacterExperience[]
 }
 
 /** 提供时（查看自己的卡、在场）「道具」页可主动用/丢/给——确定性执行，效果由 KP 叙述。 */
@@ -185,11 +191,13 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
 
   return (
     <div className="space-y-3">
-      {/* 抬头：纹章 + 姓名 + 身份，横排比居中大头像省一半竖向空间 */}
+      {/* 抬头：头像（无则首字纹章）+ 姓名 + 身份，横排比居中大头像省一半竖向空间 */}
       <div className="flex items-center gap-2.5">
-        <span className="char-sigil !h-11 !w-11 !text-[length:var(--text-xl)]" aria-hidden="true">
-          {character.name.charAt(0)}
-        </span>
+        <CharacterPortrait
+          name={character.name}
+          avatarUrl={character.avatar_url}
+          className="!h-11 !w-11 !text-[length:var(--text-xl)]"
+        />
         <div className="min-w-0 flex-1">
           <h3
             className="truncate font-semibold"
@@ -560,10 +568,13 @@ function ProfileTab({ character }: { character: CharacterData }) {
   const mythos = (sd.mythos || {}) as { spells?: string[]; tomes?: string[]; encounters?: string[] }
   const relations = (Array.isArray(sd.relations) ? sd.relations : []) as { name: string; relation: string }[]
   const history = (Array.isArray(sd.moduleHistory) ? sd.moduleHistory : []) as { module: string; experience: string }[]
+  // 系统自动归档的小传，最近跑的排前面（角色卡上先看到的应该是「他刚经历了什么」）
+  const archived = [...(character.experiences || [])].sort((a, b) => (b.at || '').localeCompare(a.at || ''))
 
   const fmt = (n?: number) => (n != null ? `$${n.toLocaleString()}` : '—')
   const hasMythos = (mythos.spells?.length || mythos.tomes?.length || mythos.encounters?.length)
-  const empty = !hasMythos && relations.length === 0 && history.length === 0 && cash == null && spendingLevel == null && !assets
+  const empty = !hasMythos && relations.length === 0 && history.length === 0
+    && archived.length === 0 && cash == null && spendingLevel == null && !assets
 
   return (
     <div className="space-y-3">
@@ -601,9 +612,28 @@ function ProfileTab({ character }: { character: CharacterData }) {
         </Section>
       )}
 
-      {history.length > 0 && (
+      {(archived.length > 0 || history.length > 0) && (
         <Section title="模组经历">
           <div className="space-y-1.5">
+            {/* 自动归档的小传（一局落幕后由系统写入）排在前面：它带结局与日期，
+                信息更全。手填的 moduleHistory 继续展示在后——那是玩家自己记的，
+                不能因为有了自动归档就吞掉。 */}
+            {archived.map((e) => (
+              <div key={e.session_id} className="chronicle-entry">
+                <div className="mb-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                  <span
+                    className="font-semibold"
+                    style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-accent)' }}
+                  >
+                    {e.module_title}
+                  </span>
+                  {e.ending_name && <span className="chip">{e.ending_name}</span>}
+                  {!e.survived && <span className="chip chip--danger">殁</span>}
+                  <span className="dossier-no ml-auto">{e.at?.slice(0, 10)}</span>
+                </div>
+                <p className="chronicle-story">{e.story}</p>
+              </div>
+            ))}
             {history.map((m, i) => (
               <div key={i} className="text-xs rounded p-1.5" style={{ background: 'var(--surface-2)' }}>
                 <div className="font-semibold" style={{ color: 'var(--color-text-accent)' }}>{m.module}</div>

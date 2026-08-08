@@ -22,7 +22,13 @@ from app.rules.coc.occupations import (
     calc_interest_points,
     calc_occupation_points,
 )
-from app.services import ai_character_service, character_service, session_service
+from app.services import (
+    ai_character_service,
+    character_avatar,
+    character_service,
+    image_store,
+    session_service,
+)
 from app.services.excel_import import parse_coc_character_sheet
 
 router = APIRouter(prefix="/api", tags=["characters"])
@@ -257,6 +263,68 @@ def get_character(character_id: str, db: Session = Depends(get_db)):
     if not char:
         raise HTTPException(404, "角色不存在")
     return char
+
+
+@router.post(
+    "/characters/{character_id}/avatar",
+    dependencies=[Depends(require_local_client)],
+    response_model=CharacterRead,
+)
+async def upload_character_avatar(
+    character_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """手动上传角色头像。
+
+    与 AI 生成走同一条落盘与回写路径，因此两者产出的头像在系统里毫无区别——没配生图模型
+    的人照样能有头像，对生成结果不满意的人也不必反复重掷。
+    """
+    char = character_service.get_character(db, character_id)
+    if not char:
+        raise HTTPException(404, "角色不存在")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "上传的文件是空的")
+    if len(raw) > image_store.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"图片过大（上限 {image_store.MAX_UPLOAD_BYTES // 1024 // 1024}MB）")
+    url = image_store.save_image_bytes(raw)
+    if not url:
+        raise HTTPException(422, "无法识别这个文件，请换一张常见格式的图片（JPG / PNG / WebP）")
+    return character_avatar.set_avatar(db, char, url)
+
+
+@router.post(
+    "/characters/{character_id}/avatar/generate",
+    dependencies=[Depends(require_local_client)],
+    response_model=CharacterRead,
+)
+async def generate_character_avatar(character_id: str, db: Session = Depends(get_db)):
+    """按需 AI 生成角色头像（手动触发，不在建卡流程里自动跑）。"""
+    char = character_service.get_character(db, character_id)
+    if not char:
+        raise HTTPException(404, "角色不存在")
+    url = await character_avatar.generate_avatar(db, char)
+    if not url:
+        raise HTTPException(
+            422,
+            "头像生成失败：请确认已在设置页配置可用的生图模型，或稍后重试；"
+            "也可以直接上传一张图片。",
+        )
+    return char
+
+
+@router.delete(
+    "/characters/{character_id}/avatar",
+    dependencies=[Depends(require_local_client)],
+    response_model=CharacterRead,
+)
+def clear_character_avatar(character_id: str, db: Session = Depends(get_db)):
+    """摘掉头像，回到姓名首字纹章（那是正常样式，不是缺陷态）。"""
+    char = character_service.get_character(db, character_id)
+    if not char:
+        raise HTTPException(404, "角色不存在")
+    return character_avatar.set_avatar(db, char, None)
 
 
 @router.delete("/characters/{character_id}", dependencies=[Depends(require_local_client)])
