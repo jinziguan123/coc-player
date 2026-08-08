@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { WeaponPickerDialog } from './WeaponPickerDialog'
 import { type CharWeapon, type WeaponDef } from './useCocData'
+import { NumberField } from '@/components/ui/number-field'
 
 const inputCls = 'w-full px-2 py-1 rounded text-sm'
 const inputStyle = { background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }
@@ -80,10 +81,10 @@ export function WeaponsEditor({
                       title="按使用技能的当前值回填"
                     >取技能</button>
                   </span>
-                  <input
-                    type="number"
-                    value={w.success ?? 0}
-                    onChange={(e) => upd({ success: Number(e.target.value) || 0 })}
+                  <NumberField
+                    value={w.success}
+                    fallback={0}
+                    onChange={(v) => upd({ success: v ?? 0 })}
                     className={inputCls + ' font-mono'}
                     style={inputStyle}
                   />

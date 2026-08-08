@@ -16,6 +16,7 @@ import {
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiDiceSixFacesSix, GiCharacter, GiReturnArrow, GiUpCard, GiPadlock, GiSave, GiScrollUnfurled } from 'react-icons/gi'
 import { ChevronRight, RefreshCw } from 'lucide-react'
+import { NumberField } from '@/components/ui/number-field'
 import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
 import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { CharacterList } from '@/features/characters/CharacterList'
@@ -952,9 +953,12 @@ export function CharacterPage() {
                 <div className="grid grid-cols-3 gap-3 mb-3">
                   <div>
                     <label className="block text-sm mb-1" style={{ color: 'var(--color-text-secondary)' }}>年龄</label>
-                    <input
-                      type="number" value={age} min={15} max={90}
-                      onChange={(e) => setAge(Math.max(15, Math.min(90, parseInt(e.target.value) || 25)))}
+                    <NumberField
+                      value={age}
+                      min={15}
+                      max={90}
+                      fallback={25}
+                      onChange={(v) => setAge(v ?? 25)}
                       className="input w-full font-mono"
                     />
                   </div>
@@ -1031,13 +1035,13 @@ export function CharacterPage() {
                             >
                               -
                             </button>
-                            <input
-                              type="number"
+                            <NumberField
                               value={val}
-                              onChange={(e) => setAttrDirect(k, parseInt(e.target.value) || range.min)}
-                              className="input w-16 text-center font-mono font-bold !py-0.5 text-sm"
                               min={range.min}
                               max={range.max}
+                              fallback={range.min}
+                              onChange={(v) => setAttrDirect(k, v ?? range.min)}
+                              className="input w-16 text-center font-mono font-bold !py-0.5 text-sm"
                               step={5}
                             />
                             <button

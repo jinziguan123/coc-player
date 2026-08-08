@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { GiCancel, GiCheckMark } from 'react-icons/gi'
 import { AvatarEditor } from './AvatarEditor'
 import { CharacterPortrait } from './CharacterPortrait'
+import { NumberField } from '@/components/ui/number-field'
 import { dossierNo } from '@/features/characters/dossier'
 import { SpecializationDialog } from './SpecializationDialog'
 import { WeaponsEditor } from './WeaponsEditor'
@@ -92,12 +93,14 @@ const BACKSTORY_SECTIONS: { key: string; label: string }[] = [
 const inputCls = 'w-full px-2 py-1 rounded text-sm'
 const inputStyle = { background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }
 
+/** 薄封装：把这份表单的输入样式套到 NumberField 上。
+ *  规整交给 NumberField 在失焦时做——写在 onChange 里会让人打不出目标值。 */
 function NumInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
-    <input
-      type="number"
-      value={Number.isFinite(value) ? value : 0}
-      onChange={(e) => onChange(Number(e.target.value) || 0)}
+    <NumberField
+      value={Number.isFinite(value) ? value : undefined}
+      fallback={0}
+      onChange={(v) => onChange(v ?? 0)}
       className={inputCls + ' font-mono'}
       style={inputStyle}
     />

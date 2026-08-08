@@ -1,4 +1,5 @@
 import { deriveAssets } from './useCocData'
+import { NumberField } from '@/components/ui/number-field'
 
 const inputCls = 'w-full px-2 py-1 rounded text-sm'
 const inputStyle = { background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }
@@ -38,11 +39,11 @@ export function AssetsPanel({
       <div className="grid grid-cols-2 gap-3">
         <label className="text-sm">
           <span className="block mb-1" style={labelStyle}>现金（$）</span>
-          <input type="number" value={value.cash} onChange={(e) => onChange({ ...value, cash: Number(e.target.value) || 0 })} className={inputCls + ' font-mono'} style={inputStyle} />
+          <NumberField value={value.cash} fallback={0} onChange={(v) => onChange({ ...value, cash: v ?? 0 })} className={inputCls + ' font-mono'} style={inputStyle} />
         </label>
         <label className="text-sm">
           <span className="block mb-1" style={labelStyle}>消费水平（$）</span>
-          <input type="number" value={value.spendingLevel} onChange={(e) => onChange({ ...value, spendingLevel: Number(e.target.value) || 0 })} className={inputCls + ' font-mono'} style={inputStyle} />
+          <NumberField value={value.spendingLevel} fallback={0} onChange={(v) => onChange({ ...value, spendingLevel: v ?? 0 })} className={inputCls + ' font-mono'} style={inputStyle} />
         </label>
       </div>
       <label className="text-sm block">
