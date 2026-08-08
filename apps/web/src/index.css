@@ -355,6 +355,28 @@ body {
   .character-card .character-card-actions,
   .entity-card .entity-card-actions { opacity: 1; }
 }
+/* ===== 角色基本信息：随**容器**宽度切换单列/两列 =====
+   同一个 CharacterPanel 既挂在书本右页（约 800px），也挂在游戏内的侧栏（288px）。
+   所以断点必须看容器而不是视口——Tailwind 的 md:/lg: 是视口断点，宽屏下会把窄侧栏
+   一起改成两列，直接挤爆。container query 才是「组件自适应它所处的位置」的正解。 */
+.char-basic { container-type: inline-size; }
+
+.char-basic-split { display: grid; gap: 0.6rem; }
+/* 雷达图在窄栏里居中独占一行；宽栏里与派生数值并排，把右半边那块空白填上 */
+.char-radar-cell { display: flex; align-items: center; justify-content: center; }
+
+@container (min-width: 30rem) {
+  .char-basic-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+  }
+  /* 宽栏下属性格摊成八列一行，读起来是一条横向的属性带 */
+  .char-attr-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  /* 背景各段并排成两栏，省掉大段竖向滚动 */
+  .char-backstory { columns: 2; column-gap: 1.4rem; }
+  .char-backstory > * { break-inside: avoid; margin-bottom: 0.7rem; }
+}
+
 /* ===== 书本：角色管理的跨页外壳 =====
    左页名录、右页详情，中间一道书脊。质感全部由既有的哥特暗色 + 琥珀金变量推出来——
    真正的「纸黄」只属于 light 主题，暗色下照搬会变成一块脏黄，所以这里用的是

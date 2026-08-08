@@ -190,7 +190,7 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
   const hasBackstorySections = BACKSTORY_SECTIONS.some((s) => sd[s.key])
 
   return (
-    <div className="space-y-3">
+    <div className="char-basic space-y-3">
       {/* 抬头：头像（无则首字纹章）+ 姓名 + 身份，横排比居中大头像省一半竖向空间 */}
       <div className="flex items-center gap-2.5">
         <CharacterPortrait
@@ -229,28 +229,32 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
         {mp && <StatBar label="MP" current={mp.current} max={mp.max} />}
       </div>
 
-      <div className="group-box">
-        <InfoRow label="幸运" value={luck} />
-        <InfoRow label="移动力" value={mov} />
-        <InfoRow label="伤害加值" value={damageBonus} />
-        {build !== undefined && <InfoRow label="体格" value={build} />}
-        <InfoRow label="闪避" value={dodge} />
-        <InfoRow label="信用评级" value={creditRating} />
-      </div>
-
-      {(residence || birthplace) && (
-        <div className="group-box">
-          {residence && <InfoRow label="居住地" value={residence} />}
-          {birthplace && <InfoRow label="出生地" value={birthplace} />}
+      {/* 派生数值与雷达图并排（窄栏下自动堆成上下两行） */}
+      <div className="char-basic-split">
+        <div className="space-y-2">
+          <div className="group-box">
+            <InfoRow label="幸运" value={luck} />
+            <InfoRow label="移动力" value={mov} />
+            <InfoRow label="伤害加值" value={damageBonus} />
+            {build !== undefined && <InfoRow label="体格" value={build} />}
+            <InfoRow label="闪避" value={dodge} />
+            <InfoRow label="信用评级" value={creditRating} />
+          </div>
+          {(residence || birthplace) && (
+            <div className="group-box">
+              {residence && <InfoRow label="居住地" value={residence} />}
+              {birthplace && <InfoRow label="出生地" value={birthplace} />}
+            </div>
+          )}
         </div>
-      )}
+        <div className="char-radar-cell">
+          <RadarChart labels={RADAR_LABELS} values={radarValues} size={180} />
+        </div>
+      </div>
 
       <div>
         <div className="section-head">属性</div>
-        <div className="flex justify-center">
-          <RadarChart labels={RADAR_LABELS} values={radarValues} size={180} />
-        </div>
-        <div className="grid grid-cols-4 gap-1 mt-1">
+        <div className="char-attr-grid grid grid-cols-4 gap-1">
           {Object.entries(ATTR_LABELS).map(([k, label]) => (
             <div key={k} className="stat-tile">
               <div className="stat-tile-label">{label}</div>
@@ -261,7 +265,7 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
       </div>
 
       {hasBackstorySections ? (
-        <div className="space-y-2">
+        <div className="char-backstory space-y-2">
           {BACKSTORY_SECTIONS.map(({ key, label }) => {
             const val = sd[key] as string | undefined
             if (!val) return null
@@ -573,11 +577,48 @@ function ProfileTab({ character }: { character: CharacterData }) {
 
   const fmt = (n?: number) => (n != null ? `$${n.toLocaleString()}` : '—')
   const hasMythos = (mythos.spells?.length || mythos.tomes?.length || mythos.encounters?.length)
-  const empty = !hasMythos && relations.length === 0 && history.length === 0
-    && archived.length === 0 && cash == null && spendingLevel == null && !assets
 
   return (
     <div className="space-y-3">
+      {(archived.length > 0 || history.length > 0) && (
+        <Section title="模组经历">
+          <div className="space-y-1.5">
+            {/* 自动归档的小传（一局落幕后由系统写入）排在前面：它带结局与日期，
+                信息更全。手填的 moduleHistory 继续展示在后——那是玩家自己记的，
+                不能因为有了自动归档就吞掉。 */}
+            {archived.map((e) => (
+              <div key={e.session_id} className="chronicle-entry">
+                <div className="mb-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                  <span
+                    className="font-semibold"
+                    style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-accent)' }}
+                  >
+                    {e.module_title}
+                  </span>
+                  {e.ending_name && <span className="chip">{e.ending_name}</span>}
+                  {!e.survived && <span className="chip chip--danger">殁</span>}
+                  <span className="dossier-no ml-auto">{e.at?.slice(0, 10)}</span>
+                </div>
+                <p className="chronicle-story">{e.story}</p>
+              </div>
+            ))}
+            {history.map((m, i) => (
+              <div key={i} className="text-xs rounded p-1.5" style={{ background: 'var(--surface-2)' }}>
+                <div className="font-semibold" style={{ color: 'var(--color-text-accent)' }}>{m.module}</div>
+                {m.experience && <div className="mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{m.experience}</div>}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+      {archived.length === 0 && history.length === 0 && (
+        <Section title="模组经历">
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+            还没有归档的经历。跑完一个模组、全员同意结束之后，系统会自动为这名调查员
+            写一段小传存进这里。
+          </p>
+        </Section>
+      )}
       <Section title="资产">
         <div className="rounded p-2 space-y-0.5" style={{ background: 'var(--surface-2)' }}>
           <InfoRow label="信用评级" value={creditRating} />
@@ -612,39 +653,7 @@ function ProfileTab({ character }: { character: CharacterData }) {
         </Section>
       )}
 
-      {(archived.length > 0 || history.length > 0) && (
-        <Section title="模组经历">
-          <div className="space-y-1.5">
-            {/* 自动归档的小传（一局落幕后由系统写入）排在前面：它带结局与日期，
-                信息更全。手填的 moduleHistory 继续展示在后——那是玩家自己记的，
-                不能因为有了自动归档就吞掉。 */}
-            {archived.map((e) => (
-              <div key={e.session_id} className="chronicle-entry">
-                <div className="mb-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                  <span
-                    className="font-semibold"
-                    style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-accent)' }}
-                  >
-                    {e.module_title}
-                  </span>
-                  {e.ending_name && <span className="chip">{e.ending_name}</span>}
-                  {!e.survived && <span className="chip chip--danger">殁</span>}
-                  <span className="dossier-no ml-auto">{e.at?.slice(0, 10)}</span>
-                </div>
-                <p className="chronicle-story">{e.story}</p>
-              </div>
-            ))}
-            {history.map((m, i) => (
-              <div key={i} className="text-xs rounded p-1.5" style={{ background: 'var(--surface-2)' }}>
-                <div className="font-semibold" style={{ color: 'var(--color-text-accent)' }}>{m.module}</div>
-                {m.experience && <div className="mt-0.5 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{m.experience}</div>}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
 
-      {empty && <p className="text-xs text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>暂无档案信息</p>}
     </div>
   )
 }

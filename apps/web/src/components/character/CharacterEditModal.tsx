@@ -5,6 +5,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { GiCancel, GiCheckMark } from 'react-icons/gi'
 import { AvatarEditor } from './AvatarEditor'
+import { CharacterPortrait } from './CharacterPortrait'
+import { dossierNo } from '@/features/characters/dossier'
 import { SpecializationDialog } from './SpecializationDialog'
 import { WeaponsEditor } from './WeaponsEditor'
 import { useSpecializations, normalizeWeapon, type CharWeapon } from './useCocData'
@@ -226,19 +228,29 @@ export function CharacterEditModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-2xl !max-h-[85vh] flex flex-col overflow-hidden">
+      <DialogContent className="!max-w-4xl !max-h-[88vh] flex flex-col overflow-hidden">
         <DialogHeader>
-          <DialogTitle>编辑角色卡</DialogTitle>
+          <DialogTitle className="flex items-center gap-2.5">
+            <CharacterPortrait name={name || character.name} avatarUrl={avatarUrl} size="sm" />
+            <span className="min-w-0 truncate">{name || character.name}</span>
+            <span className="dossier-no flex-shrink-0">NO.{dossierNo(character.id)}</span>
+            <span
+              className="flex-shrink-0"
+              style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)', fontWeight: 400 }}
+            >
+              编辑中
+            </span>
+          </DialogTitle>
         </DialogHeader>
 
         <Tabs defaultValue="基本" className="flex-1 min-h-0 flex flex-col">
-          <TabsList>
+          <TabsList className="flex-wrap">
             {['基本', '属性', '技能', '资产', '道具', '神话', '关系', '经历', '背景'].map((t) => (
               <TabsTrigger key={t} value={t}>{t}</TabsTrigger>
             ))}
           </TabsList>
 
-          <div className="flex-1 overflow-y-auto pr-1 mt-2" style={{ maxHeight: '55vh' }}>
+          <div className="flex-1 overflow-y-auto pr-1 mt-2" style={{ maxHeight: '62vh' }}>
             {/* 基本：名称、状态、派生数值、三维 */}
             <TabsContent value="基本">
               <div className="grid grid-cols-2 gap-3">
