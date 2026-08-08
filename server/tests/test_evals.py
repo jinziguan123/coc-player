@@ -706,3 +706,99 @@ class TestEvalsCallSignatures:
                         f"{ast.unparse(node.func)}() 第 {node.lineno} 行不接受 {kw!r}"
                     )
         assert not problems, "evals/run.py 调用点参数不合法：\n" + "\n".join(problems)
+
+
+class TestJudgeRobustness:
+    """裁判的抗抖动：它坏了不该被当成「被测内容不合格」记进通过率。
+
+    背景：传输层在 Provider 里已重试 3 次，内容层（空响应/坏 JSON/缺项）却一次判死。
+    实测一轮 5 次采样里出现过 2 次 judge_error，会系统性压低所有 fixture 的分数。
+    """
+
+    @staticmethod
+    def _full_output(**overrides) -> str:
+        import json as _json
+
+        from evals.judge import ADVISORY_RUBRIC, RUBRIC
+        data = {k: {"pass": True, "reason": ""} for k in {**RUBRIC, **ADVISORY_RUBRIC}}
+        data.update(overrides)
+        return _json.dumps(data, ensure_ascii=False)
+
+    @staticmethod
+    def _case():
+        from evals.common import ReplayCase
+        from app.models.character import Character
+        from app.models.module import Module
+        from app.models.session import GameSession
+        return ReplayCase(
+            name="t", session=GameSession(world_state={}), module=Module(rule_system="coc"),
+            player_char=Character(name="甲", rule_system="coc"), teammates=[], events=[],
+        )
+
+    class _LLM:
+        """按脚本依次返回；返回 Exception 实例表示这一次抛异常。"""
+
+        def __init__(self, *scripted):
+            self.scripted, self.calls, self.temps = list(scripted), 0, []
+
+        async def complete(self, messages, temperature=0.0, **kw):
+            self.calls += 1
+            self.temps.append(temperature)
+            out = self.scripted[min(self.calls - 1, len(self.scripted) - 1)]
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+    def test_空响应会重试并在成功时返回(self):
+        """`raw=` 空串是实测见过的失败形态——流正常结束但 content 全空。"""
+        import asyncio
+
+        from evals import judge
+        llm = self._LLM("", self._full_output())
+        got = asyncio.run(judge.run_judge(llm, self._case(), None, "旁白"))
+        assert got is not None and llm.calls == 2
+        assert llm.temps == [0.0, 0.3]   # 重试抬温，否则 temperature=0 会复现同一个坏输出
+
+    def test_调用异常也走重试(self):
+        import asyncio
+
+        from evals import judge
+        llm = self._LLM(RuntimeError("boom"), self._full_output())
+        assert asyncio.run(judge.run_judge(llm, self._case(), None, "旁白")) is not None
+        assert llm.calls == 2
+
+    def test_始终失败才返回_None(self):
+        import asyncio
+
+        from evals import judge
+        llm = self._LLM("坏输出")
+        assert asyncio.run(judge.run_judge(llm, self._case(), None, "旁白")) is None
+        assert llm.calls == judge.JUDGE_MAX_ATTEMPTS
+
+    def test_条件项缺失按默认通过_不废整份(self):
+        """漏写一个「非战斗轮次默认通过」的项，不该让另外十项的有效评分一起作废。"""
+        import json as _json
+
+        from evals.judge import _parse_judge_output
+        data = _json.loads(self._full_output())
+        del data["combat_turn_order"]
+        del data["perception_isolation"]
+        got = _parse_judge_output(_json.dumps(data, ensure_ascii=False))
+        assert got is not None
+        assert got["combat_turn_order"]["pass"] is True
+        assert "默认通过" in got["combat_turn_order"]["reason"]
+
+    def test_核心项缺失仍然作废(self):
+        """泄密/替玩家行动这类漏判代价是真的——宁可假阴性也不给假分。"""
+        import json as _json
+
+        from evals.judge import _REQUIRED_KEYS, _parse_judge_output
+        for key in _REQUIRED_KEYS:
+            data = _json.loads(self._full_output())
+            del data[key]
+            assert _parse_judge_output(_json.dumps(data, ensure_ascii=False)) is None, key
+
+    def test_核心项与条件项无重叠且覆盖全部(self):
+        from evals.judge import _CONDITIONAL_KEYS, _REQUIRED_KEYS, RUBRIC
+        assert not set(_REQUIRED_KEYS) & set(_CONDITIONAL_KEYS)
+        assert set(_REQUIRED_KEYS) | set(_CONDITIONAL_KEYS) == set(RUBRIC)

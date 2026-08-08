@@ -68,6 +68,21 @@ ADVISORY_RUBRIC = {
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
+#: 缺项即判 judge_error 的**核心项**：这几项任何轮次都适用，模型漏写只可能是输出坏了；
+#: 而漏判它们的代价是实打实的（泄密、替玩家行动），宁可假阴性也不给假分。
+_REQUIRED_KEYS = (
+    "no_leak", "plan_adherence", "no_player_control", "in_character", "coherence",
+)
+#: 其余都是**条件项**——rubric 文本自己就写明「无 NPC 出场时默认通过」「非战斗轮次默认通过」
+#: 这类前提。模型漏写一个它判定为不适用的项，本不该把另外十项的有效评分一起作废：
+#: 代价与错误完全不成比例。缺失时按其既定的「默认通过」处理，只记 warning。
+_CONDITIONAL_KEYS = tuple(k for k in RUBRIC if k not in _REQUIRED_KEYS)
+
+#: 裁判内容层的重试次数。传输层在 Provider 里已重试 3 次，内容层（空响应/坏 JSON/缺核心项）
+#: 此前却是一次判死——而裁判是低温结构化任务，重跑一次成本极低、成功率很高。这个不对称
+#: 会让裁判的抖动系统性压低所有 fixture 的分数，且与被测内容无关。
+JUDGE_MAX_ATTEMPTS = 3
+
 
 def _recent_events_text(case: ReplayCase, limit: int = 12) -> str:
     lines = []
@@ -131,10 +146,18 @@ def _parse_judge_output(raw: str) -> dict[str, dict] | None:
     if not isinstance(data, dict):
         return None
     result = {}
-    for key in RUBRIC:
+    for key in _REQUIRED_KEYS:
         item = data.get(key)
         if not isinstance(item, dict) or "pass" not in item:
-            return None  # 缺项视为解析失败，宁可 judge_error 也不给假分
+            return None  # 核心项缺失视为解析失败，宁可 judge_error 也不给假分
+        result[key] = {"pass": bool(item["pass"]), "reason": str(item.get("reason") or "")}
+    for key in _CONDITIONAL_KEYS:
+        item = data.get(key)
+        if not isinstance(item, dict) or "pass" not in item:
+            # 条件项缺失 → 按 rubric 自带的「不适用时默认通过」处理，不废掉整份评分。
+            logger.warning("judge 缺条件项 %s，按默认通过处理", key)
+            result[key] = {"pass": True, "reason": "（裁判未返回该项，按默认通过处理）"}
+            continue
         result[key] = {"pass": bool(item["pass"]), "reason": str(item.get("reason") or "")}
     for key in ADVISORY_RUBRIC:
         item = data.get(key)
@@ -144,20 +167,53 @@ def _parse_judge_output(raw: str) -> dict[str, dict] | None:
     return result
 
 
+def _retry_hint(last_raw: str) -> dict:
+    """把上一次的坏输出回灌给裁判——只说「不合法」而不说错在哪，模型往往照原样再错一遍。"""
+    detail = "返回了空响应" if not (last_raw or "").strip() else f"上次返回：{last_raw[:200]}"
+    return {
+        "role": "user",
+        "content": (
+            f"你上一次的输出不是合法的评分 JSON（{detail}）。"
+            "请重新评审，**只输出 JSON 对象本身**：不要解释、不要前后文字、不要代码围栏，"
+            "并确保包含全部评分项。"
+        ),
+    }
+
+
 async def run_judge(
     llm: Any, case: ReplayCase, plan: TurnPlan | None, narration: str,
 ) -> dict[str, dict] | None:
-    """返回 {rubric_key: {"pass": bool, "reason": str}}；失败返回 None。"""
-    try:
-        raw = await llm.complete(
-            build_judge_messages(case, plan, narration),
-            temperature=0.0,
-            response_format={"type": "json_object"},
+    """返回 {rubric_key: {"pass": bool, "reason": str}}；连续失败 JUDGE_MAX_ATTEMPTS 次返回 None。
+
+    三个失败通道（调用异常 / 空响应或坏 JSON / 缺核心项）统一重试，因为它们都是**裁判自己
+    坏了**、与被测旁白无关；不重试的话这些抖动会被当成内容不合格记进通过率。
+    第二次起把温度抬到 0.3：temperature=0 重跑几乎必然复现同一个坏输出，确定性在这里是负资产。
+    """
+    base = build_judge_messages(case, plan, narration)
+    last_raw = ""
+    for attempt in range(JUDGE_MAX_ATTEMPTS):
+        messages = base if attempt == 0 else [*base, _retry_hint(last_raw)]
+        try:
+            raw = await llm.complete(
+                messages,
+                temperature=0.0 if attempt == 0 else 0.3,
+                response_format={"type": "json_object"},
+            )
+        except Exception:
+            logger.exception(
+                "judge 调用失败（第 %d/%d 次）: fixture=%s",
+                attempt + 1, JUDGE_MAX_ATTEMPTS, case.name,
+            )
+            last_raw = ""
+            continue
+        parsed = _parse_judge_output(raw)
+        if parsed is not None:
+            if attempt:
+                logger.info("judge 第 %d 次重试成功: fixture=%s", attempt + 1, case.name)
+            return parsed
+        last_raw = raw or ""
+        logger.warning(
+            "judge 输出无法解析（第 %d/%d 次）: fixture=%s raw=%.200s",
+            attempt + 1, JUDGE_MAX_ATTEMPTS, case.name, last_raw,
         )
-    except Exception:
-        logger.exception("judge 调用失败: fixture=%s", case.name)
-        return None
-    parsed = _parse_judge_output(raw)
-    if parsed is None:
-        logger.warning("judge 输出无法解析: fixture=%s raw=%.200s", case.name, raw)
-    return parsed
+    return None
