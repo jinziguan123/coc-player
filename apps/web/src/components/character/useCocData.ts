@@ -99,13 +99,19 @@ export function assetTier(cr: number): string {
   return '巨富'
 }
 
+/**
+ * 现金列的倍率曾经是 ×2 / ×20 / ×50 / ×100，比规则书高一个量级
+ * （消费水平与资产两列一直是对的，只有现金这一列抄错），
+ * 建出来的调查员一上来就揣着十倍的钱。已存的角色卡不受影响——
+ * 现金是建卡时算出来存进 system_data 的快照，这里只管新算的。
+ */
 export function deriveAssets(cr: number): DerivedAssets {
   const tier = assetTier(cr)
   if (cr <= 0) return { tier, spendingLevel: 0.5, cash: 0.5, assets: 0 }
-  if (cr <= 9) return { tier, spendingLevel: 2, cash: cr * 2, assets: cr * 10 }
-  if (cr <= 49) return { tier, spendingLevel: 10, cash: cr * 20, assets: cr * 50 }
-  if (cr <= 89) return { tier, spendingLevel: 50, cash: cr * 50, assets: cr * 500 }
-  if (cr <= 98) return { tier, spendingLevel: 250, cash: cr * 100, assets: cr * 2000 }
+  if (cr <= 9) return { tier, spendingLevel: 2, cash: cr * 1, assets: cr * 10 }
+  if (cr <= 49) return { tier, spendingLevel: 10, cash: cr * 2, assets: cr * 50 }
+  if (cr <= 89) return { tier, spendingLevel: 50, cash: cr * 5, assets: cr * 500 }
+  if (cr <= 98) return { tier, spendingLevel: 250, cash: cr * 20, assets: cr * 2000 }
   return { tier, spendingLevel: 5000, cash: 50000, assets: 5000000 }
 }
 
