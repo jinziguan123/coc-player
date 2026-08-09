@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import logging
 
 from tests.wire import wires
 
@@ -387,6 +388,52 @@ def test_blind_roll_result_not_leaked_to_narration():
     assert "试图捕捉更深的情绪" in result[0]
     assert "勉强拼凑起来" in result[0]
     assert "脚步没有发出声响" in result[0]
+
+
+def test_unknown_bracket_is_dropped_not_echoed(caplog):
+    """认不出的括号一律丢弃，不能原样回吐给玩家。
+
+    线上真实踩到过：模型给旁白结尾缀了一句 `[隐藏检定：未知]`（它想暗投心理学，
+    却没写成 [DICE_CHECK]），玩家屏幕上就多出一行机器话。它既不是已知指令，
+    也不含「暗投/暗骰」或「检定+成败」——两道旧闸都不沾，落进兜底分支被塞回旁白。
+    错误写法枚举不完，只能反过来放行白名单。
+    """
+    text = (
+        "他说这话时没有回头看你，声音顺着风送过来，听不出是提醒还是警告。\n"
+        "[隐藏检定：未知]"
+    )
+    result = ["", "", [], [], []]
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(_collect(
+            chat_service._stream_narration_filtered(_FakeKP(text), [], result)
+        ))
+    assert "隐藏检定" not in result[0]
+    assert "[" not in result[0] and "]" not in result[0]
+    assert "听不出是提醒还是警告" in result[0]      # 正文一个字不少
+    assert "认不出的括号" in caplog.text            # 丢了什么要留痕，别静悄悄地吞
+
+
+def test_model_meta_commentary_bracket_is_dropped():
+    """模型对系统说的话（自我修正之类）同样不该出现在玩家眼前。"""
+    text = "[此前回应出现技术问题，现补充修正后的内容]\n\n门在身后合上，插销落下。"
+    result = ["", "", [], [], []]
+    asyncio.run(_collect(
+        chat_service._stream_narration_filtered(_FakeKP(text), [], result)
+    ))
+    assert "技术问题" not in result[0]
+    assert "门在身后合上" in result[0]
+
+
+def test_unclosed_bracket_does_not_eat_narration():
+    """只写了半个括号时，剩下的正文要原样还回来——宁可漏出半个括号，
+    也不能把这一整段旁白吞掉，那才是玩家真正会察觉的损失。"""
+    text = "长廊尽头的烛火忽明忽暗。[没写完的东西"
+    result = ["", "", [], [], []]
+    asyncio.run(_collect(
+        chat_service._stream_narration_filtered(_FakeKP(text), [], result)
+    ))
+    assert "长廊尽头的烛火忽明忽暗" in result[0]
+    assert "没写完的东西" in result[0]
 
 
 def test_set_flag_regex_tolerant():

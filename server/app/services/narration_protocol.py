@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import AsyncIterator
 
@@ -12,6 +13,8 @@ from app.services.event_protocol import make_chunk
 _is_cmd_tag = command_protocol.is_command_tag
 _parse_tag_kv = command_protocol.parse_tag_kv
 _make_chunk = make_chunk
+
+logger = logging.getLogger(__name__)
 
 # 书写/标识语境：其后引号是书写/标识内容（非台词），留旁白。允许标识名词与引号间夹分隔符。
 _WRITTEN_TEXT_RE = re.compile(
@@ -433,10 +436,22 @@ async def filter_narration_stream(
                     if _is_cmd_tag(inner_s):
                         tag_found = True
                         break
-                    if _BLIND_LEAK_RE.search(inner_s):
-                        # 暗投/暗骰裁定结果被 KP 误写进括号 → 丢弃，绝不回吐给玩家
-                        continue
-                    pending += bracket_open + inner_s + ("】" if bracket_open == "【" else "]")
+                    # 认不出的括号一律丢弃，绝不回吐给玩家。
+                    #
+                    # 括号在旁白里没有正当用途：真实语料里 646 条叙事/对白，方括号总共
+                    # 出现过两次，两次都是模型自创的机器话（`[隐藏检定：未知]`、
+                    # `[此前回应出现技术问题，现补充修正后的内容]`）。原先这里把认不出的
+                    # 原样塞回旁白，于是模型编什么，玩家屏幕上就出现什么。
+                    #
+                    # 早先只拦「暗投/暗骰」「检定+成败」这类**已知**的错误写法，模型换个
+                    # 中文措辞就绕过去了——错误写法是枚举不完的，只能反过来放行白名单。
+                    if inner_s:
+                        logger.warning(
+                            "KP 旁白里出现认不出的括号，已丢弃%s：%s",
+                            "（疑似暗投/暗骰结果泄漏）" if _BLIND_LEAK_RE.search(inner_s) else "",
+                            inner_s[:80],
+                        )
+                    continue
                 else:
                     bracket_buf += ch
             elif ch in "[【":
