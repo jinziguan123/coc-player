@@ -4,6 +4,8 @@
 语义质量归 evals。
 """
 
+import hashlib
+
 import numpy as np
 import pytest
 from sqlalchemy import create_engine
@@ -18,15 +20,24 @@ from app.services import event_recall
 
 
 class _FakeEmbedder:
-    """把文本映射到确定性向量：共享词越多越相近，够用来验检索接线。"""
+    """把文本映射到确定性向量：共享词越多越相近，够用来验检索接线。
+
+    分桶用 md5 而不是内置 `hash()`——后者对 str 是**每个进程随机加盐**的，
+    换个 PYTHONHASHSEED 分桶就变，命中排序跟着变。这条测试因此会偶发翻车
+    （`PYTHONHASHSEED=13` 必挂），而失败与被测代码毫无关系，纯属噪声。
+    """
 
     dim = 16
     model_name = "fake"
 
+    @staticmethod
+    def _bucket(token: str) -> int:
+        return int(hashlib.md5(token.encode("utf-8")).hexdigest()[:8], 16)
+
     def _vec(self, text: str) -> list[float]:
         v = np.zeros(self.dim, dtype=np.float64)
         for token in text:
-            v[hash(token) % self.dim] += 1.0
+            v[self._bucket(token) % self.dim] += 1.0
         n = np.linalg.norm(v)
         return (v / n if n else v).tolist()
 
