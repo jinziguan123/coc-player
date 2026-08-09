@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.rules.coc.checks import display_skill_name
 from app.rules.registry import get_engine
 from app.services import npc_identity, session_service
 from app.services.event_protocol import event_to_chunk, make_chunk
@@ -398,8 +399,9 @@ async def _resolve_opposed(
     """
     a_ref = (kv.get("a") or kv.get("actor") or "").strip()
     b_ref = (kv.get("b") or kv.get("target") or "").strip()
-    a_skill = (kv.get("a_skill") or kv.get("skill") or "").strip()
-    b_skill = (kv.get("b_skill") or a_skill).strip()
+    # 同 [DICE_CHECK]：英文属性键换回中文再示人
+    a_skill = display_skill_name((kv.get("a_skill") or kv.get("skill") or "").strip())
+    b_skill = display_skill_name((kv.get("b_skill") or a_skill).strip())
     if not a_ref or not b_ref or not a_skill or not b_skill:
         raise ValueError("对抗检定必须选择双方对象并填写双方技能")
 

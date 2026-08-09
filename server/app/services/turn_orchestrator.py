@@ -21,6 +21,7 @@ from app.ai.prompts.kp_system import (
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.rules.coc.checks import display_skill_name
 from app.rules.registry import get_engine
 from app.services import (
     character_chronicle,
@@ -1343,7 +1344,7 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
             )
             return
 
-        skill = check["skill"]
+        skill = display_skill_name(check["skill"])
         difficulty = check.get("difficulty", "normal")
         source = check.get("source", "")
         bonus = int(check.get("bonus") or 0)

@@ -13,6 +13,7 @@ from app.ai.image_gen import get_image_llm
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.rules.coc.checks import display_skill_name
 from app.rules.registry import get_engine
 from app.services import (
     dice_runtime,
@@ -209,7 +210,9 @@ async def _exec_san_check(
             "san_results": list(descs),
         }
         session_service.add_pending_check(db, session_id, pending)
-        prompt_text = _check_prompt_text(tchar.name, "理智", "normal")
+        # 走同一张映射表而不是再硬编码一次「理智」：两条路径各写各的，
+        # 迟早会出现一边显示「理智」、另一边显示「SAN」这种对不上的情况。
+        prompt_text = _check_prompt_text(tchar.name, display_skill_name("SAN"), "normal")
         meta = {"check_request": True, **pending}
         ev = session_service.add_event(
             db, session_id, "system", prompt_text, actor_name="系统", metadata=meta,
@@ -533,7 +536,9 @@ async def _exec_dice_check(
     """
     chunks: list[str] = []
     descs: list[str] = []
-    skill_name = (kv.get("skill") or "").strip()
+    # 英文属性键（KP 偶尔写 skill=STR）在这里换回中文：取值那层认得英文键，
+    # 但检定提示与结果卡都直接拿它示人，不换就成了「STR 检定」这种机器话。
+    skill_name = display_skill_name((kv.get("skill") or "").strip())
     if not skill_name:
         return chunks, descs, False
     difficulty = (kv.get("difficulty") or "normal").strip() or "normal"

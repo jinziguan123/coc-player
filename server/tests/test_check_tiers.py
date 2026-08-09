@@ -36,3 +36,43 @@ def test_extreme_distinguished_from_hard(monkeypatch):
     cdata = {"skills": {"侦查": 60}, "base_attributes": {}}
     assert resolve_skill_check(cdata, "侦查", "normal").tier == "extreme"
     assert TIER_LABEL_CN["extreme"] == "极难成功"
+
+
+# ── 检定名的对外写法 ────────────────────────────────────────────────────
+
+
+def test_英文属性键换成中文():
+    """线上真实踩到过：KP 写了 `[DICE_CHECK: skill=STR]`，角色卡的 base_attributes
+    本来就用英文键存，取值这层碰巧认得、检定算对了，显示这层却原样打给玩家，
+    界面上就出现「请 X 进行一次「STR」检定」这种机器话。"""
+    d = checks.display_skill_name
+    assert d("STR") == "力量"
+    assert d("POW") == "意志"
+    assert d("LUCK") == "幸运"
+    assert d("str") == "力量"          # 大小写不挑
+    assert d("SAN") == "理智" and d("sanity") == "理智"
+
+
+def test_中文与技能名原样奉还():
+    """只做英文→中文一个方向，别顺手把别的也归一了。"""
+    d = checks.display_skill_name
+    assert d("力量") == "力量"
+    assert d("图书馆使用") == "图书馆使用"
+    assert d("射击(手枪)") == "射击(手枪)"
+    assert d("") == "" and d(None) == ""
+
+
+def test_灵感不被折成智力():
+    """灵感按规则是 INT 直判，但它是个有名有姓的检定——显示成「智力」等于
+    把 KP 的意图抹平。同理「战斗」不该在展示时被折成「格斗(斗殴)」。"""
+    d = checks.display_skill_name
+    assert d("灵感") == "灵感"
+    assert d("知识") == "知识"
+    assert d("战斗") == "战斗"
+
+
+def test_换名之后仍然取得到值():
+    """换的是显示名，不能把检定本身弄坏：力量和 STR 必须取到同一个值。"""
+    attrs = {"STR": 60}
+    cdata = {"base_attributes": attrs, "skills": {}, "system_data": {}}
+    assert checks.resolve_skill_value(cdata, "STR") == checks.resolve_skill_value(cdata, "力量") == 60

@@ -23,6 +23,26 @@ _CHARACTERISTIC_ALIAS = {
 # 理智检定的写法：SAN 不在技能表也不在属性表，需单独回落到 system_data.sanity.current
 _SANITY_ALIAS = ("理智", "san", "SAN", "Sanity", "sanity", "理智值")
 
+# 英文属性键 → 中文检定名。角色卡的 base_attributes 用英文键存，KP 偶尔照抄英文写成
+# `skill=STR`——取值这一层碰巧认得（键本来就叫 STR），显示这一层却会原样打到玩家脸上，
+# 检定卡上就出现「STR 检定」。取值宽容是好事，但宽容进来的写法得换回跑团用语再示人。
+_CHARACTERISTIC_DISPLAY = {
+    "STR": "力量", "CON": "体质", "SIZ": "体型", "DEX": "敏捷", "APP": "外貌",
+    "INT": "智力", "POW": "意志", "EDU": "教育", "LUCK": "幸运",
+    "SAN": "理智", "SANITY": "理智",
+}
+
+
+def display_skill_name(name: str) -> str:
+    """检定名的对外写法：英文属性键换成中文，其余原样奉还。
+
+    只做英文→中文这一个方向，刻意**不**顺手套 :func:`normalize_skill_name`：
+    「灵感」按规则是 INT 直判，但它是个有名有姓的检定，显示成「智力」等于把 KP
+    的意图抹平；「战斗」→「格斗(斗殴)」同理，那是取值时该做的归一，不是展示。
+    """
+    s = (name or "").strip()
+    return _CHARACTERISTIC_DISPLAY.get(s.upper(), s)
+
 # 技能名的书写变体：全角括号/冒号统一成半角括号形式（「射击：手枪」→「射击(手枪)」）。
 # AI 解析模组时怎么写全看它心情，而技能查表是精确匹配——不归一就取不到值、按 0 结算。
 _SKILL_PUNCT = str.maketrans({"（": "(", "）": ")", "：": ":", "﹕": ":", "　": "", " ": ""})
