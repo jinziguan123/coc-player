@@ -59,8 +59,8 @@ def test_没在叙事里出现过的名字一律遮住(db_factory):
     _narrate(db, session.id, "树影边缘，一团比夜色更浓的黑正从土路中央隆起。没有脸，没有眼。")
 
     mask = ni.build_masker(db, session.id, module)
-    assert mask(MONSTER) == ni.UNKNOWN_LABEL
-    assert mask(STUDENT) == ni.UNKNOWN_LABEL
+    assert mask(MONSTER) == ni.UNKNOWN_LABEL      # 看着不像人
+    assert mask(STUDENT) == "陌生人"               # 看着是人，但描述没写性别
 
 
 def test_模组可以给更贴切的中性称呼(db_factory):
@@ -97,7 +97,7 @@ def test_NPC自报家门当场改口(db_factory):
     db = db_factory()
     module, _hero, session = _seed(db)
 
-    assert ni.build_masker(db, session.id, module)(STUDENT) == ni.UNKNOWN_LABEL
+    assert ni.build_masker(db, session.id, module)(STUDENT) == "陌生人"
     mask = ni.build_masker(db, session.id, module)
     assert mask(STUDENT, extra_prose="我叫香澄澪，是这附近的学生。") == STUDENT
 
@@ -156,6 +156,75 @@ def test_reveals_报告是否照实显示(db_factory):
     mask = ni.build_masker(db, session.id, module)
     assert mask.reveals("沃什·帕杉德") is True
     assert mask.reveals(MONSTER) is False
+
+
+# ── 玩家还不知道名字时怎么称呼 ───────────────────────────────────────────
+
+
+def _label(**npc):
+    return ni.unknown_label(npc)
+
+
+def test_模组明写的字段优先于一切推断():
+    assert _label(unknown_as="林中的声音", description="中年男子") == "林中的声音"
+    assert _label(looks_human=True, gender="female", description="一团黑影") == "陌生女性"
+    assert _label(looks_human=False, description="穿西装的中年男子") == ni.UNKNOWN_LABEL
+
+
+@pytest.mark.parametrize("desc,expected", [
+    ("一位焦虑的中年男子，房屋的新主人。", "陌生男性"),
+    ("波士顿环球报社编辑，一位守旧的中年女性。", "陌生女性"),
+    ("30岁男性电车乘务员，身穿制服。", "陌生男性"),
+    ("六岁，张金贵的小女儿，活泼好动。", "陌生女性"),
+    ("维托里奥的妻子，疗养院病人，意识清醒但虚弱。", "陌生女性"),
+])
+def test_描述里明写性别就用它(desc, expected):
+    assert _label(description=desc) == expected
+
+
+def test_亲属称谓排在单字性别词前面():
+    """回归：「黄婆干儿子」里若先撞上「婆」，这位男警员就成了「陌生女性」。
+
+    光看关键词在不在，语义是会反过来的——亲属称谓说的是这个 NPC 自己是谁。
+    """
+    assert _label(description="二十八岁，呼兰县人民法院法警，黄婆干儿子，身材中等。") == "陌生男性"
+    assert _label(description="六十二岁，本名王婆，普通农妇打扮，手持念珠。") == "陌生女性"
+
+
+def test_不像人的先否决_不再往下判性别():
+    """回归：「体型庞大的男子…生有巨大金狼头」先判性别就成了「陌生男性」。
+
+    把人说成「不明存在」只是别扭，把怪物说成「陌生男性」才是砸场子。
+    """
+    assert _label(
+        description="体型庞大的男子，浑身腐烂亚麻布，伤口涌出脓液，生有巨大金狼头。",
+    ) == ni.UNKNOWN_LABEL
+    assert _label(description="没有眼睛的人形怪物，面部呈菌状增生。") == ni.UNKNOWN_LABEL
+    assert _label(description="半人半鱼的佝偻身形，皮肤覆着湿冷的鳞，指间连着蹼。") == ni.UNKNOWN_LABEL
+    assert _label(description="居住在山中的神话生物，模仿声音迷惑猎物。") == ni.UNKNOWN_LABEL
+
+
+def test_看得出是人但没写性别就不猜():
+    """猜错性别比说「陌生人」糟得多，而名字是猜不出性别的。"""
+    assert _label(description="穿着学生服的青年，苍白的皮肤，黑曜石般深邃的眼睛。") == "陌生人"
+    assert _label(name="香澄澪", description="五十二岁，呼兰县公安局局长，眉头紧锁。") == "陌生人"
+
+
+def test_名字里的敬称算明写的性别():
+    assert _label(name="佐利先生", description="在街区贩卖烟卷和报纸的小贩，矮小。") == "陌生男性"
+    assert _label(name="黄婆", description="手持念珠的老人。") == "陌生女性"
+
+
+def test_什么线索都没有时兜底():
+    assert _label(name="影", description="") == ni.UNKNOWN_LABEL
+
+
+def test_遮名时用的就是这套称呼(db_factory):
+    db = db_factory()
+    module, _hero, session = _seed(db)
+    module.npcs = [{"id": "n1", "name": "史蒂芬·诺特先生", "description": "一位焦虑的中年男子。"}]
+    db.commit()
+    assert ni.build_masker(db, session.id, module)("史蒂芬·诺特先生") == "陌生男性"
 
 
 @pytest.mark.parametrize("raw,expected", [

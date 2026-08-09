@@ -25,9 +25,98 @@ from sqlalchemy.orm import Session
 from app.models.module import Module
 from app.services import session_service
 
-#: 玩家还认不出这东西时，机制界面上的称呼。
+#: 玩家还认不出这东西时的兜底称呼。看着不像人的（怪物、神话生物）用它。
 #: 模组可以给单个 NPC 写 ``unknown_as`` 覆盖成更贴切的（如「树影里的东西」）。
 UNKNOWN_LABEL = "不明存在"
+
+#: 看着是人、但玩家还不知道名字时的称呼。管它是不是真的人——
+#: 半幽灵香澄澪在玩家眼里就是个穿学生服的青年，遮名遮的是名字，不是外观。
+UNKNOWN_HUMAN = {"male": "陌生男性", "female": "陌生女性", "": "陌生人"}
+
+#: 外观上的性别线索，**按这个顺序**逐个查，先具体后笼统。顺序是有讲究的：
+#: 「黄婆干儿子」里 `儿子` 必须排在 `婆` 前面，否则这位男警员会被判成女性——
+#: 光看关键词在不在，语义是会反过来的。只认明写的，绝不从名字猜。
+_GENDER_PATTERNS: tuple[tuple[str, str], ...] = (
+    # 亲属称谓说的是这个 NPC 自己是谁（「维托里奥的妻子」＝她是妻子）
+    ("女儿", "female"), ("妻子", "female"), ("母亲", "female"), ("姐姐", "female"),
+    ("妹妹", "female"), ("孙女", "female"), ("侄女", "female"),
+    ("儿子", "male"), ("丈夫", "male"), ("父亲", "male"), ("哥哥", "male"),
+    ("弟弟", "male"), ("孙子", "male"), ("侄子", "male"),
+    # 明写的性别
+    ("女性", "female"), ("女子", "female"), ("女士", "female"), ("妇女", "female"),
+    ("少女", "female"), ("姑娘", "female"), ("夫人", "female"), ("太太", "female"),
+    ("小姐", "female"), ("女警", "female"), ("女学生", "female"), ("女人", "female"),
+    ("男性", "male"), ("男子", "male"), ("男人", "male"), ("先生", "male"),
+    ("少年", "male"), ("老头", "male"), ("大爷", "male"), ("小伙", "male"),
+    ("汉子", "male"), ("男孩", "male"), ("男警", "male"),
+    # 兜底的单字（放最后，前面都没命中才轮到）
+    ("婆", "female"), ("嫂", "female"), ("姨", "female"), ("奶奶", "female"),
+    ("大娘", "female"), ("妇", "female"), ("女", "female"),
+    ("叔", "male"), ("伯", "male"), ("爷", "male"), ("男", "male"),
+)
+
+#: 一眼看出不是人的。先查它，命中就是「不明存在」，不再往下判性别——
+#: 「体型庞大的男子…生有巨大金狼头」要是先判了性别，就成了「陌生男性」。
+_INHUMAN_HINTS = (
+    "神话生物", "怪物", "化身", "触手", "触须", "野兽", "巨兽", "半人半", "人形怪",
+    "鳞", "蹼", "菌", "黏液", "肉块", "腐烂", "脓", "狼头", "兽头", "独眼",
+    "枯树", "巨树", "活尸", "不死", "干枯如", "不可名状", "无法形容", "数不清",
+)
+#: 看着像人的。上面没否掉、这里命中，才算「人形」。放得宽一些——
+#: 把人误判成「不明存在」只是别扭，把怪物说成「陌生男性」才是砸场子，
+#: 而怪物那边已经由上面的否决词兜住了。
+_HUMAN_HINTS = (
+    "人", "男", "女", "青年", "少年", "老人", "孩子", "学生", "先生", "士",
+    "岁", "打扮", "衣", "服", "帽", "面孔", "脸", "皮肤", "头发", "身材", "身影",
+    "员", "官", "长", "师", "工", "商", "贩", "医", "警", "兵", "者", "家", "主",
+    "邻", "守", "客", "友", "徒", "伙",
+)
+
+#: 名字里的敬称也算明写的性别（「佐利先生」）。只认这类词组，不认单字——
+#: 名字里出现一个「男」「女」字什么也说明不了，从名字猜性别是要出事的。
+_NAME_HONORIFICS: tuple[tuple[str, str], ...] = (
+    ("女士", "female"), ("夫人", "female"), ("太太", "female"), ("小姐", "female"),
+    ("嬷嬷", "female"), ("婆", "female"), ("大娘", "female"), ("大婶", "female"),
+    ("先生", "male"), ("大爷", "male"), ("老爷", "male"), ("少爷", "male"),
+)
+
+
+def unknown_label(npc: dict) -> str:
+    """玩家还不知道名字时，界面上怎么称呼这个 NPC。
+
+    优先级：模组明写的 ``unknown_as`` → 明写的 ``looks_human``/``gender``
+    → 从 ``description`` 上的外观线索推断 → 兜底「不明存在」。
+
+    判据只取 ``description``（玩家看得到的样子），不碰 ``background``/``secrets``
+    ——那些是「它究竟是什么」，而这里要答的是「玩家眼里它是什么」。香澄澪其实是
+    半幽灵，但玩家看到的就是个穿学生服的青年；反过来，田间潜随者的 secrets 里
+    用「她」称呼它，那不代表玩家该看到「陌生女性」。
+    """
+    explicit = str(npc.get("unknown_as") or "").strip()
+    if explicit:
+        return explicit
+
+    looks_human = npc.get("looks_human")
+    gender = str(npc.get("gender") or "").strip().lower()
+    if gender not in ("male", "female"):
+        gender = ""
+
+    desc = str(npc.get("description") or "")
+    if looks_human is None:
+        if any(h in desc for h in _INHUMAN_HINTS):
+            looks_human = False
+        else:
+            looks_human = any(h in desc for h in _HUMAN_HINTS)
+    if not looks_human:
+        return UNKNOWN_LABEL
+
+    if not gender:
+        name = str(npc.get("name") or "")
+        gender = (
+            next((g for word, g in _GENDER_PATTERNS if word in desc), "")
+            or next((g for word, g in _NAME_HONORIFICS if word in name), "")
+        )
+    return UNKNOWN_HUMAN[gender]
 
 #: 只有这两类事件算「玩家从中认识了这个名字」：KP 写的公开叙事与对白。
 #: 刻意不含 dice/system/action——机制事件的名字正是本模块要遮的东西，
@@ -68,7 +157,7 @@ class NameMasker:
             return name
         if base and base in prose:
             return base
-        return str(npc.get("unknown_as") or "").strip() or UNKNOWN_LABEL
+        return unknown_label(npc)
 
     def __call__(self, name: str | None, extra_prose: str = "") -> str:
         """取对外称呼。不是本模组 NPC 的名字（玩家角色、临场 NPC）原样返回。
