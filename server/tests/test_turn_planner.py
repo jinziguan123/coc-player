@@ -4,6 +4,7 @@
 """
 
 import json
+import logging
 
 import pytest
 from pydantic import BaseModel
@@ -520,6 +521,62 @@ async def test_run_turn_planner_tolerates_null_fields():
     assert plan.auto_outcome == "none"
     assert plan.requires_check is False
     assert plan.npc_policy.speakers == []
+
+
+@pytest.mark.asyncio
+async def test_bool_on_non_bool_field_falls_back_to_default():
+    """模型用 false 回答「要不要换场景」，而 scene_change 要的是场景 id。
+
+    线上第二次打爆规划器的就是这个：``"scene_change": false`` 撞 str | None。
+    false 不含可用内容（转成字符串只会得到没意义的 "False"），退默认才是它的本意。
+    """
+    plan = await turn_planner.run_turn_planner(
+        _RawLLM('{"turn_kind":"move","player_intent":"去书房",'
+                '"scene_policy":{"scene_change":false}}'), [],
+    )
+    assert plan is not None
+    assert plan.turn_kind == "move" and plan.player_intent == "去书房"
+    assert plan.scene_policy.scene_change is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_type_errors_drop_only_that_field(caplog):
+    """兜底：没有专门补丁的类型错，也只该丢那一个字段，不该丢整份计划。
+
+    LLM 能写错的类型是穷举不完的，逐个打补丁永远慢一步，而每次漏网的代价
+    都是**整份**裁定计划作废、KP 静悄悄回退旧流程。这里用四种没单独处理过的
+    错法（str→int、list→int、str→bool）验证兜底真的兜得住。
+    """
+    raw = (
+        '{"turn_kind":"social","player_intent":"盘问管家",'
+        '"check":{"skill":"话术","bonus":"很多","penalty":[1,2]},'
+        '"sanity":{"trigger":"也许"},"combat":{"should_start":"不确定"}}'
+    )
+    with caplog.at_level(logging.WARNING):
+        plan = await turn_planner.run_turn_planner(_RawLLM(raw), [])
+    assert plan is not None
+    # 核心裁定信号完好
+    assert plan.turn_kind == "social"
+    assert plan.player_intent == "盘问管家"
+    assert plan.check.skill == "话术"
+    # 坏字段各自退默认
+    assert plan.check.bonus == 0 and plan.check.penalty == 0
+    assert plan.sanity.trigger is False
+    assert plan.combat.should_start is False
+    # 丢了什么要在日志里点名，否则又是一次静悄悄的降级
+    for field in ("check.bonus", "check.penalty", "sanity.trigger", "combat.should_start"):
+        assert field in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_clean_plan_logs_nothing(caplog):
+    """字段都对时不该有任何告警——兜底不能把正常回合也说成有问题。"""
+    with caplog.at_level(logging.WARNING):
+        plan = await turn_planner.run_turn_planner(
+            _RawLLM('{"turn_kind":"combat","player_intent":"拔枪"}'), [],
+        )
+    assert plan is not None and plan.turn_kind == "combat"
+    assert "类型对不上" not in caplog.text
 
 
 @pytest.mark.asyncio

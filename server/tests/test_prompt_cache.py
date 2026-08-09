@@ -4,6 +4,7 @@
 """
 
 import json
+import logging
 
 import pytest
 
@@ -50,6 +51,36 @@ def test_超预算按_priority_从大到小整段丢():
     assert "先丢" not in joined
     assert "后丢" in joined and "必留" in joined
     assert total <= int(full * 0.7)
+
+
+def test_丢段日志说清超了多少与能否取回(caplog):
+    """只报个段名的话，读日志的人无从判断这是正常代谢还是预算该调了。
+
+    摘录类的段是按需可取回的（KP 手上留着 [MODULE_LOOKUP]/[RULE_LOOKUP]），
+    这也正是它们排在丢弃序列最前面的原因——日志得把这层说出来，
+    否则每回合一条「丢弃段落：module-excerpts」看着像在掉东西。
+    """
+    segs = [
+        _seg("必留" * 200, ctx.SYS_TIER_STATIC, 0, "keep"),
+        _seg("摘录" * 200, ctx.SYS_TIER_VOLATILE, 40, "module-excerpts"),
+    ]
+    full = sum(ctx._estimate_tokens(s.text) for s in segs)
+    with caplog.at_level(logging.WARNING):
+        ctx._assemble_system(segs, max_tokens=int(full * 0.7))
+    assert "module-excerpts" in caplog.text
+    assert str(full) in caplog.text                 # 超之前的总量
+    assert "MODULE_LOOKUP" in caplog.text           # 可按需取回
+
+    # 丢的不是摘录类时，不该给出「可取回」的暗示
+    caplog.clear()
+    segs = [
+        _seg("必留" * 200, ctx.SYS_TIER_STATIC, 0, "keep"),
+        _seg("台账" * 200, ctx.SYS_TIER_VOLATILE, 5, "clue-ledger"),
+    ]
+    with caplog.at_level(logging.WARNING):
+        ctx._assemble_system(segs, max_tokens=int(full * 0.7))
+    assert "clue-ledger" in caplog.text
+    assert "MODULE_LOOKUP" not in caplog.text
 
 
 def test_priority_0_的段永不丢弃():

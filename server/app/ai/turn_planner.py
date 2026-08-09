@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -69,33 +70,110 @@ def _coerce_scalar_text(v: Any) -> str:
     return str(v)
 
 
-def _accepts_none(annotation: Any) -> bool:
-    """这个字段的类型标注收不收 None。"""
-    return annotation is Any or type(None) in get_args(annotation)
+def _accepts(annotation: Any, tp: type) -> bool:
+    """这个字段的类型标注收不收 tp（含 ``X | None`` 这类联合）。"""
+    return annotation is Any or annotation is tp or tp in get_args(annotation)
+
+
+def _str_like(annotation: Any) -> bool:
+    """字段的目标类型是不是字符串（含 ``str | None``）。
+
+    Literal 枚举与 Annotated[list[str], …] 一律不算——它们的 get_args 里
+    要么是字面量值、要么是别的类型，不会全是 str/NoneType。"""
+    if annotation is str:
+        return True
+    args = get_args(annotation)
+    return bool(args) and all(a is str or a is type(None) for a in args)
 
 
 def _coerce_str_fields(model_cls: type[BaseModel], data: dict) -> dict:
     """把 data 归一成这个模型收得下的形状（通用容错，顶层与子模型共用）。
 
-    两条规则，都由模型自身的字段类型驱动，逐字段判定，不误伤：
+    三条规则，都由模型自身的字段类型驱动，逐字段判定，不误伤：
 
     1. **值是 null、但字段不收 None → 删掉这个键**，走字段默认值。
        这是 LLM 最常犯的 JSON 错误：它如实地用 null 表达「这项没有」，
        而 default 只在键**缺席**时生效，显式 null 一律撞类型。
        计划里每个字段都有默认值，删键等于「这项没有」，正是模型想表达的意思。
-    2. 目标类型是纯 str 的字段被写成 dict/list/数字 → 转成字符串保住内容
-       （典型：把一句话意图写成 {"actor": "…", "intent": "…"}）。
+    2. **值是 bool、但字段不是 bool → 删掉这个键**。同理：模型用 ``false`` 回答
+       「要不要换场景」，而 scene_change 要的是场景 id。false 不含可用内容，
+       转成字符串只会得到没有意义的 "False"，退默认才是它的本意。
+    3. 目标类型是字符串（含 ``str | None``）的字段被写成 dict/list/数字 → 转成
+       字符串保住内容（典型：把一句话意图写成 {"actor": "…", "intent": "…"}）。
 
-    这两类错误单独看都只是某个次要字段的形状问题，却会让**整份计划**校验失败、
+    这几类错误单独看都只是某个次要字段的形状问题，却会让**整份计划**校验失败、
     回退旧流程——日志里只留一行 WARNING，功能静悄悄地降级。"""
     for name, field in model_cls.model_fields.items():
         if name not in data:
             continue
-        if data[name] is None and not _accepts_none(field.annotation):
+        value = data[name]
+        if value is None:
+            # 收 None 的字段（scene_change: str | None）null 是合法值，原样留着，
+            # 别让下面的字符串归一把它抹成空串——「不换场景」和「换到空场景」不是一回事
+            if not _accepts(field.annotation, type(None)):
+                del data[name]
+            continue
+        if isinstance(value, bool) and not _accepts(field.annotation, bool):
             del data[name]
-        elif field.annotation is str and not isinstance(data[name], str):
-            data[name] = _coerce_scalar_text(data[name])
+        elif _str_like(field.annotation) and not isinstance(value, str):
+            data[name] = _coerce_scalar_text(value)
     return data
+
+
+def _drop_at(data: Any, loc: tuple) -> bool:
+    """按 pydantic 报错的字段路径删掉那一个值；路径走不通就返回 False。"""
+    node = data
+    for key in loc[:-1]:
+        if isinstance(node, dict) and key in node:
+            node = node[key]
+        elif isinstance(node, list) and isinstance(key, int) and 0 <= key < len(node):
+            node = node[key]
+        else:
+            return False
+    last = loc[-1]
+    if isinstance(node, dict) and last in node:
+        del node[last]
+        return True
+    if isinstance(node, list) and isinstance(last, int) and 0 <= last < len(node):
+        del node[last]
+        return True
+    return False
+
+
+#: 兜底最多丢几个字段。真到这个数说明模型输出整体不可信，不如老实回退旧流程。
+_MAX_FIELD_DROPS = 8
+
+
+def _validate_dropping_bad_fields(data: dict) -> TurnPlan:
+    """校验 TurnPlan；哪个字段类型对不上就丢哪个字段走默认，而不是丢掉整份计划。
+
+    上面那些按类型归一的规则是第一道，能保住内容（dict 拼成句子而不是丢掉）；
+    这里是最后一道兜底，不认识具体是什么错，只认 pydantic 指出的字段路径。
+
+    有它才算真的止血：LLM 能写错的类型是穷举不完的——ending.reached_id 写成 null、
+    scene_change 写成 false，每种都单独打过一次补丁，而每次漏网的代价都是**整份**
+    裁定计划作废、KP 静悄悄回退旧流程。次要字段的类型错误不该有这种杀伤力。
+    """
+    attempt = copy.deepcopy(data)
+    dropped: list[str] = []
+    for _ in range(_MAX_FIELD_DROPS):
+        try:
+            plan = TurnPlan.model_validate(attempt)
+        except ValidationError as exc:
+            # loc 为空 = 整体性错误（model_validator 抛的），没有可丢的字段，交给上层回退
+            locs = [e["loc"] for e in exc.errors() if e.get("loc")]
+            removed = [loc for loc in locs if _drop_at(attempt, loc)]
+            if not removed:
+                raise
+            dropped.extend(".".join(str(p) for p in loc) for loc in removed)
+            continue
+        if dropped:
+            logger.warning(
+                "KP 回合规划器有字段类型对不上，已按默认值处理（计划其余部分照常生效）：%s",
+                "、".join(dropped),
+            )
+        return plan
+    return TurnPlan.model_validate(attempt)
 
 
 class CheckPlan(BaseModel):
@@ -762,7 +840,7 @@ async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
             )
         return None
     try:
-        return TurnPlan.model_validate(data)
+        return _validate_dropping_bad_fields(data)
     except (ValidationError, TypeError, ValueError) as exc:
         logger.warning("KP 回合规划器 JSON 不符合 schema，已回退旧流程：%s", exc)
         return None

@@ -205,13 +205,27 @@ def _assemble_system(segs: list[_Seg], max_tokens: int) -> tuple[list[str], int]
     kept = list(segs)
     total = sum(_estimate_tokens(s.text) for s in kept)
     if total > max_tokens:
+        before = total
         # 同 priority 内保持原始顺序（sorted 稳定），使丢弃行为可预测、可测试。
+        dropped: list[str] = []
         for seg in sorted((s for s in kept if s.priority > 0), key=lambda s: -s.priority):
             if total <= max_tokens:
                 break
             kept.remove(seg)
             total -= _estimate_tokens(seg.text)
-            logger.warning("系统提示超预算，丢弃段落：%s", seg.label)
+            dropped.append(seg.label)
+        # 一行说清「超了多少、丢了什么、还能不能捞回来」——只报个段名的话，
+        # 读日志的人无从判断这是正常代谢还是预算该调了。
+        # 摘录类的段是**按需可取回**的：KP 手上留着 [MODULE_LOOKUP]/[RULE_LOOKUP]，
+        # 真需要原文会自己去拿；这也正是它们排在丢弃序列最前面的原因。
+        if dropped:
+            recoverable = all(label.endswith("-excerpts") for label in dropped)
+            logger.warning(
+                "系统提示超预算 %s/%s，丢弃 %s token：%s%s",
+                before, max_tokens, before - total, "、".join(dropped),
+                "（摘录类，KP 需要时可用 [MODULE_LOOKUP]/[RULE_LOOKUP] 按需取回）"
+                if recoverable else "",
+            )
         if total > max_tokens:
             logger.warning("系统提示仍超预算（%s > %s），保留全部必留段", total, max_tokens)
     blocks = ["".join(s.text for s in kept if s.tier == t) for t in _SYS_TIERS]
