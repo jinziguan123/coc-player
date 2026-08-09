@@ -109,6 +109,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/characters/{character_id}/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Character Avatar
+         * @description 手动上传角色头像。
+         *
+         *     与 AI 生成走同一条落盘与回写路径，因此两者产出的头像在系统里毫无区别——没配生图模型
+         *     的人照样能有头像，对生成结果不满意的人也不必反复重掷。
+         */
+        post: operations["upload_character_avatar_api_characters__character_id__avatar_post"];
+        /**
+         * Clear Character Avatar
+         * @description 摘掉头像，回到姓名首字纹章（那是正常样式，不是缺陷态）。
+         */
+        delete: operations["clear_character_avatar_api_characters__character_id__avatar_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/characters/{character_id}/avatar/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Character Avatar
+         * @description 按需 AI 生成角色头像（手动触发，不在建卡流程里自动跑）。
+         */
+        post: operations["generate_character_avatar_api_characters__character_id__avatar_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -543,6 +590,29 @@ export interface paths {
         post?: never;
         /** Delete Rulebook */
         delete: operations["delete_rulebook_api_rulebooks__rulebook_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rules/{rule_system}/apply-age": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Age
+         * @description 按年龄修正属性并掷幸运（CoC 7e 建卡第 3 步）。
+         *
+         *     EDU 增强检定由服务端自动掷，掷点写进 notes——面团习惯是玩家自己掷，
+         *     但这里是单机流程，把骰点亮出来比来回问一次更顺，也照样看得见运气好坏。
+         */
+        post: operations["apply_age_api_rules__rule_system__apply_age_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2403,8 +2473,50 @@ export interface components {
             /** Acting Character Id */
             acting_character_id?: string | null;
         };
+        /**
+         * AgeNote
+         * @description 一条年龄修正明细，供界面把「属性为什么变了」摊开给玩家看。
+         */
+        AgeNote: {
+            /** Delta */
+            delta: number;
+            /** Detail */
+            detail: string;
+            /** Label */
+            label: string;
+        };
+        /** ApplyAgeRequest */
+        ApplyAgeRequest: {
+            /**
+             * Age
+             * @default 25
+             */
+            age: number;
+            /** Base Attributes */
+            base_attributes: {
+                [key: string]: number;
+            };
+        };
+        /** ApplyAgeResponse */
+        ApplyAgeResponse: {
+            /** Base Attributes */
+            base_attributes: {
+                [key: string]: number;
+            };
+            /** Luck */
+            luck: number;
+            /** Luck Rolls */
+            luck_rolls: number[];
+            /** Notes */
+            notes: components["schemas"]["AgeNote"][];
+        };
         /** Body_import_from_excel_api_characters_import_excel_post */
         Body_import_from_excel_api_characters_import_excel_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_upload_character_avatar_api_characters__character_id__avatar_post */
+        Body_upload_character_avatar_api_characters__character_id__avatar_post: {
             /** File */
             file: string;
         };
@@ -2480,6 +2592,8 @@ export interface components {
         };
         /** CharacterRead */
         CharacterRead: {
+            /** Avatar Url */
+            avatar_url?: string | null;
             /** Backstory */
             backstory: string;
             /** Base Attributes */
@@ -2491,6 +2605,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Experiences
+             * @default []
+             */
+            experiences: unknown[];
             /** Id */
             id: string;
             /** Is Player */
@@ -2521,6 +2640,8 @@ export interface components {
         };
         /** CharacterUpdate */
         CharacterUpdate: {
+            /** Avatar Url */
+            avatar_url?: string | null;
             /** Backstory */
             backstory?: string | null;
             /** Base Attributes */
@@ -2960,6 +3081,11 @@ export interface components {
             /** Description */
             description: string;
             /**
+             * Endings
+             * @default []
+             */
+            endings: unknown[];
+            /**
              * Handouts
              * @default []
              */
@@ -3029,6 +3155,8 @@ export interface components {
              * @default
              */
             description: string;
+            /** Endings */
+            endings?: unknown[] | null;
             /**
              * Handouts
              * @default []
@@ -3699,6 +3827,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_character_avatar_api_characters__character_id__avatar_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_character_avatar_api_characters__character_id__avatar_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_character_avatar_api_characters__character_id__avatar_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_character_avatar_api_characters__character_id__avatar_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterRead"];
                 };
             };
             /** @description Validation Error */
@@ -4408,6 +4633,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_age_api_rules__rule_system__apply_age_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyAgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplyAgeResponse"];
                 };
             };
             /** @description Validation Error */

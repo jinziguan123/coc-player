@@ -45,6 +45,148 @@ def roll_attributes() -> dict[str, int]:
     return attrs
 
 
+# ── 年龄修正（CoC 7e 建卡第 3 步）────────────────────────────────────────
+#
+# 这是 7 版建卡里最有味道的一步：年龄不是标签，是取舍——老角色学识深厚但体能衰退。
+# 缺了它，70 岁的教授和 25 岁的运动员除了移动力毫无差别，年龄字段等于装饰。
+#
+# 每档给 (EDU 增强检定次数, 体能减值总额, APP 减值)。体能减值按规则由玩家在
+# STR/CON/DEX 间自行分配，这里按「尽量平均、余数从 STR 起依次多扣」自动摊派，
+# 保证总额与规则一致；玩家想换分配方式可在角色卡编辑页改。
+_AGE_BANDS: tuple[tuple[int, int, int, int], ...] = (
+    # (年龄上限, EDU 增强次数, STR/CON/DEX 合计减值, APP 减值)
+    (19, 0, 0, 0),      # 15-19 另有 EDU-5、STR/SIZ-5、幸运两次取高，见下
+    (39, 1, 0, 0),
+    (49, 2, 5, 5),
+    (59, 3, 10, 10),
+    (69, 4, 20, 15),
+    (79, 4, 40, 20),
+    (89, 4, 80, 25),
+)
+_PHYSICAL_KEYS = ("STR", "CON", "DEX")
+#: 属性下限：减值再狠也不该把人扣成负数或 0（0 在 CoC 里意味着已经不是活人了）。
+_ATTR_FLOOR = 1
+EDU_MAX = 99
+
+
+def _band(age: int) -> tuple[int, int, int]:
+    for ceiling, edu_rolls, physical, app_penalty in _AGE_BANDS:
+        if age <= ceiling:
+            return edu_rolls, physical, app_penalty
+    return _AGE_BANDS[-1][1:]          # 90+ 沿用 80-89 档
+
+
+def _spread(total: int, keys: tuple[str, ...]) -> dict[str, int]:
+    """把减值总额摊到几个属性上：尽量平均，余数从头依次多扣一点。"""
+    if total <= 0:
+        return {}
+    base, rest = divmod(total, len(keys))
+    return {k: base + (1 if i < rest else 0) for i, k in enumerate(keys)}
+
+
+def apply_age_modifiers(
+    attrs: dict[str, int], age: int, *, roller=None,
+) -> tuple[dict[str, int], list[dict]]:
+    """按年龄修正属性，返回 (新属性, 明细)。
+
+    明细每条形如 ``{"label", "detail", "delta"}``，供界面把「为什么变了」摊开给玩家看——
+    建卡时属性被悄悄改掉是最容易让人觉得系统在乱来的地方。
+
+    ``roller`` 仅供测试注入（签名同 ``roll``）。
+    """
+    r = roller or roll
+    out = dict(attrs)
+    notes: list[dict] = []
+    edu_rolls, physical, app_penalty = _band(age)
+
+    def _dec(key: str, amount: int) -> int:
+        """扣减并返回**实际**扣掉的量（受下限约束）。"""
+        if amount <= 0:
+            return 0
+        before = out.get(key, 0)
+        out[key] = max(_ATTR_FLOOR, before - amount)
+        return before - out[key]
+
+    if age <= 19:
+        # 少年：教育尚浅、身体没长开，但运气特别好
+        actual = _dec("EDU", 5)
+        if actual:
+            notes.append({"label": "未成年", "detail": "教育 −5", "delta": -actual})
+        # STR 与 SIZ 合计 −5，同样按摊派处理
+        for key, amount in _spread(5, ("STR", "SIZ")).items():
+            got = _dec(key, amount)
+            if got:
+                notes.append({"label": "未成年", "detail": f"{key} −{got}", "delta": -got})
+    else:
+        for key, amount in _spread(physical, _PHYSICAL_KEYS).items():
+            got = _dec(key, amount)
+            if got:
+                notes.append({"label": "年龄衰退", "detail": f"{key} −{got}", "delta": -got})
+        got = _dec("APP", app_penalty)
+        if got:
+            notes.append({"label": "年龄衰退", "detail": f"APP −{got}", "delta": -got})
+
+    # 教育增强检定：每次 D100 > 当前 EDU 则 EDU + 1D10，封顶 99。
+    # 掷点写进明细——玩家看得见自己是怎么涨上去的，比凭空多几点可信得多。
+    for i in range(edu_rolls):
+        check = r("1d100").total
+        cur = out.get("EDU", 0)
+        if check > cur:
+            gain = r("1d10").total
+            after = min(EDU_MAX, cur + gain)
+            real = after - cur
+            out["EDU"] = after
+            notes.append({
+                "label": f"教育增强 {i + 1}",
+                "detail": f"D100={check} > 教育{cur}，+{gain}" + ("（封顶 99）" if real < gain else ""),
+                "delta": real,
+            })
+        else:
+            notes.append({
+                "label": f"教育增强 {i + 1}",
+                "detail": f"D100={check} ≤ 教育{cur}，未提升",
+                "delta": 0,
+            })
+    return out, notes
+
+
+def roll_luck(age: int = 25, *, roller=None) -> tuple[int, list[int]]:
+    """掷幸运（3D6×5）。15-19 岁掷两次取高——这是给少年角色的补偿。
+
+    返回 (幸运值, 各次掷出的原始值)，第二个值供界面说明「两次取高」。
+    """
+    r = roller or roll
+    rolls = [r("3d6").total * 5]
+    if age <= 19:
+        rolls.append(r("3d6").total * 5)
+    return max(rolls), rolls
+
+
+#: 伤害加值 / 体格表（按 STR+SIZ）。7 版在 164 以上每 80 点进一档，
+#: 早先的实现最后一档是 else，165 往上全归 1D6——玩家角色很难超 204，但 NPC 与
+#: 怪物会，而战斗引擎用的是同一套派生。
+_DAMAGE_BONUS_TABLE: tuple[tuple[int, str, int], ...] = (
+    (64, "-2", -2),
+    (84, "-1", -1),
+    (124, "0", 0),
+    (164, "1d4", 1),
+    (204, "1d6", 2),
+    (284, "2d6", 3),
+    (364, "3d6", 4),
+    (444, "4d6", 5),
+)
+
+
+def damage_bonus(combined: int) -> tuple[str, int]:
+    """按 STR+SIZ 取 (伤害加值骰式, 体格)。超出表尾时每 80 点续进一档。"""
+    for ceiling, db, build in _DAMAGE_BONUS_TABLE:
+        if combined <= ceiling:
+            return db, build
+    # 444 以上：每满 80 点多一个 D6（体格同步 +1），巨型怪物用得上
+    extra = (combined - 445) // 80 + 1
+    return f"{4 + extra}d6", 5 + extra
+
+
 def compute_derived(attrs: dict[str, int], age: int = 25) -> dict:
     """计算派生属性"""
     str_val = attrs.get("STR", 50)
@@ -56,15 +198,20 @@ def compute_derived(attrs: dict[str, int], age: int = 25) -> dict:
     hp = (con_val + siz_val) // 10
     mp = pow_val // 5
     san = pow_val
-    luck = roll("3d6").total * 5
+    # 走 roll_luck 而非裸 3d6：未成年「两次取高」是年龄规则的一部分，
+    # 不能只在新建卡流程里生效、老路径悄悄漏掉。
+    luck, _ = roll_luck(age)
 
-    # 移动力
-    if dex_val < siz_val and str_val < siz_val:
-        mov = 7
-    elif dex_val >= siz_val or str_val >= siz_val:
-        mov = 8
-    else:
+    # 移动力：7 版三档。
+    # 注意第二、三档的判据不同——「任一 ≥ SIZ」是 8，「两者都 > SIZ」才是 9。
+    # 早先第二档写成 `dex >= siz or str >= siz`，把第三档的情况全吞了，MOV 永远算不出 9
+    # （穷举 64 组属性验证过一次都没出现）。
+    if str_val > siz_val and dex_val > siz_val:
         mov = 9
+    elif str_val < siz_val and dex_val < siz_val:
+        mov = 7
+    else:
+        mov = 8
 
     if age >= 80:
         mov -= 5
@@ -77,18 +224,7 @@ def compute_derived(attrs: dict[str, int], age: int = 25) -> dict:
     elif age >= 40:
         mov -= 1
 
-    # 伤害加值和体格
-    combined = str_val + siz_val
-    if combined <= 64:
-        db, build = "-2", -2
-    elif combined <= 84:
-        db, build = "-1", -1
-    elif combined <= 124:
-        db, build = "0", 0
-    elif combined <= 164:
-        db, build = "1d4", 1
-    else:
-        db, build = "1d6", 2
+    db, build = damage_bonus(str_val + siz_val)
 
     return {
         "hitPoints": {"current": hp, "max": hp},

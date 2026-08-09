@@ -59,3 +59,24 @@ class CharacterUpdate(BaseModel):
 
 class RollAttributesResponse(BaseModel):
     sets: list[dict[str, int]]
+
+
+class ApplyAgeRequest(BaseModel):
+    base_attributes: dict[str, int]
+    age: int = 25
+
+
+class AgeNote(BaseModel):
+    """一条年龄修正明细，供界面把「属性为什么变了」摊开给玩家看。"""
+
+    label: str
+    detail: str
+    delta: int
+
+
+class ApplyAgeResponse(BaseModel):
+    base_attributes: dict[str, int]
+    notes: list[AgeNote]
+    #: 幸运一并在这里掷——15-19 岁「两次取高」也是年龄规则的一部分
+    luck: int
+    luck_rolls: list[int]

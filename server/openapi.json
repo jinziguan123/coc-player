@@ -383,6 +383,88 @@
         "title": "AdvanceRequest",
         "type": "object"
       },
+      "AgeNote": {
+        "description": "一条年龄修正明细，供界面把「属性为什么变了」摊开给玩家看。",
+        "properties": {
+          "delta": {
+            "title": "Delta",
+            "type": "integer"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "detail",
+          "delta"
+        ],
+        "title": "AgeNote",
+        "type": "object"
+      },
+      "ApplyAgeRequest": {
+        "properties": {
+          "age": {
+            "default": 25,
+            "title": "Age",
+            "type": "integer"
+          },
+          "base_attributes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Base Attributes",
+            "type": "object"
+          }
+        },
+        "required": [
+          "base_attributes"
+        ],
+        "title": "ApplyAgeRequest",
+        "type": "object"
+      },
+      "ApplyAgeResponse": {
+        "properties": {
+          "base_attributes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Base Attributes",
+            "type": "object"
+          },
+          "luck": {
+            "title": "Luck",
+            "type": "integer"
+          },
+          "luck_rolls": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Luck Rolls",
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/AgeNote"
+            },
+            "title": "Notes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_attributes",
+          "notes",
+          "luck",
+          "luck_rolls"
+        ],
+        "title": "ApplyAgeResponse",
+        "type": "object"
+      },
       "Body_import_from_excel_api_characters_import_excel_post": {
         "properties": {
           "file": {
@@ -395,6 +477,20 @@
           "file"
         ],
         "title": "Body_import_from_excel_api_characters_import_excel_post",
+        "type": "object"
+      },
+      "Body_upload_character_avatar_api_characters__character_id__avatar_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_character_avatar_api_characters__character_id__avatar_post",
         "type": "object"
       },
       "Body_upload_module_api_modules_upload_post": {
@@ -553,6 +649,17 @@
       },
       "CharacterRead": {
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "backstory": {
             "title": "Backstory",
             "type": "string"
@@ -566,6 +673,12 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "experiences": {
+            "default": [],
+            "items": {},
+            "title": "Experiences",
+            "type": "array"
           },
           "id": {
             "title": "Id",
@@ -644,6 +757,17 @@
       },
       "CharacterUpdate": {
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "backstory": {
             "anyOf": [
               {
@@ -1605,6 +1729,12 @@
             "title": "Description",
             "type": "string"
           },
+          "endings": {
+            "default": [],
+            "items": {},
+            "title": "Endings",
+            "type": "array"
+          },
           "handouts": {
             "default": [],
             "items": {},
@@ -1733,6 +1863,18 @@
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "endings": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endings"
           },
           "handouts": {
             "default": [],
@@ -3067,6 +3209,143 @@
         ]
       }
     },
+    "/api/characters/{character_id}/avatar": {
+      "delete": {
+        "description": "摘掉头像，回到姓名首字纹章（那是正常样式，不是缺陷态）。",
+        "operationId": "clear_character_avatar_api_characters__character_id__avatar_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharacterRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Character Avatar",
+        "tags": [
+          "characters"
+        ]
+      },
+      "post": {
+        "description": "手动上传角色头像。\n\n与 AI 生成走同一条落盘与回写路径，因此两者产出的头像在系统里毫无区别——没配生图模型\n的人照样能有头像，对生成结果不满意的人也不必反复重掷。",
+        "operationId": "upload_character_avatar_api_characters__character_id__avatar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_character_avatar_api_characters__character_id__avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharacterRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Character Avatar",
+        "tags": [
+          "characters"
+        ]
+      }
+    },
+    "/api/characters/{character_id}/avatar/generate": {
+      "post": {
+        "description": "按需 AI 生成角色头像（手动触发，不在建卡流程里自动跑）。",
+        "operationId": "generate_character_avatar_api_characters__character_id__avatar_generate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CharacterRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Character Avatar",
+        "tags": [
+          "characters"
+        ]
+      }
+    },
     "/api/health": {
       "get": {
         "description": "健康检查兼版本握手。\n\n``protocol_version`` 是房间事件协议的版本（见 ``app.services.room_events``）。\n客人连接房主前先比对：不一致说明两端版本不匹配，应当明确提示升级，而不是连上去\n以「有些事件收不到、界面莫名其妙不更新」的方式半坏。",
@@ -4043,6 +4322,59 @@
         "summary": "Delete Rulebook",
         "tags": [
           "rulebooks"
+        ]
+      }
+    },
+    "/api/rules/{rule_system}/apply-age": {
+      "post": {
+        "description": "按年龄修正属性并掷幸运（CoC 7e 建卡第 3 步）。\n\nEDU 增强检定由服务端自动掷，掷点写进 notes——面团习惯是玩家自己掷，\n但这里是单机流程，把骰点亮出来比来回问一次更顺，也照样看得见运气好坏。",
+        "operationId": "apply_age_api_rules__rule_system__apply_age_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyAgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyAgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Age",
+        "tags": [
+          "characters"
         ]
       }
     },

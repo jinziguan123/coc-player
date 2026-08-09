@@ -9,11 +9,14 @@ from app.api.deps import require_local_client
 from app.database import get_db
 from app.models.module import Module
 from app.schemas.character import (
+    ApplyAgeRequest,
+    ApplyAgeResponse,
     CharacterCreate,
     CharacterRead,
     CharacterUpdate,
     RollAttributesResponse,
 )
+from app.rules.coc.character import apply_age_modifiers, roll_luck
 from app.rules.coc.equipment import get_available_equipment
 from app.rules.coc.occupations import (
     COC_OCCUPATIONS,
@@ -206,6 +209,22 @@ def roll_attributes(rule_system: str = "coc", count: int = 3):
         return RollAttributesResponse(sets=sets)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.post("/rules/{rule_system}/apply-age", response_model=ApplyAgeResponse)
+def apply_age(data: ApplyAgeRequest, rule_system: str = "coc"):
+    """按年龄修正属性并掷幸运（CoC 7e 建卡第 3 步）。
+
+    EDU 增强检定由服务端自动掷，掷点写进 notes——面团习惯是玩家自己掷，
+    但这里是单机流程，把骰点亮出来比来回问一次更顺，也照样看得见运气好坏。
+    """
+    if rule_system != "coc":
+        raise HTTPException(400, f"暂不支持规则系统：{rule_system}")
+    attrs, notes = apply_age_modifiers(data.base_attributes, data.age)
+    luck, luck_rolls = roll_luck(data.age)
+    return ApplyAgeResponse(
+        base_attributes=attrs, notes=notes, luck=luck, luck_rolls=luck_rolls,
+    )
 
 
 @router.post("/characters", response_model=CharacterRead)

@@ -8,7 +8,7 @@ import { CharacterPanel } from '../components/character/CharacterPanel'
 import { CharacterEditModal } from '../components/character/CharacterEditModal'
 import { SpecializationDialog } from '../components/character/SpecializationDialog'
 import { WeaponsEditor } from '../components/character/WeaponsEditor'
-import { useSpecializations, normalizeWeapon, type CharWeapon } from '../components/character/useCocData'
+import { useSpecializations, normalizeWeapon, deriveAssets, type CharWeapon } from '../components/character/useCocData'
 import {
   AssetsPanel, MythosEditor, RelationsEditor, ModuleHistoryEditor,
   type AssetsInfo, type Mythos, type Relation, type ModuleExperience,
@@ -28,6 +28,13 @@ import {
   type Character,
 } from '@/features/characters/api'
 import { buildCharacterPayload } from '@/features/characters/characterPayload'
+import {
+  SKILL_MAX,
+  creditRatingCeiling,
+  grantableDelta,
+  remainingOccPoints,
+} from '@/features/characters/skillBudget'
+import { deriveStats } from '@/features/characters/cocDerived'
 
 interface AttrSet {
   sets: Array<Record<string, number>>
@@ -112,6 +119,20 @@ interface EvalResult {
   suggestions: string[]
 }
 
+/** 一条年龄修正明细（与后端 schemas.character.AgeNote 对齐） */
+interface AgeNote {
+  label: string
+  detail: string
+  delta: number
+}
+
+interface ApplyAgeResponse {
+  base_attributes: Record<string, number>
+  notes: AgeNote[]
+  luck: number
+  luck_rolls: number[]
+}
+
 export function CharacterPage() {
   const navigate = useNavigate()
   const { modules, fetchModules } = useModuleStore()
@@ -171,6 +192,13 @@ export function CharacterPage() {
   const [customAttrs, setCustomAttrs] = useState<Record<string, number>>(initAttrs)
   const [attrSets, setAttrSets] = useState<Record<string, number>[] | null>(null)
   const [selectedAttrs, setSelectedAttrs] = useState<Record<string, number> | null>(null)
+  /** 年龄修正结算结果。key 是「这组原始属性 + 这个年龄」的指纹：
+   *  换了年龄或重掷属性，旧结果自然失效；来回翻页则不会重掷，
+   *  否则玩家能靠反复进出把 EDU 刷高。 */
+  const [ageMods, setAgeMods] = useState<
+    { key: string; attrs: Record<string, number>; notes: AgeNote[]; luckRolls: number[] } | null
+  >(null)
+  const [settlingAge, setSettlingAge] = useState(false)
 
   // Step 3: 职业
   const [occupations, setOccupations] = useState<OccupationDef[]>([])
@@ -200,6 +228,8 @@ export function CharacterPage() {
   const [weapons, setWeapons] = useState<CharWeapon[]>([])
   // 资产 / 克苏鲁神话 / 人际关系 / 模组经历
   const [assetsInfo, setAssetsInfo] = useState<AssetsInfo>({ cash: 0, spendingLevel: 0, assets: '' })
+  /** 玩家是否手动动过财产。动过之后信用评级再变也不覆盖他填的数。 */
+  const [assetsTouched, setAssetsTouched] = useState(false)
   const [mythos, setMythos] = useState<Mythos>({ spells: [], tomes: [], encounters: [] })
   const [relations, setRelations] = useState<Relation[]>([])
   const [moduleHistory, setModuleHistory] = useState<ModuleExperience[]>([])
@@ -248,35 +278,38 @@ export function CharacterPage() {
     setCustomAttrs({ ...customAttrs, [key]: clamped })
   }
 
-  const effectiveAttrs = useDice ? selectedAttrs : customAttrs
+  /** 掷出/买出的原始属性，年龄修正之前。 */
+  const rawAttrs = useDice ? selectedAttrs : customAttrs
+  const ageKey = rawAttrs ? `${age}|${ATTR_KEYS.map((k) => rawAttrs[k]).join(',')}` : ''
+  const ageSettled = !!ageMods && ageMods.key === ageKey
+  /** 后续步骤（职业点、技能、派生值）一律用修正后的属性——EDU 变了本职点就变了。 */
+  const effectiveAttrs = ageSettled ? ageMods.attrs : rawAttrs
 
-  // ---- 派生属性计算 ----
-  const derivedStats = (() => {
-    if (!effectiveAttrs) return null
-    const str = effectiveAttrs.STR ?? 50
-    const con = effectiveAttrs.CON ?? 50
-    const siz = effectiveAttrs.SIZ ?? 50
-    const dex = effectiveAttrs.DEX ?? 50
-    const pow = effectiveAttrs.POW ?? 50
-    const hp = Math.floor((con + siz) / 10)
-    const mp = Math.floor(pow / 5)
-    const san = pow
-    let mov = (dex < siz && str < siz) ? 7 : (dex >= siz || str >= siz) ? 8 : 9
-    if (age >= 80) mov -= 5
-    else if (age >= 70) mov -= 4
-    else if (age >= 60) mov -= 3
-    else if (age >= 50) mov -= 2
-    else if (age >= 40) mov -= 1
-    const combined = str + siz
-    let db: string, build: number
-    if (combined <= 64) { db = '-2'; build = -2 }
-    else if (combined <= 84) { db = '-1'; build = -1 }
-    else if (combined <= 124) { db = '0'; build = 0 }
-    else if (combined <= 164) { db = '1D4'; build = 1 }
-    else { db = '1D6'; build = 2 }
-    const dodge = Math.floor(dex / 2)
-    return { hp, mp, san, mov, db, build, dodge }
-  })()
+  /** 结算年龄修正：体能/外貌衰退、教育增强检定、幸运（未成年两次取高）。 */
+  const settleAge = async () => {
+    if (!rawAttrs) return
+    setSettlingAge(true)
+    try {
+      const res = await api.post<ApplyAgeResponse>('/rules/coc/apply-age?rule_system=coc', {
+        base_attributes: rawAttrs,
+        age,
+      })
+      setAgeMods({
+        key: ageKey,
+        attrs: res.base_attributes,
+        notes: res.notes,
+        luckRolls: res.luck_rolls,
+      })
+      setLuck(res.luck)
+    } catch {
+      toast.error('年龄修正结算失败，请重试')
+    } finally {
+      setSettlingAge(false)
+    }
+  }
+
+  // ---- 派生属性计算（规则在 features/characters/cocDerived，与后端逐条对齐）----
+  const derivedStats = effectiveAttrs ? deriveStats(effectiveAttrs, age) : null
 
   // ---- 掷骰 ----
   const rollLuck = () => {
@@ -293,18 +326,30 @@ export function CharacterPage() {
   }
 
   // ---- 职业 ----
-  const selectOccupation = async (occ: OccupationDef) => {
+  const selectOccupation = (occ: OccupationDef) => {
     setSelectedOcc(occ)
     setCreditRating(occ.credit_min)
-    if (effectiveAttrs) {
-      const data = await api.post<{ occupation_points: number; interest_points: number }>(
-        '/rules/coc/calc-skill-points',
-        { occupation: occ.name, base_attributes: effectiveAttrs },
-      )
-      setOccPoints(data.occupation_points)
-      setIntPoints(data.interest_points)
-    }
   }
+
+  // 本职/兴趣点是属性的函数（EDU×4、INT×2 等），不能只在选中职业那一刻算一次：
+  // 回头改了年龄或重掷属性，EDU 一动点数就该跟着变，否则玩家拿着按旧 EDU 算出的
+  // 点数去加技能。导入卡里那种「自定义」职业的点数是从表里加出来的，不走这条。
+  useEffect(() => {
+    if (!selectedOcc || !effectiveAttrs) return
+    if (selectedOcc.skill_formula === '自定义') return
+    let cancelled = false
+    api.post<{ occupation_points: number; interest_points: number }>(
+      '/rules/coc/calc-skill-points',
+      { occupation: selectedOcc.name, base_attributes: effectiveAttrs },
+    )
+      .then((data) => {
+        if (cancelled) return
+        setOccPoints(data.occupation_points)
+        setIntPoints(data.interest_points)
+      })
+      .catch(() => { /* 点数保持原值，界面上仍能看出对不上 */ })
+    return () => { cancelled = true }
+  }, [selectedOcc, effectiveAttrs])
 
   const filteredOccs = occupations.filter((o) => {
     if (occCat && (o.category || '其他') !== occCat) return false
@@ -335,8 +380,25 @@ export function CharacterPage() {
     .filter(([k]) => !occHas(k))
     .reduce((s, [, v]) => s + v, 0)
 
-  const remainingOcc = occPoints - allocatedOccTotal
+  // 信用评级是本职技能，占本职点（见 skillBudget）
+  const remainingOcc = remainingOccPoints(occPoints, allocatedOccTotal, creditRating)
   const remainingInt = intPoints - allocatedIntTotal
+  const creditMax = selectedOcc
+    ? creditRatingCeiling({
+        creditMin: selectedOcc.credit_min,
+        creditMax: selectedOcc.credit_max,
+        occPoints,
+        allocated: allocatedOccTotal,
+      })
+    : 0
+
+  // 草稿/导入卡带进来的信用评级可能超出这个职业能付的额度，收进合法区间。
+  // 正常建卡流程走不到这儿——滑杆上限已经卡住了。
+  useEffect(() => {
+    if (!selectedOcc) return
+    if (creditRating > creditMax) setCreditRating(creditMax)
+    else if (creditRating < selectedOcc.credit_min) setCreditRating(selectedOcc.credit_min)
+  }, [selectedOcc, creditMax, creditRating])
 
   // 技能当前值：基础(默认或专精起始) + 已加点；导入模式直接用加点值
   const skillValueOf = (skillName: string): number => {
@@ -355,16 +417,22 @@ export function CharacterPage() {
     toast.success(`已添加 ${key}`)
   }
 
+  /** 这一下点得动多少（0 表示按钮该灰掉）。导入的老卡不受建卡约束，随便改。 */
+  const skillDelta = (skillName: string, delta: number): number => {
+    const alloc = skillAlloc[skillName] || 0
+    if (isImported) return delta < 0 ? -Math.min(-delta, alloc) : delta
+    return grantableDelta({
+      current: skillValueOf(skillName),
+      alloc,
+      delta,
+      remaining: occHas(skillName) ? remainingOcc : remainingInt,
+    })
+  }
+
   const updateSkill = (skillName: string, delta: number) => {
-    if (!isImported) {
-      const isOccSkill = occHas(skillName)
-      const remaining = isOccSkill ? remainingOcc : remainingInt
-      if (delta > 0 && remaining <= 0) return
-      if (delta > 0 && delta > remaining) return
-    }
-    const current = skillAlloc[skillName] || 0
-    const newVal = Math.max(0, current + delta)
-    setSkillAlloc({ ...skillAlloc, [skillName]: newVal })
+    const granted = skillDelta(skillName, delta)
+    if (granted === 0) return
+    setSkillAlloc({ ...skillAlloc, [skillName]: (skillAlloc[skillName] || 0) + granted })
   }
 
   // ---- 构建背景文本 ----
@@ -522,6 +590,8 @@ export function CharacterPage() {
     setInvestigatorHistory('')
     setOccSearch('')
     setEvalResult(null)
+    setAgeMods(null)
+    setAssetsTouched(false)
     setIsImported(false)
     setAiHint('')
   }
@@ -530,6 +600,18 @@ export function CharacterPage() {
   const [isImported, setIsImported] = useState(false)
   const [aiHint, setAiHint] = useState('')
   const [aiGenerating, setAiGenerating] = useState(false)
+
+  // 现金/消费水平/资产是信用评级的函数（7 版有换算表）。玩家没手动填过就跟着信用走：
+  // 信用评级已经花了本职点，建出来的卡却一分钱没有说不过去。填过就不再覆盖。
+  useEffect(() => {
+    if (isImported || assetsTouched || creditRating <= 0) return
+    const d = deriveAssets(creditRating)
+    setAssetsInfo({
+      cash: d.cash,
+      spendingLevel: d.spendingLevel,
+      assets: `约 $${d.assets.toLocaleString()}`,
+    })
+  }, [creditRating, isImported, assetsTouched])
 
   // 把导入/AI 生成的数据填入创建表单（Excel 导入与 AI 建卡共用）
   const applyImportedData = (data: ImportedCharacterData) => {
@@ -663,12 +745,12 @@ export function CharacterPage() {
     savedAt: new Date().toISOString(),
     step,
     name, moduleId, age, gender, residence, birthplace,
-    useDice, customAttrs, attrSets, selectedAttrs,
+    useDice, customAttrs, attrSets, selectedAttrs, ageMods,
     luck, creditRating,
     selectedOccId: selectedOcc?.name ?? null,
     occPoints, intPoints, occSearch, occCat,
     skillAlloc, extraSkills, specBaseVals,
-    equipText, weapons, assetsInfo, mythos, relations, moduleHistory,
+    equipText, weapons, assetsInfo, assetsTouched, mythos, relations, moduleHistory,
     personalDesc, ideologyBeliefs, significantPeople, meaningfulLocations,
     treasuredPossessions, traits, scarsAndWounds, phobiasAndManias, investigatorHistory,
     isImported, aiHint,
@@ -709,6 +791,7 @@ export function CharacterPage() {
     setCustomAttrs(d.customAttrs)
     setAttrSets(d.attrSets)
     setSelectedAttrs(d.selectedAttrs)
+    setAgeMods(d.ageMods ?? null)
     setLuck(d.luck)
     setCreditRating(d.creditRating)
     setOccPoints(d.occPoints)
@@ -721,6 +804,7 @@ export function CharacterPage() {
     setEquipText(d.equipText)
     setWeapons(d.weapons)
     setAssetsInfo(d.assetsInfo)
+    setAssetsTouched(d.assetsTouched ?? false)
     setMythos(d.mythos)
     setRelations(d.relations)
     setModuleHistory(d.moduleHistory)
@@ -1055,6 +1139,17 @@ export function CharacterPage() {
                             <span className="text-xs ml-1" style={{ color: 'var(--color-text-secondary)' }}>
                               {range.min}-{range.max}
                             </span>
+                            {/* 结算过年龄修正后，输入框里是买点前的原值，终值另标一份，
+                                否则玩家在这儿看到 60、角色卡上却是 53。 */}
+                            {ageSettled && effectiveAttrs && effectiveAttrs[k] !== val && (
+                              <span
+                                className="text-xs font-mono ml-auto"
+                                title="年龄修正后的最终值"
+                                style={{ color: 'var(--color-text-accent)' }}
+                              >
+                                → {effectiveAttrs[k]}
+                              </span>
+                            )}
                           </div>
                         )
                       })}
@@ -1078,12 +1173,21 @@ export function CharacterPage() {
                               style={{ borderColor: selectedAttrs === attrs ? 'var(--color-accent)' : undefined }}
                             >
                               <div className="flex flex-wrap gap-2">
-                                {Object.entries(attrs).map(([k, v]) => (
-                                  <span key={k} className="inline-block mr-2">
-                                    <span style={{ color: 'var(--color-text-secondary)' }}>{ATTR_LABELS[k] || k}</span>{' '}
-                                    <span className="font-mono font-bold">{v}</span>
-                                  </span>
-                                ))}
+                                {Object.entries(attrs).map(([k, v]) => {
+                                  // 选中并结算过的这一组，把年龄修正后的终值跟在原值后面
+                                  const final = attrs === selectedAttrs && ageSettled ? effectiveAttrs?.[k] : undefined
+                                  return (
+                                    <span key={k} className="inline-block mr-2">
+                                      <span style={{ color: 'var(--color-text-secondary)' }}>{ATTR_LABELS[k] || k}</span>{' '}
+                                      <span className="font-mono font-bold">{v}</span>
+                                      {final != null && final !== v && (
+                                        <span className="font-mono text-xs" style={{ color: 'var(--color-text-accent)' }}>
+                                          →{final}
+                                        </span>
+                                      )}
+                                    </span>
+                                  )
+                                })}
                               </div>
                               <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>合计：{total}</div>
                             </button>
@@ -1094,19 +1198,77 @@ export function CharacterPage() {
                   </div>
                 )}
 
-                {/* 幸运值 */}
-                <div className="flex items-center gap-3 mb-3 py-2 px-3 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
-                  <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>幸运 LUCK</span>
-                  <span className="font-mono font-bold text-sm w-10 text-center">{luck || '—'}</span>
-                  <button onClick={rollLuck} className="btn-secondary !px-2 !py-0.5 text-xs flex items-center gap-1">
-                    <GiDiceSixFacesSix /> 掷骰 (3D6×5)
-                  </button>
-                  {luck > 0 && (
-                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      半值 {Math.floor(luck / 2)} / 五分之一 {Math.floor(luck / 5)}
-                    </span>
-                  )}
-                </div>
+                {/* 年龄修正与幸运。导入的角色卡已经是修正过的成品，不再结算一次。 */}
+                {isImported ? (
+                  <div className="flex items-center gap-3 mb-3 py-2 px-3 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
+                    <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>幸运 LUCK</span>
+                    <span className="font-mono font-bold text-sm w-10 text-center">{luck || '—'}</span>
+                    <button onClick={rollLuck} className="btn-secondary !px-2 !py-0.5 text-xs flex items-center gap-1">
+                      <GiDiceSixFacesSix /> 掷骰 (3D6×5)
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mb-3 py-2 px-3 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-xs font-semibold" style={{ color: 'var(--color-text-accent)' }}>
+                        年龄修正（{age} 岁）
+                      </span>
+                      <button
+                        onClick={settleAge}
+                        disabled={!rawAttrs || settlingAge}
+                        className="btn-secondary !px-2 !py-0.5 text-xs flex items-center gap-1 disabled:opacity-40"
+                      >
+                        <GiDiceSixFacesSix /> {ageSettled ? '重新结算' : '结算年龄修正'}
+                      </button>
+                      <span className="text-sm ml-auto" style={{ color: 'var(--color-text-secondary)' }}>
+                        幸运 LUCK{' '}
+                        <span className="font-mono font-bold" style={{ color: 'var(--color-text-primary)' }}>
+                          {luck || '—'}
+                        </span>
+                        {ageSettled && ageMods.luckRolls.length > 1 && (
+                          <span className="text-xs ml-1">
+                            （未成年两次取高：{ageMods.luckRolls.join(' / ')}）
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    {!ageSettled ? (
+                      <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        结算后才会算出幸运与最终属性。年龄会带来体能衰退、外貌变化与教育增强检定；
+                        改年龄或重掷属性都需要重新结算。
+                      </p>
+                    ) : ageMods.notes.length === 0 ? (
+                      <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        这个年龄段没有属性修正。
+                      </p>
+                    ) : (
+                      <ul className="mt-1.5 space-y-0.5">
+                        {ageMods.notes.map((n, i) => (
+                          <li key={i} className="flex items-baseline gap-2 text-xs">
+                            <span className="w-16 flex-shrink-0" style={{ color: 'var(--color-text-accent)' }}>
+                              {n.label}
+                            </span>
+                            <span className="flex-1" style={{ color: 'var(--color-text-secondary)' }}>
+                              {n.detail}
+                            </span>
+                            <span
+                              className="font-mono font-bold"
+                              style={{
+                                color: n.delta < 0
+                                  ? 'var(--color-danger)'
+                                  : n.delta > 0
+                                    ? 'var(--color-success)'
+                                    : 'var(--color-text-secondary)',
+                              }}
+                            >
+                              {n.delta > 0 ? `+${n.delta}` : n.delta || '—'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
 
                 {/* 派生属性预览 */}
                 {derivedStats && (
@@ -1128,7 +1290,12 @@ export function CharacterPage() {
                   <button onClick={() => setStep('基本信息')} className="btn-secondary">上一步</button>
                   <button
                     onClick={() => setStep('职业选择')}
-                    disabled={isImported ? false : ((useDice ? !selectedAttrs : remainingPoints < 0) || luck <= 0)}
+                    disabled={
+                      isImported
+                        ? false
+                        : (useDice ? !selectedAttrs : remainingPoints < 0) || !ageSettled
+                    }
+                    title={!isImported && !ageSettled ? '请先结算年龄修正' : undefined}
                     className="btn-primary"
                   >
                     下一步
@@ -1213,12 +1380,13 @@ export function CharacterPage() {
                     <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
                       <label className="block text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                         信用评级（{selectedOcc.credit_min}-{selectedOcc.credit_max}）
+                        <span className="ml-1" style={{ opacity: 0.7 }}>· 从本职点里出</span>
                       </label>
                       <div className="flex items-center gap-2">
                         <input
                           type="range"
                           min={selectedOcc.credit_min}
-                          max={selectedOcc.credit_max}
+                          max={creditMax}
                           value={creditRating}
                           onChange={(e) => setCreditRating(parseInt(e.target.value))}
                           className="flex-1"
@@ -1226,6 +1394,15 @@ export function CharacterPage() {
                         />
                         <span className="font-mono font-bold text-sm w-10 text-right">{creditRating}%</span>
                       </div>
+                      <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        付掉信用后本职点剩余：
+                        <strong
+                          className="font-mono"
+                          style={{ color: remainingOcc < 0 ? 'var(--color-danger)' : 'var(--color-success)' }}
+                        >
+                          {remainingOcc}
+                        </strong>
+                      </p>
                     </div>
                   </div>
                 )}
@@ -1275,6 +1452,8 @@ export function CharacterPage() {
                     const isOcc = occHas(skillName)
                     const displayVal = isImported ? alloc : base + alloc
                     const isLocked = NON_ALLOCATABLE_SKILLS.includes(skillName)
+                    const canAdd = skillDelta(skillName, 5) > 0
+                    const atCap = !isImported && !isLocked && displayVal >= SKILL_MAX
                     return (
                       <div
                         key={skillName}
@@ -1292,6 +1471,15 @@ export function CharacterPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-1">
+                          {atCap && (
+                            <span
+                              className="text-[0.6rem] font-mono"
+                              style={{ color: 'var(--color-text-accent)' }}
+                              title="建卡阶段技能上限 90，超出部分要靠游戏中的成长检定"
+                            >
+                              上限
+                            </span>
+                          )}
                           <span className="font-mono font-bold w-8 text-right">{displayVal}</span>
                           {!isLocked && (
                             <>
@@ -1305,9 +1493,10 @@ export function CharacterPage() {
                               </button>
                               <button
                                 onClick={() => updateSkill(skillName, 5)}
-                                disabled={!isImported && (isOcc ? remainingOcc : remainingInt) < 5}
+                                disabled={!canAdd}
+                                title={atCap ? '已到建卡上限 90' : undefined}
                                 className="w-6 h-6 rounded text-xs border flex items-center justify-center"
-                                style={{ borderColor: 'var(--color-border)', opacity: (!isImported && (isOcc ? remainingOcc : remainingInt) < 5) ? 0.3 : 1 }}
+                                style={{ borderColor: 'var(--color-border)', opacity: canAdd ? 1 : 0.3 }}
                               >
                                 +
                               </button>
@@ -1416,7 +1605,11 @@ export function CharacterPage() {
                 {/* 资产信息（按信用评级换算，可手改） */}
                 <div className="border-t pt-3 mb-3" style={{ borderColor: 'var(--color-border)' }}>
                   <h4 className="text-sm font-semibold mb-2" style={{ color: 'var(--color-text-accent)' }}>资产信息</h4>
-                  <AssetsPanel creditRating={creditRating} value={assetsInfo} onChange={setAssetsInfo} />
+                  <AssetsPanel
+                    creditRating={creditRating}
+                    value={assetsInfo}
+                    onChange={(v) => { setAssetsTouched(true); setAssetsInfo(v) }}
+                  />
                 </div>
 
                 {/* 克苏鲁神话 */}
