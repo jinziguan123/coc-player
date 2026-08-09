@@ -21,7 +21,7 @@ from app.models import (  # noqa: F401 注册表
 )
 from app.rules.coc.checks import resolve_skill_check
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile_detailed
-from app.services import chat_service
+from app.services import chat_service, session_service
 
 
 # ---------- 纯函数：奖惩骰与合成 ----------
@@ -224,6 +224,8 @@ def test_blind_check_has_no_detail(db_factory, monkeypatch):
 def test_opposed_each_side_has_check_detail(db_factory, monkeypatch):
     db = db_factory()
     module, hero, teammates, session = _seed(db)
+    # 本测测的是骰点明细契约，不是遮名：先让 KP 在叙事里点过名
+    session_service.add_event(db, session.id, "narration", "守墓人抬起头。", actor_name="KP")
     d = _dice(_run(db, module, hero, teammates, session,
                    "[OPPOSED_CHECK: a=主角, b=守墓人, skill=侦查]", monkeypatch))[0]
     meta = d["metadata"]

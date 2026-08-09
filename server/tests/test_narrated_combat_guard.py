@@ -168,7 +168,9 @@ def test_narrated_charge_starts_combat_and_is_idempotent(db_factory, monkeypatch
 
     state = combat_service.get_combat(db.get(GameSession, session_id))
     assert state and state["active"] is True
-    assert any(p["name"] == "循声者" for p in state["initiative"])
+    # 参战方的 name 是**对外称呼**（玩家还没认出这东西时会被遮），
+    # 这里测的是「战斗有没有起来」，按真名断言
+    assert any(p.get("true_name") == "循声者" for p in state["initiative"])
     assert any(chunk.type == "combat_start" for chunk in first)
 
     second = _run_guard(

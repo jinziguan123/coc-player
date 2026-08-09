@@ -34,6 +34,7 @@ from app.services import (
     kp_actions,
     module_rag_service,
     narration_protocol,
+    npc_identity,
     rulebook_service,
     session_service,
     team_turn_service,
@@ -360,7 +361,10 @@ def _build_kp_tool_executor(
                 f"拒绝：{who} 是玩家或队友角色，你不能替他们说话或行动。"
                 "玩家与队友的言行只能由他们本人给出；你只叙述 NPC 与环境，把选择权留给他们。"
             )
-        chunks = _exec_say(result, module, who, text)
+        chunks = _exec_say(
+            result, module, who, text,
+            masker=npc_identity.build_masker(db, session_id, module),
+        )
         return kp_tools.ToolOutcome(
             "台词已作为气泡展示给玩家（续写时不要复述这句话）。", chunks=chunks,
         )

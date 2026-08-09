@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base, Character, EventLog, Module
 from app.api.chat import kp_action
 from app.schemas.session import KpActionRequest
-from app.services import session_service
+from app.services import npc_identity, session_service
 from app.services.chat_service import execute_human_kp_action, initialize_human_session
 from app.services.room_hub import room_hub
 
@@ -115,6 +115,8 @@ def test_human_kp_action_uses_seated_player_when_primary_is_empty(tmp_path):
 def test_human_kp_skill_check_selects_npc_and_applies_bonus_die(tmp_path):
     db = _db(tmp_path)()
     module, _hero, session = _seed(db)
+    # KP 已在叙事里点过名 → 玩家认识他，检定卡照实显示（遮名另见下一条）
+    session_service.add_event(db, session.id, "narration", "守门人挡在门前。", actor_name="KP")
 
     chunks, result = asyncio.run(execute_human_kp_action(
         db, session.id, session, module, "dice_check",
@@ -214,6 +216,7 @@ def test_human_kp_opposed_check_rejects_self_and_emits_frontend_contract(tmp_pat
             {"a": hero_ref, "a_skill": "力量", "b": hero_ref, "b_skill": "力量"},
         ))
 
+    session_service.add_event(db, session.id, "narration", "守门人一把抓住门闩。", actor_name="KP")
     chunks, _result = asyncio.run(execute_human_kp_action(
         db, session.id, session, module, "opposed_check",
         {
@@ -319,3 +322,23 @@ def test_human_opening_only_initializes_public_cards(tmp_path, monkeypatch):
     events = session_service.get_session_events(fresh, session.id)
     assert any((e.metadata_ or {}).get("kind") == "module_intro" for e in events)
     assert not any(e.event_type == "narration" for e in events)
+
+
+def test_human_kp_check_hides_unmet_npc_but_keeps_true_name_in_receipt(tmp_path):
+    """玩家还没认出来的 NPC：广播出去的检定卡用对外称呼，KP 自己的回执仍是真名。
+
+    守秘人是从下拉框里选的这个 NPC，回执写「不明存在」等于让他自己也认不出
+    刚才裁定了谁；而玩家那边一旦印出真名，悬念就没了。两边要的东西不一样。
+    """
+    db = _db(tmp_path)()
+    module, _hero, session = _seed(db)   # 全程没有任何叙事提到守门人
+
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "dice_check",
+        {"skill": "潜行", "char": "npc:guard"},
+    ))
+
+    payload = chunks[0].as_wire()
+    assert payload["metadata"]["actor"] == npc_identity.UNKNOWN_LABEL
+    assert "守门人" not in payload["content"]
+    assert "守门人" in result          # KP 回执照旧

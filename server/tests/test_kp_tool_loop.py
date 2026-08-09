@@ -24,7 +24,7 @@ from app.models.event_log import EventLog  # noqa: F401 — 注册建表
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
-from app.services import chat_service, combat_service, session_service
+from app.services import chat_service, combat_service, npc_identity, session_service
 
 
 # ── 测试基建 ──────────────────────────────────────────────────────────────
@@ -329,7 +329,8 @@ def test_planned_combat_fallback_starts_once_when_model_omits_tool(db_factory):
     first = asyncio.run(_ensure())
     state = combat_service.get_combat(db.get(GameSession, session_id))
     assert state and state["active"] is True
-    assert any(p["name"] == "循声者" for p in state["initiative"])
+    # name 是对外称呼（玩家还没认出时会被遮）；这里测的是战斗有没有起来
+    assert any(p.get("true_name") == "循声者" for p in state["initiative"])
     assert any(chunk.type == "combat_start" for chunk in first)
 
     second = asyncio.run(_ensure())
@@ -485,6 +486,15 @@ def test_say_tool_interleaves_dialogue_in_persist_order(db_factory):
     assert "dialogue" in kinds
 
 
+def _seed_say(db_factory):
+    """一间店、一个店主：say() 相关用例的公共起手。"""
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    module.npcs = [{"id": "npc_knott", "name": "史蒂芬·诺特先生"}]
+    db.commit()
+    return db, session_id, session, module, hero
+
+
 def test_say_tool_refuses_to_voice_player_or_teammate(db_factory):
     """守卫：say() 归到玩家/队友名下时驳回、不出气泡；对在场 NPC 正常出气泡。"""
     db = db_factory()
@@ -510,7 +520,39 @@ def test_say_tool_refuses_to_voice_player_or_teammate(db_factory):
     rp, ra, rn = asyncio.run(_go())
     assert "拒绝" in rp.result_text and not rp.chunks       # 玩家：驳回、无气泡
     assert "拒绝" in ra.result_text and not ra.chunks       # 队友（名字片段）：驳回
-    assert rn.chunks and result[3] == [(0, "史蒂芬·诺特先生", "欢迎光临。")]  # NPC：正常出气泡
+    # NPC：正常出气泡。玩家还没听人报过名字，气泡上是对外称呼——
+    # 陌生人开口时你本来就不知道他叫什么（见 npc_identity）
+    assert rn.chunks and result[3] == [(0, npc_identity.UNKNOWN_LABEL, "欢迎光临。")]
+
+
+def test_say_tool_uses_real_name_once_players_have_heard_it(db_factory):
+    """KP 在叙事里点过名之后，气泡就该改口叫真名。"""
+    db, session_id, session, module, hero = _seed_say(db_factory)
+    session_service.add_event(
+        db, session_id, "narration", "柜台后的史蒂芬·诺特先生放下账本。", actor_name="KP",
+    )
+    result = ["", "", [], [], []]
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], llm=None, result=result,
+    )
+    asyncio.run(execute(ToolCall(
+        id="1", name="say", arguments={"who": "史蒂芬·诺特先生", "text": "欢迎光临。"},
+    )))
+    assert result[3] == [(0, "史蒂芬·诺特先生", "欢迎光临。")]
+
+
+def test_say_tool_self_introduction_switches_name_immediately(db_factory):
+    """自报家门那一刻就改口，否则会是「不明存在：我叫史蒂芬·诺特」。"""
+    db, session_id, session, module, hero = _seed_say(db_factory)
+    result = ["", "", [], [], []]
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], llm=None, result=result,
+    )
+    asyncio.run(execute(ToolCall(
+        id="1", name="say",
+        arguments={"who": "史蒂芬·诺特先生", "text": "我是史蒂芬·诺特先生，这家店的主人。"},
+    )))
+    assert result[3][0][1] == "史蒂芬·诺特先生"
 
 
 def test_reorder_turn_events_interleaves_by_broadcast_offset(db_factory):

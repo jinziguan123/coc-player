@@ -18,6 +18,7 @@ from app.services import (
     dice_runtime,
     human_kp_service,
     illustration_service,
+    npc_identity,
     session_service,
     turn_context,
     world_memory,
@@ -630,6 +631,9 @@ async def _exec_dice_check(
     char_data, disp_name, is_npc, char_id = _resolve_check_actor(
         char_ref, skill_name, player_char, teammates, module,
     )
+    # 检定卡是玩家可见面：玩家还没认出来的 NPC 用对外称呼。真名留给回灌 KP 的描述——
+    # KP 得知道自己在给谁投骰，喂它「不明存在」只会把它自己也绕晕。
+    shown_name = npc_identity.build_masker(db, session_id, module)(disp_name)
 
     # req 1/2：真人控制、且非暗投的检定 → 不自动掷，挂成「待玩家投骰」并给出提示；
     # NPC 暗骰 / AI 队友 / 暗投 仍由系统自动掷（无人点投骰，避免卡住）。
@@ -645,7 +649,7 @@ async def _exec_dice_check(
         check_id = uuid.uuid4().hex
         pending = {
             "id": check_id, "skill": skill_name, "difficulty": difficulty,
-            "char_ref": char_ref, "char_id": char_id, "actor_name": disp_name,
+            "char_ref": char_ref, "char_id": char_id, "actor_name": shown_name,
             "source": source, "bonus": bonus, "penalty": penalty,
             "modifier_reason": modifier_reason,
         }
@@ -660,7 +664,7 @@ async def _exec_dice_check(
                 pending["heal_target_id"] = heal_target.id
         session_service.add_pending_check(db, session_id, pending)
         prompt_text = _check_prompt_text(
-            disp_name, skill_name, difficulty, bonus, penalty, modifier_reason,
+            shown_name, skill_name, difficulty, bonus, penalty, modifier_reason,
         )
         meta = {"check_request": True, **pending}
         ev = session_service.add_event(
@@ -675,6 +679,7 @@ async def _exec_dice_check(
     rc, rd, _succeeded, _fumbled = await _auto_roll_check(
         db, session_id, game_session, module, char_data, disp_name, is_npc,
         skill_name, difficulty, blind, source, bonus, penalty, modifier_reason,
+        public_name=shown_name,
     )
     return chunks + rc, descs + rd, False
 
@@ -684,12 +689,17 @@ async def _auto_roll_check(
     char_data: dict, disp_name: str, is_npc: bool,
     skill_name: str, difficulty: str, blind: bool, source: str,
     bonus: int, penalty: int, modifier_reason: str = "",
+    public_name: str = "",
 ) -> tuple[list[str], list[str], bool, bool]:
     """系统自动掷一次检定并落库（不挂 pending）。单人自动路径与群检各成员共用。
 
     返回 (chunks, 回灌 KP 的结果描述, 是否成功, 是否大失败)。
     暗投不落 dice 明细（会反推成败）。
+
+    ``disp_name`` 是真名，只进**回灌 KP 的描述**——KP 得知道自己在给谁投骰；
+    ``public_name`` 是对外称呼，进落库内容与广播，玩家还没认出这东西时不能报真名。
     """
+    shown = public_name or disp_name
     chunks: list[str] = []
     descs: list[str] = []
     engine = get_engine(module.rule_system)
@@ -698,15 +708,15 @@ async def _auto_roll_check(
 
     if blind:
         kind_word = "暗骰" if is_npc else "暗投"
-        dice_content = f"{disp_name} 进行了一次{kind_word}·{skill_name}（结果仅 KP 可见）"
-        dice_meta = {"skill": skill_name, "actor": disp_name, "blind": True}
+        dice_content = f"{shown} 进行了一次{kind_word}·{skill_name}（结果仅 KP 可见）"
+        dice_meta = {"skill": skill_name, "actor": shown, "blind": True}
         descs.append(
             f"【{kind_word}·{disp_name}·{skill_name}（{difficulty}），结果仅你（KP）可见，"
             f"绝不可直接把成败告诉玩家】：达成 {tier_cn}；{result.description}"
         )
     else:
         dice_content = (
-            f"{disp_name}｜{skill_name} 检定（{difficulty}）：{tier_cn}（{result.description}）"
+            f"{shown}｜{skill_name} 检定（{difficulty}）：{tier_cn}（{result.description}）"
         )
         dice_meta = {
             "skill": skill_name,
@@ -715,7 +725,7 @@ async def _auto_roll_check(
             "target": result.target,
             "outcome": result.outcome,
             "tier": result.tier,
-            "actor": disp_name,
+            "actor": shown,
             "dice": _check_dice_detail(
                 result, dice_runtime.modifier_notes(bonus, penalty, modifier_reason),
             ),

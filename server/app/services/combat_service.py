@@ -141,8 +141,13 @@ def _char_participant(char: Character, side: str, is_human: bool = True) -> dict
     }
 
 
-def _npc_participant(npc: dict, side: str = "enemy") -> dict:
-    """把模组 NPC（或临时敌）转成参战方。HP 由属性派生，只在战斗态追踪。"""
+def _npc_participant(npc: dict, side: str = "enemy", masker=None) -> dict:
+    """把模组 NPC（或临时敌）转成参战方。HP 由属性派生，只在战斗态追踪。
+
+    ``name`` 存的是**对外称呼**（玩家还没认出这东西时是「不明存在」之类），
+    HUD、先攻表、战报、命中日志一律读它——它们全是玩家可见面，不能替 KP
+    把怪物的真名说出去。真名另存 ``true_name``，供按名定位与 KP 侧使用。
+    """
     attrs = npc.get("attributes") or {}
     con, siz = attrs.get("CON", 50), attrs.get("SIZ", 50)
     max_hp = npc.get("hp") or (con + siz) // 10
@@ -155,7 +160,10 @@ def _npc_participant(npc: dict, side: str = "enemy") -> dict:
         pass
     return {
         "id": npc.get("id") or f"enemy_{uuid.uuid4().hex[:6]}",
-        "npc_id": npc.get("id"), "name": npc.get("name") or "敌人", "side": side,
+        "npc_id": npc.get("id"),
+        "name": (masker(npc.get("name")) if masker else npc.get("name")) or "敌人",
+        "true_name": npc.get("name") or "敌人",
+        "side": side,
         "dex": attrs.get("DEX", 50), "hp": max_hp, "max_hp": max_hp, "status": "ok",
         "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon),
         # damage：怪物卡上写明的攻击伤害骰（如「撕咬 1D6」）。自创攻击方式不在人类武器表里，
@@ -241,7 +249,7 @@ def start_combat(db: Session, session_id: str, player_side: list[dict], enemies:
 
 async def start(db: Session, session_id: str, party: list[Character], enemies: list[dict],
                 human_ids: set[str], trigger: str = "", agent=None, scene_hint: str = "",
-                deployment: dict | None = None) -> tuple[dict, list[str]]:
+                deployment: dict | None = None, masker=None) -> tuple[dict, list[str]]:
     """高层入口：从角色/敌人 spec 建参战方、起战斗、自动跑到第一个真人回合。返回 (state, chunks)。
 
     party：玩家方角色（human_ids 里的算真人玩家=会停下等操作，其余算 AI 队友=自动）。
@@ -251,7 +259,7 @@ async def start(db: Session, session_id: str, party: list[Character], enemies: l
         _char_participant(c, "player" if c.id in human_ids else "ally", c.id in human_ids)
         for c in party
     ]
-    enemy_side = [_npc_participant(n, "enemy") for n in enemies]
+    enemy_side = [_npc_participant(n, "enemy", masker) for n in enemies]
     state = start_combat(db, session_id, player_side, enemy_side, trigger, deployment=deployment)
     chunks = [_chunk("combat_start", trigger or "战斗爆发！", metadata=_combat_meta(state))]
     drive_chunks, beats = await drive_npcs(db, session_id, state, agent, scene_hint)
@@ -298,6 +306,16 @@ def current_actor(state: dict) -> dict | None:
     order = state.get("initiative") or []
     i = state.get("turn_index", 0)
     return order[i] if 0 <= i < len(order) else None
+
+
+def _name_matches(p: dict, name: str) -> bool:
+    """参战方是否叫这个名字。对外称呼与真名都算——上游给的可能是任一种。"""
+    if not name:
+        return False
+    for known in (p.get("name") or "", p.get("true_name") or ""):
+        if known and (known == name or name in known):
+            return True
+    return False
 
 
 def _find(state: dict, pid: str) -> dict | None:
@@ -697,8 +715,10 @@ def stage_aoe_damage(
     victims = []
     for name in target_names:
         name = (name or "").strip()
+        # 真名也要认：规划器/KP 那边看到的是模组里的规范名，而参战方的 name 已经
+        # 换成了对外称呼（玩家还没认出这东西时）。只按 name 匹配会定位不到目标。
         v = next((p for p in state.get("initiative") or []
-                  if p["name"] == name or (name and name in p["name"])), None)
+                  if _name_matches(p, name)), None)
         if v and engine.is_active(v) and v.get("side") == "enemy" and v["id"] not in [x["id"] for x in victims]:
             victims.append(v)
     if not victims:

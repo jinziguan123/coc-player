@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import (  # noqa: F401 注册表
     Base, Character, EventLog, GameSession, Module, SessionParticipant,
 )
-from app.services import chat_service, session_service
+from app.services import chat_service, npc_identity, session_service
 
 
 @pytest.fixture
@@ -167,7 +167,8 @@ def test_blind_player_and_npc(db_factory, monkeypatch):
     assert "成功" not in d["content"] and "失败" not in d["content"]  # 不泄露成败
     assert "outcome" not in d["metadata"]
 
-    # NPC 暗骰
+    # NPC 暗骰（KP 已在叙事里点过名，这里只测暗骰本身）
+    session_service.add_event(db, session.id, "narration", "守墓人提着灯走过。", actor_name="KP")
     d = _dice(_run(db, module, hero, teammates, session,
                    "[DICE_CHECK: skill=潜行, char=守墓人, visibility=blind]", monkeypatch))[0]
     assert d["metadata"]["blind"] is True and d["metadata"]["actor"] == "守墓人"
@@ -478,12 +479,35 @@ def test_san_per_character_and_once_per_source(db_factory, monkeypatch):
 def test_opposed_check(db_factory, monkeypatch):
     db = db_factory()
     module, hero, teammates, session = _seed(db)
+    # KP 已经在叙事里点过名 → 玩家认识它，对抗卡照实显示
+    session_service.add_event(db, session.id, "narration", "守墓人正提着灯往这边走。", actor_name="KP")
+
     d = _dice(_run(db, module, hero, teammates, session,
                    "[OPPOSED_CHECK: a=主角, a_skill=潜行, b=守墓人, b_skill=侦查]", monkeypatch))[0]
     assert d["metadata"]["opposed"]["attacker"]["name"] == "主角"
     assert d["metadata"]["opposed"]["defender"]["name"] == "守墓人"
     assert d["metadata"]["winner"] in ("主角", "守墓人", "平局")
     assert "对抗骰" in d["content"]
+
+
+def test_opposed_check_hides_name_player_has_not_learned(db_factory, monkeypatch):
+    """叙事里没提过的 NPC，对抗卡不能替 KP 把名字说出来。
+
+    线上真实踩到过：叙事克制地写着「一团比夜色更浓的黑…没有脸，没有眼」，
+    旁边的对抗卡却印出「田间潜随者（莎布·尼古拉丝化身）」——玩家一眼就知道
+    对面是哪尊旧日支配者的化身，悬念当场作废。
+    """
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    session_service.add_event(
+        db, session.id, "narration", "有什么东西在墓碑之间移动，看不清形状。", actor_name="KP",
+    )
+
+    d = _dice(_run(db, module, hero, teammates, session,
+                   "[OPPOSED_CHECK: a=主角, a_skill=潜行, b=守墓人, b_skill=侦查]", monkeypatch))[0]
+    assert d["metadata"]["opposed"]["defender"]["name"] == npc_identity.UNKNOWN_LABEL
+    assert "守墓人" not in d["content"]
+    assert d["metadata"]["opposed"]["attacker"]["name"] == "主角"   # 玩家角色不受影响
 
 
 def test_invalid_ai_opposed_check_does_not_abort_command_processing(db_factory, monkeypatch):

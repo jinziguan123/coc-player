@@ -11,7 +11,9 @@ from app.ai.context import build_npc_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import illustration_service, session_service, turn_context, world_memory
+from app.services import (
+    illustration_service, npc_identity, session_service, turn_context, world_memory,
+)
 from app.services.event_protocol import make_chunk as _make_chunk
 
 _attach_npc_portrait = illustration_service._attach_npc_portrait
@@ -39,6 +41,13 @@ async def _exec_npc_act(
 
     npc_agent = NPCAgent(llm, npc_id)
     npc_response = await npc_agent.respond(npc_messages)
+
+    # 气泡上的说话人也是玩家可见面：玩家还没认出这东西时，不能替 KP 报出真名。
+    # 把这句台词本身算进判据——NPC 自报家门（「我叫香澄澪」）那一刻就该改口，
+    # 否则会出现「不明存在：我叫香澄澪」这种自己打自己脸的气泡。
+    npc_name = npc_identity.build_masker(db, session_id, module)(
+        npc_name, extra_prose=npc_response,
+    )
 
     ev = session_service.add_event(
         db, session_id, "dialogue", npc_response,
@@ -106,11 +115,14 @@ async def _exec_start_combat(
     _state, chunks = await combat_service.start(
         db, session_id, party, enemies, human_ids, trigger,
         agent=agent, scene_hint=scene_hint,
+        masker=npc_identity.build_masker(db, session_id, module),
     )
     return illust_chunks + chunks
 
 
-def _exec_say(result: list, module: Module, who: str, text: str) -> list[str]:
+def _exec_say(
+    result: list, module: Module, who: str, text: str, masker=None,
+) -> list[str]:
     """say() 工具：把一句 NPC 台词作为对话气泡广播，并**记入 result 的对话交错标记**——
     落库交给收尾的 _persist_narration 按偏移与旁白交错持久化（复用旧路径的成熟机制），
     从而在 resync 时与旁白保持正确先后顺序（不能在 loop 中直接落库，那会先于旁白）。
@@ -123,6 +135,10 @@ def _exec_say(result: list, module: Module, who: str, text: str) -> list[str]:
         if n.get("id") == who or n.get("name") == who:
             npc_name = n.get("name") or who
             break
+    # 气泡上的说话人是玩家可见面：玩家还没认出这东西时不能报出真名。
+    # 这句台词本身也算判据（自报家门当场改口）。
+    if masker is not None:
+        npc_name = masker(npc_name, extra_prose=text)
     # 偏移＝此刻已累计旁白长度（本步旁白已并入 result[0]）→ 台词插在本步旁白之后、下步之前。
     offset = len(result[0])
     if len(result) > 3:

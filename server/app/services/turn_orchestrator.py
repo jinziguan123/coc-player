@@ -23,20 +23,21 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.registry import get_engine
 from app.services import (
+    character_chronicle,
     chat_event_writer,
     command_protocol,
-    character_chronicle,
     dice_runtime,
-    event_recall,
     event_protocol,
-    generation_lifecycle,
+    event_recall,
     generation_housekeeping,
+    generation_lifecycle,
     human_kp_actions,
     illustration_service,
     inventory_service,
     kp_actions,
     kp_tool_loop,
     narration_protocol,
+    npc_identity,
     planned_effects,
     rulebook_service,
     session_service,
@@ -1350,6 +1351,9 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         char_data, disp_name, _is_npc, _cid = _resolve_check_actor(
             check.get("char_ref", ""), skill, player_char, party_others, module,
         )
+        # 检定卡是玩家可见面：玩家还没认出来的 NPC 用对外称呼。
+        # 真名（disp_name）留给回灌 KP 的描述——守秘人得知道自己在给谁投骰。
+        shown_name = npc_identity.build_masker(db, session_id, module)(disp_name)
         # 奖惩骰的来龙去脉：KP 判的理由 + 系统自己加的（临时疯狂），一并摆给玩家看。
         # 只显示最终数量而不说凭什么，玩家就只能猜是不是被针对了。
         modifiers = dice_runtime.modifier_notes(
@@ -1371,12 +1375,12 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         tier_cn = TIER_LABEL.get(result.tier, result.tier)
 
         dice_content = (
-            f"{disp_name}｜{skill} 检定（{difficulty}）：{tier_cn}（{result.description}）"
+            f"{shown_name}｜{skill} 检定（{difficulty}）：{tier_cn}（{result.description}）"
         )
         dice_meta = {
             "skill": skill, "skill_value": result.skill_value, "roll": result.roll,
             "target": result.target, "outcome": result.outcome, "tier": result.tier,
-            "actor": disp_name, "dice": _check_dice_detail(result, modifiers),
+            "actor": shown_name, "dice": _check_dice_detail(result, modifiers),
         }
         ev = session_service.add_event(
             db, session_id, "dice", dice_content, actor_name="系统", metadata=dice_meta,

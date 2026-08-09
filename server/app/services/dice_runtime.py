@@ -10,7 +10,7 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.registry import get_engine
-from app.services import session_service
+from app.services import npc_identity, session_service
 from app.services.event_protocol import event_to_chunk, make_chunk
 
 _make_chunk = make_chunk
@@ -409,6 +409,11 @@ async def _resolve_opposed(
     b_data, b_name, b_is_npc, b_id = _resolve_check_actor(
         b_ref, b_skill, player_char, teammates, module,
     )
+    # 对抗卡是玩家可见面：玩家还没认出这东西时，不能替 KP 把怪物真名印在卡上。
+    # 这正是「叙事写着『一团比夜色更浓的黑』、旁边的卡却写着神话身份」那个漏子。
+    # 真名留给 private_content（回灌 KP / 人类 KP 的回执）——守秘人得知道自己在裁定谁。
+    mask = npc_identity.build_masker(db, session_id, module)
+    a_shown, b_shown = mask(a_name), mask(b_name)
     if (
         (a_id is not None and a_id == b_id)
         or (a_is_npc == b_is_npc and a_name == b_name)
@@ -433,18 +438,26 @@ async def _resolve_opposed(
         winner = None
 
     winner_name = a_name if winner == "attacker" else (b_name if winner == "defender" else "")
-    verdict = f"{winner_name} 胜" if winner_name else "平局"
+    shown_winner = a_shown if winner == "attacker" else (b_shown if winner == "defender" else "")
+    verdict = f"{shown_winner} 胜" if shown_winner else "平局"
+    # 私有回执给 KP（人类 KP 的操作回执 / AI KP 的回灌），一律真名——
+    # 守秘人得知道自己在裁定谁，喂它「不明存在」只会把它自己也绕晕。
     private_content = (
         f"对抗骰　{a_name}（{a_skill}）{a_res.description}　vs　"
-        f"{b_name}（{b_skill}）{b_res.description}　→　{verdict}"
+        f"{b_name}（{b_skill}）{b_res.description}　→　"
+        + (f"{winner_name} 胜" if winner_name else "平局")
+    )
+    public_content = (
+        f"对抗骰　{a_shown}（{a_skill}）{a_res.description}　vs　"
+        f"{b_shown}（{b_skill}）{b_res.description}　→　{verdict}"
     )
     opposed = {
         "attacker": {
-            "name": a_name, "skill": a_skill, "roll": a_res.roll,
+            "name": a_shown, "skill": a_skill, "roll": a_res.roll,
             "target": a_res.target, "outcome": a_res.outcome,
         },
         "defender": {
-            "name": b_name, "skill": b_skill, "roll": b_res.roll,
+            "name": b_shown, "skill": b_skill, "roll": b_res.roll,
             "target": b_res.target, "outcome": b_res.outcome,
         },
         "winner": winner,
@@ -452,15 +465,15 @@ async def _resolve_opposed(
     }
     blind = (kv.get("visibility") or "open").strip().lower() == "blind"
     if blind:
-        dice_content = f"KP 进行了一次对抗暗投：{a_name} vs {b_name}（结果仅 KP 可见）"
+        dice_content = f"KP 进行了一次对抗暗投：{a_shown} vs {b_shown}（结果仅 KP 可见）"
         dice_meta = {"opposed": True, "blind": True, "kp_manual": True}
     else:
-        dice_content = private_content
+        dice_content = public_content
         dice_meta = {
             "opposed": opposed,
-            "a": {**opposed["attacker"], "actor": a_name, "dice": _check_dice_detail(a_res)},
-            "b": {**opposed["defender"], "actor": b_name, "dice": _check_dice_detail(b_res)},
-            "winner": winner_name or "平局",
+            "a": {**opposed["attacker"], "actor": a_shown, "dice": _check_dice_detail(a_res)},
+            "b": {**opposed["defender"], "actor": b_shown, "dice": _check_dice_detail(b_res)},
+            "winner": shown_winner or "平局",
             "kp_manual": True,
         }
     ev = session_service.add_event(
