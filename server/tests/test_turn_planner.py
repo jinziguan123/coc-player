@@ -6,6 +6,7 @@
 import json
 
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -492,6 +493,64 @@ async def test_run_turn_planner_tolerates_bad_field_shapes():
     assert plan is not None
     assert plan.turn_kind == "mixed"  # 非法枚举退默认
     assert plan.safety.do_not_reveal == []  # 句子形状的 safety 退默认
+
+
+@pytest.mark.asyncio
+async def test_run_turn_planner_tolerates_null_fields():
+    """模型用 null 表达「这项没有」→ 退字段默认，而不是丢掉整份计划。
+
+    这是线上实际打爆过的路子：规划器每轮如实回 ``"ending": {"reached_id": null}``
+    （本轮没到结局），撞上纯 str 字段，整份 TurnPlan 校验失败回退旧流程——
+    日志里只有一行 WARNING，规划器就这么整局静悄悄地没生效。
+    """
+    raw = (
+        '{"turn_kind":"investigate","player_intent":"搜查书桌",'
+        '"ending":{"reached_id":null,"reason":null},'
+        '"check":{"skill":"侦查","bonus":null},'
+        '"npc_policy":{"speakers":null},'
+        '"auto_outcome":null,"requires_check":null}'
+    )
+    plan = await turn_planner.run_turn_planner(_RawLLM(raw), [])
+    assert plan is not None
+    assert plan.turn_kind == "investigate"          # 计划本体完好，没被次要字段拖垮
+    assert plan.player_intent == "搜查书桌"
+    assert plan.ending.reached_id == ""             # null → 字段默认
+    assert plan.check.bonus == 0
+    assert plan.check.skill == "侦查"
+    assert plan.auto_outcome == "none"
+    assert plan.requires_check is False
+    assert plan.npc_policy.speakers == []
+
+
+@pytest.mark.asyncio
+async def test_null_is_kept_for_optional_fields():
+    """声明成 ``str | None`` 的字段收得下 null，别一并抹掉——
+    scene_policy.scene_change 用 None 表示「不换场景」，和空串不是一回事。"""
+    plan = await turn_planner.run_turn_planner(
+        _RawLLM('{"turn_kind":"move","scene_policy":{"scene_change":null}}'), [],
+    )
+    assert plan is not None
+    assert plan.scene_policy.scene_change is None
+
+
+def test_submodel_tolerance_covers_every_submodel():
+    """子模型容错必须覆盖 TurnPlan 上的每一个子模型字段。
+
+    这条断言存在的理由：这份覆盖范围原先是手写清单，漏了 ending 一个——
+    漏掉的字段不会报错，只会悄悄失去容错。改成从模型推导后，这里钉住它不再退回手写。
+    """
+    subs = [
+        name for name, f in turn_planner.TurnPlan.model_fields.items()
+        if isinstance(f.annotation, type) and issubclass(f.annotation, BaseModel)
+    ]
+    assert len(subs) >= 10
+    for name in subs:
+        # 每个子模型字段被写成一句话（LLM 常见错误）都应退默认，而非丢弃整份计划
+        plan = turn_planner.TurnPlan.model_validate({"turn_kind": "social", name: "没有"})
+        assert plan.turn_kind == "social", f"{name} 形状错误拖垮了整份计划"
+        # null 同理
+        plan = turn_planner.TurnPlan.model_validate({"turn_kind": "social", name: None})
+        assert plan.turn_kind == "social", f"{name}=null 拖垮了整份计划"
 
 
 def test_turn_plan_messages_include_truth_and_scene_events(db_factory):

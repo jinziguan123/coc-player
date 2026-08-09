@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -69,14 +69,31 @@ def _coerce_scalar_text(v: Any) -> str:
     return str(v)
 
 
-def _coerce_str_fields(model_cls: type[BaseModel], data: dict) -> dict:
-    """把 data 里所有「目标类型是纯 str」的字段的非字符串值就地转成字符串（通用容错）。
+def _accepts_none(annotation: Any) -> bool:
+    """这个字段的类型标注收不收 None。"""
+    return annotation is Any or type(None) in get_args(annotation)
 
-    模型反复把标量 str 字段（player_intent / auto_outcome_reason / 子模型的 reason/skill/…）写成
-    dict/list/数字 → 撞 str 类型令**整份计划**被丢弃回退旧流程。用模型自身字段类型驱动，逐字段判定，
-    枚举/列表/布尔字段（annotation 非纯 str）一律跳过，不误伤。"""
+
+def _coerce_str_fields(model_cls: type[BaseModel], data: dict) -> dict:
+    """把 data 归一成这个模型收得下的形状（通用容错，顶层与子模型共用）。
+
+    两条规则，都由模型自身的字段类型驱动，逐字段判定，不误伤：
+
+    1. **值是 null、但字段不收 None → 删掉这个键**，走字段默认值。
+       这是 LLM 最常犯的 JSON 错误：它如实地用 null 表达「这项没有」，
+       而 default 只在键**缺席**时生效，显式 null 一律撞类型。
+       计划里每个字段都有默认值，删键等于「这项没有」，正是模型想表达的意思。
+    2. 目标类型是纯 str 的字段被写成 dict/list/数字 → 转成字符串保住内容
+       （典型：把一句话意图写成 {"actor": "…", "intent": "…"}）。
+
+    这两类错误单独看都只是某个次要字段的形状问题，却会让**整份计划**校验失败、
+    回退旧流程——日志里只留一行 WARNING，功能静悄悄地降级。"""
     for name, field in model_cls.model_fields.items():
-        if field.annotation is str and name in data and not isinstance(data[name], str):
+        if name not in data:
+            continue
+        if data[name] is None and not _accepts_none(field.annotation):
+            del data[name]
+        elif field.annotation is str and not isinstance(data[name], str):
             data[name] = _coerce_scalar_text(data[name])
     return data
 
@@ -262,12 +279,6 @@ class DirectionPolicy(BaseModel):
         return str(v)
 
 
-# 各嵌套子模型字段：LLM 常把它们写成一句话（safety→「安全，无即时威胁」、check→「不需要」），
-# 形状错误只应让该字段退到默认，绝不能连累整份计划被丢弃回退旧流程。
-_SUBMODEL_FIELDS = (
-    "check", "clue_policy", "npc_policy", "scene_policy", "combat", "combat_damage",
-    "safety", "sanity", "mishap", "direction",
-)
 _TURN_KINDS = frozenset(
     ("investigate", "social", "move", "combat", "knowledge", "roleplay", "mixed")
 )
@@ -322,17 +333,21 @@ class TurnPlan(BaseModel):
         if not isinstance(data, dict):
             return data
         data = dict(data)
-        for name in _SUBMODEL_FIELDS:
+        # 子模型字段从模型自身推导，不另立一份手写清单：清单漏了谁，谁就悄悄没有容错。
+        # ending 就这么漏过——规划器每轮如实回 "reached_id": null（本轮没到结局），
+        # 撞上纯 str 字段，整份计划被丢弃回退旧流程，日志里只有一行 WARNING。
+        for name, field in cls.model_fields.items():
+            sub_cls = field.annotation
+            if not (isinstance(sub_cls, type) and issubclass(sub_cls, BaseModel)):
+                continue
             val = data.get(name)
             # 放行 dict（来自 JSON）与子模型实例（来自直接构造）；只拦截标量/字符串/列表等错误形状
             if name in data and not isinstance(val, (dict, BaseModel)):
                 data[name] = {}
             elif isinstance(val, dict):
-                # 子模型形状对，但内部标量 str 字段可能被写成 dict/list → 就地容错（否则子模型
-                # 校验失败照样连累整份计划被丢弃）。
-                sub_cls = cls.model_fields[name].annotation
-                if isinstance(sub_cls, type) and issubclass(sub_cls, BaseModel):
-                    data[name] = _coerce_str_fields(sub_cls, dict(val))
+                # 子模型形状对，但内部标量 str 字段可能被写成 dict/list/null → 就地容错
+                # （否则子模型校验失败照样连累整份计划被丢弃）。
+                data[name] = _coerce_str_fields(sub_cls, dict(val))
         if data.get("turn_kind") not in _TURN_KINDS:
             data.pop("turn_kind", None)  # 交回默认 "mixed"
         # auto_outcome 是枚举式 str（none/success/failure）：非字符串内容无意义，直接退默认，

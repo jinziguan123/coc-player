@@ -609,14 +609,19 @@ async def _ensure_planned_sanity(
     发出（真人挂待投请求，AI 角色自动结算）。若 KP 本轮已自行发起 SAN（任意恐怖源），本守卫幂等跳过；
     同一角色对同一恐怖源的去重仍由 _exec_san_check（world_state.san_checked）保证。
     """
+    asked = plan is not None and plan.sanity.trigger
     plan = plan or turn_planner.TurnPlan()
     if not _sanity_has_evidence(
         db, session_id, game_session, module, player_char, plan, pre_gen_seq,
     ):
-        logger.warning(
-            "规划器 SAN 缺少本轮恐怖证据，已跳过：session=%s source=%s",
-            session_id, plan.sanity.source,
-        )
+        # 只有「规划器确实要了 SAN、却拿不出恐怖证据」才值得报警——那是它在凭空加检定。
+        # 规划器没要（trigger=False，含计划整个缺席时的空计划）是绝大多数回合的常态，
+        # 这里曾经也打同一条 WARNING，读日志的人会以为守卫吞掉了一次该发的检定。
+        if asked:
+            logger.warning(
+                "规划器 SAN 缺少本轮恐怖证据，已跳过：session=%s source=%s",
+                session_id, plan.sanity.source,
+            )
         return
     # 结构化场景机制使用稳定 source_key，_exec_san_check 可逐角色跳过已结算/待投项并补齐遗漏者；
     # 非结构化来源仍保留旧的整轮守卫，避免 KP 与 planner 对同一恐怖使用不同自由文本时重复扣。

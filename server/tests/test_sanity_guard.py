@@ -1,6 +1,7 @@
 """确定性 SAN 守卫：planner 裁定本轮目睹恐怖 → 引擎确定性发理智检定，不靠 KP 记得。"""
 
 import asyncio
+import logging
 
 import pytest
 from sqlalchemy import create_engine
@@ -107,6 +108,35 @@ def test_guard_skips_sanity_without_terror_evidence(db_factory):
         e.event_type == "dice" and (e.metadata_ or {}).get("skill") == "SAN"
         for e in session_service.get_session_events(db, sid)
     )
+
+
+def test_no_warning_when_planner_never_asked_for_san(db_factory, caplog):
+    """规划器没要 SAN（含计划整个缺席）→ 静默跳过，不打警告。
+
+    绝大多数回合都不该掉 SAN，若这条也报警，日志里满屏「已跳过」，
+    真正该看的那条——规划器凭空要了个检定——就淹了。
+    """
+    db = db_factory(); sid, pc = _seed(db)
+    pre = session_service.get_next_sequence_num(db, sid) - 1
+    gs = db.get(GameSession, sid)
+    for plan in (TurnPlan(sanity=SanityPolicy(trigger=False)), None):
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            assert _run(cs._ensure_planned_sanity(db, sid, gs, pc, [], plan, pre)) == []
+        assert "缺少本轮恐怖证据" not in caplog.text
+
+
+def test_warns_when_planner_asked_for_san_without_evidence(db_factory, caplog):
+    """规划器要了 SAN 却拿不出恐怖证据 → 这才是要看见的那条警告。"""
+    db = db_factory(); sid, pc = _seed(db)
+    pre = session_service.get_next_sequence_num(db, sid) - 1
+    session_service.add_event(db, sid, "narration", "走廊尽头的灯又闪了一下。", actor_name="KP")
+    plan = TurnPlan(sanity=SanityPolicy(trigger=True, source="走廊的灯"))
+    with caplog.at_level(logging.WARNING):
+        assert _run(cs._ensure_planned_sanity(
+            db, sid, db.get(GameSession, sid), pc, [], plan, pre,
+        )) == []
+    assert "缺少本轮恐怖证据" in caplog.text
 
 
 def test_scene_mechanism_overrides_generic_sanity_loss(db_factory, monkeypatch):
