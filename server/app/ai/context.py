@@ -137,7 +137,7 @@ RESERVE_FOR_OUTPUT = 7000
 # 本身就装不下**：静态手册 10.4k + 大模组数据 6k + 能力广告 1.7k ≈ 18k，台账/NPC 记忆/
 # 幕后动态这些「玩家直接可感」的内容每轮都在被挤掉（实测 evals 的 manor_multiplayer_npc）。
 # 20000 估算 ≈ 13000 真实 token，对 64K 窗口仍只占两成，且事件区有在线校准补偿。
-MAX_SYSTEM_TOKENS = 20000
+MAX_SYSTEM_TOKENS = 30000
 MAX_SUMMARY_TOKENS = 2000
 MIN_RECENT_EVENTS = 10
 MAX_RECENT_EVENTS = 60
