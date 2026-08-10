@@ -395,6 +395,64 @@ def _narrated_turn_text(db: Session, session_id: str, pre_gen_seq: int) -> str:
     return "\n".join(texts)
 
 
+#: KP 明确裁定「这次不用掷」的措辞。命中就认它裁定过了，不再补挂检定。
+#: 只认明说的——KP 若压根没提检定、直接写了段叙事，那不是裁定，是把玩家的申请顺过去了。
+_NO_CHECK_PHRASES = (
+    "无需检定", "不需要检定", "无须检定", "不必检定", "不用检定", "无需再检定",
+    "无需掷骰", "不用掷骰", "不必掷骰", "无需骰", "不用投骰", "无需投骰",
+)
+
+
+def requested_check_settled(
+    db: Session, session_id: str, actor_id: str, pre_gen_seq: int,
+) -> bool:
+    """本轮 KP 是否已经为该角色挂出待投检定（即：它对这次申请给了机制上的答复）。
+
+    **不算数的**：系统守卫补的 SAN 检定（kind=san_check）——那是恐怖裁定，不是对
+    「我要用格斗砸它」这次申请的答复。实测那一局正是这样：玩家申请格斗检定，KP 写了段
+    叙事没发指令，SAN 守卫补了个理智检定，于是看起来「挂了检定」，玩家申请的那个却蒸发了。
+    技能名换了不算问题（玩家申请侦查、KP 认为该用聆听，那是 KP 的裁定权）。
+    """
+    for ev in session_service.get_session_events(db, session_id):
+        if int(ev.sequence_num or 0) <= pre_gen_seq:
+            continue
+        meta = ev.metadata_ or {}
+        if not meta.get("check_request"):
+            continue
+        if meta.get("kind") == "san_check":
+            continue
+        if str(meta.get("char_id") or "") == str(actor_id):
+            return True
+    return False
+
+
+def requested_check_fallback_command(
+    db: Session, session_id: str, actor, skill: str, pre_gen_seq: int,
+) -> str:
+    """玩家亲口申请的检定被叙事顺过去时，合成一条 [DICE_CHECK] 交给既有指令管线补挂。
+
+    玩家点「申请检定」是一次明确的机制请求，只该有两种归宿：掷骰，或 KP 明说这次不用掷。
+    第三种——KP 写了段叙事、申请无声无息地消失——不可接受：玩家点的那一下等于没发生，
+    更糟的是 KP 常顺手把结果也演了（实测「说服」那次直接演成说服成功，骰子根本没登场，
+    等于替玩家判定了成败）。
+
+    返回空串表示无需补挂（已挂过 / KP 明说免检 / 参数不全）。
+    """
+    skill = (skill or "").strip()
+    if not skill or actor is None:
+        return ""
+    if requested_check_settled(db, session_id, getattr(actor, "id", ""), pre_gen_seq):
+        return ""
+    narration = _narrated_turn_text(db, session_id, pre_gen_seq)
+    if any(phrase in narration for phrase in _NO_CHECK_PHRASES):
+        return ""   # KP 明确裁定这次不用掷，尊重它的裁定权
+    logger.info(
+        "玩家申请的检定被叙事顺过去，确定性补挂：session=%s 角色=%s 技能=%s",
+        session_id, getattr(actor, "name", ""), skill,
+    )
+    return f"[DICE_CHECK: skill={skill}, difficulty=normal, char={getattr(actor, 'name', '')}]"
+
+
 def _npcs_present(module: Module | None, game_session: GameSession) -> list[dict]:
     """当前场景在场（或无固定位置）的存活 NPC 简况，供判定认名字、认动机。"""
     if module is None:

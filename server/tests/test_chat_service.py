@@ -801,8 +801,9 @@ def test_check_request_generation_includes_intent(db_factory, monkeypatch):
     _patch_runtime(monkeypatch, db_factory)
     captured = {}
 
-    async def fake_run_kp_turn(db, session_id, game_session, module, player_char, party_others, user_prompt):
+    async def fake_run_kp_turn(db, session_id, game_session, module, player_char, party_others, user_prompt, **kwargs):
         captured["prompt"] = user_prompt
+        captured["requested_check"] = kwargs.get("requested_check")
 
     monkeypatch.setattr(chat_service, "_run_kp_turn", fake_run_kp_turn)
 
@@ -821,8 +822,9 @@ def test_check_request_generation_without_intent_prompts_kp_to_infer(db_factory,
     _patch_runtime(monkeypatch, db_factory)
     captured = {}
 
-    async def fake_run_kp_turn(db, session_id, game_session, module, player_char, party_others, user_prompt):
+    async def fake_run_kp_turn(db, session_id, game_session, module, player_char, party_others, user_prompt, **kwargs):
         captured["prompt"] = user_prompt
+        captured["requested_check"] = kwargs.get("requested_check")
 
     monkeypatch.setattr(chat_service, "_run_kp_turn", fake_run_kp_turn)
 
@@ -1699,3 +1701,86 @@ def test_epilogue_survives_generation_failure(db_factory, monkeypatch):
     asyncio.run(chat_service.run_epilogue_generation(session_id))   # 不抛
     texts = [e.content for e in session_service.get_session_events(db_factory(), session_id)]
     assert any("收场叙述生成失败" in t for t in texts)
+
+
+# ── 玩家申请的检定必须有归宿 ──────────────────────────────────────────
+
+def _seed_check_request(db):
+    """一局里玩家刚点了「申请格斗检定」，KP 还没答复。返回 (session_id, 角色, 基线 seq)。"""
+    session_id = _seed_session(db)
+    session = db.get(GameSession, session_id)
+    actor = db.get(Character, session.player_character_id)
+    session_service.add_event(
+        db, session_id, "action", "（申请「格斗(斗殴)」检定）",
+        actor_id=actor.id, actor_name=actor.name,
+        metadata={"check_request": True, "skill": "格斗(斗殴)", "intent": ""},
+    )
+    return session_id, actor, session_service.get_next_sequence_num(db, session_id) - 1
+
+
+def test_requested_check_swallowed_by_narration_is_reissued(db_factory):
+    """KP 把检定申请写成叙事顺过去 → 确定性补挂。
+
+    实测那一局：玩家申请「格斗(斗殴)」，KP 回了一整段叙事（还顺手把拳头砸中的手感也写了），
+    没发 [DICE_CHECK]；随后 SAN 守卫补了个理智检定，看起来「挂了检定」，玩家申请的那个
+    却从头到尾没掷过。玩家点的那一下等于没发生。
+    """
+    from app.services import planned_effects
+
+    db = db_factory()
+    session_id, actor, pre = _seed_check_request(db)
+    session_service.add_event(
+        db, session_id, "narration", "那只手在你腕上收得更紧，你挥起另一只手砸向它。",
+        actor_name="KP",
+    )
+    cmd = planned_effects.requested_check_fallback_command(
+        db, session_id, actor, "格斗(斗殴)", pre,
+    )
+    assert "[DICE_CHECK:" in cmd and "格斗(斗殴)" in cmd and actor.name in cmd
+
+
+def test_requested_check_not_reissued_when_kp_hung_one(db_factory):
+    """KP 照办了（哪怕换成更贴切的技能）→ 不重复补挂。"""
+    from app.services import planned_effects
+
+    db = db_factory()
+    session_id, actor, pre = _seed_check_request(db)
+    session_service.add_event(
+        db, session_id, "system", "请 测试角色 进行一次「聆听」检定", actor_name="系统",
+        metadata={"check_request": True, "skill": "聆听", "char_id": actor.id},
+    )
+    assert not planned_effects.requested_check_fallback_command(
+        db, session_id, actor, "格斗(斗殴)", pre,
+    )
+
+
+def test_san_guard_check_does_not_count_as_answer(db_factory):
+    """系统守卫补的 SAN 检定不算对这次申请的答复——那是恐怖裁定，不是玩家申请的那个。"""
+    from app.services import planned_effects
+
+    db = db_factory()
+    session_id, actor, pre = _seed_check_request(db)
+    session_service.add_event(
+        db, session_id, "system", "请 测试角色 进行一次「理智」检定", actor_name="系统",
+        metadata={"check_request": True, "kind": "san_check", "skill": "SAN",
+                  "char_id": actor.id},
+    )
+    cmd = planned_effects.requested_check_fallback_command(
+        db, session_id, actor, "格斗(斗殴)", pre,
+    )
+    assert "[DICE_CHECK:" in cmd
+
+
+def test_explicit_no_check_verdict_is_respected(db_factory):
+    """KP 明说这次不用掷 → 尊重它的裁定权，不补挂。"""
+    from app.services import planned_effects
+
+    db = db_factory()
+    session_id, actor, pre = _seed_check_request(db)
+    session_service.add_event(
+        db, session_id, "narration", "这无需检定，你一眼便看清那扇门根本没有锁。",
+        actor_name="KP",
+    )
+    assert not planned_effects.requested_check_fallback_command(
+        db, session_id, actor, "格斗(斗殴)", pre,
+    )

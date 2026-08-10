@@ -938,6 +938,7 @@ async def run_chat_generation(session_id: str) -> None:
                 CHECK_REQUEST_PROMPT.format(
                     actor=acting.name, skill=requested_skill, intent=player_text,
                 ),
+                requested_check=(acting, requested_skill),
                 # 暂存式申请：这一轮里还有玩家的台词与行动，队友得像常规回合那样接话——
                 # 否则「说一句 + 顺手查一下」会让队友从申请一路哑到投骰结果之后（这条路和
                 # 投骰续写都不跑队友回合）。打字申请的老路径维持原样，不跑队友。
@@ -1075,8 +1076,12 @@ async def _run_kp_turn(
     then_team_turn: list[Character] | None = None,
     sanity_guard: bool = False,
     mishap_guard: bool = False,
+    requested_check: tuple[Character, str] | None = None,
 ) -> None:
     """跑一轮 KP：注入 user_prompt → 流式叙事 → 处理指令（待定检定/掷骰/场景等）→ done。
+
+    ``requested_check=(角色, 技能名)`` 给定时（玩家亲口申请检定的那条路）：叙事结束后确定性
+    兜底——玩家点下的那次申请必须有归宿（见 ``planned_effects.requested_check_fallback_command``）。
 
     ``then_team_turn`` 给定时（如玩家大地图前往后），在 KP 叙事与指令处理之后、``done`` 之前
     再跑一轮 AI 队友回合——否则这条路（不经 run_chat_generation）的队友永远没有发言机会。
@@ -1168,6 +1173,18 @@ async def _run_kp_turn(
             ):
                 room_hub.broadcast(session_id, chunk)
 
+    # 玩家亲口申请的检定必须有归宿：KP 把它写成叙事顺过去时确定性补挂（详见守卫的文档）。
+    if requested_check is not None:
+        cmd = planned_effects.requested_check_fallback_command(
+            db, session_id, requested_check[0], requested_check[1], pre_gen_seq,
+        )
+        if cmd:
+            async for chunk in _process_commands(
+                db, session_id, cmd, module, player_char, game_session, llm,
+                teammates=party_others, allow_rule_lookup=False,
+            ):
+                room_hub.broadcast(session_id, chunk)
+
     if then_team_turn:
         db.refresh(game_session)  # 叙事里可能有 [SCENE_CHANGE]/[MOVE] 改了位置，重取再判分头
         async for chunk in _run_team_turn(
@@ -1205,6 +1222,7 @@ async def run_check_request_generation(
                 actor=actor.name, skill=skill,
                 intent=intent.strip() or "（未说明，需你结合当前情境自行判断意图）",
             ),
+            requested_check=(actor, skill),
         )
     except asyncio.CancelledError:
         logger.info("检定申请生成被取消: session=%s", session_id)
