@@ -781,12 +781,67 @@ def _rule_block(rule_excerpts: list[dict] | None) -> str:
     )
 
 
-def _extract_json_object(raw: Any) -> dict | None:
+def _repair_truncated_json(text: str) -> dict | None:
+    """把**被截断**的 JSON 补全成可解析的对象：丢掉末尾那个残缺字段，按嵌套栈补齐闭合符。
+
+    输出被服务端上限截断是常见故障，日志里长这样——JSON 停在半截键上：
+
+        {"intent": "...", "requires_check": true, "check": {...}, "auto_
+
+    此前这种输出整份丢弃、回退旧流程，于是这一轮的线索记账、SAN 裁定、安全边界、开战判断
+    全没了。但 TurnPlan 的每个字段都有默认值，前面已经写完的 intent/requires_check/check
+    本来完全可用——为一个半截字段丢掉整轮裁定不划算。
+
+    做法：单遍扫描（正确处理字符串与转义），记住最后一个「值刚结束」的安全边界（逗号或
+    闭合括号处），截到那里再按当时未闭合的栈补齐。补不出合法对象就返回 None，行为同以前。
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    stack: list[str] = []      # 待补的闭合符，栈顶在末尾
+    in_str = esc = False
+    cut, cut_stack = -1, []    # 最后一个安全截断点，及该处仍未闭合的栈快照
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            cut, cut_stack = i + 1, list(stack)
+        elif ch == ",":
+            cut, cut_stack = i, list(stack)   # 逗号处切：其后那个半截字段整个丢掉
+    if cut < 0 or not cut_stack:
+        return None   # 连一个完整字段都没写完，或整份本就闭合（那不是截断，另有问题）
+    candidate = text[start:cut].rstrip().rstrip(",") + "".join(reversed(cut_stack))
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _extract_json_object(raw: Any, salvage_truncated: bool = False) -> dict | None:
     """从 LLM 原始输出里稳健地抠出一个 JSON object。
 
     模型常不严格遵守 ``response_format=json_object``：可能已是 dict、被 ```json 围栏包裹、
     或在 JSON 前后夹带解释文字。依次尝试：直接用 dict → 剥围栏后整体解析 → 抠出首个 ``{``
     到末个 ``}`` 的子串解析。都不成返回 None，由调用方回退旧流程。
+
+    ``salvage_truncated=True``：再多一步——被输出上限截断时抢救已经写完的字段（见
+    ``_repair_truncated_json``）。**只有「半份结果也有用」的调用方才该开**：TurnPlan 每个
+    字段都有默认值，救回 intent/check 就够本轮裁定用。校验器那种「判定 + 改写文本」成对
+    出现的结果不能开——只救回一个 violated=true、改写文本却没了，比直接放行更糟。
     """
     if isinstance(raw, dict):
         return raw
@@ -809,8 +864,18 @@ def _extract_json_object(raw: Any) -> dict | None:
         try:
             return json.loads(text[start:end + 1])
         except json.JSONDecodeError:
-            return None
-    return None
+            pass
+    if not salvage_truncated:
+        return None
+    # 多半是被服务端输出上限截断（停在半截字段上）：抢救已经写完的部分，
+    # 而不是为一个残缺字段丢掉整份裁定。
+    repaired = _repair_truncated_json(text)
+    if repaired is not None:
+        logger.warning(
+            "LLM 输出被截断（多为服务端输出上限），已抢救出前 %d 个字段：%s",
+            len(repaired), "、".join(list(repaired)[:8]),
+        )
+    return repaired
 
 
 async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
@@ -826,7 +891,7 @@ async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
         logger.exception("KP 回合规划器调用失败，已回退旧流程")
         return None
 
-    data = _extract_json_object(raw)
+    data = _extract_json_object(raw, salvage_truncated=True)
     if data is None:
         snippet = str(raw)[:200]
         if not snippet.strip():

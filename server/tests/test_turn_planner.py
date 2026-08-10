@@ -746,3 +746,55 @@ def test_plan_directive_renders_ending_block():
 def test_plan_directive_without_ending_has_no_block():
     text = turn_planner.build_turn_plan_message(turn_planner.TurnPlan())["content"]
     assert "已抵达终局" not in text
+
+
+# ── 输出被截断：抢救已经写完的字段，别整份丢掉 ────────────────────────
+
+# 线上日志里的真实片段：服务端输出上限把 JSON 截在了半截键 "auto_ 上。
+_TRUNCATED = """{
+  "intent": "调查大型建筑内神龛，比较其与祠堂神龛的差异，并尝试读取村规",
+  "requires_check": true,
+  "check": {
+    "skill": "侦查",
+    "difficulty": "normal",
+    "reason": "神龛细致的刻痕与文字需要认真观察才能辨明",
+    "chars": []
+  },
+  "auto_"""
+
+
+@pytest.mark.asyncio
+async def test_truncated_plan_is_salvaged_not_discarded():
+    """被截断的计划要抢救出前面写完的字段，而不是回退旧流程把整轮裁定丢掉。
+
+    此前这种输出整份丢弃：这一轮的检定裁定、线索记账、SAN 判断、安全边界全没了，
+    而 intent/requires_check/check 明明已经写完、完全可用。
+    """
+    class _FakeLLM:
+        async def complete(self, messages, temperature=0, response_format=None, max_tokens=None):
+            return _TRUNCATED
+
+    plan = await turn_planner.run_turn_planner(_FakeLLM(), [{"role": "user", "content": "x"}])
+    assert plan is not None
+    assert plan.requires_check is True
+    assert plan.check.skill == "侦查"          # 检定裁定被救回来了
+    assert plan.combat.should_start is False   # 没写到的字段走默认值
+
+
+def test_repair_handles_truncation_anywhere():
+    def ex(t):
+        return turn_planner._extract_json_object(t, salvage_truncated=True)
+    assert ex('{"a": 1, "b": "没写完的句子') == {"a": 1}            # 断在字符串中间
+    assert ex('{"a": 1, "list": ["x", "y", "z') == {"a": 1, "list": ["x", "y"]}
+    assert ex('{"a": 1, "o": {"p": 2, "q": {"r": 3, "s') == {"a": 1, "o": {"p": 2, "q": {"r": 3}}}
+
+
+def test_repair_does_not_touch_healthy_or_hopeless_output():
+    def ex(t):
+        return turn_planner._extract_json_object(t, salvage_truncated=True)
+    assert ex('{"a": 1, "b": 2}') == {"a": 1, "b": 2}   # 完整输出照旧
+    assert ex('{"a') is None                            # 一个字段都没写完 → 仍回退
+    assert ex("hello world") is None                    # 压根不是 JSON
+    assert ex('{"a": "含 \\" 转义引号的值", "b": 2, "c') == {"a": '含 " 转义引号的值', "b": 2}
+    # 默认不抢救：只有明确开了 salvage 的调用方才拿半份结果（校验器等成对结果不能开）
+    assert turn_planner._extract_json_object('{"a": 1, "b') is None
