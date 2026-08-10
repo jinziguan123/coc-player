@@ -15,7 +15,13 @@ from app.ai.llm_factory import get_fast_llm
 from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import human_kp_service, module_image_service, session_service, turn_context
+from app.services import (
+    human_kp_service,
+    module_image_service,
+    npc_identity,
+    session_service,
+    turn_context,
+)
 from app.services.event_protocol import make_chunk
 from app.services.room_hub import room_hub
 
@@ -469,9 +475,19 @@ def _maybe_encounter_illustration(
 
     首个能匹配到模组 NPC 的敌人若带 ``encounter_image`` 缓存则秒出并不再生图；
     否则后台生图，成功回写该 NPC 的 ``encounter_image``（临场杂兵无模组条目，不回写）。
+
+    **卡面标题走身份遮蔽**：这张卡是玩家看的。战斗面板、检定卡、对抗卡都已经遮住了玩家
+    还没认出来的东西（显示「不明存在」），唯独这张卡直接印模组里的名字——而模组名普遍写成
+    「外号（神话身份）」，于是 KP 在旁边好好写着「一团比夜色更浓的黑」，卡上却大字写着
+    「田间潜随者（莎布·尼古拉丝化身）」，玩家一眼看穿自己在跟哪尊旧日支配者打交道。
+    生图提示词与缓存回写仍用真名/真 id（那不给玩家看）。
     """
     try:
-        names = [str(e.get("name") or "").strip() for e in (enemies or []) if e.get("name")]
+        mask = npc_identity.build_masker(db, session_id, module)
+        names = [
+            mask(str(e.get("name") or "").strip())
+            for e in (enemies or []) if e.get("name")
+        ]
         if not names:
             return []
         # 敌方里首个模组正牌 NPC：它的缓存与回写位（杂兵没有归宿，只借它的档案存图）

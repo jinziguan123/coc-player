@@ -237,3 +237,44 @@ def test_遮名时用的就是这套称呼(db_factory):
 ])
 def test_拆名(raw, expected):
     assert ni.split_name(raw) == expected
+
+
+def test_遭遇配图卡的名字也要遮住(db_factory, monkeypatch):
+    """截图里的那一幕：战斗面板显示「不明存在」，遭遇卡却大字印着神话真名。
+
+    这张卡是给玩家看的，此前直接印模组名——而模组名普遍是「外号（神话身份）」，
+    KP 在旁边好好写着「一团比夜色更浓的黑」，卡上一行字就把旧日支配者的名号抖了出来。
+    """
+    from app.services import illustration_service
+
+    monkeypatch.setattr(illustration_service, "_spawn_illustration",
+                        lambda *a, **k: False)      # 不起生图任务
+    db = db_factory()
+    module, hero, session = _seed(db)
+    _narrate(db, session.id, "门缝里探出一截暗色的东西，看不见头，也看不见眼。")
+
+    enemies = [n for n in module.npcs if n["id"] == "npc_field"]
+    chunks = illustration_service._maybe_encounter_illustration(
+        db, session.id, module, enemies,
+    )
+    assert chunks
+    card = [e for e in session_service.get_session_events(db, session.id)
+            if (e.metadata_ or {}).get("icat") == "encounter"][-1]
+    assert MONSTER not in card.content and "莎布" not in card.content
+    assert ni.UNKNOWN_LABEL in card.content
+
+
+def test_叙事里点过名的怪物_遭遇卡照常报真名(db_factory, monkeypatch):
+    """遮的是「玩家还不知道」，不是无差别打码——KP 已经在叙事里直呼其名就该照显。"""
+    from app.services import illustration_service
+
+    monkeypatch.setattr(illustration_service, "_spawn_illustration", lambda *a, **k: False)
+    db = db_factory()
+    module, hero, session = _seed(db)
+    _narrate(db, session.id, f"香澄压低声音：那是{MONSTER}，山里的老人管它叫田间潜随者。")
+
+    enemies = [n for n in module.npcs if n["id"] == "npc_field"]
+    illustration_service._maybe_encounter_illustration(db, session.id, module, enemies)
+    card = [e for e in session_service.get_session_events(db, session.id)
+            if (e.metadata_ or {}).get("icat") == "encounter"][-1]
+    assert MONSTER in card.content
