@@ -2028,8 +2028,10 @@ export function GameSessionPage() {
                     <span className="chat-bubble-player">{msg.content}</span>
                   </div>
                 ) : !isPlayer && msg.type === 'dialogue' ? (
-                  // NPC 气泡：有立绘（metadata.portrait，缓存秒挂或生成后 event_patch 补挂）时在气泡旁放小圆头像
-                  <div className="flex items-end gap-2">
+                  // NPC 气泡：有立绘（metadata.portrait，缓存秒挂或生成后 event_patch 补挂）时在气泡旁放小圆头像。
+                  // 头像顶对齐气泡，紧跟在名字下面：底对齐时 30px 的头像会被推到气泡底部，
+                  // 气泡越长名字离头像越远（单行 18px、四行就 73px），两者看着不像一伙的。
+                  <div className="flex items-start gap-2">
                     {msg.metadata?.portrait ? (
                       <LiveModuleImage
                         src={String(msg.metadata.portrait)}

@@ -2143,7 +2143,9 @@ body {
   font-family: var(--font-game);   /* 游戏内信息：NPC 台词走圆润楷体 */
   background: var(--npc-bubble-bg);
   border: 1px solid var(--npc-bubble-border);
-  border-radius: 4px 4px 4px 0;
+  /* 直角那一角是指向头像的「尾巴」。头像改为顶对齐（紧跟名字下方）后，
+     尾巴也从左下挪到左上，否则它指着头像下方的空气。 */
+  border-radius: 0 4px 4px 4px;
   line-height: 1.7;
   box-shadow: 0 1px 4px var(--shadow-color);
 }
