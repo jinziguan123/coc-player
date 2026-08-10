@@ -217,3 +217,55 @@ async def test_validate_fails_open_on_truncated_json():
     llm = _FakeLLM(resp='{"violated": true, "reason": "泄露了秘密的具体内容但这段话还没写完')
     result = await turn_validator.validate_turn_narration(llm, plan, "旁白内容")
     assert result is None  # 截断无法解析，按放行处理，不阻塞跑团
+
+
+# ── 谁算「玩家/队友」 ───────────────────────────────────────────────────
+
+
+def test_prompt_names_the_party_so_npcs_are_not_mistaken_for_teammates():
+    """线上真实误判：NPC 香澄澪一路跟着主角、台词很多，校验器把她当成队友，
+    于是判定 KP「代演了队友香澄的动作与内心」并改写落库版本——把 KP 本职该写的
+    NPC 表演删了。根因是提示词从头到尾没说过谁是玩家一侧，它只能靠戏份猜。"""
+    plan = TurnPlan()
+    msgs = turn_validator.build_validator_messages(
+        plan, "香澄澪弯下腰去读那块木牌，肩头绷紧。",
+        turn_inputs="[沃什·帕杉德] 我跟上去",
+        party_names={"沃什·帕杉德"},
+    )
+    joined = "\n".join(m["content"] for m in msgs)
+    assert "沃什·帕杉德" in joined
+    assert "名单之外的一切角色都是 NPC" in joined
+    assert "不要按" in joined and "戏份" in joined      # 明确禁止按戏份猜
+
+
+def test_prompt_omits_party_block_when_roster_unknown():
+    """拿不到名单时不硬塞一个空名单——那等于告诉校验器「没有玩家」。"""
+    msgs = turn_validator.build_validator_messages(TurnPlan(), "一段旁白")
+    joined = "\n".join(m["content"] for m in msgs)
+    assert "玩家一侧的角色名单" not in joined
+
+
+def test_party_roster_drops_blanks():
+    msgs = turn_validator.build_validator_messages(
+        TurnPlan(), "旁白", party_names=["沃什", "  ", "", "亨利"],
+    )
+    joined = "\n".join(m["content"] for m in msgs)
+    assert "沃什、亨利" in joined
+
+
+@pytest.mark.asyncio
+async def test_party_names_threaded_to_validator_prompt():
+    plan = TurnPlan(safety=SafetyPolicy(do_not_reveal=["隐藏真相"]))
+    captured: dict = {}
+
+    class _Cap:
+        async def complete(self, messages, **kw):
+            captured["m"] = messages
+            return '{"violated": false}'
+
+    await turn_validator.validate_turn_narration(
+        _Cap(), plan, "香澄澪转过头。", party_names={"沃什·帕杉德", "亨利·卡特"},
+    )
+    joined = "\n".join(m["content"] for m in captured["m"])
+    assert "沃什·帕杉德" in joined and "亨利·卡特" in joined
+    assert "香澄澪" not in joined.split("【玩家一侧的角色名单】")[1].split("\n\n")[0]

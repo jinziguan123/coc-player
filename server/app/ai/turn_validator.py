@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -62,7 +62,8 @@ def _looks_suspicious(narration: str, plan: TurnPlan, turn_inputs: str = "") -> 
 
 
 def build_validator_messages(
-    plan: TurnPlan, narration: str, seen_context: str = "", turn_inputs: str = "",
+    plan: TurnPlan, narration: str, seen_context: str = "",
+    turn_inputs: str = "", party_names: Iterable[str] | None = None,
 ) -> list[dict]:
     do_not_reveal = json.dumps(plan.safety.do_not_reveal, ensure_ascii=False)
     seen_block = (
@@ -73,6 +74,17 @@ def build_validator_messages(
         "\n\n【本轮已在界面展示的玩家/队友消息】（只能承接，不得复述、润色或代演）：\n"
         + turn_inputs.strip() + "\n"
     ) if turn_inputs.strip() else ""
+    # 名单是「代演」这条的判据。不给的话校验器只能靠猜——线上真实误判过：一个一路
+    # 跟着主角行动、台词很多的 NPC（香澄澪）被当成了队友，于是它把这个 NPC 的动作、
+    # 姿势、内心统统当作「代演玩家」删掉，等于把 KP 该写的东西改没了。
+    roster = [n.strip() for n in (party_names or []) if str(n).strip()]
+    party_block = (
+        "\n\n【玩家一侧的角色名单】（只有这些名字算「玩家/队友」）：\n"
+        + "、".join(roster)
+        + "\n**名单之外的一切角色都是 NPC**，由 KP 扮演——写他们的动作、姿势、表情、"
+          "内心与台词是 KP 的本职，绝不算代演。判断第 3、4 条时只认这份名单，不要按"
+          "「谁戏份多」「谁跟主角同行」去猜。\n"
+    ) if roster else ""
     return [
         {
             "role": "system",
@@ -88,7 +100,7 @@ def build_validator_messages(
                 "本轮必须对玩家保密的**隐藏真相**（其身份/本质/成因/幕后关联/后果，玩家须靠游戏"
                 "自行揭开）：\n"
                 f"{do_not_reveal}\n"
-                + seen_block + turn_block +
+                + party_block + seen_block + turn_block +
                 "\n判定标准——**只拦「点破真相」，不拦「亲历现象」**：\n"
                 "· 违规 = 旁白**命名、点破或解释**了上述隐藏真相：直接说出它是什么/是谁/为何发生/"
                 "将导致什么；或让角色的内心「已然明白/认出」了这层真相（等于把答案塞进玩家脑子）；"
@@ -117,6 +129,7 @@ def build_validator_messages(
 async def validate_turn_narration(
     llm: Any, plan: TurnPlan | None, narration: str, seen_context: str = "",
     turn_inputs: str = "", on_start: Callable[[], None] | None = None,
+    party_names: Iterable[str] | None = None,
 ) -> TurnValidation | None:
     """校验一段已生成的旁白是否违反本轮裁定计划的硬约束，违反则给出改写版本。
 
@@ -135,7 +148,9 @@ async def validate_turn_narration(
     if on_start is not None:
         on_start()
 
-    messages = build_validator_messages(plan, narration, seen_context, turn_inputs)
+    messages = build_validator_messages(
+        plan, narration, seen_context, turn_inputs, party_names=party_names,
+    )
     try:
         # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限会把 JSON 截成半截
         # 字符串（线上「Unterminated string」正是如此）。交服务端默认上限，complete 已内部流式。

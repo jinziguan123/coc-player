@@ -480,6 +480,7 @@ async def _run_generation(
         await _validate_and_patch_narration(
             llm, plan, result, event_order, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            party_names=party_names,
         )
         _persist_narration(db, session_id, result, event_order)
         _reorder_turn_events(db, session_id, event_order, base_seq)
@@ -506,6 +507,7 @@ async def _run_generation(
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            party_names=party_names,
         )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
@@ -678,6 +680,8 @@ async def _run_split_generation(
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            # 取**全队**而非本组成员：别组的队友同样不能被代演
+            party_names={player_char.name} | {t.name for t in (teammates or [])},
         )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本组 NPC 台词记入其互动史（听众＝该组成员，信息不跨组共享）
