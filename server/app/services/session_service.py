@@ -1150,29 +1150,63 @@ def get_latest_events(
     return results, has_more
 
 
+#: 参与检索的事件类型（系统提示、幕后推演等噪音不进）。
+SEARCHABLE_EVENT_TYPES = ("narration", "dialogue", "action", "dice", "ooc")
+
+#: 检索结果片段的长度上限，以及关键词左侧留多少上文。
+SNIPPET_CHARS = 160
+SNIPPET_LEAD = 40
+
+
+def search_snippet(content: str, query: str, width: int = SNIPPET_CHARS) -> str:
+    """截一段**以命中处为中心**的片段，两端截断处补省略号。
+
+    原先是无脑取正文前 140 字。一段旁白动辄两三百字，关键词落在后半截时切下来的
+    片段里根本看不到它——玩家看到的就是「这条明明不含关键词，怎么也被搜出来了」。
+    匹配是在全文上做的，展示也得对得上。
+    """
+    text = (content or "").strip()
+    q = (query or "").strip()
+    if len(text) <= width:
+        return text
+    idx = text.lower().find(q.lower()) if q else -1
+    if idx < 0:                                  # 查不到（大小写/空白差异）→ 退回取开头
+        return text[:width].rstrip() + "…"
+    start = max(0, idx - SNIPPET_LEAD)
+    end = min(len(text), start + width)
+    start = max(0, min(start, end - width))      # 命中在结尾附近时把窗口往左推满
+    return ("…" if start > 0 else "") + text[start:end].strip() + ("…" if end < len(text) else "")
+
+
 def search_events(
-    db: Session, session_id: str, query: str, limit: int = 30,
-) -> list[EventLog]:
-    """在本局历史里模糊检索（content LIKE），按时间倒序返回匹配的叙事/对话/行动/骰子/场外
-    事件（排除系统提示等噪音）。空查询返回空列表。"""
+    db: Session, session_id: str, query: str, limit: int = 20,
+    offset: int = 0, order: str = "desc",
+) -> tuple[list[EventLog], int]:
+    """在本局历史里模糊检索（content LIKE），返回 (本页事件, 命中总数)。
+
+    ``order``：``desc`` 由新到旧（默认，最近发生的先看），``asc`` 由旧到新。
+    命中总数供前端画分页——没有它，用户不知道自己在多大的结果集里翻。
+    """
     q = (query or "").strip()
     if not q:
-        return []
+        return [], 0
     like = f"%{q}%"
+    base = db.query(EventLog).filter(
+        EventLog.session_id == session_id,
+        EventLog.content.like(like),
+        EventLog.event_type.in_(SEARCHABLE_EVENT_TYPES),
+    )
+    total = base.count()
+    col = EventLog.sequence_num
     rows = (
-        db.query(EventLog)
-        .filter(
-            EventLog.session_id == session_id,
-            EventLog.content.like(like),
-            EventLog.event_type.in_(["narration", "dialogue", "action", "dice", "ooc"]),
-        )
-        .order_by(EventLog.sequence_num.desc())
-        .limit(limit)
+        base.order_by(col.asc() if order == "asc" else col.desc())
+        .offset(max(0, offset))
+        .limit(max(1, limit))
         .all()
     )
     # 双保险：幕后事件（event_type=system）本就被类型过滤挡住，这里再按 kp 哨兵
     # 显式过滤一次，防未来搜索范围扩大后泄露「仅 KP 可见」内容。
-    return [e for e in rows if not is_kp_only_event(e)]
+    return [e for e in rows if not is_kp_only_event(e)], total
 
 
 def human_character_ids(db: Session, session_id: str) -> set[str]:

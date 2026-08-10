@@ -7651,7 +7651,7 @@
     },
     "/api/sessions/{session_id}/search": {
       "get": {
-        "description": "在本局历史里模糊检索，返回匹配事件（含 sequence_num 供前端定位/跳转）。",
+        "description": "在本局历史里模糊检索，返回匹配事件（含 sequence_num 供前端定位/跳转）。\n\n``order``：desc 由新到旧（默认），asc 由旧到新。``total`` 供前端画分页。",
         "operationId": "search_history_api_sessions__session_id__search_get",
         "parameters": [
           {
@@ -7670,6 +7670,36 @@
             "schema": {
               "default": "",
               "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "title": "Order",
               "type": "string"
             }
           }

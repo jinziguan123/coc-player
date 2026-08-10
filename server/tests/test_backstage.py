@@ -373,10 +373,11 @@ def test_isolation_b_search_history(db_factory):
     """出口 b：历史搜索不命中幕后事件。"""
     db = db_factory()
     session, module, player, kp_ev = _seed_with_backstage_event(db)
-    hits = session_service.search_events(db, session.id, "地窖")
+    hits, total = session_service.search_events(db, session.id, "地窖")
     assert hits == []
     # 普通事件照常可搜
-    assert any("烛火" in e.content for e in session_service.search_events(db, session.id, "烛火"))
+    normal, _ = session_service.search_events(db, session.id, "烛火")
+    assert any("烛火" in e.content for e in normal)
 
 
 def test_isolation_c_team_context(db_factory):

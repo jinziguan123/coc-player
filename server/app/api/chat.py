@@ -446,23 +446,37 @@ async def delete_event(
 def search_history(
     session_id: str,
     q: str = "",
+    limit: int = 20,
+    offset: int = 0,
+    order: str = "desc",
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    """在本局历史里模糊检索，返回匹配事件（含 sequence_num 供前端定位/跳转）。"""
+    """在本局历史里模糊检索，返回匹配事件（含 sequence_num 供前端定位/跳转）。
+
+    ``order``：desc 由新到旧（默认），asc 由旧到新。``total`` 供前端画分页。
+    """
     require_session_viewer(db, session_id, token)
-    rows = session_service.search_events(db, session_id, q)
+    rows, total = session_service.search_events(
+        db, session_id, q, limit=limit, offset=offset, order=order,
+    )
     return {
+        "total": total,
+        "offset": max(0, offset),
+        "limit": max(1, limit),
         "results": [
             {
                 "id": e.id,
                 "sequence_num": e.sequence_num,
                 "event_type": e.event_type,
                 "actor_name": e.actor_name or "",
-                "content": (e.content or "")[:140],
+                # 片段以命中处为中心：一段旁白两三百字，关键词常落在后半截，
+                # 取开头会切掉它，看着就像「这条不含关键词却被搜出来了」。
+                "content": session_service.search_snippet(e.content or "", q),
+                "created_at": e.created_at.isoformat() if e.created_at else None,
             }
             for e in rows
-        ]
+        ],
     }
 
 

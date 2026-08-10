@@ -1814,6 +1814,8 @@ export interface paths {
         /**
          * Search History
          * @description 在本局历史里模糊检索，返回匹配事件（含 sequence_num 供前端定位/跳转）。
+         *
+         *     ``order``：desc 由新到旧（默认），asc 由旧到新。``total`` 供前端画分页。
          */
         get: operations["search_history_api_sessions__session_id__search_get"];
         put?: never;
@@ -6795,6 +6797,9 @@ export interface operations {
         parameters: {
             query?: {
                 q?: string;
+                limit?: number;
+                offset?: number;
+                order?: string;
             };
             header?: never;
             path: {

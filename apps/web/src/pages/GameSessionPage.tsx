@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { api, connectSSE, getServerUrl } from '../api/client'
 import { runLiveSession } from '@/lib/liveSession'
+import { HistorySearchModal } from '../components/game/HistorySearchModal'
 import { getSceneBackdropEnabled } from '@/lib/theme'
 import {
   buildPartyByName,
@@ -70,7 +71,6 @@ interface KnownLocation {
   nodeKind?: 'scene' | 'terrain'
 }
 interface MapNodePayload { id: string; q: number; r: number; biome: string; scene_id?: string | null }
-interface SearchHit { id: string; sequence_num: number; event_type: string; actor_name: string; content: string }
 
 // 距底多少像素以内算「已经在最新处」。留一点余量：markdown 渲染完成后高度会有零点几像素的
 // 抖动，卡死 0 会让按钮在贴底时忽隐忽现。
@@ -320,9 +320,6 @@ export function GameSessionPage() {
   const [showInterrupt, setShowInterrupt] = useState(false)
   // 历史检索：模糊搜索本局历史 + 跳转到对应消息
   const [showSearch, setShowSearch] = useState(false)
-  const [searchQ, setSearchQ] = useState('')
-  const [searchResults, setSearchResults] = useState<SearchHit[]>([])
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 回合确认制：本回合各真人的确认进度
   const [turnState, setTurnState] = useState<{ confirmed_ids: string[]; total: number; ready: boolean } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -1256,22 +1253,6 @@ export function GameSessionPage() {
     }
   }
 
-  // 历史检索：输入防抖后查后端；结果点击可跳转到对应消息。
-  const runSearch = (q: string) => {
-    setSearchQ(q)
-    if (searchTimer.current) clearTimeout(searchTimer.current)
-    if (!q.trim() || !currentSession) { setSearchResults([]); return }
-    const sid = currentSession.id
-    searchTimer.current = setTimeout(async () => {
-      try {
-        const r = await api.get<{ results: SearchHit[] }>(
-          `/sessions/${sid}/search?q=${encodeURIComponent(q.trim())}`,
-        )
-        setSearchResults(r.results || [])
-      } catch { setSearchResults([]) }
-    }, 250)
-  }
-
   // 跳转到某条历史：若未加载则不断向前翻页直到出现，再滚动居中并短暂高亮。
   const jumpToEvent = async (eventId: string) => {
     if (!currentSession) return
@@ -1555,52 +1536,12 @@ export function GameSessionPage() {
             <img src={portraitView} alt="" className="block w-full cursor-pointer" onClick={() => setPortraitView(null)} />
           </Modal>
         )}
-        {showSearch && (
-          // 历史检索悬浮窗（portal 到 body，遮罩盖全屏含侧栏、居中于聊天区、Esc 关闭）
-          <Modal onClose={() => { setShowSearch(false); setSearchQ(''); setSearchResults([]) }} widthClass="max-w-xl" align="top">
-            <div>
-              <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
-                <Search size={16} style={{ color: 'var(--color-text-secondary)' }} />
-                <input
-                  autoFocus
-                  value={searchQ}
-                  onChange={(e) => runSearch(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Escape') setShowSearch(false) }}
-                  placeholder="模糊检索本局历史（旁白 / 对话 / 行动 / 骰子 / 场外）…"
-                  className="input flex-1 !py-1 text-sm"
-                />
-                <button
-                  onClick={() => { setShowSearch(false); setSearchQ(''); setSearchResults([]) }}
-                  title="关闭检索（Esc）"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="max-h-[55vh] overflow-y-auto chat-scroll p-2 flex flex-col gap-1">
-                {!searchQ.trim() ? (
-                  <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--color-text-secondary)' }}>
-                    输入关键词以检索本局历史记录，点结果可跳转到对应位置
-                  </div>
-                ) : searchResults.length === 0 ? (
-                  <div className="text-xs px-2 py-4 text-center" style={{ color: 'var(--color-text-secondary)' }}>
-                    无匹配记录
-                  </div>
-                ) : searchResults.map((h) => (
-                  <button
-                    key={h.id}
-                    onClick={() => jumpToEvent(h.id)}
-                    className="text-left text-xs px-2 py-1.5 rounded hover:opacity-80"
-                    style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
-                    title="跳转到该记录"
-                  >
-                    <span style={{ color: 'var(--color-text-accent)' }}>{h.actor_name || '旁白'}</span>
-                    <span className="ml-1" style={{ color: 'var(--color-text-secondary)' }}>{h.content}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </Modal>
+        {showSearch && currentSession && (
+          <HistorySearchModal
+            sessionId={currentSession.id}
+            onClose={() => setShowSearch(false)}
+            onJump={jumpToEvent}
+          />
         )}
         {currentSession.participants && currentSession.participants.length > 1 && (
           <div className="pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
