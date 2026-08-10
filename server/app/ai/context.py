@@ -877,6 +877,38 @@ def _format_backstage_section(events: list[EventLog]) -> str:
     return "\n".join(lines)
 
 
+def _format_combat_in_progress(session) -> str:
+    """战斗轮**正在进行**时给 KP 的硬约束段；不在战斗中返回空串（不注入，行为不变）。
+
+    战斗期间攻防由引擎逐轮结算、由战斗子代理逐轮叙述；主线 KP 若在此时被叫起来
+    （投骰后续写、进场检定续写等），必须知道自己不是在写一段自由叙事——否则它会顺手
+    把这场冲突「讲完」：让怪物退走、让队友把人拖开、给一个收尾。而战斗态还立着，
+    下一轮引擎照样让那只已经退走的东西扑上来。
+    参战方名字取战斗态里的那一份——建参战方时已经过身份遮蔽（玩家还没认出来的东西
+    在战斗面板里就叫「不明存在」），这里直接沿用，不会从模组名把真名漏回来。
+    """
+    combat = (getattr(session, "world_state", None) or {}).get("combat") or {}
+    if not combat.get("active"):
+        return ""
+    alive = [
+        f"{p.get('name') or ''}（HP {p.get('hp')}/{p.get('max_hp')}"
+        + (f"，{p.get('status')}" if p.get("status") not in (None, "ok") else "")
+        + "）"
+        for p in (combat.get("initiative") or [])
+    ]
+    return (
+        "\n\n## 战斗进行中（最高优先级状态约束）\n"
+        f"- 本场结构化战斗仍在进行：第 {combat.get('round', 1)} 轮，"
+        f"参战方 {'、'.join(alive) or '（见战斗面板）'}。\n"
+        "- 攻防的命中、伤害、生死、逃脱**全部由引擎逐轮结算**，每一轮的表现另有专门叙述。\n"
+        "- 因此你**绝不能**在本次叙述里：写出任何一方命中/受伤/倒下、写谁把谁拉开或救走、"
+        "写敌人退走或放弃、写战斗结束或就此收场、宣布任何胜负。那会和下一轮的实际结算直接打架"
+        "——你刚写完它缩回黑暗里，引擎下一条就让它扑上来。\n"
+        "- 你在这里只负责当下这一刻的感官与氛围（疼痛、气味、光影、心跳），"
+        "并把局面**留在僵持中**，交还给战斗轮继续推进。\n"
+    )
+
+
 def _format_combat_result(result: dict) -> str:
     """把刚结束的战斗/追逐结果摘要拼成注入段，供 KP 续写余波（只给结论，不重放逐轮血肉）。"""
     label = {
@@ -1121,6 +1153,14 @@ def build_kp_context(
     if combat_result:
         segs.append(_Seg(_format_combat_result(combat_result),
                          SYS_TIER_VOLATILE, 0, "combat-result"))
+
+    # **正在进行**的战斗：此前上下文里只有「刚结束」的摘要，没有「正打着」这回事。
+    # 于是开战后紧接着的主线生成（如投骰后续写）对战斗态一无所知，会按自由叙事的惯性
+    # 把冲突就地收尾——实测写出「怪物松开手缩回门里、队友把人拉走」，而战斗轮仍在推进，
+    # 下一条就是那只已经缩回去的东西扑上来。叙事与机制当场对撞。priority=0：本轮不给就没了。
+    combat_now = _format_combat_in_progress(session)
+    if combat_now:
+        segs.append(_Seg(combat_now, SYS_TIER_VOLATILE, 0, "combat-active"))
 
     # 手书（Handouts）：仅当模组尚有未发放的手书、且非开场时，广告 [HANDOUT] 发放能力，
     # 附「id｜类型｜标题｜发放条件」清单（正文不进上下文——发放时才由系统展开成卡片）。
