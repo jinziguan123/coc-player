@@ -19,6 +19,7 @@ from app.ai.prompts.kp_system import (
     TRAVEL_SUGGEST_INSTRUCTION,
     KP_OPENING_PROMPT,
     HANDOUT_INSTRUCTION,
+    MARK_SEEN_INSTRUCTION,
     MODULE_EXCERPT_SECTION,
     MODULE_LOOKUP_INSTRUCTION,
     RECALL_HISTORY_INSTRUCTION,
@@ -1219,6 +1220,10 @@ def build_kp_context(
             if scene_events_section:
                 segs.append(_Seg("\n\n" + scene_events_section,
                                  SYS_TIER_VOLATILE, 5, "scene-events"))
+            # 记账指令：两张清单至少有一张在场时才广告——没有清单可标，说明也没意义。
+            if ledger_section or scene_events_section:
+                segs.append(_Seg(MARK_SEEN_INSTRUCTION,
+                                 SYS_TIER_VOLATILE, 6, "mark-seen"))
             npc_memory_section = world_memory.format_npc_memory_section(ws_mem, npcs)
             if npc_memory_section:
                 segs.append(_Seg("\n\n" + npc_memory_section,

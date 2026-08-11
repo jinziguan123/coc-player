@@ -18,7 +18,7 @@ from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
-from app.services import chat_service, planned_effects, world_memory
+from app.services import chat_service, planned_effects, turn_effects, world_memory
 
 
 # ── 纯函数：台账写入 ──────────────────────────────────────────────
@@ -626,6 +626,91 @@ def test_narrated_progress_fail_open(db_factory):
         db, session.id, session, None, player, [], pre_gen_seq=0,
     )
     assert not (session.world_state or {}).get("clue_ledger")
+
+
+# ── [MARK_SEEN]：KP 主动声明「这条我给过了」──────────────────────
+
+
+def _mark(db, session, module, player, **kv):
+    return turn_effects._exec_mark_seen(
+        db, session.id, session, module, kv, player, [],
+    )
+
+
+def test_mark_seen_records_clue_as_known(db_factory):
+    """KP 说「给过了」就是给过了——默认记完全掌握，不必再猜。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    note = _mark(db, session, module, player, clue="clue_5")
+    entry = (session.world_state or {}).get("clue_ledger", {}).get("clue_5")
+    assert entry["status"] == "known"
+    assert entry["discovered_by"] == [player.id]
+    assert "clue_5" in note
+
+
+def test_mark_seen_hint_level(db_factory):
+    """只透了个边角 → level=hint 记成有所察觉，后续仍可完整揭示。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _mark(db, session, module, player, clue="clue_5", level="hint")
+    assert session.world_state["clue_ledger"]["clue_5"]["status"] == "partial"
+
+
+def test_mark_seen_unknown_clue_is_skipped(db_factory):
+    """编出来的 id 静默跳过，绝不因一次误标中断叙事。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    note = _mark(db, session, module, player, clue="clue_nope")
+    assert not (session.world_state or {}).get("clue_ledger")
+    assert "未知线索 id" in note
+
+
+def test_mark_seen_records_scene_event_by_trigger(db_factory):
+    """机制点按原文引用——分组叙事里编号必然指错场景，所以刻意不用编号。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _mark(db, session, module, player, event="进入最里面的小屋被拖拽")
+    assert world_memory.scene_event_seen(session.world_state, "scene_8", 0)
+    assert not world_memory.scene_event_seen(session.world_state, "scene_8", 1)
+
+
+def test_mark_seen_scene_event_loose_match(db_factory):
+    """KP 只抄了半句也认（包含匹配兜底）。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _mark(db, session, module, player, event="阅读村规时")
+    assert world_memory.scene_event_seen(session.world_state, "scene_8", 1)
+
+
+def test_mark_seen_unmatched_event_is_skipped(db_factory):
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    note = _mark(db, session, module, player, event="在月亮上跳舞")
+    assert not (session.world_state or {}).get("scene_events_seen")
+    assert "对不上的机制点" in note
+
+
+def test_mark_seen_both_in_one_call(db_factory):
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _mark(db, session, module, player, clue="clue_3", event="阅读村规")
+    assert session.world_state["clue_ledger"]["clue_3"]["status"] == "known"
+    assert world_memory.scene_event_seen(session.world_state, "scene_8", 1)
+
+
+def test_mark_seen_requires_a_parameter(db_factory):
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    assert "参数缺失" in _mark(db, session, module, player)
+
+
+def test_mark_seen_does_not_downgrade_known(db_factory):
+    """已完全掌握的线索不会被后来的 hint 拉回 partial。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _mark(db, session, module, player, clue="clue_3")
+    _mark(db, session, module, player, clue="clue_3", level="hint")
+    assert session.world_state["clue_ledger"]["clue_3"]["status"] == "known"
 
 
 # ── v2：MemoryKeeper 差量合并（纯函数）─────────────────────────────

@@ -989,3 +989,105 @@ async def _exec_handout(
     except Exception:  # noqa: BLE001 — 配图判定失败不影响发放
         logger.exception("手书配图任务启动失败（忽略）")
     return chunks, f"手书 {hid} 已发放（正文已由系统以卡片呈现给玩家，续写时不要复述正文）。"
+
+
+def _find_scene_event(module: Module, scene_ids: list[str], ref: str) -> tuple[str, int, str] | None:
+    """按 trigger 原文在给定场景里找机制点，返回 (scene_id, index, trigger)。
+
+    KP 引用的是上下文清单里印着的那行原文，所以先精确相等，再退回包含匹配（它偶尔会
+    只抄前半句或补个「时」字）。**刻意不按编号引用**：分组叙事里每组看的是自己场景的
+    清单，而指令是对合并文本统一处理的，编号在那里必然指错场景。
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    loose: tuple[str, int, str] | None = None
+    for scene in module.scenes or []:
+        sid = str(scene.get("id") or "")
+        if sid not in scene_ids:
+            continue
+        for index, event in enumerate(scene.get("events") or []):
+            if not isinstance(event, dict):
+                continue
+            trigger = str(event.get("trigger") or "").strip()
+            if not trigger:
+                continue
+            if trigger == ref:
+                return sid, index, trigger
+            if loose is None and (ref in trigger or trigger in ref):
+                loose = (sid, index, trigger)
+    return loose
+
+
+def _exec_mark_seen(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module,
+    kv: dict,
+    player_char: Character,
+    teammates: list[Character] | None,
+) -> str:
+    """KP 主动声明「这条线索/这个桥段我已经给过玩家了」→ 记进世界记忆。返回结果说明。
+
+    这是台账的第三条写入路径，补的是前两条各自的盲区：规划器要从叙事回推 clue_id
+    （它整局一次都没填过），文本兜底只认字面（KP 把「被拖拽」写成「那只手猛地一拽」
+    就抓不住）。而 KP 自己最清楚它刚给出了什么——上下文里就印着线索 id 与机制点原文，
+    照着标一下即可，不必回推、不怕改写。
+
+    未知 id / 对不上的机制点静默跳过（照 HANDOUT 范式，只记日志并在 note 里说明），
+    绝不因为一次误标就中断叙事。
+    """
+    db.refresh(game_session)
+    notes: list[str] = []
+    seq = session_service.get_next_sequence_num(db, session_id) - 1
+    party = [player_char, *(teammates or [])]
+    anchor = session_service.get_char_location(game_session, player_char.id)
+    present = [c.id for c in party if session_service.get_char_location(game_session, c.id) == anchor]
+    scene_ids = [
+        s for s in dict.fromkeys(
+            [session_service.get_char_location(game_session, c.id) for c in party]
+            + [str(game_session.current_scene_id or "")]
+        ) if s
+    ]
+
+    cid = str(kv.get("clue") or "").strip()
+    if cid:
+        clue = next(
+            (c for c in (module.clues or [])
+             if isinstance(c, dict) and str(c.get("id") or "").strip() == cid),
+            None,
+        )
+        if clue is None:
+            logger.warning("MARK_SEEN 引用了未知线索 id（跳过）：%r", cid)
+            notes.append(f"未知线索 id：{cid}（只标线索台账里列出的 id）。")
+        else:
+            # 默认 direct：KP 说「给过了」就是给过了。它只想标「提了一嘴」时自己写 level=hint。
+            level = str(kv.get("level") or "direct").strip().lower()
+            _apply_world_memory(
+                db, game_session,
+                lambda ws, _c=cid, _l=level: world_memory.record_clue_reveal(
+                    ws, [_c], _l, present, seq, note="KP 标记已给出",
+                ),
+            )
+            notes.append(f"线索 {cid} 已记入台账（后续不要再安排它的发现桥段）。")
+
+    ref = str(kv.get("event") or "").strip()
+    if ref:
+        found = _find_scene_event(module, scene_ids, ref)
+        if found is None:
+            logger.warning("MARK_SEEN 引用了对不上的场景机制点（跳过）：%r", ref)
+            notes.append(f"对不上的机制点：{ref}（照「本场景机制点进度」里的原文写）。")
+        else:
+            sid, index, trigger = found
+            _apply_world_memory(
+                db, game_session,
+                lambda ws, _s=sid, _i=index, _t=trigger: world_memory.record_scene_event_seen(
+                    ws, _s, _i, seq, note=_t,
+                ),
+            )
+            notes.append(f"机制点「{trigger}」已记为发生过（后续不要重演）。")
+
+    if not notes:
+        return "参数缺失：clue 与 event 至少填一个。"
+    return "".join(notes)

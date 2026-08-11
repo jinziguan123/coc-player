@@ -392,6 +392,31 @@ REGISTRY: tuple[ToolSpec, ...] = (
         }, ["id"]),
         kind="state",
     ),
+    ToolSpec(
+        name="mark_seen",
+        tag="MARK_SEEN",
+        description=(
+            "记账：你这一轮确实把某条线索交到了玩家手里、或演完了某个场景机制点时调用，"
+            "系统据此在台账上划掉它，下次就不会再让你重复安排同一个发现桥段。"
+            "只标真正给出去的——玩家没看到、没听懂、只是路过，都不算。"
+        ),
+        parameters=_params({
+            "clue": {
+                "type": "string",
+                "description": "线索 id（照「线索台账」里印的写，如 clue_5）",
+            },
+            "event": {
+                "type": "string",
+                "description": "机制点原文（照「本场景机制点进度」里印的那行写，别用编号）",
+            },
+            "level": {
+                "type": "string",
+                "enum": ["direct", "hint"],
+                "description": "线索给到什么程度：完整交出=direct（默认），只透了个边角=hint",
+            },
+        }, []),
+        kind="state",
+    ),
 )
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in REGISTRY}
@@ -441,9 +466,9 @@ def tool_mode_message() -> dict:
             "【工具调用模式】本会话已启用标准工具调用：上文提到的方括号指令"
             "（[DICE_CHECK]、[OPPOSED_CHECK]、[SAN_CHECK]、[HP_CHANGE]、[NPC_ACT]、"
             "[SCENE_CHANGE]、[RULE_LOOKUP]、[MODULE_LOOKUP]、[SET_FLAG]、[CLEAR_FLAG]、"
-            "[HANDOUT]）一律改为调用对应的同名工具（dice_check、opposed_check、"
+            "[HANDOUT]、[MARK_SEEN]）一律改为调用对应的同名工具（dice_check、opposed_check、"
             "san_check、hp_change、npc_act、scene_change、rule_lookup、module_lookup、"
-            "set_flag、clear_flag、handout），不要把这些指令写成文本。"
+            "set_flag、clear_flag、handout、mark_seen），不要把这些指令写成文本。"
             "**NPC 台词一律改为调用 say(who, text) 工具**（每句一次，who 填说话人姓名、"
             "text 只填这句话本身）——不要再把台词或 [SAY] 写进叙述文本，写进文本的引号不会"
             "成为对话气泡。旁白（环境/动作/神态）仍照常写在叙述文本里。"

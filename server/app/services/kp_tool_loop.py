@@ -60,6 +60,7 @@ RECALL_HISTORY_RE = command_protocol.RECALL_HISTORY_RE
 SET_FLAG_RE = command_protocol.SET_FLAG_RE
 CLEAR_FLAG_RE = command_protocol.CLEAR_FLAG_RE
 HANDOUT_RE = command_protocol.HANDOUT_RE
+MARK_SEEN_RE = command_protocol.MARK_SEEN_RE
 MAX_RULE_LOOKUPS = command_protocol.MAX_RULE_LOOKUPS
 MAX_DICE_CONTINUATIONS = command_protocol.MAX_DICE_CONTINUATIONS
 _parse_tag_kv = command_protocol.parse_tag_kv
@@ -83,6 +84,7 @@ _exec_dice_check = turn_effects._exec_dice_check
 _exec_scene_change = turn_effects._exec_scene_change
 _exec_flag = turn_effects._exec_flag
 _exec_handout = turn_effects._exec_handout
+_exec_mark_seen = turn_effects._exec_mark_seen
 _travel_suggest_event = turn_effects.travel_suggest_event
 _set_path_block = turn_effects.set_path_block
 
@@ -454,6 +456,13 @@ def _build_kp_tool_executor(
         )
         return kp_tools.ToolOutcome(note, chunks=chunks)
 
+    async def _h_mark_seen(name, kv):
+        # 纯记账，不出 chunk：玩家看不到台账，只会感到 KP 不再重复同一个发现桥段。
+        note = _exec_mark_seen(
+            db, session_id, game_session, module, kv, player_char, teammates,
+        )
+        return kp_tools.ToolOutcome(note)
+
     handlers = {
         "dice_check": _h_dice_check,
         "opposed_check": _h_opposed_check,
@@ -473,6 +482,7 @@ def _build_kp_tool_executor(
         "block_path": _h_block_path,
         "unblock_path": _h_block_path,
         "handout": _h_handout,
+        "mark_seen": _h_mark_seen,
     }
 
     async def execute(call: ToolCall) -> kp_tools.ToolOutcome:
@@ -849,6 +859,13 @@ async def _process_commands(
         )
         for chunk in handout_chunks:
             yield chunk
+
+    # 记账：[MARK_SEEN: clue=xxx] / [MARK_SEEN: event=机制点原文] → 只写世界记忆，不出 chunk。
+    for match in MARK_SEEN_RE.finditer(kp_text):
+        _exec_mark_seen(
+            db, session_id, game_session, module,
+            _parse_tag_kv(match.group(1).strip()), player_char, teammates,
+        )
 
     for match in NPC_ACT_RE.finditer(kp_text):
         npc_chunks, _resp = await _exec_npc_act(

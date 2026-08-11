@@ -37,6 +37,9 @@ RECALL_HISTORY_RE = re.compile(r"\[RECALL_HISTORY:\s*query=([^\]]+)\]")
 SET_FLAG_RE = re.compile(r"\[SET_FLAG[:：\s]\s*(?:flag=)?\s*([^\]]+?)\s*\]")
 CLEAR_FLAG_RE = re.compile(r"\[CLEAR_FLAG[:：\s]\s*(?:flag=)?\s*([^\]]+?)\s*\]")
 HANDOUT_RE = re.compile(r"\[HANDOUT[:：\s]\s*([^\]]+?)\s*\]")
+# 记账：KP 主动声明「这条线索/这个桥段我已经给过玩家了」。台账此前只有两条写入路径，
+# 一条要规划器从叙事回推 clue_id、一条只认字面，都会漏；KP 自己最清楚它刚给出了什么。
+MARK_SEEN_RE = re.compile(r"\[MARK_SEEN[:：\s]\s*([^\]]+?)\s*\]")
 GROUP_RE = re.compile(r"\[GROUP:([^\]]*)\]")
 
 CMD_TAG_PREFIXES = (
@@ -55,6 +58,7 @@ CMD_TAG_PREFIXES = (
     "SET_FLAG:",
     "CLEAR_FLAG:",
     "HANDOUT:",
+    "MARK_SEEN:",
 )
 _CMD_TAG_KEYWORDS = tuple(prefix.rstrip(":") for prefix in CMD_TAG_PREFIXES)
 
