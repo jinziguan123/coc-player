@@ -1742,11 +1742,22 @@ def list_known_locations(
     by_id = {s.get("id"): s for s in (module.scenes or []) if s.get("id")}
     visited = set((session.world_state or {}).get("visited_scenes") or [])
     cur = get_char_location(session, char_id)
+    # 层级门禁：挂在某个父级地点之下的场景，父级被**真正到过**之前一律不可见。
+    # 这既是防剧透（开局就不该知道村里有几间屋子），也让子沙盘有个明确的解锁时刻。
+    # 判据用 visited 而不是 known：听说过村庄不等于进过村、更不等于看得见村里的门牌。
+    # 队伍当前所在的场景永不隐藏（分头行动时有人已经在里面了）。
+    from app.services import hex_map
+
+    def _unlocked(sid: str) -> bool:
+        parent = hex_map.scene_parent(by_id.get(sid))
+        return not parent or parent in visited or sid == cur
+
     known = {
         sid for sid in known_scene_ids(module, session, events)
-        if by_id[sid].get("kind") != "chapter" or sid == cur
+        if (by_id[sid].get("kind") != "chapter" or sid == cur) and _unlocked(sid)
     }
     if reveal_all:
+        # KP 上帝视角看得见全部（含未解锁的子级），由 known 标记如实告诉他玩家看不看得见
         shown = {sid for sid, s in by_id.items() if s.get("kind") != "chapter" or sid == cur}
     else:
         shown = known

@@ -1,7 +1,7 @@
 """六边形沙盘 P-Hex-1 单测：坐标数学、落位修复的确定性/幂等、KP 空间语义注入（不调 LLM）。"""
 
 from app.ai.context import build_kp_context
-from app.models import Character, GameSession, Module
+from app.models import Character, EventLog, GameSession, Module
 from app.services import hex_map, module_service, session_service
 
 
@@ -283,3 +283,176 @@ class TestSetSceneMap:
         module, _ = _three_scene_fixture()
         new_map = hex_map.set_scene_map(_FakeDb(), module, "c", 5, -2, biome="ruin")
         assert new_map["biome"] == "ruin"
+
+
+# ── 层级归组（P-Hex-5）──
+#
+# 归组只决定「挂在谁下面、什么时候可见」，不发明任何几何：子沙盘的节点全是模组自己
+# 写出来的场景。模组没写内部结构的地点，就没有子沙盘（那条红线仍然立着）。
+
+
+def _loc(sid, biome, conns=(), title=None):
+    return {
+        "id": sid, "title": title or sid, "kind": "location",
+        "map": {"biome": biome}, "connections": list(conns),
+    }
+
+
+class TestSceneHierarchy:
+    def test_室内场景归到唯一的非室内邻居下(self):
+        scenes = [
+            _loc("village", "ruin", ["hut", "shrine"]),
+            _loc("hut", "interior", ["village"]),
+            _loc("shrine", "interior", ["village"]),
+            _loc("road", "road", ["village"]),
+        ]
+        assert hex_map.infer_scene_parents(scenes) is True
+        by = {s["id"]: s for s in scenes}
+        assert hex_map.scene_parent(by["hut"]) == "village"
+        assert hex_map.scene_parent(by["shrine"]) == "village"
+        assert hex_map.scene_parent(by["village"]) == ""   # 顶层不动
+        assert hex_map.scene_parent(by["road"]) == ""
+
+    def test_chapter_不参与候选否则制造假歧义(self):
+        """闇暗山的「最里面的小屋」正因候选里混进 chapter「逃离大火」才判不出唯一父级。"""
+        scenes = [
+            _loc("village", "ruin", ["inner"]),
+            _loc("inner", "interior", ["village", "fire"]),
+            _loc("road", "road", ["village"]),
+            {"id": "fire", "title": "逃离大火", "kind": "chapter", "connections": ["inner"]},
+        ]
+        hex_map.infer_scene_parents(scenes)
+        by = {s["id"]: s for s in scenes}
+        assert hex_map.scene_parent(by["inner"]) == "village"
+
+    def test_层级可超过两级(self):
+        """室内套室内（农场 > 公寓楼 > 地牢）：等父级定下来后再顺着室内邻居往下认一层。"""
+        scenes = [
+            _loc("farm", "plain", ["flat"]),
+            _loc("flat", "interior", ["farm", "dungeon"]),
+            _loc("dungeon", "interior", ["flat"]),
+            _loc("road", "road", ["farm"]),
+        ]
+        hex_map.infer_scene_parents(scenes)
+        by = {s["id"]: s for s in scenes}
+        assert hex_map.scene_parent(by["flat"]) == "farm"
+        assert hex_map.scene_parent(by["dungeon"]) == "flat"
+
+    def test_多个非室内邻居时歧义不猜(self):
+        scenes = [
+            _loc("village", "ruin", ["hut"]),
+            _loc("camp", "plain", ["hut"]),
+            _loc("hut", "interior", ["village", "camp"]),
+        ]
+        hex_map.infer_scene_parents(scenes)
+        assert hex_map.scene_parent({"map": {}}) == ""
+        by = {s["id"]: s for s in scenes}
+        assert hex_map.scene_parent(by["hut"]) == ""   # 留在顶层，等 LLM 补全或人工归组
+
+    def test_顶层会被掏空时整批放弃(self):
+        """常暗之箱：整模组 7 个车厢全是 interior、互相串联、无任何外部连接。"""
+        scenes = [_loc(f"car{i}", "interior", [f"car{i + 1}"]) for i in range(6)]
+        scenes.append(_loc("car6", "interior", []))
+        assert hex_map.infer_scene_parents(scenes) is False
+        assert all(hex_map.scene_parent(s) == "" for s in scenes)
+
+    def test_不成环(self):
+        scenes = [
+            _loc("a", "interior", ["b"]),
+            _loc("b", "interior", ["a"]),
+            _loc("out", "plain", ["a"]),
+            _loc("road", "road", ["out"]),
+        ]
+        hex_map.infer_scene_parents(scenes)
+        by = {s["id"]: s for s in scenes}
+        # a 认 out 为父；b 只能认 a——反过来 a 认 b 会成环，必须被挡住
+        assert hex_map.scene_parent(by["a"]) == "out"
+        assert hex_map.scene_parent(by["b"]) == "a"
+
+    def test_已有父级不被推翻(self):
+        """KP 手动归过组的一律保留，推断只补空的。"""
+        scenes = [
+            _loc("village", "ruin", ["hut"]),
+            _loc("camp", "plain", ["hut"]),
+            _loc("hut", "interior", ["village", "camp"]),
+        ]
+        scenes[2]["map"]["parent"] = "camp"
+        hex_map.infer_scene_parents(scenes)
+        assert hex_map.scene_parent(scenes[2]) == "camp"
+
+    def test_分层落位互不撞格且保住parent(self):
+        """各层用各自的坐标空间；重写 map 时 parent 必须原样带上，否则每跑一次就抹平一次。"""
+        scenes = [
+            _loc("village", "ruin", ["hut", "shrine"]),
+            _loc("hut", "interior", ["village"]),
+            _loc("shrine", "interior", ["village"]),
+            _loc("road", "road", ["village"]),
+        ]
+        hex_map.infer_scene_parents(scenes)
+        hex_map.ensure_scene_maps(scenes)
+        by = {s["id"]: s for s in scenes}
+        assert hex_map.scene_parent(by["hut"]) == "village"      # 落位没把 parent 洗掉
+        assert hex_map.scene_coord(by["hut"]) != hex_map.scene_coord(by["shrine"])
+        # 幂等：再跑一遍不动任何东西
+        assert hex_map.infer_scene_parents(scenes) is False
+        assert hex_map.ensure_scene_maps(scenes) is False
+
+    def test_换层后重新落位不继承旧坐标(self):
+        """顶层排出的坐标搬进子沙盘只是无主残值，留着子沙盘会继承顶层那份散乱。"""
+        scenes = [
+            _loc("village", "ruin", ["hut"]),
+            _loc("hut", "interior", ["village"]),
+            _loc("road", "road", ["village"]),
+        ]
+        hex_map.ensure_scene_maps(scenes)               # 先按老规矩全平铺
+        by = {s["id"]: s for s in scenes}
+        by["hut"]["map"].update({"q": 9, "r": 9})       # 一个远在天边的顶层坐标
+        hex_map.infer_scene_parents(scenes)
+        hex_map.ensure_scene_maps(scenes)
+        assert hex_map.scene_coord(by["hut"]) == (0, 0)  # 子沙盘里重排到原点
+
+    def test_父级未访问前子级对玩家不可见(self):
+        """门禁：开局就不该知道村里有几间屋子；KP 上帝视角仍看得见，只是 known=False。
+
+        注意「已知」本身不靠连通解锁（见 known_scene_ids：只认已访问与旁白提及），
+        所以这里先用一条提到小屋的旁白把它变成已知，再单独验证门禁那一层的效果。
+        """
+        module = Module(
+            title="村", rule_system="coc",
+            scenes=[
+                _loc("village", "ruin", ["hut", "road"], title="村庄遗址"),
+                _loc("hut", "interior", ["village"], title="村民小屋"),
+                _loc("road", "road", ["village"], title="山路"),
+            ],
+        )
+        scenes = [dict(s) for s in module.scenes]
+        hex_map.infer_scene_parents(scenes)
+        hex_map.ensure_scene_maps(scenes)
+        module.scenes = scenes
+        assert hex_map.scene_parent(scenes[1]) == "village"
+
+        mention = [EventLog(
+            session_id="s", sequence_num=1, event_type="narration",
+            content="远处能看见村民小屋的轮廓。", visibility=[],
+        )]
+
+        session = GameSession(
+            module_id="m", status="active", current_scene_id="road",
+            world_state={"visited_scenes": ["road"]},
+        )
+        ids = {x["id"] for x in session_service.list_known_locations(module, session, events=mention)}
+        assert "hut" not in ids            # 旁白提过，但还没进村 → 仍不可见
+
+        session.current_scene_id = "village"
+        session.world_state = {"visited_scenes": ["road", "village"]}
+        ids = {x["id"] for x in session_service.list_known_locations(module, session, events=mention)}
+        assert "hut" in ids                # 进了村 → 子沙盘解锁
+
+        # KP 上帝视角：全都看得见，靠 known 标记区分玩家知不知道
+        session.world_state = {"visited_scenes": ["road"]}
+        session.current_scene_id = "road"
+        god = {
+            x["id"]: x for x in
+            session_service.list_known_locations(module, session, events=mention, reveal_all=True)
+        }
+        assert "hut" in god and god["hut"]["known"] is False

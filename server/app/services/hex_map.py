@@ -74,6 +74,116 @@ def scene_coord(scene: dict | None) -> tuple[int, int] | None:
         return None
 
 
+def scene_parent(scene: dict | None) -> str:
+    """场景挂在哪个父级地点之下；空串 = 顶层沙盘（缺省，存量模组行为不变）。"""
+    m = (scene or {}).get("map")
+    if not isinstance(m, dict):
+        return ""
+    return str(m.get("parent") or "").strip()
+
+
+# ── 层级归组 ────────────────────────────────────────────────────────────────
+#
+# 归组只做两件事：**这个地点挂在谁下面**、**什么时候可见**。它不发明任何几何——
+# 子沙盘的节点全是模组自己写出来的场景，`connections` 图与移动规则一字不动。
+# 「场景内部几何（房间/墙）」那条红线仍然立着：模组只写了「一间小屋」，就没有子沙盘。
+#
+# 之所以需要它：室内场景今天与山路平铺在同一层，被螺旋落位甩得到处都是（闇暗山的四间
+# 屋子落在 (-1,6)(1,6)(3,5)(4,3)，而村庄遗址在 (2,4)），既看不出从属，也提前把
+# 「村里有几间屋子」摊给了玩家。
+#
+#: 归组后顶层至少要剩下这么多个地点，否则整批放弃。
+#: 反例是「常暗之箱」——整模组 7 个车厢全是 interior、互相串联、没有任何外部连接，
+#: 若按「interior 一律下沉」处理，顶层沙盘会直接空掉。
+MIN_TOP_LEVEL_SCENES = 2
+
+
+def _walks_to_cycle(parent_of: dict[str, str], child: str, parent: str) -> bool:
+    """把 parent 指派给 child 会不会成环（顺着父链往上走能否走回 child）。"""
+    seen, cur = {child}, parent
+    while cur:
+        if cur in seen:
+            return True
+        seen.add(cur)
+        cur = parent_of.get(cur, "")
+    return False
+
+
+def infer_scene_parents(scenes: list) -> bool:
+    """确定性推断室内场景的父级地点（原地写 scene["map"]["parent"]）。返回是否有改动。
+
+    判据只有一条、且完全来自模组自己写的 connections：**某个 interior 场景在连通图里
+    只挨着一个「非 interior」邻居**，那个邻居就是它的父级。多于一个 = 歧义，不猜；
+    一个都没有（内部套内部，如「农场 > 公寓楼 > 地牢」）则等父级先被定下来，再顺着
+    interior 邻居往下认一层——所以层级天然可以超过两级，不必写死。
+
+    chapter 场景先滤掉：它们不是地点、本就不上沙盘，留着只会制造假歧义（闇暗山的
+    「最里面的小屋」正是因为候选里混进了 chapter「逃离大火」才判不出唯一父级）。
+
+    已经有 parent 的一律保留（KP 手动归组过的不推翻），只补空的。
+    """
+    locs = [s for s in scenes or [] if isinstance(s, dict) and s.get("kind") != "chapter"]
+    by_id = {str(s.get("id")): s for s in locs if s.get("id")}
+    if not by_id:
+        return False
+
+    adj: dict[str, set[str]] = {i: set() for i in by_id}
+    for sid, s in by_id.items():
+        for c in s.get("connections") or []:
+            other = str(c or "").strip()
+            if other in adj and other != sid:
+                adj[sid].add(other)
+                adj[other].add(sid)
+
+    def is_interior(sid: str) -> bool:
+        m = by_id[sid].get("map")
+        return isinstance(m, dict) and str(m.get("biome") or "").lower() == "interior"
+
+    parent_of = {sid: scene_parent(s) for sid, s in by_id.items()}
+    pending = [sid for sid in by_id if is_interior(sid) and not parent_of[sid]]
+
+    # 逐轮收敛：每轮先认「唯一的非 interior 邻居」，再认「已经归好组的 interior 邻居」。
+    # 一轮下来没有任何新指派就停——剩下的要么歧义、要么真的没有父级（如整列火车）。
+    while pending:
+        settled: list[str] = []
+        for sid in pending:
+            outer = [n for n in sorted(adj[sid]) if not is_interior(n)]
+            if len(outer) != 1:
+                outer = [n for n in sorted(adj[sid]) if is_interior(n) and parent_of.get(n)]
+                if len(outer) != 1:
+                    continue
+            if _walks_to_cycle(parent_of, sid, outer[0]):
+                continue
+            parent_of[sid] = outer[0]
+            settled.append(sid)
+        if not settled:
+            break
+        pending = [sid for sid in pending if sid not in settled]
+
+    top = [sid for sid in by_id if not parent_of[sid]]
+    if len(top) < MIN_TOP_LEVEL_SCENES:
+        return False   # 顶层会被掏空 → 整批放弃，保持现状
+
+    changed = False
+    for sid, s in by_id.items():
+        want = parent_of[sid]
+        if scene_parent(s) == want:
+            continue
+        m = dict(s.get("map")) if isinstance(s.get("map"), dict) else {}
+        if want:
+            m["parent"] = want
+        else:
+            m.pop("parent", None)
+        # 换层就丢掉旧坐标，交给落位器在**新的那一层**重排。坐标是相对某个坐标空间才有
+        # 意义的，顶层排出来的 (-1,6) 搬进子沙盘只是个无主的残值——留着，子沙盘就会原样
+        # 继承顶层那份散乱（村庄遗址的四间屋子会散落在半径 4 格开外）。
+        m.pop("q", None)
+        m.pop("r", None)
+        s["map"] = m
+        changed = True
+    return changed
+
+
 def _axial_round(qf: float, rf: float) -> tuple[int, int]:
     """cube 取整（q+r+s=0）：把重心浮点坐标收敛到最近的合法 hex。"""
     sf = -qf - rf
@@ -117,6 +227,19 @@ def ensure_scene_maps(scenes: list) -> bool:
     if not locs:
         return changed
 
+    # 按父级分组，**每一层各跑一次落位**：顶层的 (0,0) 与「村庄遗址」子沙盘的 (0,0)
+    # 是两个互不相干的格子。落位算法本身一字未改，只是作用域从「全图」缩到「一层」。
+    groups: dict[str, list[dict]] = {}
+    for s in locs:
+        groups.setdefault(scene_parent(s), []).append(s)
+    for group in groups.values():
+        changed = _layout_group(group) or changed
+    return changed
+
+
+def _layout_group(locs: list[dict]) -> bool:
+    """把同一层的场景落位到该层自己的坐标空间（原落位算法，作用域＝一层）。"""
+    changed = False
     coord_of: dict[int, tuple[int, int]] = {}   # locs 下标 → 坐标
     used: set[tuple[int, int]] = set()
     todo: list[int] = []
@@ -162,6 +285,10 @@ def ensure_scene_maps(scenes: list) -> bool:
         if biome not in BIOMES:
             biome = "plain"
         new_map = {"q": q, "r": r, "biome": biome}
+        # parent 是归组的产物、不是落位的产物：重写整个 map 时必须原样带上，
+        # 否则每跑一次修复器就把层级抹平一次（幂等性直接坏掉）。
+        if parent := scene_parent(s):
+            new_map["parent"] = parent
         if s.get("map") != new_map:
             s["map"] = new_map
             changed = True
@@ -169,9 +296,13 @@ def ensure_scene_maps(scenes: list) -> bool:
 
 
 def ensure_module_map(db, module) -> bool:
-    """存量模组懒回填：scenes 过修复器，有改动才落库（幂等；JSON 列须整体重赋值）。"""
+    """存量模组懒回填：scenes 过归组与修复器，有改动才落库（幂等；JSON 列须整体重赋值）。
+
+    归组必须排在落位之前：`ensure_scene_maps` 是按 parent 分层落位的，先定层再落格。
+    """
     scenes = [dict(s) if isinstance(s, dict) else s for s in (module.scenes or [])]
-    if not ensure_scene_maps(scenes):
+    changed = infer_scene_parents(scenes)
+    if not ensure_scene_maps(scenes) and not changed:
         return False
     module.scenes = scenes
     db.add(module)
@@ -194,14 +325,19 @@ def set_scene_map(db, module, scene_id: str, q: int, r: int, biome: str | None =
     if target.get("kind") == "chapter":
         raise ValueError("章节场景不上沙盘")
     q, r = int(q), int(r)
+    # 只和**同一层**的场景比占位：顶层的 (2,4) 与某个子沙盘里的 (2,4) 是两个格子，
+    # 不按层过滤就会出现「拖到空地却报该格已被占用」这种查无实据的拒绝。
+    layer = scene_parent(target)
     for s in scenes:
-        if isinstance(s, dict) and s.get("id") != scene_id and scene_coord(s) == (q, r):
+        if not isinstance(s, dict) or s.get("id") == scene_id or scene_parent(s) != layer:
+            continue
+        if scene_coord(s) == (q, r):
             raise ValueError(f"该格已被「{s.get('title') or s.get('id')}」占用")
-        if isinstance(s, dict) and s.get("id") != scene_id:
-            other = scene_coord(s)
-            if other is not None and axial_distance((q, r), other) < 2:
-                raise ValueError("场景节点之间至少需要间隔一个普通节点")
+        other = scene_coord(s)
+        if other is not None and axial_distance((q, r), other) < 2:
+            raise ValueError("场景节点之间至少需要间隔一个普通节点")
     old = target.get("map") if isinstance(target.get("map"), dict) else {}
+    keep_parent = str(old.get("parent") or "").strip()
     if biome is not None:
         b = str(biome).strip().lower()
         if b not in BIOMES:
@@ -211,6 +347,8 @@ def set_scene_map(db, module, scene_id: str, q: int, r: int, biome: str | None =
         if b not in BIOMES:
             b = "plain"
     target["map"] = {"q": q, "r": r, "biome": b}
+    if keep_parent:   # 拖拽只改格子，不改它挂在谁下面
+        target["map"]["parent"] = keep_parent
     # 兼容仍使用 PATCH /scene-map 的调用方：同步统一地图节点，避免下一次读取时旧节点覆盖新位置。
     map_nodes = [dict(node) for node in (getattr(module, "map_nodes", None) or []) if isinstance(node, dict)]
     updated_node = False
