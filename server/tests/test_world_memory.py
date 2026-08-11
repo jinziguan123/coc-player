@@ -284,8 +284,9 @@ def test_turn_planner_empty_ledger_backward_compatible():
 
 
 def test_story_summary_prompt_mentions_ledger():
-    messages = story_summarizer.build_summary_messages(
+    messages = story_summarizer.build_memory_keeper_messages(
         "", [EventLog(session_id="s", sequence_num=1, event_type="narration", content="x")],
+        "",
     )
     assert "台账" in messages[1]["content"]
     assert "剧情脉络" in messages[1]["content"]

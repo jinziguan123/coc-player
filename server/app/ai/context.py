@@ -141,7 +141,6 @@ RESERVE_FOR_OUTPUT = 7000
 MAX_SYSTEM_TOKENS = 30000
 MAX_SUMMARY_TOKENS = 2000
 MIN_RECENT_EVENTS = 10
-MAX_RECENT_EVENTS = 60
 # 被动注入的模组原文摘录：单块截断（摘录段计入 MAX_SYSTEM_TOKENS 预算）。系统预算放宽后
 # 可给更完整的原文片段，从 400 提到 600 字。
 MODULE_EXCERPT_MAX_CHARS = 600
@@ -162,15 +161,6 @@ def _estimate_tokens(text: str) -> int:
     cn_chars = sum(1 for c in text if '一' <= c <= '鿿')
     other = len(text) - cn_chars
     return int(cn_chars * 1.5 + other * 0.4)
-
-
-def _truncate_to_tokens(text: str, max_tokens: int) -> str:
-    """将文本截断到大约 max_tokens 以内"""
-    if _estimate_tokens(text) <= max_tokens:
-        return text
-    ratio = max_tokens / max(_estimate_tokens(text), 1)
-    cut = int(len(text) * ratio * 0.9)
-    return text[:cut] + "\n…（内容过长，已截断）"
 
 
 # ── 系统提示的分段装配 ────────────────────────────────────────────────────

@@ -458,26 +458,8 @@ def test_old_events_summary_keeps_recent_not_opening():
     assert out.index("第198段剧情") < out.index("第199段剧情")
 
 
-def test_story_summarizer_merges_and_fails_open():
-    """滚动摘要生成：正常返回浓缩文本；无 LLM / 无事件 / 调用异常一律 None（保持原摘要）。"""
-    from types import SimpleNamespace
-
-    from app.ai import story_summarizer
-
-    class LLM:
-        async def complete(self, messages, **kw):
-            return "梗概：调查员到过疗养院。"
-
-    evs = [SimpleNamespace(event_type="narration", actor_name="KP", content="到了疗养院")]
-    assert asyncio.run(story_summarizer.summarize_story(LLM(), "旧摘要", evs)) == "梗概：调查员到过疗养院。"
-    assert asyncio.run(story_summarizer.summarize_story(None, "x", evs)) is None
-    assert asyncio.run(story_summarizer.summarize_story(LLM(), "x", [])) is None
-
-    class BadLLM:
-        async def complete(self, *a, **k):
-            raise RuntimeError("boom")
-
-    assert asyncio.run(story_summarizer.summarize_story(BadLLM(), "x", evs)) is None
+# 滚动摘要生成的正常/fail-open 行为，现由 v2 合并调用一并覆盖，见
+# tests/test_world_memory.py::test_summarize_and_extract_*。
 
 
 def test_maybe_roll_story_summary_updates_and_advances_cursor(db_factory, monkeypatch):

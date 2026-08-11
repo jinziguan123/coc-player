@@ -33,62 +33,14 @@ def _events_text(events: list[Any]) -> str:
     return "\n".join(lines)
 
 
-def build_summary_messages(prev_summary: str, events: list[Any]) -> list[dict]:
-    body = _events_text(events)
-    prev = (prev_summary or "").strip() or "（暂无既往摘要）"
-    return [
-        {
-            "role": "system",
-            "content": (
-                "你是 TRPG 剧情书记员。把既往剧情摘要与新发生的一段事件，合并浓缩成一份**连贯、"
-                "客观**的剧情进展梗概，供 KP 后续叙事时回顾。只输出梗概正文，不要解释、不要标题。"
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                "要求：\n"
-                "- 保留对后续推进重要的事实：去过哪些地点、见过哪些 NPC、已揭示的线索与结论、"
-                "已做出的关键决定与承诺、尚未了结的悬念/待办、当前处境。\n"
-                "- 舍弃寒暄与重复的氛围描写；按时间顺序、紧凑成段。\n"
-                "- 线索与 NPC 关系已有专门台账维护，摘要侧重剧情脉络与因果，"
-                "不必逐条保留线索细节。\n"
-                "- 以既往摘要为基础做增量更新，不要丢失其中仍然重要的内容。\n\n"
-                f"【既往剧情摘要】\n{prev}\n\n【新发生的事件】\n{body}\n\n"
-                "请输出更新后的完整剧情梗概："
-            ),
-        },
-    ]
-
-
-async def summarize_story(llm: Any, prev_summary: str, events: list[Any]) -> str | None:
-    """把既往摘要 + 新事件合并成新的滚动剧情摘要。
-
-    失败（无 LLM / 无事件 / 调用异常 / 产出为空）一律返回 None，由调用方保持原摘要不变，
-    绝不阻塞跑团。
-    """
-    if llm is None or not events:
-        return None
-    try:
-        raw = await llm.complete(
-            build_summary_messages(prev_summary, events),
-            temperature=0.2,
-        )
-    except Exception:
-        logger.exception("滚动剧情摘要生成失败，保持原摘要")
-        return None
-    text = (raw or "").strip() if isinstance(raw, str) else ""
-    return text or None
-
-
 def build_memory_keeper_messages(
     prev_summary: str, events: list[Any], npc_memory_brief: str,
     team_memory_brief: str = "",
 ) -> list[dict]:
     """合并调用（v2）：一次低温 json_object 调用同时产出滚动摘要 + MemoryKeeper 差量。
 
-    与纯摘要（``build_summary_messages``）共用同一批输入事件与既往摘要，额外喂入当前
-    npc_memory 摘要，让抽取器据「本轮新事件里 NPC 的言行变化」输出态度/承诺/谎言的差量。
+    在同一批输入事件与既往摘要之上，额外喂入当前 npc_memory 摘要，让抽取器据
+    「本轮新事件里 NPC 的言行变化」输出态度/承诺/谎言的差量。
     ``team_memory_brief`` 非空时（会话有 AI 队友）再抽取队友私有记忆差量（个人目标/心事）。
     输出严格 JSON：{summary, npc_updates, clue_notes[, team_updates]}。
     """
