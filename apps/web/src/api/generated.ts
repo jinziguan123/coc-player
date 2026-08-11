@@ -2179,6 +2179,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/ai/profiles/{profile_id}/set-vision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Vision Profile
+         * @description 把某配置标记为「视觉模型」（解析扫描件/图文模组用）；再点同一个 = 取消标记（回落主模型）。
+         */
+        post: operations["set_vision_profile_api_settings_ai_profiles__profile_id__set_vision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/ai/profiles/{profile_id}/test": {
         parameters: {
             query?: never;
@@ -2337,6 +2357,11 @@ export interface components {
              * @default false
              */
             is_fast: boolean;
+            /**
+             * Is Vision
+             * @default false
+             */
+            is_vision: boolean;
             /**
              * Model Name
              * @default
@@ -7454,6 +7479,37 @@ export interface operations {
         };
     };
     set_fast_profile_api_settings_ai_profiles__profile_id__set_fast_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_vision_profile_api_settings_ai_profiles__profile_id__set_vision_post: {
         parameters: {
             query?: never;
             header?: never;

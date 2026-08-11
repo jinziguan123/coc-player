@@ -69,3 +69,21 @@ def get_fast_llm() -> LLMProvider:
     if not profile:
         return get_llm()
     return _provider_from_profile(profile)
+
+
+def get_vision_llm() -> LLMProvider:
+    """看图任务（扫描件/图文模组的视觉解析）用的「视觉模型」。
+
+    设置页可把某个配置标记为视觉模型（is_vision）；未标记时回落主模型（行为与从前一致）。
+
+    单开一个槽位是因为这两件事对模型的要求正相反：带团要文笔与工具调用，主模型多是纯文本；
+    而解析图文模组只需要一双眼睛，跟文笔无关。绑在一起的后果是「想解析图文模组就得把带团
+    模型也换成多模态」——多数人不会为了导一次模组这么折腾，于是图文模组直接解析不了。
+    拆开之后，视觉模型可以是云端的（Qwen-VL/GPT-4o/Gemini），也可以是本机跑的。
+    """
+    from app.api.ai_settings import load_vision_profile
+
+    profile = load_vision_profile()
+    if not profile:
+        return get_llm()
+    return _provider_from_profile(profile)

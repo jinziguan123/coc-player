@@ -3,7 +3,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.ai.llm_factory import get_llm
+from app.ai.llm_factory import get_llm, get_vision_llm
 from app.models.module import Module
 
 logger = logging.getLogger(__name__)
@@ -254,9 +254,16 @@ def _extract_json(raw: str) -> dict:
 async def parse_module_images(images: list[tuple[bytes, str]], rule_system: str, extra_text: str = "") -> dict:
     """多模态：据模组的图片（扫描页/图文模组）识别提取结构化数据（需视觉 LLM）。"""
     import base64
-    llm = get_llm()
+
+    # 走「视觉模型」槽位：没标记就回落主模型（行为与从前一致）。带团用纯文本模型的人
+    # 因此不必为导一次图文模组去换主模型——标一个视觉配置即可。
+    llm = get_vision_llm()
     if not llm.supports_vision():
-        raise ValueError("当前模型不支持图片解析。请在设置里切换到支持视觉的模型（如 GPT-4o / Claude / Gemini / Qwen-VL），或上传文字版模组。")
+        raise ValueError(
+            "没有可用于看图的模型。请到设置页把一个支持视觉的配置"
+            "（如 Qwen-VL / GPT-4o / Claude / Gemini，本机部署的也行）标记为「视觉模型」，"
+            "或改上传文字版模组。"
+        )
     content = extra_text.strip() or "（模组内容见所附图片，请仔细阅读图片中的文字与示意图后提取）"
     prompt = PARSE_PROMPT_TEMPLATE.format(rule_system=rule_system.upper(), content=content)
     imgs = [(base64.b64encode(b).decode(), mime) for b, mime in images]

@@ -340,10 +340,12 @@ async def upload_module(
         raise HTTPException(400, "请至少上传一个文件")
 
     _IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
-    # 模型是否支持看图——支持时才从 PDF 抽内嵌图（插图/手稿）一并喂给视觉解析
+    # 本机有没有一双眼睛——有才从 PDF 抽内嵌图（插图/手稿）一并喂给视觉解析。
+    # 取的是「视觉模型」槽位（未标记则回落主模型），与 parse_module_images 同源：
+    # 两处若不同源，就会出现「抽了图但解析端说不支持」或反过来「能解析却没抽图」。
     try:
-        from app.ai.llm_factory import get_llm
-        vision = get_llm().supports_vision()
+        from app.ai.llm_factory import get_vision_llm
+        vision = get_vision_llm().supports_vision()
     except Exception:
         vision = False
 
@@ -365,7 +367,8 @@ async def upload_module(
                 raise HTTPException(
                     422,
                     f"「{f.filename}」似乎是扫描件（无可提取文字）。请改用含文字层的 PDF，"
-                    "或切换到支持视觉的多模态模型后重试（届时会直接识图）",
+                    "或到设置页把一个支持视觉的配置标记为「视觉模型」后重试（届时会直接识图，"
+                    "带团用的主模型不必更换）",
                 )
         else:
             text = _extract_doc_text(content, f.filename or "")

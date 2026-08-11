@@ -65,6 +65,49 @@ def test_set_fast_profile_toggle(monkeypatch, tmp_path):
     assert c.post("/api/settings/ai/profiles/nonexistent/set-fast").status_code == 404
 
 
+def test_set_vision_profile_toggle(monkeypatch, tmp_path):
+    """视觉模型标记：单选、可取消，与快模型互不干扰（两个槽位各自独立）。"""
+    c = TestClient(app)
+    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+
+    a = c.post("/api/settings/ai/profiles", json={"name": "A", "model_name": "m1", "api_key": "k1"}).json()
+    b = c.post("/api/settings/ai/profiles", json={"name": "B", "model_name": "qwen-vl-max", "api_key": "k2"}).json()
+
+    assert c.post(f"/api/settings/ai/profiles/{b['id']}/set-vision").json()["is_vision"] is True
+    assert ai_settings.load_vision_profile().name == "B"
+
+    # 两个槽位互不干扰：A 标快模型不影响 B 的视觉标记
+    c.post(f"/api/settings/ai/profiles/{a['id']}/set-fast")
+    assert ai_settings.load_fast_profile().name == "A"
+    assert ai_settings.load_vision_profile().name == "B"
+
+    # 重复点 B → 取消，回落主模型
+    resp = c.post(f"/api/settings/ai/profiles/{b['id']}/set-vision").json()
+    assert resp["is_vision"] is False and ai_settings.load_vision_profile() is None
+
+    assert c.post("/api/settings/ai/profiles/nonexistent/set-vision").status_code == 404
+
+
+def test_vision_llm_routes_to_vision_slot(monkeypatch, tmp_path):
+    """带团用纯文本主模型时，看图仍走视觉槽位——这正是本槽位存在的理由。"""
+    from app.ai import llm_factory
+
+    c = TestClient(app)
+    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    c.post("/api/settings/ai/profiles", json={"name": "带团", "model_name": "deepseek-chat", "api_key": "k1"})
+    vis = c.post(
+        "/api/settings/ai/profiles",
+        json={"name": "看图", "model_name": "qwen-vl-max", "api_key": "k2"},
+    ).json()
+
+    # 未标记视觉槽位：回落主模型，纯文本 → 看不了图（与本槽位引入前完全一致）
+    assert llm_factory.get_vision_llm().supports_vision() is False
+
+    c.post(f"/api/settings/ai/profiles/{vis['id']}/set-vision")
+    assert llm_factory.get_vision_llm().supports_vision() is True
+    assert llm_factory.get_llm().supports_vision() is False   # 主模型不受影响
+
+
 def test_reveal_key_and_duplicate_profile(monkeypatch, tmp_path):
     """列表/增改响应里 key 恒掩码；/key 端点返回明文供「显示/复制」；
     /duplicate 完整拷贝（含真实 key）、命名「X 副本」、不激活不标快。"""

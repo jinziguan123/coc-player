@@ -23,6 +23,7 @@ interface AIProfile {
   api_key: string
   is_active: boolean
   is_fast?: boolean
+  is_vision?: boolean
   vision?: boolean
   context_window?: number
   thinking_disabled?: boolean
@@ -183,6 +184,22 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
     }
   }
 
+  /* 标记/取消视觉模型（解析扫描件与图文模组时走它）。单开一档是因为带团模型多为纯文本，
+     从前想解析图文模组就得连带团模型一起换——标一个视觉配置即可，主模型不动。 */
+  const handleToggleVision = async (id: string) => {
+    try {
+      const res = await localApi.post<{ is_vision: boolean }>(`/settings/ai/profiles/${id}/set-vision`)
+      toast.success(
+        res.is_vision
+          ? '已设为视觉模型（解析扫描件/图文模组将走它）'
+          : '已取消视觉模型，看图改用主模型',
+      )
+      await fetchProfiles()
+    } catch {
+      toast.error('设置视觉模型失败')
+    }
+  }
+
   const handleDelete = async (id: string, name: string) => {
     if (!window.confirm(`确定要删除配置「${name}」吗？`)) return
     try {
@@ -334,6 +351,14 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                       快模型
                     </span>
                   )}
+                  {p.is_vision && (
+                    <span
+                      className="chip chip--accent"
+                      title="解析扫描件与图文模组时走此配置；带团仍走激活配置"
+                    >
+                      视觉模型
+                    </span>
+                  )}
                 </div>
                 <div
                   style={{
@@ -368,6 +393,14 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   title="快模型：裁定 planner、滚动摘要等结构化副任务改走此配置（KP 叙事与 AI 队友言行仍走激活配置）；再点一次取消"
                 >
                   {p.is_fast ? '取消快模型' : '设为快模型'}
+                </button>
+                <button
+                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
+                  onClick={() => handleToggleVision(p.id)}
+                  aria-label={`${p.is_vision ? '取消' : '设为'}视觉模型 ${p.name}`}
+                  title="视觉模型：解析扫描件与图文模组时改走此配置（带团仍走激活配置），主模型是纯文本也不影响导模组；再点一次取消"
+                >
+                  {p.is_vision ? '取消视觉模型' : '设为视觉模型'}
                 </button>
                 <button
                   className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"

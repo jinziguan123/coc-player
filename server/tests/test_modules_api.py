@@ -32,12 +32,13 @@ def test_parse_module_images(monkeypatch):
     class TextOnly:
         def supports_vision(self): return False
 
-    monkeypatch.setattr(ms, "get_llm", lambda: Vision())
+    # 取的是「视觉模型」槽位（未标记时槽位内部回落主模型），不是当前激活的带团模型
+    monkeypatch.setattr(ms, "get_vision_llm", lambda: Vision())
     out = asyncio.run(ms.parse_module_images([(b"\x89PNG...", "image/png")], "coc"))
     assert out["title"] == "图片模组"
 
-    monkeypatch.setattr(ms, "get_llm", lambda: TextOnly())
-    with pytest.raises(ValueError):
+    monkeypatch.setattr(ms, "get_vision_llm", lambda: TextOnly())
+    with pytest.raises(ValueError, match="视觉模型"):
         asyncio.run(ms.parse_module_images([(b"x", "image/png")], "coc"))
 
 

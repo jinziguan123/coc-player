@@ -86,6 +86,11 @@
             "title": "Is Fast",
             "type": "boolean"
           },
+          "is_vision": {
+            "default": false,
+            "title": "Is Vision",
+            "type": "boolean"
+          },
           "model_name": {
             "default": "",
             "title": "Model Name",
@@ -8657,6 +8662,47 @@
           }
         },
         "summary": "Set Fast Profile",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ai/profiles/{profile_id}/set-vision": {
+      "post": {
+        "description": "把某配置标记为「视觉模型」（解析扫描件/图文模组用）；再点同一个 = 取消标记（回落主模型）。",
+        "operationId": "set_vision_profile_api_settings_ai_profiles__profile_id__set_vision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Vision Profile",
         "tags": [
           "settings"
         ]

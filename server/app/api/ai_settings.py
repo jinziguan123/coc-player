@@ -45,6 +45,11 @@ class AIProfile(BaseModel):
     # KP 主叙事与 NPC 台词恒走激活配置。全部未标记 = 副任务也走激活配置（旧行为）。
     is_fast: bool = False
     vision: bool = False  # 是否支持多模态（看图）。显式开关，覆盖按模型名的启发式判断
+    # 「视觉模型」槽位：解析扫描件/图文模组时改走此配置。与上面的 vision 是两回事——
+    # vision 说的是「这个模型会不会看图」，is_vision 说的是「看图的活派给谁」。
+    # 主模型多为纯文本（带团要的是文笔与工具调用，不是眼睛），从前这意味着图文模组直接解析不了；
+    # 有了槽位就能：带团用纯文本模型，解析模组时自动切到视觉模型（含本机部署的）。
+    is_vision: bool = False
     # KP 生成走 agent loop（标准工具调用）新路径的开关。**默认开启**（tool_use 为治本方向，
     # 台词走 say() 结构化出口）；仅当 Provider 支持工具（supports_tools）时才实际生效，否则安全
     # 回退旧正则指令路径，见 kp_tool_loop._tool_loop_active。
@@ -334,6 +339,18 @@ def load_fast_profile() -> AIProfile | None:
     return None
 
 
+def load_vision_profile() -> AIProfile | None:
+    """返回标记为「视觉模型」的配置；未标记或配置不完整（缺 key/model）返回 None（回落主模型）。
+
+    只负责「派给谁」，不负责「它到底会不会看图」——后者仍由 Provider 的 supports_vision()
+    判定，槽位里放了个纯文本模型照样会被挡下来（错误文案会指回这里）。
+    """
+    for p in _load_profiles():
+        if p.is_vision and p.api_key and p.model_name:
+            return p
+    return None
+
+
 def load_active_image_profile() -> ImageProfile | None:
     """返回激活的生图配置；没有则 None（=本机不出图，配图静默跳过）。"""
     for p in _load_image_profiles():
@@ -479,6 +496,23 @@ def set_fast_profile(profile_id: str):
         raise HTTPException(status_code=404, detail="配置不存在")
     _save_profiles(profiles)
     return {"status": "ok", "is_fast": any(p.is_fast for p in profiles)}
+
+
+@router.post("/ai/profiles/{profile_id}/set-vision")
+def set_vision_profile(profile_id: str):
+    """把某配置标记为「视觉模型」（解析扫描件/图文模组用）；再点同一个 = 取消标记（回落主模型）。"""
+    profiles = _load_profiles()
+    found = False
+    for p in profiles:
+        if p.id == profile_id:
+            p.is_vision = not p.is_vision   # 幂等开关：重复点击即取消
+            found = True
+        else:
+            p.is_vision = False
+    if not found:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    _save_profiles(profiles)
+    return {"status": "ok", "is_vision": any(p.is_vision for p in profiles)}
 
 
 @router.get("/ai/profiles/{profile_id}/key")
