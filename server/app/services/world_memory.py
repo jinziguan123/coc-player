@@ -152,6 +152,42 @@ def record_unblock(ws: dict, scene_id: str) -> dict:
     return out
 
 
+def scene_event_key(scene_id: str, index: int) -> str:
+    """场景机制点的台账键：``场景 id:events 下标``。"""
+    return f"{str(scene_id or '').strip()}:{int(index)}"
+
+
+def scene_event_seen(ws: dict, scene_id: str, index: int) -> bool:
+    """某场景机制点是否已经发生过（``scene_events_seen`` 是唯一真源）。"""
+    key = scene_event_key(scene_id, index)
+    return key in dict((ws or {}).get("scene_events_seen") or {})
+
+
+def record_scene_event_seen(
+    ws: dict, scene_id: str, index: int, seq: int, note: str = "",
+) -> dict:
+    """把「场景 events 里的这条机制点已经演过了」写进台账。纯函数，重复记只保留首次。
+
+    模组场景的 ``events``（「进入最里面的小屋被拖拽」「阅读村规」）是**一次性桥段**，
+    可它们随当前场景 JSON 每轮明文注入 KP 上下文，且此前没有任何「已经发生过」的标记——
+    KP 于是照着同一份清单一演再演。实测『闇暗山』那局里「被手拖进屋」演了两轮，
+    玩家当场在对话里回了一句「这不就是你刚才和我说的内容嘛」。
+
+    后端确定性发出的进场检定此前只写 ``scene_entry_checks``——那是**后端私有的幂等键**，
+    从不进上下文，拦得住系统重复发骰，拦不住 KP 重复叙事。本台账专供注入。
+    """
+    scene_id = str(scene_id or "").strip()
+    if not scene_id:
+        return dict(ws or {})
+    out = dict(ws or {})
+    seen = dict(out.get("scene_events_seen") or {})
+    key = scene_event_key(scene_id, index)
+    if key not in seen:
+        seen[key] = {"seq": int(seq or 0), "note": _truncate(note)}
+    out["scene_events_seen"] = seen
+    return out
+
+
 def travel_suggested(ws: dict, scene_id: str) -> bool:
     """某地点是否已经给玩家挂过「要不要去」的建议卡（幂等真源）。"""
     return str(scene_id or "") in set((ws or {}).get("travel_suggested") or [])
@@ -550,27 +586,78 @@ def format_clue_ledger_section(
     ws: dict,
     clue_names: dict[str, str] | None = None,
     char_names: dict[str, str] | None = None,
+    visible_clues: list[dict] | None = None,
 ) -> str:
-    """渲染 KP 上下文的「线索台账」小节；台账为空返回空串（向后兼容，不注入）。"""
+    """渲染 KP 上下文的「线索台账」小节。
+
+    ``visible_clues`` 给定时**全量对账**：把这批线索连同「尚未给出」的一并列出，逐条标状态。
+    这是刻意的——原先只列已触碰的线索、台账空就整段不注入，等于**失效时完全静默**：
+    『闇暗山』那局跑了 6 个场景、44 次掷骰，台账一条没有（记账全靠规划器自觉填 clue_id），
+    于是「不要重复安排发现桥段」这句硬指示从头到尾没进过上下文，KP 对着线索明文重演。
+    全量列出后，即便记账链路整条失灵，这一小节仍在，KP 至少看得见清单本身。
+
+    只列 ``visible_clues`` 不扩大泄露面：这批就是「场景列表/线索」小节已经给过 KP 的同一批
+    （同一个 ``visible_scene_ids`` 过滤，见 ``context._compact_clues``）。台账里另有条目
+    （手书、已离开场景的线索）一律照列——那些玩家早就拿到了，无密可守。
+
+    两者皆空时返回空串（向后兼容，不注入）。
+    """
     ledger = dict((ws or {}).get("clue_ledger") or {})
-    if not ledger:
-        return ""
-    clue_names = clue_names or {}
+    clue_names = dict(clue_names or {})
     char_names = char_names or {}
+    pending: list[str] = []
+    for clue in visible_clues or []:
+        cid = str((clue or {}).get("id") or "").strip()
+        if not cid:
+            continue
+        clue_names.setdefault(cid, str(clue.get("name") or ""))
+        if cid not in ledger:
+            pending.append(cid)
+    if not ledger and not pending:
+        return ""
+
+    def _head(cid: str) -> str:
+        name = clue_names.get(cid)
+        return f"{name}（{cid}）" if name else cid
+
     lines = ["【线索台账】（内部资料——玩家已掌握的线索进度，绝不向玩家复述本清单或线索 id）"]
     for cid in sorted(ledger):
         entry = ledger[cid] or {}
         label = _STATUS_LABEL.get(entry.get("status"), str(entry.get("status") or ""))
-        name = clue_names.get(cid)
-        head = f"{name}（{cid}）" if name else cid
         who = "、".join(char_names.get(w, w) for w in (entry.get("discovered_by") or []))
-        line = f"- {head}：{label}" + (f"｜知晓者：{who}" if who else "")
+        line = f"- {_head(cid)}：{label}" + (f"｜知晓者：{who}" if who else "")
         if entry.get("note"):
             line += f"｜备注：{entry['note']}"
         lines.append(line)
+    for cid in sorted(pending):
+        lines.append(f"- {_head(cid)}：尚未给出")
     lines.append(
-        "已列出的线索玩家已经掌握（或有所察觉），不要重复安排「发现」桥段、"
-        "不要再把它当成新信息揭示；未列出的线索一律视为未发现，照常守密。"
+        "标「完全掌握」的线索玩家已经拿到手，绝不要再安排一次「发现」桥段，也不要当成新信息"
+        "重新揭示；标「有所察觉」的玩家只摸到边角，可以让他们查得更深，但已经讲过的部分不要"
+        "重讲一遍；标「尚未给出」的玩家还不知道，照常守密，只在他们真调查到时才揭示。"
+    )
+    return "\n".join(lines)
+
+
+def format_scene_events_section(ws: dict, scene: dict | None) -> str:
+    """渲染当前场景的「机制点进度」小节：events 逐条标已发生/未发生。
+
+    当前场景整份 JSON（含 ``events``）每轮明文注入 KP 上下文，而此前没有任何一条带着
+    「这个桥段已经演过了」的标记——KP 便照单重演（详见 ``record_scene_event_seen``）。
+    无 events 的场景返回空串（不注入）。
+    """
+    events = [e for e in ((scene or {}).get("events") or []) if isinstance(e, dict)]
+    if not events:
+        return ""
+    scene_id = str((scene or {}).get("id") or "").strip()
+    lines = ["【本场景机制点进度】（内部资料，绝不向玩家复述本清单）"]
+    for index, event in enumerate(events):
+        trigger = str(event.get("trigger") or "").strip() or f"机制点 {index + 1}"
+        seen = scene_event_seen(ws, scene_id, index)
+        lines.append(f"- {trigger}：{'已发生' if seen else '尚未发生'}")
+    lines.append(
+        "标「已发生」的桥段本局已经演过，绝不要重演、也不要换个说法再来一次；"
+        "标「尚未发生」的按模组写明的触发条件照常裁定。"
     )
     return "\n".join(lines)
 

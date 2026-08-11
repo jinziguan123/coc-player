@@ -18,7 +18,7 @@ from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
-from app.services import chat_service, world_memory
+from app.services import chat_service, planned_effects, world_memory
 
 
 # ── 纯函数：台账写入 ──────────────────────────────────────────────
@@ -65,6 +65,44 @@ def test_discovered_clue_status():
     }}
     assert world_memory.discovered_clue_status(ws) == {"a": "known", "b": "partial"}
     assert world_memory.discovered_clue_status({}) == {}
+
+
+# ── 纯函数：场景机制点台账 ───────────────────────────────────────
+
+
+def test_record_scene_event_seen_is_idempotent_and_pure():
+    ws = {"flags": {"x": True}}
+    out = world_memory.record_scene_event_seen(ws, "scene_8", 3, 317, note="进入最里面的小屋被拖拽")
+    assert world_memory.scene_event_seen(out, "scene_8", 3)
+    assert not world_memory.scene_event_seen(out, "scene_8", 4)
+    assert "scene_events_seen" not in ws            # 入参不被就地修改
+    assert out["flags"] == {"x": True}              # 其余键原样带过
+
+    # 重复记只保留首次的 seq（同一桥段不会因为后来又被提到而改写发生时点）
+    again = world_memory.record_scene_event_seen(out, "scene_8", 3, 999)
+    assert again["scene_events_seen"]["scene_8:3"]["seq"] == 317
+
+
+def test_scene_event_seen_on_empty_state():
+    assert not world_memory.scene_event_seen({}, "scene_8", 0)
+    assert not world_memory.scene_event_seen(None, "scene_8", 0)
+
+
+def test_format_scene_events_section_marks_progress():
+    scene = {"id": "scene_8", "events": [
+        {"trigger": "阅读村规", "kind": "san_check"},
+        {"trigger": "进入最里面的小屋被拖拽", "kind": "dice_check", "skill": "STR"},
+    ]}
+    ws = world_memory.record_scene_event_seen({}, "scene_8", 1, 317)
+    text = world_memory.format_scene_events_section(ws, scene)
+    assert "- 阅读村规：尚未发生" in text
+    assert "- 进入最里面的小屋被拖拽：已发生" in text
+    assert "绝不要重演" in text
+
+
+def test_format_scene_events_section_empty_scene():
+    assert world_memory.format_scene_events_section({}, None) == ""
+    assert world_memory.format_scene_events_section({}, {"id": "s1"}) == ""
 
 
 # ── 纯函数：NPC 互动环形缓冲 ─────────────────────────────────────
@@ -142,25 +180,60 @@ def test_kp_context_contains_clue_ledger_and_npc_memory():
     assert "线索台账" in system
     assert "书房钥匙" in system and "完全掌握" in system
     assert "亨利" in system                       # discovered_by 的 id 已映射成角色名
-    assert "不要重复安排「发现」桥段" in system
-    assert "未列出的线索一律视为未发现" in system
+    assert "绝不要再安排一次「发现」桥段" in system
     assert "NPC 记忆" in system
     assert "答应半夜带玩家看西厢房" in system
     assert "谎称老爷死时自己在厨房" in system
 
 
-def test_kp_context_empty_memory_backward_compatible():
+def test_kp_context_empty_ledger_still_lists_visible_clues():
+    """台账一条没有时也要注入——静默才是病根。
+
+    『闇暗山』那局跑了 6 个场景、台账全程为空（规划器一次都没填 clue_id），
+    于是「不要重复安排发现桥段」这句硬指示从头到尾没进过上下文，KP 对着线索明文重演。
+    """
     ws = {"visited_scenes": ["scene_hall"]}
     messages = build_kp_context(_mem_session(ws), _mem_module(), _mem_char(), _one_event())
     system = messages[0]["content"]
-    assert "线索台账" not in system   # 空台账不注入任何小节，与现状一致
-    assert "NPC 记忆" not in system
+    assert "线索台账" in system
+    assert "书房钥匙" in system and "尚未给出" in system
+    assert "NPC 记忆" not in system   # NPC 记忆仍是「有才注入」，行为不变
 
 
 def test_kp_context_opening_never_injects_ledger():
     ws = {"clue_ledger": {"clue_key": {"status": "known"}}}
     messages = build_kp_context(_mem_session(ws), _mem_module(), _mem_char(), [])
     assert "线索台账" not in messages[0]["content"]  # 开场隔离照旧
+
+
+def test_kp_context_ledger_never_lists_unreached_clues():
+    """全量对账不扩大泄露面：只列「线索」小节已经给过 KP 的那批。"""
+    module = _mem_module()
+    module.clues = [
+        {"id": "clue_key", "name": "书房钥匙", "location": "scene_hall"},
+        {"id": "clue_far", "name": "地窖账本", "location": "scene_cellar"},
+    ]
+    ws = {"visited_scenes": ["scene_hall"]}
+    system = build_kp_context(_mem_session(ws), module, _mem_char(), _one_event())[0]["content"]
+    assert "书房钥匙" in system
+    assert "地窖账本" not in system      # 玩家还没去过地窖
+
+
+def test_kp_context_injects_scene_events_progress():
+    """当前场景的机制点逐条标已发生/未发生——KP 才不会把一次性桥段重演一遍。"""
+    module = _mem_module()
+    module.scenes = [{"id": "scene_hall", "name": "大厅", "events": [
+        {"trigger": "阅读村规", "kind": "san_check"},
+        {"trigger": "进入最里面的小屋被拖拽", "kind": "dice_check", "skill": "STR"},
+    ]}]
+    ws = {
+        "visited_scenes": ["scene_hall"],
+        "scene_events_seen": {"scene_hall:1": {"seq": 317, "note": ""}},
+    }
+    system = build_kp_context(_mem_session(ws), module, _mem_char(), _one_event())[0]["content"]
+    assert "本场景机制点进度" in system
+    assert "- 阅读村规：尚未发生" in system
+    assert "- 进入最里面的小屋被拖拽：已发生" in system
 
 
 def test_npc_context_injects_own_memory():
@@ -410,6 +483,149 @@ def test_apply_world_memory_fail_open(db_factory):
     # 更新函数抛异常不得上抛（fail-open），world_state 保持原样
     chat_service._apply_world_memory(db, session, _boom)
     assert (session.world_state or {}) == {}
+
+
+# ── 叙事进度记账：规划器漏记时的确定性兜底（带库）──────────────────
+
+
+_VILLAGE = {
+    "id": "scene_8", "title": "村庄遗址", "keywords": ["村庄"],
+    "events": [
+        {"trigger": "进入最里面的小屋被拖拽", "kind": "dice_check", "skill": "STR"},
+        {"trigger": "阅读村规", "kind": "san_check", "san_loss": "0/1"},
+    ],
+}
+
+
+def _seed_village(db):
+    """『闇暗山』村庄遗址：石板与村规都在本场景，绘本在没去过的树洞。"""
+    module = Module(
+        title="闇暗山", rule_system="coc", npcs=[], scenes=[_VILLAGE],
+        clues=[
+            {"id": "clue_3", "name": "石板", "location": "scene_8"},
+            {"id": "clue_5", "name": "村规", "location": "scene_8"},
+            {"id": "clue_4", "name": "绘本《摘瘤爷爷》", "location": "scene_9"},
+        ],
+    )
+    player = Character(name="沃什", rule_system="coc")
+    db.add_all([module, player]); db.flush()
+    session = GameSession(
+        module_id=module.id, player_character_id=player.id, status="active",
+        current_scene_id="scene_8", world_state={},
+    )
+    db.add(session); db.commit()
+    return session, module, player
+
+
+def _narrate(db, session, text, seq=10):
+    db.add(EventLog(
+        session_id=session.id, sequence_num=seq, event_type="narration",
+        actor_name="KP", content=text, visibility=[], metadata={},
+    ))
+    db.commit()
+
+
+def test_narrated_progress_records_clue_seen_in_narration(db_factory):
+    """KP 把石板摆到玩家面前却没让规划器记账 → 兜底补挂（只记 partial）。
+
+    取自实测那局的原句：规划器全程没填过 clue_id，台账一条没有。
+    """
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _narrate(db, session, "手电光打在石板表面，你蹲下身，指腹贴着板面一寸寸扫过去。刻痕摸得出来。")
+    planned_effects.record_narrated_progress(
+        db, session.id, session, module, player, [], pre_gen_seq=0,
+    )
+    entry = (session.world_state or {}).get("clue_ledger", {}).get("clue_3")
+    assert entry is not None
+    assert entry["status"] == "partial"        # 文本匹配只记「有所察觉」，不敢判成已掌握
+    assert entry["discovered_by"] == [player.id]
+    assert "clue_5" not in (session.world_state or {}).get("clue_ledger", {})
+
+
+def test_narrated_progress_ignores_bare_mention(db_factory):
+    """只在环境描写里带过一句「有块石板」不算发现——那时玩家还什么都没看到。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _narrate(db, session, "院子里横七竖八地躺着几块石板，荒草从缝隙间钻出来。")
+    planned_effects.record_narrated_progress(
+        db, session.id, session, module, player, [], pre_gen_seq=0,
+    )
+    assert not (session.world_state or {}).get("clue_ledger")
+
+
+def test_narrated_progress_ignores_clues_elsewhere(db_factory):
+    """别处的线索不因为一个同名词就被记掉（绘本在还没去过的树洞）。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _narrate(db, session, "香澄翻开那本绘本，纸页脆得像要碎掉。")
+    planned_effects.record_narrated_progress(
+        db, session.id, session, module, player, [], pre_gen_seq=0,
+    )
+    assert "clue_4" not in (session.world_state or {}).get("clue_ledger", {})
+
+
+def test_narrated_progress_records_scene_event(db_factory):
+    """叙事演过的场景机制点记进台账 → 下一轮 KP 看得见「已发生」，不会重演。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _narrate(db, session, "你把那张村规从墙上揭下来，借着手电光一行行读完。")
+    planned_effects.record_narrated_progress(
+        db, session.id, session, module, player, [], pre_gen_seq=0,
+    )
+    assert world_memory.scene_event_seen(session.world_state, "scene_8", 1)
+    assert not world_memory.scene_event_seen(session.world_state, "scene_8", 0)
+
+
+def test_narrated_progress_scene_event_matching_is_literal(db_factory):
+    """能力边界：KP 把「被拖拽」整段改写掉时，文本匹配抓不住。
+
+    实测那句是「那只手猛地一拽，你半个人被扯进门洞」——与 trigger 的「小屋 / 拖拽」
+    没有一个字面重合。这类只能靠后端确定性发出机制时记的那本账，
+    此处如实断言现状，免得日后误以为覆盖了语义改写。
+    """
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _narrate(db, session, "黑暗里那只手猛地一拽，你半个人被扯进门洞，鞋底在门槛上碾出一道深痕。")
+    planned_effects.record_narrated_progress(
+        db, session.id, session, module, player, [], pre_gen_seq=0,
+    )
+    assert not world_memory.scene_event_seen(session.world_state, "scene_8", 0)
+
+
+def test_narrated_progress_does_not_downgrade_known(db_factory):
+    """规划器已记成「完全掌握」的线索，不会被兜底的 hint 拉回 partial。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    session.world_state = {"clue_ledger": {"clue_3": {"status": "known", "seq": 1}}}
+    db.commit()
+    _narrate(db, session, "你又低头看了看那块石板，刻痕还是那些刻痕。")
+    planned_effects.record_narrated_progress(
+        db, session.id, session, module, player, [], pre_gen_seq=0,
+    )
+    assert session.world_state["clue_ledger"]["clue_3"]["status"] == "known"
+
+
+def test_narrated_progress_noop_without_new_narration(db_factory):
+    """本轮没有新叙事（pre_gen_seq 之后无事件）→ 什么都不记。"""
+    db = db_factory()
+    session, module, player = _seed_village(db)
+    _narrate(db, session, "你蹲下身，指腹贴着石板一寸寸扫过去。", seq=10)
+    planned_effects.record_narrated_progress(
+        db, session.id, session, module, player, [], pre_gen_seq=10,
+    )
+    assert not (session.world_state or {}).get("clue_ledger")
+
+
+def test_narrated_progress_fail_open(db_factory):
+    """记账异常绝不阻塞出牌（模组为 None 等残缺输入直接返回）。"""
+    db = db_factory()
+    session, _module, player = _seed_village(db)
+    _narrate(db, session, "你蹲下身，指腹贴着石板一寸寸扫过去。")
+    planned_effects.record_narrated_progress(
+        db, session.id, session, None, player, [], pre_gen_seq=0,
+    )
+    assert not (session.world_state or {}).get("clue_ledger")
 
 
 # ── v2：MemoryKeeper 差量合并（纯函数）─────────────────────────────

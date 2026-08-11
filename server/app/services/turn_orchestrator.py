@@ -564,6 +564,12 @@ async def _run_generation(
     async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
         room_hub.broadcast(session_id, chunk)
 
+    # 叙事进度记账（放在全部守卫之后：场景守卫可能刚把队伍挪进新场景）：本轮演过的场景
+    # 机制点 / 摆到玩家面前的线索 → 确定性写世界记忆，补规划器漏记的那些（详见守卫文档）。
+    planned_effects.record_narrated_progress(
+        db, session_id, game_session, module, player_char, teammates, pre_gen_seq,
+    )
+
     await _finish_generation(db, session_id, llm)
 
 
@@ -736,6 +742,12 @@ async def _run_split_generation(
     # 确定性战斗伤害守卫：战斗中非常规/范围攻击 → 挂成玩家 pending_roll 亲手掷、扣敌人 HP。
     async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
         room_hub.broadcast(session_id, chunk)
+
+    # 叙事进度记账（放在全部守卫之后：场景守卫可能刚把队伍挪进新场景）：本轮演过的场景
+    # 机制点 / 摆到玩家面前的线索 → 确定性写世界记忆，补规划器漏记的那些（详见守卫文档）。
+    planned_effects.record_narrated_progress(
+        db, session_id, game_session, module, player_char, teammates, pre_gen_seq,
+    )
 
     await _finish_generation(db, session_id, llm)
 
@@ -1172,6 +1184,12 @@ async def _run_kp_turn(
                 db, session_id, player_char, party_others, plan, pre_gen_seq, module=module,
             ):
                 room_hub.broadcast(session_id, chunk)
+
+    # 叙事进度记账：本轮演过的场景机制点 / 摆到玩家面前的线索 → 确定性写世界记忆。
+    # 放在 _process_commands 之后，KP 自发的 [HANDOUT]/线索指令已落账，这里只补它漏的。
+    planned_effects.record_narrated_progress(
+        db, session_id, game_session, module, player_char, party_others, pre_gen_seq,
+    )
 
     # 玩家亲口申请的检定必须有归宿：KP 把它写成叙事顺过去时确定性补挂（详见守卫的文档）。
     if requested_check is not None:

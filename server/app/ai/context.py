@@ -593,28 +593,43 @@ def _compact_npcs(
     return json.dumps(result, ensure_ascii=False, separators=(",", ":")) if result else "无"
 
 
+def visible_clues(
+    clues: list[dict] | None,
+    visible_scene_ids: set[str] | None = None,
+) -> list[dict]:
+    """本轮可给 KP 看的线索原始条目。
+
+    ``visible_scene_ids`` 给定时（运行时分层用）只保留 location ∈ 已访问场景、或没有
+    绑定场景的线索，避免把玩家尚未到达区域的线索提前喂给 KP（防中途泄露）。
+
+    线索台账的「全量对账」用的是同一批（见 ``world_memory.format_clue_ledger_section``）：
+    两处必须同源，台账才不会列出 KP 在「线索」小节里根本看不到的条目。
+    """
+    out = []
+    for c in clues or []:
+        loc = c.get("location")
+        if visible_scene_ids is not None and loc and loc not in visible_scene_ids:
+            continue
+        out.append(c)
+    return out
+
+
 def _compact_clues(
     clues: list[dict] | None,
     visible_scene_ids: set[str] | None = None,
 ) -> str:
-    """压缩线索列表。
-
-    ``visible_scene_ids`` 给定时（运行时分层用）只保留 location ∈ 已访问场景、或没有
-    绑定场景的线索，避免把玩家尚未到达区域的线索提前喂给 KP（防中途泄露）。
-    """
+    """压缩线索列表（筛选口径见 ``visible_clues``）。"""
     if not clues:
         return "无"
-    result = []
-    for c in clues:
-        loc = c.get("location")
-        if visible_scene_ids is not None and loc and loc not in visible_scene_ids:
-            continue
-        result.append({
+    result = [
+        {
             "id": c.get("id", ""),
             "name": c.get("name", ""),
             "description": (c.get("description") or "")[:80],
             "location": c.get("location", ""),
-        })
+        }
+        for c in visible_clues(clues, visible_scene_ids)
+    ]
     return json.dumps(result, ensure_ascii=False, separators=(",", ":")) if result else "无"
 
 
@@ -1010,6 +1025,7 @@ def build_kp_context(
     # 开场隔离：开场（无历史事件）时只给起始场景的 NPC、剥掉 secrets，线索完全不给——
     # 防止 KP 拿"待发现"的尸体/笔记/线索现编进开场白。游戏开始后恢复完整资料。
     is_opening = not events
+    clues_for_ledger: list[dict] = []
     if is_opening:
         npcs_info = _compact_npcs(
             npcs, only_scene_id=scene_id, hide_secrets=True,
@@ -1020,6 +1036,7 @@ def build_kp_context(
         # 区域的内容。无固定位置的 NPC / 线索照常给。
         visible_scene_ids = _visible_scenes(session, scene_id, module)
         npcs_info = _compact_npcs(npcs, visible_scene_ids=visible_scene_ids)
+        clues_for_ledger = visible_clues(module.clues, visible_scene_ids)
         clues_info = _compact_clues(module.clues, visible_scene_ids=visible_scene_ids)
 
     # 场景连通：当前场景可直达的邻居（connections 无向闭包）。模组建了图才注入——
@@ -1189,11 +1206,19 @@ def build_kp_context(
             char_names = {player_char.id: player_char.name}
             char_names.update({t.id: t.name for t in teammates})
             ledger_section = world_memory.format_clue_ledger_section(
-                ws_mem, clue_names, char_names,
+                ws_mem, clue_names, char_names, visible_clues=clues_for_ledger,
             )
             if ledger_section:
                 segs.append(_Seg("\n\n" + ledger_section,
                                  SYS_TIER_VOLATILE, 5, "clue-ledger"))
+            # 当前场景机制点进度：events 逐条标已发生/未发生。与台账同档 priority——
+            # 丢了 KP 就会把「被手拖进屋」这类一次性桥段照着场景 JSON 重演一遍，玩家直接可感。
+            scene_events_section = world_memory.format_scene_events_section(
+                ws_mem, current_scene,
+            )
+            if scene_events_section:
+                segs.append(_Seg("\n\n" + scene_events_section,
+                                 SYS_TIER_VOLATILE, 5, "scene-events"))
             npc_memory_section = world_memory.format_npc_memory_section(ws_mem, npcs)
             if npc_memory_section:
                 segs.append(_Seg("\n\n" + npc_memory_section,

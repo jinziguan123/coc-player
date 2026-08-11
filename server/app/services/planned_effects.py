@@ -453,6 +453,143 @@ def requested_check_fallback_command(
     return f"[DICE_CHECK: skill={skill}, difficulty=normal, char={getattr(actor, 'name', '')}]"
 
 
+#: 线索确实被「摆到玩家面前」的动作证据。只出现名字不算——KP 常顺笔带过环境里躺着块石板，
+#: 那时玩家还什么都没看到，记进台账反而会让真正的发现桥段被当成重复而跳过。
+_CLUE_EVIDENCE_WORDS = (
+    "读", "看", "翻", "查", "扫", "照", "摸", "辨认", "发现", "认出", "拿起", "捡起",
+    "写着", "刻着", "记着", "字迹", "刻痕", "内容", "翻开", "递给", "接过", "凑近", "拨开",
+)
+
+#: 机制点 trigger 里的触发动作/虚词，剥掉后剩下的才是「这条机制点讲的那个具名事物」。
+_TRIGGER_ACTION_WORDS = (
+    "阅读", "翻看", "查看", "看到", "看见", "读到", "进入", "走进", "抵达", "到达", "来到",
+    "踏入", "前往", "踏进", "离开", "走出", "触碰", "接触", "发现", "调查", "搜索", "搜寻",
+    "尝试", "试图", "的时候", "时", "后", "被", "中",
+)
+
+
+def _scene_event_narrated(trigger: str, text: str) -> bool:
+    """本轮叙事有没有把这条机制点演出来。
+
+    判据是「trigger 里的具名事物在叙事里出现了」：剥掉触发动作后剩下的实词命中一个即算。
+    不能用 ``_trigger_matches``——机制点的 trigger 多是无标点长句（「进入最里面的小屋被拖拽」），
+    那个函数对这种输入退化成整串包含匹配，永远命中不了。
+
+    只认字面：KP 把「被拖拽」写成「那只手猛地一拽，你半个人被扯进门洞」时抓不住——
+    语义改写超出文本匹配的能力边界，那类只能靠后端确定性发出机制时记的那本账。
+    宁可漏标（KP 至多重演一次，与现状同）也不多标（多标会让没演的桥段被跳过）——
+    但反过来，实词一旦出现就认，因为「重复」正是玩家最能直接感知的那种坏。
+    """
+    if not trigger or not text:
+        return False
+    core = trigger
+    for word in _TRIGGER_ACTION_WORDS:
+        core = core.replace(word, " ")
+    terms = re.findall(r"[一-鿿]{2,}", core)
+    return any(term in text for term in terms)
+
+
+def _clue_aliases(clue: dict) -> list[str]:
+    """线索名里可供文本匹配的中文片段（「绘本《摘瘤爷爷》」→ 绘本 / 摘瘤爷爷）。"""
+    return re.findall(r"[一-鿿]{2,}", str(clue.get("name") or ""))
+
+
+def _clue_shown_in_narration(clue: dict, text: str) -> bool:
+    """本轮叙事里是否真把这条线索摆到了玩家面前（名字 + 动作证据近距离同现）。"""
+    if not text:
+        return False
+    action = "|".join(map(re.escape, _CLUE_EVIDENCE_WORDS))
+    for alias in _clue_aliases(clue):
+        obj = re.escape(alias)
+        if re.search(rf"(?:{action}).{{0,24}}{obj}|{obj}.{{0,24}}(?:{action})", text):
+            return True
+    return False
+
+
+def record_narrated_progress(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module | None,
+    player_char: Character,
+    teammates: list[Character] | None,
+    pre_gen_seq: int,
+) -> None:
+    """本轮叙事里实际发生了什么 → 确定性记进世界记忆（场景机制点 + 线索台账）。
+
+    补的是「记账这件事本身也交给了 LLM」这个结构性缺口：线索台账此前唯一的写入口是规划器
+    填的 ``clue_policy.candidate_clue_ids``（见 ``turn_context.record_clue_ledger_from_plan``），
+    规划器没把「祠堂里那块石板」认回 ``clue_3``，账就永远不记。实测『闇暗山』那局跑了 6 个
+    场景、187 条叙述，``clue_ledger`` 一条没有——于是「不要重复安排发现桥段」这句硬指示
+    从头到尾没进过上下文，KP 对着线索明文重演，玩家在对话里当场回了句「这不就是你刚才
+    和我说的内容嘛」。
+
+    补挂一律只记 ``hint``（有所察觉）而非完整揭示：文本匹配必然有误差，宁可让 KP 觉得
+    「玩家摸到了边角」而继续深入，也不能凭一次误匹配就把整条线索判成已掌握、从此再不揭示。
+    规划器正常记账时仍会把它升级为「完全掌握」（``known`` 不降级）。
+
+    fail-open：任何异常都只记日志，绝不阻塞出牌。
+    """
+    try:
+        narration = _narrated_turn_text(db, session_id, pre_gen_seq)
+        if not narration or module is None:
+            return
+        db.refresh(game_session)
+        party = [player_char, *(teammates or [])]
+        at = {c.id: session_service.get_char_location(game_session, c.id) for c in party}
+        anchor = at.get(player_char.id)
+        # 分头行动下信息不共享：知晓者只记与主角同场景的人（与规划器记账口径一致）。
+        here = [c.id for c in party if at.get(c.id) == anchor]
+        scene_ids = set(at.values()) | {str(game_session.current_scene_id or "")}
+        scene_ids.discard("")
+        scene_ids.discard(None)
+        seq = session_service.get_next_sequence_num(db, session_id) - 1
+
+        ws = dict(game_session.world_state or {})
+        before = json.dumps(
+            [ws.get("scene_events_seen"), ws.get("clue_ledger")], sort_keys=True,
+        )
+
+        # 场景机制点：模组写明的一次性桥段，叙事对上 trigger 就算演过了。
+        # 遍历队伍所在的每个场景（不只当前场景）——分头行动时那一轮叙事覆盖多个场景。
+        for scene in module.scenes or []:
+            sid = str(scene.get("id") or "")
+            if sid not in scene_ids:
+                continue
+            for index, event in enumerate(scene.get("events") or []):
+                if not isinstance(event, dict):
+                    continue
+                trigger = str(event.get("trigger") or "").strip()
+                if not trigger or world_memory.scene_event_seen(ws, sid, index):
+                    continue
+                if _scene_event_narrated(trigger, narration):
+                    ws = world_memory.record_scene_event_seen(
+                        ws, sid, index, seq, note=trigger,
+                    )
+
+        # 线索：只认玩家此刻所在场景（或无绑定场景）的，别把别处的线索凭一个同名词记掉。
+        ledger = dict(ws.get("clue_ledger") or {})
+        for clue in module.clues or []:
+            cid = str((clue or {}).get("id") or "").strip()
+            loc = str(clue.get("location") or "").strip()
+            if not cid or cid in ledger or (loc and loc not in scene_ids):
+                continue
+            if _clue_shown_in_narration(clue, narration):
+                ws = world_memory.record_clue_reveal(
+                    ws, [cid], "hint", here, seq,
+                    note=f"叙事已提及{clue.get('name') or cid}（确定性补挂）",
+                )
+
+        after = json.dumps(
+            [ws.get("scene_events_seen"), ws.get("clue_ledger")], sort_keys=True,
+        )
+        if before != after:
+            game_session.world_state = ws
+            db.commit()
+    except Exception:
+        logger.exception("叙事进度记账失败（忽略）：session=%s", session_id)
+
+
 def _npcs_present(module: Module | None, game_session: GameSession) -> list[dict]:
     """当前场景在场（或无固定位置）的存活 NPC 简况，供判定认名字、认动机。"""
     if module is None:
@@ -1010,13 +1147,67 @@ async def _ensure_planned_scene(
         yield chunk
 
 
+#: 进场标记后面的宾语指到这些泛称之一时，说的就是本场景（「进入房间时全员聆听」）。
+#: 精确相等才算——带修饰的宾语（「最里面的小屋」）恰恰说明特指场景**内部**的某处。
+_ENTRY_GENERIC_PLACES = frozenset({
+    "房间", "屋内", "室内", "内部", "此处", "该地", "这里", "现场", "场景", "本场景", "该场景",
+})
+#: 宾语的右边界：「进入X时」「到达X后」「进入X，」都在此截断。
+_ENTRY_OBJECT_STOP = re.compile(r"[时后，,。；;：:、]")
+
+
+def _entry_trigger_object(trigger: str) -> str | None:
+    """进场标记后面跟的那个地点短语。
+
+    无进场标记 → None；标记后没有宾语（「进入时」）→ 空串。
+    """
+    trigger = str(trigger or "")
+    for marker in _ENTRY_CHECK_MARKERS:
+        pos = trigger.find(marker)
+        if pos < 0:
+            continue
+        tail = trigger[pos + len(marker):]
+        stop = _ENTRY_OBJECT_STOP.search(tail)
+        return (tail[:stop.start()] if stop else tail).strip()
+    return None
+
+
+def _is_scene_entry_trigger(trigger: str, scene: dict | None) -> bool:
+    """这条 trigger 说的是不是「踏进**本场景**就触发」。
+
+    光看有没有「进入」二字是不够的：『闇暗山』村庄遗址里那条
+    ``trigger="进入最里面的小屋被拖拽"`` 说的是村内某间屋子，可它被当成了进村即触发——
+    玩家刚踏进村口就被判了一次 STR，还把幂等键占掉，真进那间小屋时反而不再检定。
+    所以要求宾语确实指向本场景：没有宾语（「进入时」）、泛称本场景（「进入房间时」），
+    或与场景标题/关键词互相包含。指向场景内部某处的一律不算——那些等玩家真走过去，
+    由 KP 按 events 明文自行裁定（现在它看得见每条机制点发生没有，见 ``format_scene_events_section``）。
+
+    场景连个名字都没有时 fail-open 退回「有进场标记就算」：无从对文，宁可照旧发，
+    也不要因为模组数据残缺就把既有机制整条漏掉。
+    """
+    obj = _entry_trigger_object(trigger)
+    if obj is None:
+        return False
+    if not obj or obj in _ENTRY_GENERIC_PLACES:
+        return True
+    names = [(scene or {}).get("title"), (scene or {}).get("name")]
+    names += list((scene or {}).get("keywords") or [])
+    # 空白归一：模组里「7 号车厢」与 trigger 里的「7号车厢」是同一个地方。
+    names = [n for n in (re.sub(r"\s+", "", str(n or "")) for n in names) if n]
+    if not names:
+        return True
+    obj = re.sub(r"\s+", "", obj)
+    return any(n in obj or obj in n for n in names)
+
+
 def _scene_entry_check_mechanisms(
     module: Module | None, scene_id: str | None,
 ) -> list[tuple[int, dict]]:
     """该场景中「进入即触发」的技能检定机制点（模组明文，须带技能名）。
 
     与 ``_scene_sanity_mechanism`` 的 entry 分支同源，只是那边筛 san_check、这边筛 dice_check。
-    不含进场标记的机制点（「搜寻丢失物品时」「悄悄通过时」）一律不在此列——那些要玩家先有行动。
+    不含进场标记的机制点（「搜寻丢失物品时」「悄悄通过时」）一律不在此列——那些要玩家先有行动；
+    指向场景内部某处的（「进入最里面的小屋」）同样不在此列，判据见 ``_is_scene_entry_trigger``。
     """
     if not module or not scene_id:
         return []
@@ -1030,8 +1221,7 @@ def _scene_entry_check_mechanisms(
             continue
         if not str(event.get("skill") or "").strip():
             continue
-        trigger = str(event.get("trigger") or "")
-        if any(marker in trigger for marker in _ENTRY_CHECK_MARKERS):
+        if _is_scene_entry_trigger(str(event.get("trigger") or ""), scene):
             found.append((index, event))
     return found
 
@@ -1096,6 +1286,13 @@ async def _ensure_scene_entry_checks(
             recorded = set(ws.get(_ENTRY_CHECK_STATE_KEY) or [])
             recorded.update(_entry_check_key(scene_id, index, c.id) for c in targets)
             ws[_ENTRY_CHECK_STATE_KEY] = sorted(recorded)
+            # 同一件事记两本账：上面那本是后端私有的逐角色幂等键（拦重复发骰），
+            # 这本进 KP 上下文（拦 KP 照着场景 events 明文把同一桥段重演一遍）。
+            ws = world_memory.record_scene_event_seen(
+                ws, scene_id, index,
+                session_service.get_next_sequence_num(db, session_id) - 1,
+                note=kv["source"],
+            )
             game_session.world_state = ws
             db.commit()
             done = recorded

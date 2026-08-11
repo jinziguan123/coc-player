@@ -105,6 +105,56 @@ def test_travel_flavored_trigger_counts_as_entry():
     assert len(planned_effects._scene_entry_check_mechanisms(module, "s7")) == 1
 
 
+# 取自「闇暗山」村庄遗址：trigger 里的「进入」指的是村内那间小屋，不是进村。
+_SCENE_VILLAGE = {
+    "id": "scene_8",
+    "title": "村庄遗址",
+    "keywords": ["废弃村落", "旧村", "村庄", "村庄遗址"],
+    "events": [
+        {"trigger": "进入最里面的小屋被拖拽", "kind": "dice_check", "skill": "STR"},
+    ],
+}
+
+
+def test_sub_location_trigger_is_not_scene_entry():
+    """『进入最里面的小屋』说的是场景内部某处，不该在玩家刚踏进村口时就打。
+
+    这条此前被当成进村即触发：玩家一进村就被判 STR，幂等键还被占掉，
+    真走进那间小屋时反而不再检定。
+    """
+    module = Module(title="闇暗山", rule_system="coc", scenes=[_SCENE_VILLAGE])
+    assert planned_effects._scene_entry_check_mechanisms(module, "scene_8") == []
+
+
+def test_entry_trigger_matches_scene_keyword():
+    """宾语对上场景关键词（而非标题）也算进场。"""
+    scene = dict(_SCENE_VILLAGE, events=[
+        {"trigger": "进入废弃村落时", "kind": "dice_check", "skill": "聆听"},
+    ])
+    module = Module(title="闇暗山", rule_system="coc", scenes=[scene])
+    assert len(planned_effects._scene_entry_check_mechanisms(module, "scene_8")) == 1
+
+
+def test_bare_and_generic_entry_triggers_count():
+    """「进入时」没有宾语、「进入房间时」泛称本场景——都算进场。"""
+    scene = dict(_SCENE_VILLAGE, events=[
+        {"trigger": "进入时", "kind": "dice_check", "skill": "聆听"},
+        {"trigger": "进入房间时", "kind": "dice_check", "skill": "侦查"},
+    ])
+    module = Module(title="闇暗山", rule_system="coc", scenes=[scene])
+    found = planned_effects._scene_entry_check_mechanisms(module, "scene_8")
+    assert [index for index, _ in found] == [0, 1]
+
+
+def test_entry_trigger_ignores_whitespace_in_scene_title():
+    """模组写「7 号车厢」、trigger 写「7号车厢」是同一个地方。"""
+    scene = {"id": "s7", "title": "7 号车厢", "events": [
+        {"trigger": "进入7号车厢时", "kind": "dice_check", "skill": "灵感"},
+    ]}
+    module = Module(title="M", rule_system="coc", scenes=[scene])
+    assert len(planned_effects._scene_entry_check_mechanisms(module, "s7")) == 1
+
+
 # ── 守卫行为 ──
 
 def test_guard_fires_entry_check_for_whole_party(db_factory):
