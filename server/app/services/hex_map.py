@@ -232,16 +232,31 @@ def ensure_scene_maps(scenes: list) -> bool:
     groups: dict[str, list[dict]] = {}
     for s in locs:
         groups.setdefault(scene_parent(s), []).append(s)
-    for group in groups.values():
-        changed = _layout_group(group) or changed
+    for parent, group in groups.items():
+        changed = _layout_group(group, reserve_origin=bool(parent)) or changed
     return changed
 
 
-def _layout_group(locs: list[dict]) -> bool:
-    """把同一层的场景落位到该层自己的坐标空间（原落位算法，作用域＝一层）。"""
+def _layout_group(locs: list[dict], reserve_origin: bool = False) -> bool:
+    """把同一层的场景落位到该层自己的坐标空间（原落位算法，作用域＝一层）。
+
+    ``reserve_origin``（子沙盘专用）把原点空出来给父级地点本身。模组里的连通几乎总是
+    星形——四间屋子各自只连「村庄遗址」，彼此不相连（闇暗山实测）。父级不在场，星形就
+    没有中心，子沙盘里一条连线都画不出来，四个格子彼此悬空。留出原点，父级坐这个位置，
+    连线自然成立，它同时也是「走出去」的锚点。
+    """
     changed = False
     coord_of: dict[int, tuple[int, int]] = {}   # locs 下标 → 坐标
-    used: set[tuple[int, int]] = set()
+    if reserve_origin:
+        # 已经占着原点的场景要挪走：那个位置属于父级
+        for s in locs:
+            if scene_coord(s) == (0, 0) and isinstance(s.get("map"), dict):
+                m = dict(s["map"])
+                m.pop("q", None)
+                m.pop("r", None)
+                s["map"] = m
+                changed = True
+    used: set[tuple[int, int]] = {(0, 0)} if reserve_origin else set()
     todo: list[int] = []
     for i, s in enumerate(locs):
         c = scene_coord(s)
@@ -265,7 +280,10 @@ def _layout_group(locs: list[dict]) -> bool:
         todo.sort(key=lambda i: (-sum(1 for j in adj[i] if j in coord_of), i))
         i = todo.pop(0)
         placed_nb = [coord_of[j] for j in adj[i] if j in coord_of]
-        anchor = placed_nb or list(coord_of.values())
+        # 子沙盘里退回原点而不是「全层重心」：同层的场景彼此几乎不相连（都只连父级），
+        # 一个已定位邻居都找不到，按重心找位就会把它们排成一条越走越远的链。
+        # 父级坐在原点、人人都连它——围着原点铺开才是这层真实的拓扑。
+        anchor = placed_nb or ([] if reserve_origin else list(coord_of.values()))
         if anchor:
             target = _axial_round(
                 sum(c[0] for c in anchor) / len(anchor),

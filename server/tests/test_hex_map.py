@@ -409,7 +409,10 @@ class TestSceneHierarchy:
         by["hut"]["map"].update({"q": 9, "r": 9})       # 一个远在天边的顶层坐标
         hex_map.infer_scene_parents(scenes)
         hex_map.ensure_scene_maps(scenes)
-        assert hex_map.scene_coord(by["hut"]) == (0, 0)  # 子沙盘里重排到原点
+        coord = hex_map.scene_coord(by["hut"])
+        assert coord != (9, 9)                            # 旧的顶层坐标没被继承
+        assert coord != (0, 0)                            # 原点留给父级本人
+        assert hex_map.axial_distance(coord, (0, 0)) <= 3  # 就近围着父级铺开
 
     def test_父级未访问前子级对玩家不可见(self):
         """门禁：开局就不该知道村里有几间屋子；KP 上帝视角仍看得见，只是 known=False。
@@ -479,3 +482,20 @@ class TestSceneHierarchy:
         assert (nodes["hut"]["q"], nodes["hut"]["r"]) == hex_map.scene_coord(by["hut"])
         assert nodes["hut"]["biome"] == "interior"
         assert (nodes["t1"]["q"], nodes["t1"]["r"]) == (3, 3)   # 地貌节点原样保留
+
+    def test_子沙盘留出原点给父级(self):
+        """模组里的连通几乎总是星形（四间屋子各自只连村庄、彼此不相连）。父级不在场，
+        星形就没有中心，子沙盘一条连线都画不出来。落位为此空出原点。"""
+        scenes = [
+            _loc("village", "ruin", ["a", "b", "c"]),
+            _loc("a", "interior", ["village"]),
+            _loc("b", "interior", ["village"]),
+            _loc("c", "interior", ["village"]),
+            _loc("road", "road", ["village"]),
+        ]
+        hex_map.infer_scene_parents(scenes)
+        hex_map.ensure_scene_maps(scenes)
+        by = {s["id"]: s for s in scenes}
+        kids = [hex_map.scene_coord(by[i]) for i in ("a", "b", "c")]
+        assert (0, 0) not in kids                                   # 原点是父级的
+        assert all(hex_map.axial_distance(c, (0, 0)) <= 3 for c in kids)  # 围着原点，不排成链

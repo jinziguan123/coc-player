@@ -427,6 +427,56 @@ def _normalize_scenes(scenes: list) -> list:
     return scenes
 
 
+def _scene_map_with_parent(scene: dict, node: dict) -> dict:
+    """由地图节点回写 scene.map 时，把层级（parent）原样带上。
+
+    map_nodes 只管坐标与地貌，没有层级概念；不显式保留就等于每存一次模组把归组抹平一次。
+    """
+    from app.services import hex_map
+
+    out = {"q": node["q"], "r": node["r"], "biome": node["biome"]}
+    if parent := hex_map.scene_parent(scene):
+        out["parent"] = parent
+    return out
+
+
+#: 地貌填充的补洞方向（与 hex_map._DIRS 同序，本模块自用，避免跨模块取私有名）
+_FILL_DIRS = ((1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1))
+
+
+def _close_enclosed_gaps(required: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    """把被 required 完全包围的空格并进 required（补洞）。
+
+    凸包判定跑在 axial 坐标上，却用的是**笛卡尔**多边形算法——六角网格是斜的，两者对不上，
+    于是视觉上明明在陆地内部的格子会被判成外部，留下几个孤零零的黑洞（闇暗山实测 4 个）。
+    与其去修那个判定的几何，不如在结果上做一次「从外部泛洪、够不着的就是洞」：
+    与坐标系无关，凸包怎么算都不会再漏。
+    """
+    if not required:
+        return required
+    lo_q = min(q for q, _ in required) - 1
+    hi_q = max(q for q, _ in required) + 1
+    lo_r = min(r for _, r in required) - 1
+    hi_r = max(r for _, r in required) + 1
+    outside: set[tuple[int, int]] = set()
+    stack = [(lo_q, lo_r)]
+    while stack:
+        cell = stack.pop()
+        if cell in outside or cell in required:
+            continue
+        q, r = cell
+        if not (lo_q <= q <= hi_q and lo_r <= r <= hi_r):
+            continue
+        outside.add(cell)
+        stack.extend((q + dq, r + dr) for dq, dr in _FILL_DIRS)
+    return required | {
+        (q, r)
+        for q in range(lo_q, hi_q + 1)
+        for r in range(lo_r, hi_r + 1)
+        if (q, r) not in required and (q, r) not in outside
+    }
+
+
 def _normalize_map_nodes(map_nodes: list | None, scenes: list) -> list:
     """把沙盘节点归一化为稳定的统一节点对象。
 
@@ -444,7 +494,8 @@ def _normalize_map_nodes(map_nodes: list | None, scenes: list) -> list:
         if s.get("id") and s.get("kind") != "chapter" and hex_map.scene_coord(s) is not None
     }
     by_scene: dict[str, dict] = {}
-    ordinary: dict[tuple[int, int], dict] = {}
+    # 键带层：各层坐标空间独立，只用 (q,r) 会让子沙盘的格子把顶层同坐标的挤掉。
+    ordinary: dict[tuple[int, int, str], dict] = {}
     for node in raw:
         sid = str(node.get("scene_id") or "").strip()
         try:
@@ -457,22 +508,30 @@ def _normalize_map_nodes(map_nodes: list | None, scenes: list) -> list:
         if sid and sid in scene_by_id:
             by_scene[sid] = {"id": sid, "q": q, "r": r, "biome": biome, "scene_id": sid}
         elif not sid:
-            ordinary.setdefault((q, r), {
+            # parent 必须原样带回来：丢了它，子沙盘的地貌下一次归一化就漏回顶层，
+            # 在顶层留下一片没有来源的底色（闇暗山实测 9 格）。
+            layer = str(node.get("parent") or "").strip()
+            entry = {
                 "id": str(node.get("id") or f"terrain_{q}_{r}"),
                 "q": q, "r": r, "biome": biome,
                 "scene_id": None,
-            })
+            }
+            if layer:
+                entry["parent"] = layer
+            ordinary.setdefault((q, r, layer), entry)
 
     # 编辑器提交的场景地图节点优先；再统一做间距、冲突和地貌校验。
     for sid, node in by_scene.items():
         scene = next((s for s in scenes if str(s.get("id")) == sid), None)
         if scene is not None:
-            scene["map"] = {"q": node["q"], "r": node["r"], "biome": node["biome"]}
+            scene["map"] = _scene_map_with_parent(scene, node)
     hex_map.ensure_scene_maps(scenes)
 
     # scene.map 仍是剧情与空间语义的兼容来源；map_nodes 里的位置/地貌优先。
     nodes: list[dict] = []
-    occupied: set[tuple[int, int]] = set()
+    # 占位以 (q, r, 层) 为键：各层坐标空间独立，顶层的 (2,4) 和某个子沙盘的 (2,4)
+    # 是两个格子，用二元组当键会让子层的格子把顶层的挤掉。
+    occupied: set[tuple[int, int, str]] = set()
     for sid, scene in scene_by_id.items():
         q, r = hex_map.scene_coord(scene)  # type: ignore[misc]
         node = by_scene.get(sid) or {
@@ -484,11 +543,9 @@ def _normalize_map_nodes(map_nodes: list | None, scenes: list) -> list:
         if node["biome"] not in hex_map.BIOMES:
             node["biome"] = "plain"
         # 地图节点是编辑器的真源，回写剧情场景上的 map 以兼容旧空间语义。
-        scene["map"] = {"q": node["q"], "r": node["r"], "biome": node["biome"]}
+        scene["map"] = _scene_map_with_parent(scene, node)
         nodes.append(node)
-        occupied.add((q, r))
-
-    scene_coords = [(n["q"], n["r"]) for n in nodes if n.get("scene_id")]
+        occupied.add((q, r, hex_map.scene_parent(scene)))
 
     def cube_round(qf: float, rf: float) -> tuple[int, int]:
         sf = -qf - rf
@@ -540,45 +597,82 @@ def _normalize_map_nodes(map_nodes: list | None, scenes: list) -> list:
             signs.append((other[0] - point[0]) * (r - point[1]) - (other[1] - point[1]) * (q - point[0]))
         return all(value >= 0 for value in signs) or all(value <= 0 for value in signs)
 
-    # 生成“场景凸包 + 每个场景一圈”的最小连续区域，避免旧版矩形 q/r 包围盒在斜向地图上产生大量角落废格。
-    required: set[tuple[int, int]] = set(scene_coords)
-    hull = convex_hull(scene_coords)
-    if len(hull) == 2:
-        required.update(line_cells(hull[0], hull[1]))
-    elif len(hull) >= 3:
-        min_q, max_q = min(q for q, _ in hull) - 1, max(q for q, _ in hull) + 1
-        min_r, max_r = min(r for _, r in hull) - 1, max(r for _, r in hull) + 1
-        required.update(
-            (q, r)
-            for q in range(min_q, max_q + 1)
-            for r in range(min_r, max_r + 1)
-            if inside_polygon(q, r, hull)
-        )
-    for q, r in scene_coords:
-        required.update((q + dq, r + dr) for dq, dr in ((1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)))
+    def _required_for(coords: list[tuple[int, int]]) -> set[tuple[int, int]]:
+        """一层的最小连续陆地：场景凸包 + 每个场景一圈邻居 + 补掉被围住的洞。
+
+        （凸包而非矩形包围盒，是为了避免斜向地图上产生大量角落废格。）
+        """
+        required = set(coords)
+        hull = convex_hull(coords)
+        if len(hull) == 2:
+            required.update(line_cells(hull[0], hull[1]))
+        elif len(hull) >= 3:
+            min_q, max_q = min(q for q, _ in hull) - 1, max(q for q, _ in hull) + 1
+            min_r, max_r = min(r for _, r in hull) - 1, max(r for _, r in hull) + 1
+            required.update(
+                (q, r)
+                for q in range(min_q, max_q + 1)
+                for r in range(min_r, max_r + 1)
+                if inside_polygon(q, r, hull)
+            )
+        for q, r in coords:
+            required.update((q + dq, r + dr) for dq, dr in _FILL_DIRS)
+        return _close_enclosed_gaps(required)
+
+    # 地貌**按层**生成：各层坐标空间独立，把两层的场景混在一个凸包里算，得到的既不是
+    # 顶层的形状也不是子层的形状。子沙盘从前一块地都没有（地貌节点全是顶层的），
+    # 四间屋子就那么悬在氛围底图上——正是同一个原因。
+    by_layer: dict[str, list[tuple[int, int]]] = {}
+    for node in nodes:
+        scene = scene_by_id.get(str(node.get("scene_id") or ""))
+        by_layer.setdefault(hex_map.scene_parent(scene), []).append((node["q"], node["r"]))
 
     # 保留用户主动拖到地图范围外的普通节点；清理旧版自动生成的 terrain_q_r 边缘节点。
-    for coord, node in ordinary.items():
+    # 地貌节点没有层级概念，一律归顶层（子层的地貌由下面按需补齐）。
+    top_required = _required_for(by_layer.get("", []))
+    #: 顶层还“活着”的地貌种类。自动格的底色取自最近场景，那个场景一旦下沉进子沙盘，
+    #: 它留下的一片底色就成了没有主人的孤儿——闇暗山归组后顶层平白多出 18 格 interior 褐土，
+    #: 把半座山染成了村庄的颜色。自动格是可再生的，孤儿色一律丢掉重算；
+    #: 用户手动拖进来的节点（id 不是 terrain_q_r）连同其配色一律不动。
+    live_biomes = {
+        n["biome"] for n in nodes
+        if n.get("scene_id") and not hex_map.scene_parent(scene_by_id.get(str(n["scene_id"])))
+    }
+    for (q, r, layer), node in ordinary.items():
         node_id = str(node.get("id") or "")
-        if coord in required or node_id != f"terrain_{coord[0]}_{coord[1]}":
-            if coord not in occupied:
+        auto = node_id in (f"terrain_{q}_{r}", f"terrain_{layer}_{q}_{r}")
+        if not layer and auto and node.get("biome") not in live_biomes:
+            continue          # 孤儿底色：跳过，交给下面的填充按最近的顶层场景重算
+        if layer or (q, r) in top_required or not auto:
+            if (q, r, layer) not in occupied:
                 nodes.append(node)
-                occupied.add(coord)
+                occupied.add((q, r, layer))
 
     scene_nodes = [node for node in nodes if node.get("scene_id")]
-    for q, r in sorted(required):
-        if (q, r) in occupied:
+    for layer, coords in sorted(by_layer.items()):
+        if not coords:
             continue
-        # 最近场景的地貌作为普通格底色，保证森林/水域等区域连续可辨。
-        nearest = min(
-            scene_nodes,
-            key=lambda n: (hex_map.axial_distance((q, r), (n["q"], n["r"])), n["id"]),
-        )
-        nodes.append({
-            "id": f"terrain_{q}_{r}", "q": q, "r": r,
-            "biome": nearest.get("biome") or "plain", "scene_id": None,
-        })
-        occupied.add((q, r))
+        same_layer = [
+            n for n in scene_nodes
+            if hex_map.scene_parent(scene_by_id.get(str(n.get("scene_id") or ""))) == layer
+        ] or scene_nodes
+        for q, r in sorted(_required_for(coords)):
+            if (q, r, layer) in occupied:
+                continue
+            # 最近场景的地貌作为普通格底色，保证森林/水域等区域连续可辨。
+            nearest = min(
+                same_layer,
+                key=lambda n: (hex_map.axial_distance((q, r), (n["q"], n["r"])), n["id"]),
+            )
+            node = {
+                "id": f"terrain_{layer}_{q}_{r}" if layer else f"terrain_{q}_{r}",
+                "q": q, "r": r,
+                "biome": nearest.get("biome") or "plain", "scene_id": None,
+            }
+            if layer:
+                node["parent"] = layer
+            nodes.append(node)
+            occupied.add((q, r, layer))
     return nodes
 
 

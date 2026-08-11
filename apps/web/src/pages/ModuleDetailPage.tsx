@@ -34,7 +34,7 @@ interface NpcState { when?: string[]; personality?: string; initial_location?: s
 interface SceneEvent { trigger?: string; kind?: string; san_loss?: string; skill?: string; damage?: string; note?: string }
 interface SceneMap { q?: number; r?: number; biome: string; parent?: string }
 interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; kind?: string; connections?: string[]; events?: SceneEvent[]; states?: SceneState[]; image?: string; map?: SceneMap | null }
-interface MapNode { id: string; q: number; r: number; biome: string; scene_id?: string | null }
+interface MapNode { id: string; q: number; r: number; biome: string; scene_id?: string | null; parent?: string }
 interface NPC { id: string; name?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; damage?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
 interface Clue { id: string; name?: string; description?: string; location?: string; trigger_condition?: string; image?: string }
 interface Trigger { id: string; when?: string; set_flags?: string[]; clear_flags?: string[]; description?: string }
@@ -474,9 +474,10 @@ export function ModuleDetailPage() {
       sceneId: scene?.id,
       nodeKind: scene ? 'scene' as const : 'terrain' as const,
       connections: scene?.connections,
-      // parent 从**场景**取，不从 map_nodes 取：后者只同步坐标与地貌，没有层级概念。
-      // 不带上它，子级会拿着子层坐标画进顶层坐标空间，两层格子直接叠在一起。
-      map: { q: node.q, r: node.r, biome: node.biome, parent: scene?.map?.parent },
+      // 场景节点的层级以**场景**为准（map_nodes 只同步坐标与地貌）；地貌节点没有对应场景，
+      // 它的层级就写在节点自己身上。两个来源都要认——只认前者，子沙盘里一块地也没有；
+      // 只认后者，场景节点会拿着子层坐标画进顶层坐标空间，两层格子直接叠在一起。
+      map: { q: node.q, r: node.r, biome: node.biome, parent: scene?.map?.parent ?? node.parent },
       danger: scene?.danger,
     }
   })

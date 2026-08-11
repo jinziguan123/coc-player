@@ -275,18 +275,29 @@ export function HexSandbox({
   // 发生在 located 这一层——它下游的贴图邻接、连线、自动缩放全靠它，漏过滤就会把两层的
   // 格子叠画在一起。地貌节点没有 parent，恒属顶层。
   const [drillParent, setDrillParent] = useState('')
+  // 只数**场景**：地貌格也带 parent（子沙盘要有地面），把它们算进来，角标会显示成
+  // 「22」这种地砖数，更糟的是父级还没解锁、一个子场景都不该露出时，光凭地砖就把
+  // 「这里面另有天地」漏给了玩家。
   const childrenOf = useMemo(() => {
     const m = new Map<string, number>()
     for (const l of locations) {
       const p = String(l.map?.parent || '')
-      if (p) m.set(p, (m.get(p) || 0) + 1)
+      if (p && l.nodeKind !== 'terrain' && l.sceneId) m.set(p, (m.get(p) || 0) + 1)
     }
     return m
   }, [locations])
-  const located = useMemo(() => locations.filter((l) =>
-    l.map && Number.isFinite(l.map.q) && Number.isFinite(l.map.r)
-    && String(l.map.parent || '') === drillParent,
-  ), [locations, drillParent])
+  const located = useMemo(() => {
+    const inLayer = locations.filter((l) =>
+      l.map && Number.isFinite(l.map.q) && Number.isFinite(l.map.r)
+      && String(l.map.parent || '') === drillParent)
+    if (!drillParent) return inLayer
+    // 父级本人坐在子沙盘的原点。模组里的连通几乎总是星形——四间屋子各自只连「村庄遗址」、
+    // 彼此不相连，父级不在场就等于星形没有中心，一条连线都画不出来。把它画进来，连线
+    // 立刻成立，它同时也是「从这里走出去」的锚点。落位器为此空出了原点（reserve_origin）。
+    const parent = locations.find((l) => l.id === drillParent)
+    if (!parent) return inLayer
+    return [{ ...parent, map: { q: 0, r: 0, biome: parent.map?.biome || 'plain' } }, ...inLayer]
+  }, [locations, drillParent])
   // 下钻中的那一层被清空（父级尚未解锁、或数据换了一个模组）→ 退回顶层，
   // 否则玩家会对着一块空沙盘，且没有任何线索该怎么出去。
   useEffect(() => {
@@ -523,7 +534,7 @@ export function HexSandbox({
         {/* 子沙盘角标：这个地点内部还有几个已解锁的地方。单独一遍绘制且**可点**——
             它是比双击更容易被发现的那个入口，8px 的小圆又不会挡住「点格子＝移动过去」。
             父级未访问时后端根本不下发子级，这里自然就没有角标，解锁时刻是可感的。 */}
-        {located.filter((l) => childrenOf.get(l.id)).map((l) => {
+        {located.filter((l) => childrenOf.get(l.id) && l.id !== drillParent).map((l) => {
           const p = hexXY(l.map!.q, l.map!.r)
           // 反缩放：整图缩到 0.44 时，9px 的角标只剩 4 个屏幕像素——看不清也点不中。
           // 它是个操作入口而不是地图内容，屏幕尺寸该恒定，不跟着地图一起缩。
