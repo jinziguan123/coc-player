@@ -150,6 +150,9 @@ _MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
     ("o1", 200_000),
     ("o3", 200_000),
     ("gemini", 1_000_000),
+    # 具体型号必须排在通用前缀之前——匹配是「顺序取首个命中的子串」。
+    # deepseek-v4 起窗口放到 1M；v3/r1 仍是 64K，故不能只留一条通用 deepseek。
+    ("deepseek-v4", 1_000_000),
     ("deepseek", 65_536),
     ("qwen", 131_072),
     ("glm", 131_072),

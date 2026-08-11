@@ -77,7 +77,9 @@ def test_resolve_context_window_explicit_wins():
 
 def test_resolve_context_window_by_model_name():
     assert resolve_context_window(AIProfile(model_name="claude-opus-4-8")) == 200_000
-    assert resolve_context_window(AIProfile(model_name="deepseek-v4-flash")) == 65_536
+    # 具体型号先于通用前缀命中：v4 起是 1M 窗口，v3/r1 仍是 64K
+    assert resolve_context_window(AIProfile(model_name="deepseek-v4-flash")) == 1_000_000
+    assert resolve_context_window(AIProfile(model_name="deepseek-v3")) == 65_536
     assert resolve_context_window(AIProfile(model_name="gpt-4o-mini")) == 128_000
 
 

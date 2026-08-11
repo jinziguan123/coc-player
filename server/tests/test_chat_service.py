@@ -19,7 +19,7 @@ from app.models.event_log import EventLog  # noqa: F401 — 注册建表
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
-from app.services import chat_service, session_service
+from app.services import chat_service, session_service, turn_orchestrator
 
 
 @pytest.fixture
@@ -232,6 +232,9 @@ def test_finish_generation_detaches_housekeeping(monkeypatch, db_factory):
     monkeypatch.setattr(chat_service, "_maybe_roll_story_summary", fake_summary)
     monkeypatch.setattr(chat_service, "_maybe_run_backstage", fake_backstage)
     monkeypatch.setattr(chat_service.room_hub, "broadcast", fake_broadcast)
+    # 收尾会去取快模型；本例只验 done 与两项收尾的先后，给个哑对象即可
+    # （不打桩就得依赖开发机上真配了可用模型，见 conftest.isolate_ai_settings）。
+    monkeypatch.setattr(turn_orchestrator, "get_fast_llm", lambda: object())
 
     async def main():
         await chat_service._finish_generation(None, "sid", None)
@@ -499,6 +502,36 @@ def test_leaked_dialogue_party_name_never_extracted():
     narr = "江户川龙牙（侦探）：“交给我。”"
     new_narr, marks = chat_service._extract_leaked_dialogue(narr, [], party_names={"江户川龙牙"})
     assert new_narr == narr and not marks
+
+
+def test_leaked_dialogue_known_npc_name_extracted_without_shape_signal():
+    """署名是本局 NPC → 强信号，不需要（身份）标注或重复前缀也抽。
+
+    这是实际最常见的漏写形态（闇暗山存档 44 条全长这样）；只认形状的旧门槛对它命中 0 次。
+    """
+    narr = "他低头看了看掌心。\n\n香澄澪：“这座山，以前是有人住的。”\n\n风从窗洞钻进来。"
+    new_narr, marks = chat_service._extract_leaked_dialogue(
+        narr, [], party_names=set(), npc_names={"香澄澪"})
+    assert marks == [(marks[0][0], "香澄澪", "这座山，以前是有人住的。")]
+    assert "香澄澪：" not in new_narr and "以前是有人住的" not in new_narr
+    assert "风从窗洞钻进来" in new_narr
+
+
+def test_leaked_dialogue_narration_fragment_never_mistaken_for_speaker():
+    """『他声音压得很低：「…」』的『声音压得很低』不是 NPC 名 → 不抽（放宽门槛最怕的误伤）。"""
+    narr = "他声音压得很低：“别答应它。”"
+    new_narr, marks = chat_service._extract_leaked_dialogue(
+        narr, [], party_names=set(), npc_names={"香澄澪"})
+    assert new_narr == narr and not marks
+
+
+def test_leaked_dialogue_keeps_nested_inner_quotes_whole():
+    """台词里嵌 『…』 时整句抽出，不在内层引号处截断、也不给旁白留残渣。"""
+    narr = "香澄澪：“石板上刻着『愿献，祈愈』。我想了十年。”"
+    new_narr, marks = chat_service._extract_leaked_dialogue(
+        narr, [], party_names=set(), npc_names={"香澄澪"})
+    assert marks[0][2] == "石板上刻着『愿献，祈愈』。我想了十年。"
+    assert new_narr.strip() == ""
 
 
 def test_leaked_dialogue_shifts_existing_marks():

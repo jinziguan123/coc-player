@@ -578,6 +578,17 @@ def test_kp_context_includes_party(db_factory):
     assert "我推开门" in handoff and "我殿后" in handoff
     assert "把那一个声明动作演细" not in messages[0]["content"]
 
+    # 格式提醒必须与 say()/[SAY] 同向：它一度要求「台词用中文双引号包裹（写进正文）」，
+    # 与结构化对话出口正相反，每轮贴在玩家输入前，把模型推回「台词写进旁白」的老路。
+    reminder = "\n".join(
+        m["content"] for m in messages
+        if m["role"] == "system" and "[格式提醒]" in m["content"]
+    )
+    assert reminder, "格式提醒应在玩家输入前注入"
+    assert "不要把台词写进叙述文本" in reminder
+    assert "say" in reminder or "[SAY]" in reminder
+    assert "用中文双引号（“”）包裹" not in reminder
+
 
 def test_kp_context_uses_viewer_scene_for_split(db_factory):
     """分头行动：build_kp_context 按 viewer_scene_id 给出「该组所在场景」的 NPC，而非只有主角

@@ -9,8 +9,9 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session
 
 from app.models.character import Character
+from app.models.module import Module
 from app.models.session import GameSession
-from app.services import session_service
+from app.services import session_service, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -34,23 +35,39 @@ def persist_error_notice(db: Session, session_id: str, text: str) -> None:
 _ORPHAN_QUOTE_LINE_RE = re.compile(r"(?m)^[ \t　]*[“”「」『』\"]+[ \t　]*(?:\n|$)")
 
 # 台词残留兜底：模型（尤其 deepseek）漏调 say()、把「名字[（身份）]：「台词」」写进叙述文本
-# （有时把名字写重一遍，如「京山人吉：\n京山人吉（乘务员）：“…”」）。只抽**显式署名**且带强信号
-# （有身份标注 或 重复同名前缀）的台词——裸引号、招牌标识、被提及、玩家党名一概不碰。
+# （有时把名字写重一遍，如「京山人吉：\n京山人吉（乘务员）：“…”」）。
+#
+# 引号**成对匹配**，不是「任一开引号 + 任一闭引号」：台词里嵌 『…』 是常事
+# （「香澄澪：“……石板上刻着『愿献，祈愈』。”」），用一个大字符类当闭引号会在内层 』 处截断，
+# 抽出半句、把残渣留在旁白里。外层只认 “ ” / 「 」 / ASCII 引号——『』 基本只用于刻字与引文，
+# 不当台词定界符，顺带把「石板：『…』」这类挡在门外。
 _LEAKED_SAY_RE = re.compile(
     r"(?P<name>[一-龥·]{2,8})(?P<role>（[^）\n]{1,10}）)?[：:][ \t　]*"
-    r"[“「『\"](?P<text>[^”」』\"\n]{1,200})[”」』\"]"
+    r"(?:“(?P<t1>[^”\n]{1,200})”|「(?P<t2>[^」\n]{1,200})」|\"(?P<t3>[^\"\n]{1,200})\")"
 )
 
 
+def _leaked_text(m: re.Match) -> str:
+    """取成对引号里那一段台词（三个候选组里唯一命中的那个）。"""
+    return next((g for g in (m.group("t1"), m.group("t2"), m.group("t3")) if g), "").strip()
+
+
 def _extract_leaked_dialogue(
-    narration: str, marks: list | None, party_names: set[str] | None,
+    narration: str,
+    marks: list | None,
+    party_names: set[str] | None,
+    npc_names: set[str] | None = None,
 ) -> tuple[str, list | None]:
     """把漏进旁白的显式署名 NPC 台词抽成对话 mark、从旁白删除（含吞掉紧邻其前的「同名：」重复前缀）。
 
-    保守触发：仅当命中「名字（身份）：「台词」」有身份标注、或前面紧跟「同名：」重复前缀时才抽——
-    二者都是「漏调 say()」的强信号；无信号的裸引号/招牌一律留旁白（不猜、不误抽）。玩家党名不抽。
+    触发要有强信号，否则会把「他声音压得很低：“…”」里的『声音压得很低』当成说话人。三选一：
+    ① 名字就在**本局 NPC 名单**里（最可靠，见 ``_session_npc_names``）；② 带「（身份）」标注；
+    ③ 前面紧跟「同名：」重复前缀。②③ 是形状启发式，只够兜住名单外的临场龙套——闇暗山存档实测，
+    单靠它们对最常见的「香澄澪：“…”」形态命中 0/51，漏写的台词全程以旁白原文留在历史里，
+    模型下一轮照抄自己，违规率越滚越高。玩家党名一概不抽（绝不替玩家发声）。
     """
     party = set(party_names or ())
+    npcs = set(npc_names or ())
     hits: list[tuple[int, int, str, str]] = []   # (start, end, speaker, text)
     last_end = 0
     for m in _LEAKED_SAY_RE.finditer(narration):
@@ -59,13 +76,13 @@ def _extract_leaked_dialogue(
             continue
         s, e = m.start(), m.end()
         dup = re.search(re.escape(name) + r"[：:][ \t　]*[\r\n]*[ \t　]*$", narration[:s])
-        if not (m.group("role") or dup):   # 无强信号 → 不抽（可能是招牌/标识/被提及）
+        if not (name in npcs or m.group("role") or dup):  # 无强信号 → 不抽（可能是招牌/标识/被提及）
             continue
         if dup:
             s = dup.start()
         s = max(s, last_end)               # 防与前一命中区间重叠
         last_end = e
-        hits.append((s, e, name, (m.group("text") or "").strip()))
+        hits.append((s, e, name, _leaked_text(m)))
     if not hits:
         return narration, marks
     logger.info("台词残留兜底：从旁白抽出 %d 条显式署名台词（模型漏调 say()）", len(hits))
@@ -108,6 +125,35 @@ def _session_party_names(db: Session, session_id: str) -> set[str]:
         nm = getattr(mate, "name", None)
         if nm:
             names.add(nm)
+    return names
+
+
+def _session_npc_names(db: Session, session_id: str) -> set[str]:
+    """本局有资格开口的 NPC 名：模组 NPC + 已转正龙套 + 临场龙套。
+
+    台词兜底抽取的首要判据。比「有没有（身份）标注」这类形状启发式可靠得多：署名是本局 NPC，
+    就是「漏调 say()」的确凿信号；反过来「声音压得很低：“…”」里的名字不在名单里，照样不抽。
+    fail-open：解析异常返回空集，抽取退回形状启发式（与本判据引入前完全一致）。
+    """
+    names: set[str] = set()
+    try:
+        gs = db.get(GameSession, session_id)
+        if not gs:
+            return names
+        ws = gs.world_state or {}
+        module = db.get(Module, gs.module_id) if gs.module_id else None
+        defs = list((module.npcs if module else None) or [])
+        defs += world_memory.promoted_npc_cards(ws)
+        names.update(
+            nm for n in defs if (nm := str((n or {}).get("name") or "").strip())
+        )
+        # 临场龙套过一道合理性筛：improvised_npcs 的 key 来自台词归属，混进过旁白碎片。
+        names.update(
+            nm for raw in (ws.get("improvised_npcs") or {})
+            if (nm := str(raw).strip()) and world_memory.is_plausible_npc_name(nm)
+        )
+    except Exception:
+        logger.exception("解析本局 NPC 名单失败（台词兜底抽取退回形状启发式）: session=%s", session_id)
     return names
 
 
@@ -154,7 +200,10 @@ def persist_narration(
     narration, marks = _strip_marked_lines(narration, marks, _FAKE_CHECK_RESULT_RE)
     narration, marks = _strip_marked_lines(narration, marks, _ORPHAN_QUOTE_LINE_RE)
     # 台词残留兜底：模型漏调 say()、把显式署名台词写进旁白 → 抽成对话气泡、清掉重复前缀。
-    narration, marks = _extract_leaked_dialogue(narration, marks, _session_party_names(db, session_id))
+    narration, marks = _extract_leaked_dialogue(
+        narration, marks,
+        _session_party_names(db, session_id), _session_npc_names(db, session_id),
+    )
     group_marks = sorted(result[4], key=lambda g: g[0]) if len(result) > 4 and result[4] else []
 
     def _group_at(offset: int) -> str | None:
