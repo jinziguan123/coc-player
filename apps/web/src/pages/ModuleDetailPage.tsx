@@ -32,7 +32,7 @@ function styleLabel(options: StyleOption[] | undefined, value: string): string {
 interface SceneState { when?: string[]; danger?: string; atmosphere?: string; description?: string }
 interface NpcState { when?: string[]; personality?: string; initial_location?: string; alive?: boolean }
 interface SceneEvent { trigger?: string; kind?: string; san_loss?: string; skill?: string; damage?: string; note?: string }
-interface SceneMap { q?: number; r?: number; biome: string }
+interface SceneMap { q?: number; r?: number; biome: string; parent?: string }
 interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; kind?: string; connections?: string[]; events?: SceneEvent[]; states?: SceneState[]; image?: string; map?: SceneMap | null }
 interface MapNode { id: string; q: number; r: number; biome: string; scene_id?: string | null }
 interface NPC { id: string; name?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; damage?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
@@ -474,7 +474,9 @@ export function ModuleDetailPage() {
       sceneId: scene?.id,
       nodeKind: scene ? 'scene' as const : 'terrain' as const,
       connections: scene?.connections,
-      map: { q: node.q, r: node.r, biome: node.biome },
+      // parent 从**场景**取，不从 map_nodes 取：后者只同步坐标与地貌，没有层级概念。
+      // 不带上它，子级会拿着子层坐标画进顶层坐标空间，两层格子直接叠在一起。
+      map: { q: node.q, r: node.r, biome: node.biome, parent: scene?.map?.parent },
       danger: scene?.danger,
     }
   })

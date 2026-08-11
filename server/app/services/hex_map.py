@@ -305,9 +305,33 @@ def ensure_module_map(db, module) -> bool:
     if not ensure_scene_maps(scenes) and not changed:
         return False
     module.scenes = scenes
+    module.map_nodes = _synced_map_nodes(module, scenes)
     db.add(module)
     db.commit()
     return True
+
+
+def _synced_map_nodes(module, scenes: list) -> list:
+    """把 map_nodes 里「有 scene_id 的那些」的坐标与地貌对齐到 scenes（纯函数，返回新列表）。
+
+    map_nodes 是坐标的第二份拷贝（模组详情页的沙盘直接读它），此前只有 set_scene_map
+    这一条路在维护。归组会把子级场景重排到**子层坐标空间**，不同步就会出现：详情页按旧的
+    顶层坐标把四间屋子摊在子沙盘的四个角上——数据是对的，看着却像没归组。
+    地貌节点（无 scene_id）不动，它们本就只属于顶层。
+    """
+    by_id = {str(s.get("id")): s for s in scenes if isinstance(s, dict) and s.get("id")}
+    out = []
+    for node in (getattr(module, "map_nodes", None) or []):
+        if not isinstance(node, dict):
+            continue
+        node = dict(node)
+        scene = by_id.get(str(node.get("scene_id") or ""))
+        coord = scene_coord(scene) if scene else None
+        if coord is not None:
+            node["q"], node["r"] = coord
+            node["biome"] = (scene.get("map") or {}).get("biome") or node.get("biome") or "plain"
+        out.append(node)
+    return out
 
 
 def set_scene_map(db, module, scene_id: str, q: int, r: int, biome: str | None = None) -> dict:

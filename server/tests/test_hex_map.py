@@ -456,3 +456,26 @@ class TestSceneHierarchy:
             session_service.list_known_locations(module, session, events=mention, reveal_all=True)
         }
         assert "hut" in god and god["hut"]["known"] is False
+
+    def test_map_nodes_坐标跟着重排同步(self):
+        """map_nodes 是坐标的第二份拷贝（模组详情页沙盘直接读它），归组后必须跟着重排；
+        不同步就会出现「数据已归组，详情页却把子级摊在子沙盘四个角上」。"""
+        class _M:
+            scenes = [
+                _loc("village", "ruin", ["hut"]),
+                _loc("hut", "interior", ["village"]),
+                _loc("road", "road", ["village"]),
+            ]
+            map_nodes = [
+                {"id": "hut", "scene_id": "hut", "q": 9, "r": 9, "biome": "plain"},
+                {"id": "t1", "q": 3, "r": 3, "biome": "forest"},   # 地貌节点：不该被动
+            ]
+        m = _M()
+        scenes = [dict(s) for s in m.scenes]
+        hex_map.infer_scene_parents(scenes)
+        hex_map.ensure_scene_maps(scenes)
+        nodes = {n["id"]: n for n in hex_map._synced_map_nodes(m, scenes)}
+        by = {s["id"]: s for s in scenes}
+        assert (nodes["hut"]["q"], nodes["hut"]["r"]) == hex_map.scene_coord(by["hut"])
+        assert nodes["hut"]["biome"] == "interior"
+        assert (nodes["t1"]["q"], nodes["t1"]["r"]) == (3, 3)   # 地貌节点原样保留

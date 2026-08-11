@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Stage, Layer, Group, RegularPolygon, Line, Rect, Circle, Text, Shape, Image as KonvaImage } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
+import { GiReturnArrow } from 'react-icons/gi'
 import { hexRng, terrainGeometryKey } from '@/lib/terrain'
 import { BIOME_TEXTURES, BIOME_VARIANTS, biomeTextureUrl } from '@/lib/biome'
 
@@ -13,7 +14,8 @@ export interface SandboxLocation {
   connections?: string[]
   party?: string[]
   clues?: { id: string; name: string; status: string }[]
-  map?: { q: number; r: number; biome: string } | null
+  /** parent 非空 = 这个地点挂在某个父级地点的子沙盘里；坐标是**那一层**的坐标。 */
+  map?: { q: number; r: number; biome: string; parent?: string } | null
   known?: boolean
   danger?: string
   sceneId?: string
@@ -268,7 +270,32 @@ export function HexSandbox({
     return () => ro.disconnect()
   }, [])
 
-  const located = useMemo(() => locations.filter((l) => l.map && Number.isFinite(l.map.q) && Number.isFinite(l.map.r)), [locations])
+  // ── 层级：一次只渲染一层 ──
+  // 各层坐标空间彼此独立（顶层的 (0,0) 和某个子沙盘的 (0,0) 是两个格子），所以过滤必须
+  // 发生在 located 这一层——它下游的贴图邻接、连线、自动缩放全靠它，漏过滤就会把两层的
+  // 格子叠画在一起。地貌节点没有 parent，恒属顶层。
+  const [drillParent, setDrillParent] = useState('')
+  const childrenOf = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const l of locations) {
+      const p = String(l.map?.parent || '')
+      if (p) m.set(p, (m.get(p) || 0) + 1)
+    }
+    return m
+  }, [locations])
+  const located = useMemo(() => locations.filter((l) =>
+    l.map && Number.isFinite(l.map.q) && Number.isFinite(l.map.r)
+    && String(l.map.parent || '') === drillParent,
+  ), [locations, drillParent])
+  // 下钻中的那一层被清空（父级尚未解锁、或数据换了一个模组）→ 退回顶层，
+  // 否则玩家会对着一块空沙盘，且没有任何线索该怎么出去。
+  useEffect(() => {
+    if (drillParent && !located.length) setDrillParent('')
+  }, [drillParent, located.length])
+  const drillName = useMemo(
+    () => locations.find((l) => l.id === drillParent)?.name || '',
+    [locations, drillParent],
+  )
   const scenes = useMemo(() => located.filter((l) => l.nodeKind !== 'terrain' && l.sceneId !== undefined), [located])
   // (q,r) → 地貌：给每格算出六个方向的邻格地貌，供瓦片画交界过渡。
   const biomeAt = useMemo(() => {
@@ -423,6 +450,10 @@ export function HexSandbox({
             }}
             onClick={() => editable ? onToggleScene?.(l.id) : clickable && onPick?.(l)}
             onTap={() => editable ? onToggleScene?.(l.id) : clickable && onPick?.(l)}
+            // 双击下钻进子沙盘。单击的语义（移动过去 / 编辑态选中）保持不变——
+            // 「进入这个地点」和「查看它内部有哪些地方」是两件事，不该抢同一个手势。
+            onDblClick={() => childrenOf.get(l.id) && setDrillParent(l.id)}
+            onDblTap={() => childrenOf.get(l.id) && setDrillParent(l.id)}
             onMouseEnter={(e) => { const st = e.target.getStage(); if (st) st.container().style.cursor = editable ? 'move' : clickable ? 'pointer' : 'grab' }}
             onMouseLeave={(e) => { const st = e.target.getStage(); if (st) st.container().style.cursor = 'grab' }}>
             {/* 六边形命中检测区域：透明、始终监听，确保父 Group 的事件正确触发 */}
@@ -489,6 +520,24 @@ export function HexSandbox({
             )}
           </Group>
         })}
+        {/* 子沙盘角标：这个地点内部还有几个已解锁的地方。单独一遍绘制且**可点**——
+            它是比双击更容易被发现的那个入口，8px 的小圆又不会挡住「点格子＝移动过去」。
+            父级未访问时后端根本不下发子级，这里自然就没有角标，解锁时刻是可感的。 */}
+        {located.filter((l) => childrenOf.get(l.id)).map((l) => {
+          const p = hexXY(l.map!.q, l.map!.r)
+          // 反缩放：整图缩到 0.44 时，9px 的角标只剩 4 个屏幕像素——看不清也点不中。
+          // 它是个操作入口而不是地图内容，屏幕尺寸该恒定，不跟着地图一起缩。
+          const inv = 1 / Math.max(view.scale, 0.001)
+          return <Group key={`drill-${l.id}`} x={p.x + -R * 0.66} y={p.y + R * 0.42}
+            scaleX={inv} scaleY={inv}
+            onClick={() => setDrillParent(l.id)} onTap={() => setDrillParent(l.id)}
+            onMouseEnter={(e) => { const st = e.target.getStage(); if (st) st.container().style.cursor = 'zoom-in' }}
+            onMouseLeave={(e) => { const st = e.target.getStage(); if (st) st.container().style.cursor = 'grab' }}>
+            <Circle radius={9} fill="#29221b" stroke={CANDLE} strokeWidth={1.2} />
+            <Text text={String(childrenOf.get(l.id))} x={-9} y={-5.5} width={18} align="center"
+              fontSize={10} fontStyle="bold" fill={CANDLE} listening={false} />
+          </Group>
+        })}
         {scenes.filter((l) => l.known !== false || revealUnknownTokens).map((l) => { const p = hexXY(l.map!.q, l.map!.r); const isSelected = editable && selected.has(l.id); const nameW = Math.max(52, (l.name || l.id).length * 13 + 16); return <Group key={`label-${l.id}`} x={p.x} y={p.y} listening={false}>
           <Rect x={-nameW / 2} y={R - 2} width={nameW} height={20} cornerRadius={3} fill="rgba(26,21,13,0.9)" stroke={l.current || isSelected ? CANDLE : 'rgba(221,188,122,0.7)'} strokeWidth={l.current || isSelected ? 1.5 : 0.8} />
           <Text text={l.name || l.id} x={-nameW / 2} y={R + 3} width={nameW} align="center" fontSize={12} fontStyle={l.current ? 'bold' : 'normal'} fill={l.current ? CANDLE : PARCH} />
@@ -496,5 +545,22 @@ export function HexSandbox({
       </Layer>
     </Stage>
     {!located.length && <div className="absolute inset-0 flex items-center justify-center text-xs" style={{ color: 'var(--color-text-secondary)', pointerEvents: 'none' }}>尚无可显示的沙盘节点</div>}
+    {/* 下钻中的面包屑与出口。做成 HTML 浮层而不是 Konva 元素：它不该跟着画布缩放平移跑，
+        且要和站内其余按钮长得一样。 */}
+    {drillParent && (
+      <div className="absolute left-2 top-2 flex items-center gap-2">
+        <button
+          className="chip flex items-center gap-1 hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
+          onClick={() => setDrillParent('')}
+          aria-label="返回上一层沙盘"
+        >
+          <GiReturnArrow aria-hidden="true" />
+          返回
+        </button>
+        <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {drillName || '上级地点'}　内部
+        </span>
+      </div>
+    )}
   </div>
 }
