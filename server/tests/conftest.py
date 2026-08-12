@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
+import sys
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+import app.database as database
 from app.api import ai_settings
+from app.models.base import Base
 
 
 @pytest.fixture(autouse=True)
@@ -20,3 +26,30 @@ def isolate_ai_settings(tmp_path, monkeypatch):
     即这些用例被写下时的那套预算。要测特定窗口的行为，用例自行 monkeypatch。
     """
     monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+
+
+@pytest.fixture(autouse=True)
+def isolate_dev_db(tmp_path, monkeypatch):
+    """把 ``SessionLocal`` 指向一次性临时库，任何测试都别想写到开发库上。
+
+    这不是假想的风险。上传任务 ``_run_upload_job`` 会一路跑到入库，而验证「走了哪条解析
+    链路」的用例只打桩了解析函数、没管 SessionLocal——于是每跑一次全量测试，开发库里就
+    多两条标题为「T」的空模组，攒到二十条才被看见。
+
+    麻烦在于 ``SessionLocal`` 被各处 ``from app.database import SessionLocal`` 过，
+    只改 ``app.database`` 上的那一个没用——已经拿到引用的模块照旧写真库。所以扫一遍
+    ``sys.modules``，凡是持有同一个对象的模块属性一并换掉。
+
+    用例自己 monkeypatch SessionLocal 的（如 db_factory 那批）不受影响：
+    autouse 夹具先跑，用例随后的 setattr 覆盖它。
+    """
+    engine = create_engine(f"sqlite:///{tmp_path / 'test-isolated.db'}")
+    Base.metadata.create_all(engine)
+    tmp_session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    real = database.SessionLocal
+    for mod in list(sys.modules.values()):
+        if getattr(mod, "SessionLocal", None) is real:
+            monkeypatch.setattr(mod, "SessionLocal", tmp_session, raising=False)
+    yield
+    engine.dispose()
