@@ -402,7 +402,7 @@ def test_upload_endpoint_returns_job_id_and_status(client, monkeypatch):
     """上传端点立即返回 job_id；状态端点可轮询；未知任务 404。"""
     import app.api.modules as mod
 
-    async def noop_job(job_id, raw_text, images, rule_system):
+    async def noop_job(job_id, raw_text, images, rule_system, ocr_prepass=False):
         return None
 
     monkeypatch.setattr(mod, "_run_upload_job", noop_job)

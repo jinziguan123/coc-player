@@ -260,9 +260,9 @@ async def parse_module_images(images: list[tuple[bytes, str]], rule_system: str,
     llm = get_vision_llm()
     if not llm.supports_vision():
         raise ValueError(
-            "没有可用于看图的模型。请到设置页把一个支持视觉的配置"
-            "（如 Qwen-VL / GPT-4o / Claude / Gemini，本机部署的也行）标记为「视觉模型」，"
-            "或改上传文字版模组。"
+            "没有可用于看图的模型。请到设置页把一个多模态配置"
+            "（如 qwen3.7-plus / Qwen-VL / GPT-4o / Claude / Gemini，本机部署的也行）"
+            "标记为「视觉模型」，或改上传文字版模组。"
         )
     content = extra_text.strip() or "（模组内容见所附图片，请仔细阅读图片中的文字与示意图后提取）"
     prompt = PARSE_PROMPT_TEMPLATE.format(rule_system=rule_system.upper(), content=content)

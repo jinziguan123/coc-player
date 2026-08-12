@@ -3495,7 +3495,7 @@
     },
     "/api/modules/upload": {
       "post": {
-        "description": "上传模组：同步做文件抽取与格式校验（错误立即可见），解析转后台任务。\n\n返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。",
+        "description": "上传模组：同步做文件抽取与格式校验（错误立即可见），解析转后台任务。\n\n返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。\n\n``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，\n以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。",
         "operationId": "upload_module_api_modules_upload_post",
         "parameters": [
           {
@@ -3506,6 +3506,16 @@
               "default": "coc",
               "title": "Rule System",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ocr_prepass",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Ocr Prepass",
+              "type": "boolean"
             }
           }
         ],

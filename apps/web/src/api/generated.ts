@@ -252,6 +252,9 @@ export interface paths {
          * @description 上传模组：同步做文件抽取与格式校验（错误立即可见），解析转后台任务。
          *
          *     返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。
+         *
+         *     ``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，
+         *     以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。
          */
         post: operations["upload_module_api_modules_upload_post"];
         delete?: never;
@@ -4092,6 +4095,7 @@ export interface operations {
         parameters: {
             query?: {
                 rule_system?: string;
+                ocr_prepass?: boolean;
             };
             header?: never;
             path?: never;

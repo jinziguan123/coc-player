@@ -153,3 +153,27 @@ def test_update_image_profile_persists_comfyui_fields(monkeypatch, tmp_path):
     assert saved.backend == "comfyui"
     assert saved.comfyui_base_url == "http://172.30.18.236:8188"
     assert saved.comfyui_workflow == '{"1": {}}'
+
+
+def test_视觉槽位即视觉能力(monkeypatch, tmp_path):
+    """把配置放进视觉槽位，本身就是断言「这个模型会看图」——不该再要求勾一次 vision 复选框。
+
+    名字里没有 -vl 的多模态模型（qwen3.7-plus、gpt-5 这类）会被名字启发式判成纯文本，
+    于是出现「我明明设了视觉模型」却报「没有可用于看图的模型」。
+    """
+    from app.ai import llm_factory
+
+    c = TestClient(app)
+    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    c.post("/api/settings/ai/profiles", json={"name": "带团", "model_name": "deepseek-chat", "api_key": "k1"})
+    vis = c.post("/api/settings/ai/profiles", json={
+        "name": "看图", "model_name": "qwen3.7-plus", "api_key": "k2",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    }).json()
+
+    assert vis.get("vision") is not True                       # 能力位没勾
+    assert llm_factory.get_vision_llm().supports_vision() is False   # 槽位未设 → 回落主模型
+
+    c.post(f"/api/settings/ai/profiles/{vis['id']}/set-vision")
+    assert llm_factory.get_vision_llm().supports_vision() is True    # 设了槽位即认可
+    assert llm_factory.get_llm().supports_vision() is False          # 主模型不受影响
