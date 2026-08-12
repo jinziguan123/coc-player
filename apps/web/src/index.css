@@ -2453,6 +2453,13 @@ select.input option {
   background: rgba(212, 162, 78, 0.08);
 }
 .seat-chip:disabled { opacity: 0.45; cursor: default; }
+/* 正在右栏预览的那一张：选中态要立得住，否则看完卡回头找不到自己点的是哪个 */
+.seat-chip--on {
+  border-color: var(--color-accent);
+  color: var(--color-text-accent);
+  background: rgba(212, 162, 78, 0.14);
+  box-shadow: 0 0 10px rgba(212, 162, 78, 0.22);
+}
 
 /* 骰子事件卡入场：微旋转 + 缩放弹入（骰子落定的仪式感） */
 .dice-enter {

@@ -60,6 +60,14 @@ export function RoomLobbyPage() {
   const [chatInput, setChatInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [panelChar, setPanelChar] = useState<Character | null>(null)
+  /**
+   * 正在预览、尚未入座的候选角色。
+   *
+   * 从前点一下角色 chip 就**直接入座**了——玩家只看到一个名字，卡上有什么技能、什么职业、
+   * 什么背景一概不知，等于盲选。现在点 chip 只是把它放到右栏看，确认之后才真的坐下。
+   * ``source`` 决定确认走哪条路：本机角色要先同步一份副本给房主（见 importAndClaim）。
+   */
+  const [preview, setPreview] = useState<{ char: Character; source: 'mine' | 'local' } | null>(null)
   const [evaluation, setEvaluation] = useState<CharacterEvaluation | null>(null)
   const [evaluating, setEvaluating] = useState(false)
   const [typingName, setTypingName] = useState('')
@@ -496,7 +504,19 @@ export function RoomLobbyPage() {
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
-                  ) : (
+                  ) : null}
+                  {/* 下拉同样是盲选：房主看不到这张队友卡的技能与背景。给个直达的查看入口。 */}
+                  {p.role === 'ai' && amHost && p.character_id && (
+                    <button
+                      onClick={() => viewSeat(p.character_id)}
+                      className="btn-secondary !px-1.5 !py-1"
+                      title="查看这张队友卡"
+                      aria-label="查看队友卡"
+                    >
+                      <Eye size={13} />
+                    </button>
+                  )}
+                  {!(p.role === 'ai' && amHost) && (
                     <button
                       onClick={() => viewSeat(p.character_id)}
                       disabled={!p.character_id}
@@ -629,8 +649,10 @@ export function RoomLobbyPage() {
                   {myChars.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {myChars.map((c) => (
-                        <button key={c.id} onClick={() => claimWithChar(c.id)} disabled={busy}
-                          className="seat-chip">
+                        <button key={c.id} onClick={() => setPreview({ char: c, source: 'mine' })}
+                          disabled={busy}
+                          className={`seat-chip${preview?.char.id === c.id ? ' seat-chip--on' : ''}`}
+                          title="点击查看这张卡，确认后再入座">
                           {c.name}
                         </button>
                       ))}
@@ -643,9 +665,11 @@ export function RoomLobbyPage() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {localChars.map((c) => (
-                          <button key={`local-${c.id}`} onClick={() => void importAndClaim(c)} disabled={busy}
-                            className="seat-chip"
-                            title="选它入座。房主的规则引擎要读写角色数据才跑得动，所以会同步一份副本过去；它不会进入房主的角色库">
+                          <button key={`local-${c.id}`}
+                            onClick={() => setPreview({ char: c, source: 'local' })}
+                            disabled={busy}
+                            className={`seat-chip${preview?.char.id === c.id ? ' seat-chip--on' : ''}`}
+                            title="点击查看这张卡。确认入座时会把角色同步一份副本给房主（他的规则引擎要读写角色数据才跑得动），不会进入房主的角色库">
                             {c.name}
                           </button>
                         ))}
@@ -743,12 +767,49 @@ export function RoomLobbyPage() {
         </div>
       </div>
 
-      {panelChar && (
-        <aside className="w-64 flex-shrink-0 border-l overflow-y-auto" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}>
+      {/* 右栏常驻：挑角色时它是「这张卡长什么样」，挑完是「我坐下的是谁」。
+          从前它只在点眼睛图标时才出现，于是选角色那一步只能对着几个名字盲选。
+          w-80 而不是 w-64——技能表在 264px 下要换行到没法读。 */}
+      {(preview || panelChar) && (
+        <aside className="w-80 flex-shrink-0 border-l overflow-y-auto flex flex-col" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}>
           <div className="flex items-center justify-between px-3 py-1.5 text-xs border-b" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            <span>角色卡</span>
-            <button onClick={() => setPanelChar(null)} className="btn-secondary !px-2 !py-0.5">关闭</button>
+            <span>{preview ? '预览 · 尚未入座' : '角色卡'}</span>
+            <button
+              onClick={() => { setPreview(null); setPanelChar(null) }}
+              className="btn-secondary !px-2 !py-0.5"
+            >关闭</button>
           </div>
+          {/* 确认区钉在顶部：看完卡就在原地决定，不必滚回去找按钮 */}
+          {preview && (
+            <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="mb-1.5 text-sm font-semibold" style={{ color: 'var(--color-text-accent)' }}>
+                {preview.char.name}
+              </div>
+              {preview.source === 'local' && (
+                <p className="mb-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  本机角色 · 入座时同步一份副本给房主，你自己这份不受影响
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const { char, source } = preview
+                    setPreview(null)
+                    if (source === 'local') void importAndClaim(char)
+                    else void claimWithChar(char.id)
+                  }}
+                  disabled={busy}
+                  className="btn-primary !px-3 !py-1 text-sm"
+                >
+                  {busy ? '处理中…' : '用这张卡入座'}
+                </button>
+                <button
+                  onClick={() => setPreview(null)}
+                  className="btn-secondary !px-2 !py-1 text-xs"
+                >再看看</button>
+              </div>
+            </div>
+          )}
           {evaluation && (
             <div className="mx-3 mt-3 rounded border p-2 text-xs" style={{ borderColor: evaluation.compatible ? 'var(--color-success)' : 'var(--color-danger)' }}>
               <div className="font-semibold mb-1" style={{ color: evaluation.compatible ? 'var(--color-success)' : 'var(--color-danger)' }}>
@@ -758,7 +819,9 @@ export function RoomLobbyPage() {
               {evaluation.suggestions.length > 0 && <div>建议：{evaluation.suggestions.join('；')}</div>}
             </div>
           )}
-          <CharacterPanel character={panelChar} />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <CharacterPanel character={preview?.char ?? panelChar!} />
+          </div>
         </aside>
       )}
     </div>
