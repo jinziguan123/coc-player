@@ -371,6 +371,12 @@ async def _run_upload_job(
         parsed = await module_service.supplement_parse(raw_text, parsed, rule_system)
         parsed["rule_system"] = rule_system
 
+        # 防剧透自检：简介 / 世界观导入 / 开场钩子是**玩家可见**的三段文本，主解析里
+        # 「写简介」与「别剧透」两个目标直接打架，禁令写得再满也常输——单开一遍只做删减判断。
+        # 必须排在查漏自检**之后**：那一步会往 truth 里补内容，得拿补全后的真相来比对。
+        _job_update(job_id, stage="防剧透自检（检查玩家可见文本）", percent=66)
+        parsed = await module_service.redact_player_facing(parsed, rule_system)
+
         # 模组自带地图 → 沙盘坐标。落在入库**之前**是有意的：写进 parsed 的 q/r 就是一份
         # 「AI 提议」，create_module 里的修复器按「合法提议保留、冲突重排」照常收口，
         # 与既有的「AI 提议 → 确定性修复 → KP 修正」管线完全同构，不需要新的落库路径。
