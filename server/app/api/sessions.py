@@ -21,6 +21,8 @@ from app.schemas.session import (
     ClaimSeatRequest,
     EndVoteRequest,
     ReadyRequest,
+    SeatAddRequest,
+    SeatAssignRequest,
     SessionCreate,
     SessionRead,
     SessionStatusUpdate,
@@ -285,6 +287,63 @@ def kick_seat(
     return _session_payload(
         session, _chars_map(db, [session]), module.title if module else None, token,
     )
+
+
+def _lobby_payload(db: Session, session, token: str | None) -> dict:
+    """座位变动后统一广播 lobby 并回当前房间快照。"""
+    room_hub.broadcast(session.id, _make_chunk("lobby"))
+    module = db.get(Module, session.module_id)
+    return _session_payload(
+        session, _chars_map(db, [session]), module.title if module else None, token,
+    )
+
+
+@router.post("/{session_id}/seats")
+def add_seat(
+    session_id: str,
+    data: SeatAddRequest,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """大厅：加一个座位。人数在房间里调——建房那一屏只定模组与 KP 模式。"""
+    try:
+        session = session_service.add_seat(db, session_id, data.role, token)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _lobby_payload(db, session, token)
+
+
+@router.delete("/{session_id}/seats/{seat_order}")
+def remove_seat(
+    session_id: str,
+    seat_order: int,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """大厅：删一个座位（KP 席与房主自己的席位不可删）。"""
+    try:
+        session = session_service.remove_seat(db, session_id, seat_order, token)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _lobby_payload(db, session, token)
+
+
+@router.post("/{session_id}/seats/{seat_order}/character")
+def assign_seat_character(
+    session_id: str,
+    seat_order: int,
+    data: SeatAssignRequest,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """大厅：给 AI 席指派/清空角色（真人席的入座走 /claim）。"""
+    try:
+        session = session_service.assign_seat_character(
+            db, session_id, seat_order, data.character_id, token,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _lobby_payload(db, session, token)
 
 
 @router.post("/{session_id}/typing")

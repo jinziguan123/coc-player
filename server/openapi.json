@@ -2434,6 +2434,36 @@
         "title": "SceneMapPatch",
         "type": "object"
       },
+      "SeatAddRequest": {
+        "description": "大厅加座位：human=留给真人的空席，ai=待指派角色的 AI 席。",
+        "properties": {
+          "role": {
+            "default": "ai",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "title": "SeatAddRequest",
+        "type": "object"
+      },
+      "SeatAssignRequest": {
+        "description": "给 AI 席指派角色；None=清空（真人席的入座走 ClaimSeatRequest）。",
+        "properties": {
+          "character_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character Id"
+          }
+        },
+        "title": "SeatAssignRequest",
+        "type": "object"
+      },
       "SessionCreate": {
         "properties": {
           "kp_mode": {
@@ -7750,9 +7780,185 @@
         ]
       }
     },
+    "/api/sessions/{session_id}/seats": {
+      "post": {
+        "description": "大厅：加一个座位。人数在房间里调——建房那一屏只定模组与 KP 模式。",
+        "operationId": "add_seat_api_sessions__session_id__seats_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeatAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Add Seat",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/sessions/{session_id}/seats/{seat_order}": {
+      "delete": {
+        "description": "大厅：删一个座位（KP 席与房主自己的席位不可删）。",
+        "operationId": "remove_seat_api_sessions__session_id__seats__seat_order__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "seat_order",
+            "required": true,
+            "schema": {
+              "title": "Seat Order",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Remove Seat",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/sessions/{session_id}/seats/{seat_order}/character": {
+      "post": {
+        "description": "大厅：给 AI 席指派/清空角色（真人席的入座走 /claim）。",
+        "operationId": "assign_seat_character_api_sessions__session_id__seats__seat_order__character_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "seat_order",
+            "required": true,
+            "schema": {
+              "title": "Seat Order",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeatAssignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Assign Seat Character",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/sessions/{session_id}/start": {
       "post": {
-        "description": "大厅：房主开局。校验门槛后 setup→active，并触发开场生成。",
+        "description": "大厅：房主开局。校验门槛后 setup→active，并触发开场生成。\n\n用 manager 级而非 host 级授权：后者刻意不放行「无席位归属的纯本机会话」，而建局改成\n恒进大厅之后，单人本机局（建局不带 token）正是这一类——只认 host 的话它永远开不了。\n开局与删除、踢人同属房间管理动作，口径本就该一致。",
         "operationId": "start_game_api_sessions__session_id__start_post",
         "parameters": [
           {

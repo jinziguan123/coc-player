@@ -263,3 +263,95 @@ def test_others_still_cannot_take_a_claimed_seat(db_factory):
 
     with pytest.raises(ValueError, match="已被认领"):
         session_service.claim_seat(db, sid, empty.seat_order, other.id, "stranger-tok")
+
+
+# ── 大厅里的座位管理 ──
+#
+# 「模组是房间的身份（建房时定），座位是房间的内容（房间里配）」：建房那一屏只选本子与
+# KP 模式，人数、谁坐哪、AI 队友用哪张卡，全部在大厅里调。
+
+
+def _room(db, module, host_char=None):
+    """建一个房间：默认连房主角色都不带（角色进大厅再挑）。"""
+    seats = [{"character_id": host_char.id if host_char else None,
+              "role": "human", "is_primary": True}]
+    return session_service.create_session(db, module.id, seats, creator_token="host-tok")
+
+
+def test_建房可以不带任何角色(db_factory):
+    """创建者在上一屏只选了本子；角色是进大厅之后才挑的。"""
+    db = db_factory()
+    module, _host, _ = _seed(db)
+    session = _room(db, module)
+    assert session.status == "setup"
+    assert session.player_character_id is None
+    assert session_service.lobby_gaps(db, session.id)      # 空席仍被门槛拦住，不会漏出无角色的局
+
+
+def test_加减座位(db_factory):
+    db = db_factory()
+    module, host, _ = _seed(db)
+    session = _room(db, module, host)
+
+    session_service.add_seat(db, session.id, "ai", "host-tok")
+    session_service.add_seat(db, session.id, "human", "host-tok")
+    parts = [p for p in session_service.get_participants(db, session.id) if p.role != "kp"]
+    assert [p.role for p in parts] == ["human", "ai", "human"]
+    assert next(p for p in parts if p.role == "ai").ready      # AI 席没有「谁来点准备」可言
+
+    session_service.remove_seat(db, session.id, parts[-1].seat_order, "host-tok")
+    assert len([p for p in session_service.get_participants(db, session.id) if p.role != "kp"]) == 2
+
+
+def test_座位增删的边界(db_factory):
+    db = db_factory()
+    module, host, _ = _seed(db)
+    session = _room(db, module, host)
+    only_seat = session_service.get_participants(db, session.id)[0]
+
+    # 唯一的座位既是房主的、也是最后一个——先撞上「不能删房主自己」这条更具体的
+    with pytest.raises(ValueError, match="房主自己"):
+        session_service.remove_seat(db, session.id, only_seat.seat_order, "host-tok")
+    # 换个不属于房主的场景验「至少保留一个」：加一个 AI 席再把房主席之外的删到只剩一个
+    session_service.add_seat(db, session.id, "ai", "host-tok")
+    extra = next(p for p in session_service.get_participants(db, session.id) if p.role == "ai")
+    session_service.remove_seat(db, session.id, extra.seat_order, "host-tok")
+    with pytest.raises(ValueError, match="房主自己|至少要保留"):
+        session_service.remove_seat(db, session.id, only_seat.seat_order, "host-tok")
+    with pytest.raises(ValueError, match="只有房主"):
+        session_service.add_seat(db, session.id, "ai", "someone-else")
+    for _ in range(session_service.MAX_PLAYER_SEATS - 1):
+        session_service.add_seat(db, session.id, "ai", "host-tok")
+    with pytest.raises(ValueError, match="最多"):
+        session_service.add_seat(db, session.id, "ai", "host-tok")
+
+
+def test_给AI席指派角色(db_factory):
+    db = db_factory()
+    module, host, ally = _seed(db)
+    session = _room(db, module, host)
+    session_service.add_seat(db, session.id, "ai", "host-tok")
+    ai_seat = next(p for p in session_service.get_participants(db, session.id) if p.role == "ai")
+
+    session_service.assign_seat_character(db, session.id, ai_seat.seat_order, ally.id, "host-tok")
+    assert next(
+        p for p in session_service.get_participants(db, session.id) if p.role == "ai"
+    ).character_id == ally.id
+    assert session_service.lobby_gaps(db, session.id) == []    # 都入座了 → 可开局
+
+    # 真人席不能这样指派：那条路要校验 token 归属，走 claim
+    human_seat = next(
+        p for p in session_service.get_participants(db, session.id) if p.role == "human"
+    )
+    with pytest.raises(ValueError, match="本人认领"):
+        session_service.assign_seat_character(
+            db, session.id, human_seat.seat_order, ally.id, "host-tok")
+
+
+def test_开局后不能再动座位(db_factory):
+    db = db_factory()
+    module, host, _ = _seed(db)
+    session = _room(db, module, host)
+    session_service.start_game(db, session.id, "host-tok")
+    with pytest.raises(ValueError, match="游戏已开始"):
+        session_service.add_seat(db, session.id, "ai", "host-tok")

@@ -156,9 +156,13 @@ def create_session(
         and (requested_primary.get("role") or "ai") == "human"
     )
     new_human_kp = kp_mode == "human" and not legacy_human_kp
+    # 建房时一律允许空主角席：「模组是房间的身份（建房时定），座位是房间的内容（房间里配）」——
+    # 创建者在上一屏只选了本子与 KP 模式，角色是进大厅之后才挑的。
+    # 从前只对真人 KP 放开，因为 AI KP 模式是「在建局表单里一次配完」，那条路已经不存在了。
+    # 开局门槛不受影响：空席仍会被 lobby_gaps 拦住（见其实现），不会漏出「没有角色的局」。
     seats = _normalize_participants(
         participants,
-        allow_empty_primary=new_human_kp,
+        allow_empty_primary=True,
         allow_ai_primary=new_human_kp,
     )
 
@@ -611,6 +615,121 @@ def lobby_gaps(db: Session, session_id: str) -> list[str]:
         else:
             gaps.append("至少需要 1 名真人玩家")
     return gaps
+
+
+def _lobby_host_guard(db: Session, session_id: str, token: str | None) -> GameSession:
+    """大厅内改动座位的共同前置：房间在、还没开局、动手的是房主。
+
+    授权与 /start 同口径（manager 级）：纯本机会话没有「房主」可言，本机即可管理。
+    """
+    session = db.get(GameSession, session_id)
+    if not session:
+        raise ValueError("房间不存在")
+    if session.status != "setup":
+        raise ValueError("游戏已开始，无法调整座位")
+    if not (is_host(db, session_id, token) or can_manage_session(db, session_id, token)):
+        raise ValueError("只有房主可以调整座位")
+    return session
+
+
+#: 一个房间最多几个玩家席。模组推荐人数最多也就 6~8，留点余量；上不封顶会让大厅被拖垮。
+MAX_PLAYER_SEATS = 8
+
+
+def add_seat(
+    db: Session, session_id: str, role: str, token: str | None,
+) -> GameSession:
+    """在大厅里加一个座位（``role`` 为 ``human`` 空席或 ``ai`` 待指派席）。
+
+    座位是房间的内容，人数在房间里调——建房那一屏只定模组与 KP 模式。
+    """
+    session = _lobby_host_guard(db, session_id, token)
+    if role not in ("human", "ai"):
+        raise ValueError("席位类型只能是 human 或 ai")
+    parts = get_participants(db, session_id)
+    players = [p for p in parts if p.role != "kp"]
+    if len(players) >= MAX_PLAYER_SEATS:
+        raise ValueError(f"最多 {MAX_PLAYER_SEATS} 个玩家席位")
+    session.participants.append(
+        SessionParticipant(
+            character_id=None,
+            role=role,
+            is_primary=False,
+            seat_order=max((p.seat_order for p in parts), default=-1) + 1,
+            claimed=False,
+            owner_token=None,
+            # AI 席没有「谁来点准备」可言，加进来就是就绪的；真人空席等人认领后自己点。
+            ready=role == "ai",
+            identity_version=session.identity_version,
+        )
+    )
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def remove_seat(
+    db: Session, session_id: str, seat_order: int, token: str | None,
+) -> GameSession:
+    """在大厅里删掉一个座位。KP 席与房主自己的席位不可删。"""
+    session = _lobby_host_guard(db, session_id, token)
+    seat = next(
+        (p for p in get_participants(db, session_id) if p.seat_order == seat_order), None,
+    )
+    if seat is None:
+        raise ValueError("席位不存在")
+    if seat.role == "kp":
+        raise ValueError("KP 席位不可删除")
+    if seat.owner_token and seat.owner_token == session.host_token:
+        raise ValueError("不能删除房主自己的席位")
+    players = [p for p in get_participants(db, session_id) if p.role != "kp"]
+    if len(players) <= 1:
+        raise ValueError("至少要保留一个玩家席位")
+    db.delete(seat)
+    db.commit()
+    db.refresh(session)
+    # 主角席被删 → 把锚点让给剩下的第一个座位，否则 player_character_id 会指向已删的角色
+    _reseat_primary(db, session)
+    return session
+
+
+def _reseat_primary(db: Session, session: GameSession) -> None:
+    """确保还有一个主角席，并让 player_character_id 与它一致（纯修复，无副作用语义）。"""
+    players = [p for p in get_participants(db, session.id) if p.role != "kp"]
+    if not players:
+        return
+    if not any(p.is_primary for p in players):
+        anchor = next((p for p in players if p.character_id), players[0])
+        anchor.is_primary = True
+    primary = next((p for p in players if p.is_primary), None)
+    session.player_character_id = primary.character_id if primary else None
+    db.commit()
+
+
+def assign_seat_character(
+    db: Session, session_id: str, seat_order: int, character_id: str | None,
+    token: str | None,
+) -> GameSession:
+    """给 AI 席指派/清空角色。真人席的入座走 claim_seat（那条路要校验 token 归属）。"""
+    session = _lobby_host_guard(db, session_id, token)
+    seat = next(
+        (p for p in get_participants(db, session_id) if p.seat_order == seat_order), None,
+    )
+    if seat is None:
+        raise ValueError("席位不存在")
+    if seat.role != "ai":
+        raise ValueError("真人席位请由本人认领")
+    if character_id:
+        if not db.get(Character, character_id):
+            raise ValueError("角色不存在")
+        if character_id in active_character_ids(db, exclude_session_id=session_id):
+            raise ValueError("该角色正在其他房间或游戏中")
+    seat.character_id = character_id
+    seat.ready = True          # AI 席没有「谁来点准备」可言
+    db.commit()
+    db.refresh(session)
+    _reseat_primary(db, session)
+    return session
 
 
 def kick_seat(

@@ -91,6 +91,18 @@ class ClaimSeatRequest(BaseModel):
     character_id: str | None = None
 
 
+class SeatAddRequest(BaseModel):
+    """大厅加座位：human=留给真人的空席，ai=待指派角色的 AI 席。"""
+
+    role: str = "ai"
+
+
+class SeatAssignRequest(BaseModel):
+    """给 AI 席指派角色；None=清空（真人席的入座走 ClaimSeatRequest）。"""
+
+    character_id: str | None = None
+
+
 class ReadyRequest(BaseModel):
     ready: bool = True
 

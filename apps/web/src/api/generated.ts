@@ -1829,6 +1829,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/seats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Seat
+         * @description 大厅：加一个座位。人数在房间里调——建房那一屏只定模组与 KP 模式。
+         */
+        post: operations["add_seat_api_sessions__session_id__seats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/seats/{seat_order}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Seat
+         * @description 大厅：删一个座位（KP 席与房主自己的席位不可删）。
+         */
+        delete: operations["remove_seat_api_sessions__session_id__seats__seat_order__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/seats/{seat_order}/character": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Seat Character
+         * @description 大厅：给 AI 席指派/清空角色（真人席的入座走 /claim）。
+         */
+        post: operations["assign_seat_character_api_sessions__session_id__seats__seat_order__character_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/start": {
         parameters: {
             query?: never;
@@ -1841,6 +1901,10 @@ export interface paths {
         /**
          * Start Game
          * @description 大厅：房主开局。校验门槛后 setup→active，并触发开场生成。
+         *
+         *     用 manager 级而非 host 级授权：后者刻意不放行「无席位归属的纯本机会话」，而建局改成
+         *     恒进大厅之后，单人本机局（建局不带 token）正是这一类——只认 host 的话它永远开不了。
+         *     开局与删除、踢人同属房间管理动作，口径本就该一致。
          */
         post: operations["start_game_api_sessions__session_id__start_post"];
         delete?: never;
@@ -3422,6 +3486,25 @@ export interface components {
             scene_id: string;
             /** Session Id */
             session_id?: string | null;
+        };
+        /**
+         * SeatAddRequest
+         * @description 大厅加座位：human=留给真人的空席，ai=待指派角色的 AI 席。
+         */
+        SeatAddRequest: {
+            /**
+             * Role
+             * @default ai
+             */
+            role: string;
+        };
+        /**
+         * SeatAssignRequest
+         * @description 给 AI 席指派角色；None=清空（真人席的入座走 ClaimSeatRequest）。
+         */
+        SeatAssignRequest: {
+            /** Character Id */
+            character_id?: string | null;
         };
         /** SessionCreate */
         SessionCreate: {
@@ -6837,6 +6920,109 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_seat_api_sessions__session_id__seats_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeatAddRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_seat_api_sessions__session_id__seats__seat_order__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                seat_order: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assign_seat_character_api_sessions__session_id__seats__seat_order__character_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                seat_order: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeatAssignRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
