@@ -187,8 +187,18 @@ def _select_pdf_images(
     return out
 
 
+#: 从 PDF 抽内嵌图的上限。抽出来是**给多个消费者用的**：结构化解析、地图定位、OCR，
+#: 各自有各自的取用量（见下）。抽得多本身不花钱，只是多解码几张图。
+MAX_EMBEDDED_IMAGES = 40
+
+#: 一次性视觉解析**单个请求**里最多带几张图。这个不能跟着上限走：parse_module_images
+#: 是把图全部塞进一次调用，每张限长边 1600px 的 JPEG、base64 后 300~500KB——
+#: 40 张就是十几 MB 的请求体，在 provider 的 120s 超时下几乎必然读超时
+#: （实测报的就是一个 message 为空的 httpx 超时）。按体积降序取前几张最有信息量的。
+MAX_IMAGES_PER_VISION_PARSE = 8
+
 #: OCR 前置的取图上限。扫描件一页一张图，8 张连一章都盖不住；OCR 是逐张独立调用、
-#: 有并发闸，页数多只是慢一点，不像视觉解析那样受单次上下文限制。
+#: 有并发闸，页数多只是慢一点，不像视觉解析那样受单次请求体限制。
 OCR_MAX_PAGES = 60
 
 
@@ -342,8 +352,16 @@ async def _run_upload_job(
                 logger.warning("OCR 前置未识出任何文字，回落图片解析路径：job=%s", job_id)
         _job_update(job_id, stage="AI 解析模组结构（大模组需数分钟）", percent=15)
         if images:
-            # 图文/扫描件模组：用视觉模型据图片（+ 任何文字）识别提取
-            parsed = await module_service.parse_module_images(images, rule_system, raw_text)
+            # 图文/扫描件模组：用视觉模型据图片（+ 任何文字）识别提取。
+            # 这是**一次**调用、图全在同一个请求体里，所以只带前几张——抽图上限管的是
+            # 「一共抽多少备用」，不是「一次发多少」，两者混同会直接把请求撑到读超时。
+            for_parse = images[:MAX_IMAGES_PER_VISION_PARSE]
+            if len(images) > len(for_parse):
+                logger.info(
+                    "视觉解析取 %s/%s 张（单次请求体上限）；其余仍供地图定位使用",
+                    len(for_parse), len(images),
+                )
+            parsed = await module_service.parse_module_images(for_parse, rule_system, raw_text)
         else:
             parsed = await module_service.parse_module_text(
                 raw_text, rule_system,
@@ -410,8 +428,17 @@ async def _run_upload_job(
         _job_update(job_id, status="failed",
                     detail="模型解析返回不完整（可能被截断），请重试；若反复失败可换更稳定的模型")
     except httpx.HTTPError as e:
-        logger.warning("模组解析与模型连接失败：%s", e)
-        _job_update(job_id, status="failed", detail="与模型的连接中断，模组解析未完成，请重试")
+        # 用 repr 而不是 str：httpx 的超时类异常（ReadTimeout/ConnectTimeout…）多数由传输层
+        # 直接抛出、不带 message，str() 就是空串——日志只剩「连接失败：」，等于什么都没说。
+        kind = type(e).__name__
+        logger.warning("模组解析与模型连接失败：%r", e)
+        hint = (
+            "与模型的连接超时。图文模组会把图片一并发给视觉模型，请求体较大；"
+            "可换更快的视觉模型，或改用文字版模组重试。"
+            if "Timeout" in kind else
+            "与模型的连接中断，模组解析未完成，请重试。"
+        )
+        _job_update(job_id, status="failed", detail=f"{hint}（{kind}）")
     except (ValueError, RuntimeError) as e:
         _job_update(job_id, status="failed", detail=f"模型解析失败：{e}")
     except Exception:
@@ -455,10 +482,10 @@ async def upload_module(
             images.append((content, ct or "image/png"))
         elif fn.endswith(".pdf") or ct == "application/pdf":
             text = _read_pdf_text(content)
-            # OCR 前置要页序、要全本；视觉解析只塞得下几张，仍按体积挑最有信息量的。
+            # OCR 前置要页序、要全本；否则按体积降序抽到上限，供解析/地图定位各取所需。
             pdf_imgs = _extract_pdf_images(
                 content,
-                max_images=OCR_MAX_PAGES if ocr_prepass else 8,
+                max_images=OCR_MAX_PAGES if ocr_prepass else MAX_EMBEDDED_IMAGES,
                 keep_page_order=ocr_prepass,
             ) if vision else []
             if text.strip():

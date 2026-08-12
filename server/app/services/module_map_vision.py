@@ -36,7 +36,9 @@ MIN_MATCHED_LABELS = 3
 
 #: 最多试几张候选图。模组 PDF 常有几十张图，绝大多数是插画；地图通常是最大的那几张之一
 #: （``_select_pdf_images`` 默认就按体积降序），试前几张即可，不必逐张烧钱。
-MAX_CANDIDATES = 5
+#: 每张一次独立的 vision 调用，成本线性——所以这个数可以比「一次请求带几张图」宽得多，
+#: 但也不能等于抽图上限：40 张全试就是 40 次调用，而地图几乎不会排在体积第 9 名之后。
+MAX_CANDIDATES = 8
 
 
 def build_prompt(hint: str = "地图上标注的所有地点") -> str:

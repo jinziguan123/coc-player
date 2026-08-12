@@ -194,3 +194,45 @@ def test_正文末尾附带说明不会整页丢掉():
     ])
     pages = asyncio.run(module_ocr.ocr_images(_imgs(1), llm=llm))
     assert pages[0].startswith("第二章 石棺")
+
+
+def test_抽图上限与单次请求上限是两回事(monkeypatch):
+    """抽 40 张备用，但一次性视觉解析只带前 8 张。
+
+    混同这两个数会把请求体撑到十几 MB——每张限长边 1600px 的 JPEG、base64 后 300~500KB，
+    而 provider 的读超时是 120s。用户实测撞到的就是一个 message 为空的 httpx 超时。
+    """
+    seen = {}
+
+    async def fake_images(imgs, rule_system, extra_text=""):
+        seen["count"] = len(imgs)
+        return {"title": "T", "scenes": [], "npcs": [], "clues": []}
+
+    monkeypatch.setattr(modules_api.module_service, "parse_module_images", fake_images)
+    monkeypatch.setattr(modules_api.module_service, "supplement_parse",
+                        lambda raw, parsed, rs: asyncio.sleep(0, result=parsed))
+
+    async def no_grounding(*a, **k):
+        return {"index": -1, "matched": 0, "proposals": [], "detections": [], "pairs": []}
+
+    monkeypatch.setattr(modules_api.module_map_vision, "locate_scenes_on_map", no_grounding)
+
+    asyncio.run(modules_api._run_upload_job(modules_api._job_new(), "", _imgs(40), "coc"))
+    assert seen["count"] == modules_api.MAX_IMAGES_PER_VISION_PARSE == 8
+    assert modules_api.MAX_EMBEDDED_IMAGES == 40
+
+
+def test_连接超时的报错要说得出是什么(monkeypatch):
+    """httpx 超时类异常多数不带 message，str() 是空串——日志与 detail 都不能只剩一个冒号。"""
+    import httpx
+
+    async def boom(*a, **k):
+        raise httpx.ReadTimeout("")
+
+    monkeypatch.setattr(modules_api.module_service, "parse_module_text", boom)
+    job = modules_api._job_new()
+    asyncio.run(modules_api._run_upload_job(job, "正文", [], "coc"))
+
+    detail = modules_api._upload_jobs[job]["detail"]
+    assert "ReadTimeout" in detail          # 说得出异常类型
+    assert "超时" in detail                  # 且给了可操作的方向
