@@ -8,6 +8,13 @@ import { CharacterPanel } from '../components/character/CharacterPanel'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
 import { GiReturnArrow } from 'react-icons/gi'
 import { parsePlayerRange } from '@/lib/module'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
 interface Character {
@@ -31,6 +38,33 @@ interface RoomData {
   kp_mode?: 'ai' | 'human'
   identity_version?: number
   participants: SessionParticipant[]
+}
+
+/** 从 system_data 里取一眼能看懂的摘要字段——角色列表要长得像角色列表，不是一排名字。 */
+function occupationOf(c: Character): string {
+  const sd = c.system_data || {}
+  return String(sd.occupation || sd.profession || '').trim()
+}
+
+function ageOf(c: Character): string {
+  const age = (c.system_data || {}).age
+  return age ? `${age} 岁` : ''
+}
+
+/** 取 HP/SAN 当前值（形如 {current, max}）；缺失返回空串，不占位。 */
+function vitalOf(c: Character, key: 'hitPoints' | 'sanity'): string {
+  const v = (c.system_data || {})[key] as { current?: number; max?: number } | undefined
+  if (!v || v.current == null) return ''
+  return v.max != null ? `${v.current}/${v.max}` : String(v.current)
+}
+
+/** 技能里最高的几项——最能说明「这个人擅长什么」。 */
+function topSkills(c: Character, n = 3): string[] {
+  return Object.entries(c.skills || {})
+    .filter(([, v]) => typeof v === 'number' && v >= 50)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([k, v]) => `${k} ${v}`)
 }
 
 interface ChatLine { id: string; name: string; content: string }
@@ -409,6 +443,41 @@ export function RoomLobbyPage() {
     } finally { setEvaluating(false) }
   }
 
+  /** 角色列表里的一张卡：头像首字 + 姓名 + 职业/年龄 + HP/SAN + 最擅长的几项技能。
+      从前这里只有一颗写着名字的药丸，看不出这是「角色列表」，更判断不了该选谁。 */
+  const renderCharCard = (c: Character, source: 'mine' | 'local') => {
+    const on = preview?.char.id === c.id
+    const meta = [occupationOf(c), ageOf(c)].filter(Boolean).join(' · ')
+    const hp = vitalOf(c, 'hitPoints')
+    const san = vitalOf(c, 'sanity')
+    return (
+      <button
+        key={`${source}-${c.id}`}
+        onClick={() => setPreview({ char: c, source })}
+        disabled={busy}
+        className={`char-card${on ? ' char-card--on' : ''}`}
+        title={source === 'local'
+          ? '点击查看这张卡。确认入座时会同步一份副本给房主，不会进入他的角色库'
+          : '点击查看这张卡，确认后再入座'}
+      >
+        <span className="char-card-avatar" aria-hidden="true">{c.name.slice(0, 1)}</span>
+        <span className="char-card-body">
+          <span className="char-card-name">{c.name}</span>
+          {meta && <span className="char-card-meta">{meta}</span>}
+          {(hp || san) && (
+            <span className="char-card-vitals">
+              {hp && <span>HP {hp}</span>}
+              {san && <span>SAN {san}</span>}
+            </span>
+          )}
+          {topSkills(c).length > 0 && (
+            <span className="char-card-skills">{topSkills(c).join(' · ')}</span>
+          )}
+        </span>
+      </button>
+    )
+  }
+
   const copyCode = () => {
     if (room?.room_code) { navigator.clipboard?.writeText(room.room_code); toast.success('房间码已复制') }
   }
@@ -488,22 +557,32 @@ export function RoomLobbyPage() {
                     />
                   )}
                   {/* AI 席由房主直接指派队友卡（真人席只能本人认领，走 /claim） */}
+                  {/* 用项目自己的 Select（Radix + 主题变量）。原生 <select> 的弹层由系统绘制，
+                      在这套羊皮纸配色里会突兀地弹出一片深蓝系统菜单，和站内其它下拉也不一致。 */}
                   {p.role === 'ai' && amHost ? (
-                    <select
-                      value={p.character_id || ''}
-                      onChange={(e) => void assignAiChar(p.seat_order, e.target.value || null)}
+                    <Select
+                      value={p.character_id || '__none'}
+                      onValueChange={(v) => void assignAiChar(p.seat_order, v === '__none' ? null : v)}
                       disabled={busy}
-                      className="input flex-1 !py-0.5 text-sm"
-                      aria-label={`AI 队友 ${p.seat_order + 1} 的角色`}
                     >
-                      <option value="">— 选择 AI 队友角色 —</option>
-                      {p.character_id && !aiChars.some((c) => c.id === p.character_id) && (
-                        <option value={p.character_id}>{p.character_name || '当前角色'}</option>
-                      )}
-                      {aiChars.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="flex-1" aria-label={`AI 队友 ${p.seat_order + 1} 的角色`}>
+                        <SelectValue placeholder="— 选择 AI 队友角色 —" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">— 未指派 —</SelectItem>
+                        {p.character_id && !aiChars.some((c) => c.id === p.character_id) && (
+                          <SelectItem value={p.character_id}>{p.character_name || '当前角色'}</SelectItem>
+                        )}
+                        {aiChars.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                            {occupationOf(c) && (
+                              <span style={{ color: 'var(--color-text-secondary)' }}>（{occupationOf(c)}）</span>
+                            )}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   ) : null}
                   {/* 下拉同样是盲选：房主看不到这张队友卡的技能与背景。给个直达的查看入口。 */}
                   {p.role === 'ai' && amHost && p.character_id && (
@@ -647,15 +726,8 @@ export function RoomLobbyPage() {
                     </p>
                   )}
                   {myChars.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {myChars.map((c) => (
-                        <button key={c.id} onClick={() => setPreview({ char: c, source: 'mine' })}
-                          disabled={busy}
-                          className={`seat-chip${preview?.char.id === c.id ? ' seat-chip--on' : ''}`}
-                          title="点击查看这张卡，确认后再入座">
-                          {c.name}
-                        </button>
-                      ))}
+                    <div className="char-grid">
+                      {myChars.map((c) => renderCharCard(c, 'mine'))}
                     </div>
                   )}
                   {localChars.length > 0 && (
@@ -663,16 +735,8 @@ export function RoomLobbyPage() {
                       <div className="seat-pick-sub">
                         本机角色 · 入座时会同步一份副本给房主，你自己这份不受影响
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {localChars.map((c) => (
-                          <button key={`local-${c.id}`}
-                            onClick={() => setPreview({ char: c, source: 'local' })}
-                            disabled={busy}
-                            className={`seat-chip${preview?.char.id === c.id ? ' seat-chip--on' : ''}`}
-                            title="点击查看这张卡。确认入座时会把角色同步一份副本给房主（他的规则引擎要读写角色数据才跑得动），不会进入房主的角色库">
-                            {c.name}
-                          </button>
-                        ))}
+                      <div className="char-grid">
+                        {localChars.map((c) => renderCharCard(c, 'local'))}
                       </div>
                     </div>
                   )}
