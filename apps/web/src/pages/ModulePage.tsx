@@ -7,6 +7,7 @@ import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiUpCard, GiScrollUnfurled, GiReturnArrow, GiArchiveResearch } from 'react-icons/gi'
 import { Loader2 } from 'lucide-react'
+import { staggerStyle } from '@/lib/stagger'
 
 const ALLOWED_EXTS = ['txt', 'md', 'pdf', 'docx', 'doc', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
 
@@ -259,8 +260,12 @@ export function ModulePage() {
         <p style={{ color: 'var(--color-text-secondary)' }}>暂无模组，请上传</p>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {modules.map((m) => (
-            <div key={m.id} className="card entity-card !p-0 flex flex-col overflow-hidden">
+          {modules.map((m, i) => (
+            <div
+              key={m.id}
+              style={staggerStyle(i)}
+              className="card entity-card list-enter !p-0 flex flex-col overflow-hidden"
+            >
               {/* 抬头：卷轴纹章 + 标题 + 规则/索引态；操作按钮 hover 才浮现 */}
               <div
                 className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"

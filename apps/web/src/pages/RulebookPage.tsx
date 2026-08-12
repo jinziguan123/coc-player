@@ -5,6 +5,7 @@ import { api, getApiBase, getPlayerToken, localApi } from '../api/client'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiBookCover, GiUpCard, GiReturnArrow, GiMagnifyingGlass } from 'react-icons/gi'
+import { staggerStyle } from '@/lib/stagger'
 
 interface Rulebook {
   id: string
@@ -210,8 +211,12 @@ export function RulebookPage() {
         <p style={{ color: 'var(--color-text-secondary)' }}>暂无规则书，请上传</p>
       ) : (
         <div className="grid gap-3 mb-8 lg:grid-cols-2 2xl:grid-cols-3">
-          {books.map((b) => (
-            <div key={b.id} className="card entity-card !p-0 flex flex-col overflow-hidden">
+          {books.map((b, i) => (
+            <div
+              key={b.id}
+              style={staggerStyle(i)}
+              className="card entity-card list-enter !p-0 flex flex-col overflow-hidden"
+            >
               <div
                 className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
                 style={{ borderBottom: '1px solid var(--color-border)' }}

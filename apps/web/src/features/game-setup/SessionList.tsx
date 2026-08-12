@@ -1,4 +1,5 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { staggerStyle } from '@/lib/stagger'
 import type { GameSetupState } from './useGameSetup'
 
 function formatTime(timestamp?: string) {
@@ -33,16 +34,17 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
         </p>
       )}
       <div className="grid gap-2.5 lg:grid-cols-2">
-        {activeSessions.map((session) => (
+        {activeSessions.map((session, i) => (
           <div
             key={session.id}
+            style={staggerStyle(i)}
             onClick={() => openSession(session)}
             role="button"
             tabIndex={0}
             onKeyDown={(event) => {
               if (event.key === 'Enter') openSession(session)
             }}
-            className={`card entity-card w-full cursor-pointer text-left ${session.status === 'active' ? 'active-rail' : ''}`}
+            className={`card entity-card list-enter w-full cursor-pointer text-left ${session.status === 'active' ? 'active-rail' : ''}`}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">

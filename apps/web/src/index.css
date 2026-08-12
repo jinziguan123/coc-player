@@ -2327,6 +2327,21 @@ select.input option {
   animation-delay: var(--enter-delay, 0ms);
 }
 
+/* 列表项错峰入场：卡片/条目按顺序依次浮现，给「一页内容正在铺开」的观感。
+   与消息入场（.anim-enter）刻意区分：位移大一档、时长略长，因为列表卡片体量更大，
+   4px 的位移在卡片上几乎看不出来。延迟由行内 --enter-delay 注入（见 lib/stagger.ts，
+   那里做了上限，长列表的末项不会干等）。
+   只用于**首次进入页面时已有的那批**——搜索筛选后的重排不加，否则每敲一个字整页都在弹。 */
+.list-enter {
+  animation: listEnter 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--enter-delay, 0ms);
+  will-change: opacity, transform;
+}
+@keyframes listEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* 骰子事件卡入场：微旋转 + 缩放弹入（骰子落定的仪式感） */
 .dice-enter {
   animation: diceEnter 0.42s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
