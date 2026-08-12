@@ -234,8 +234,13 @@ async def start_game(
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    """大厅：房主开局。校验门槛后 setup→active，并触发开场生成。"""
-    require_session_host(
+    """大厅：房主开局。校验门槛后 setup→active，并触发开场生成。
+
+    用 manager 级而非 host 级授权：后者刻意不放行「无席位归属的纯本机会话」，而建局改成
+    恒进大厅之后，单人本机局（建局不带 token）正是这一类——只认 host 的话它永远开不了。
+    开局与删除、踢人同属房间管理动作，口径本就该一致。
+    """
+    require_session_manager(
         db, session_id, token, detail="只有房主可以开始游戏",
     )
     try:

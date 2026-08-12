@@ -342,8 +342,10 @@ export function useGameSetup() {
         is_primary: index === 0,
       }))
       const session = await createSession(moduleId, participants, kpMode)
-      if (session.status === 'setup') navigate(`/room/${session.id}`)
-      else navigate(`/game/${session.id}`, { state: { isNew: true } })
+      // 建局恒进大厅：队友全是 AI 也一样。这里曾经按 status 分岔（无空真人席就直接跳进
+      // 游戏），代价是心智不一致、且建完就改不动了。大厅才是改座位、换角色、放真人空席
+      // 并发邀请码的地方；全 AI 局落进去时门槛已经满了，点一下就开。
+      navigate(`/room/${session.id}`)
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : '创建游戏失败')
     }

@@ -52,6 +52,9 @@ def _seed(db):
         ],
         creator_token="kp-token", kp_mode="human",
     )
+    # 建局恒落大厅；本文件验的是跑团中的 KP 工作台，补一次开局
+    if not session_service.lobby_gaps(db, session.id):
+        session_service.start_game(db, session.id, "kp-token")
     return module, hero, ally, session
 
 

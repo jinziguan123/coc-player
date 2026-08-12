@@ -10,6 +10,39 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import get_db
 from app.main import app
+from app.services import session_service
+
+
+@pytest.fixture(autouse=True)
+def auto_start_sessions(monkeypatch):
+    """新建的会话直接推到 active，跳过大厅那一步。
+
+    建局改成**恒落在 setup**（建局＝建房，队友全是 AI 也一样，见 create_session 的注释）
+    之后，本文件里 20 多处内联建局全都拿到了「还没开局的房间」，而它们要验的是**跑团中**
+    的会话 API（推进回合、改事件、切场景…），不是大厅。逐个补一次 /start 只会把这个文件
+    变成噪音，所以统一在这里推进。
+
+    已入座的真人席一并置为已准备——多人用例（如「等所有真人确认才推进」）要的是两个真人
+    都已在局中的状态，而「每个真人自己点准备」那条大厅语义由 test_lobby.py 覆盖。
+    留空待认领的席位不动，那种房间仍会停在 setup。
+    """
+    real = session_service.create_session
+
+    def _create_and_start(db, *args, **kwargs):
+        session = real(db, *args, **kwargs)
+        if session.status != "setup":
+            return session
+        for part in session_service.get_participants(db, session.id):
+            if part.character_id and not part.ready:
+                part.ready = True
+        db.commit()
+        if not session_service.lobby_gaps(db, session.id):
+            session.status = "active"
+            db.commit()
+        db.refresh(session)
+        return session
+
+    monkeypatch.setattr(session_service, "create_session", _create_and_start)
 from app.models import (  # noqa: F401 — 注册全部表
     Base,
     Character,

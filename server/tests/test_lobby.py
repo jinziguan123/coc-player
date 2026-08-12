@@ -48,7 +48,13 @@ def test_create_with_open_seat_enters_lobby(db_factory):
     assert session.status == "setup"  # 有空真人席 → 进大厅
 
 
-def test_create_all_filled_starts_active(db_factory):
+def test_建局恒进大厅且房主席已就绪(db_factory):
+    """建局＝建房，单人局也一样落在 setup。
+
+    从前这里是「无空席 → 直接 active」的快速开局，代价是心智不一致、且建完就改不动了
+    （配错一个角色只能删档重来，也没法把席位改留给后来的真人）。多出的那一次点击靠
+    「房主席建局即就绪」抵掉：他刚选完自己的角色，再跟自己确认一次准备纯属仪式。
+    """
     db = db_factory()
     module, host, _ = _seed(db)
     session = session_service.create_session(
@@ -56,7 +62,9 @@ def test_create_all_filled_starts_active(db_factory):
         [{"character_id": host.id, "is_primary": True}],
         creator_token="host-tok",
     )
-    assert session.status == "active"  # 无空席 → 直接开局（单人体验不回退）
+    assert session.status == "setup"
+    assert session_service.lobby_gaps(db, session.id) == []   # 门槛已满，进大厅点一下就开
+    assert session_service.start_game(db, session.id, "host-tok").status == "active"
 
 
 def test_lobby_gating_and_start_flow(db_factory):

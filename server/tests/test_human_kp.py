@@ -40,6 +40,10 @@ def _seed(db):
         db, module.id, [{"character_id": hero.id, "role": "human", "is_primary": True}],
         creator_token="kp-token", kp_mode="human",
     )
+    # 建局恒落大厅；下面多数用例要的是「已经在跑的局」（authorize_kp 等都要求 active）。
+    # 真正验大厅门槛与开局流程的用例在本文件里各自建局，不走这个助手。
+    if not session_service.lobby_gaps(db, session.id):
+        session_service.start_game(db, session.id, "kp-token")
     return module, hero, session
 
 

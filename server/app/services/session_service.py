@@ -47,8 +47,12 @@ def active_character_ids(
 
     既读旧的 ``player_character_id`` 快捷字段，也读 ``session_participants``，
     供开局冲突校验和 ``/characters?available=true`` 对齐使用。
+
+    ``setup``（大厅里等开局）同样算占用：建局改成恒进大厅之后，一个角色可能长时间停在
+    「已入座、还没开局」的状态。只认 active 的话，同一个角色能被同时拉进两个房间，
+    等两边都开局就撞车了——而这个坑正是本函数存在的理由。
     """
-    q = db.query(GameSession).filter(GameSession.status.in_(["active", "paused"]))
+    q = db.query(GameSession).filter(GameSession.status.in_(["setup", "active", "paused"]))
     if exclude_session_id:
         q = q.filter(GameSession.id != exclude_session_id)
     sessions = q.all()
@@ -177,12 +181,16 @@ def create_session(
     if module.scenes:
         first_scene_id = module.scenes[0].get("id")
 
-    # 有空的真人席 → 进大厅（setup，等真人认领+准备后房主开局）；
-    # 否则（单人/全 AI 已填满）→ 直接 active，保持原快速开局体验。
-    has_open_seat = any(
-        (not s["character_id"]) and s["role"] == "human" for s in seats
-    )
-    status = "setup" if has_open_seat else "active"
+    # **建局恒为建房**：一律落在 setup，由大厅统一开局。
+    #
+    # 从前这里分了岔——没有空的真人席（单人或队友全是 AI）就跳过大厅直接 active，
+    # 为的是「保持原快速开局体验」。代价有三，都比省下的那一次点击贵：
+    # ① 心智不一致，用户得记住「什么情况下会进大厅」；
+    # ② 建完就定死了，配错一个角色只能删档重来——大厅里本来可以换人、踢座、改配置；
+    # ③ 想让朋友后来加入，得整局重开（大厅里点一下「设为真人空席」就行）。
+    # 单人多出的那一次点击只是一次：房主席在建局时就置为 ready（见下方 ready 的算法），
+    # 所以全 AI / 单人局落进大厅时门槛已经是满的，点「开始冒险」即走。
+    status = "setup"
 
     identity_version = 1 if legacy_human_kp else 2
     game_session = GameSession(
@@ -204,7 +212,9 @@ def create_session(
             if seat["is_primary"] and not (kp_mode == "human" and not legacy_human_kp)
             else None
         )
-        # AI 席与房主席默认就绪；空/待认领的真人席需手动准备
+        # AI 席与房主席默认就绪；空/待认领的真人席需手动准备。
+        # 房主席默认就绪是「建局恒进大厅」之后单人局仍然顺手的关键：他刚在上一屏选完自己的
+        # 角色，再要求他跟自己确认一次「准备好了」纯属仪式。后来加入的真人仍要自己点。
         ready = seat["role"] == "ai" or (seat["is_primary"] and claimed)
         game_session.participants.append(
             SessionParticipant(
@@ -649,7 +659,11 @@ def start_game(db: Session, session_id: str, token: str | None) -> GameSession:
         raise ValueError("房间不存在")
     if session.status != "setup":
         raise ValueError("房间不在大厅状态")
-    if not is_host(db, session_id, token):
+    # 纯本机会话（建局时没带 token，主角席也无归属）没有「房主」可言——is_host 对
+    # token=None 恒为 False，若只认它，这类局会永远卡在大厅开不了。从前它们建完直接
+    # active、根本不走这里，所以这个缺口是「建局恒进大厅」之后才暴露出来的。
+    # 判定与 can_manage_session 的「无归属 → 本机可管理」保持同一口径。
+    if not (is_host(db, session_id, token) or can_manage_session(db, session_id, token)):
         raise ValueError("只有房主可以开始游戏")
     gaps = lobby_gaps(db, session_id)
     if gaps:

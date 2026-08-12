@@ -298,13 +298,18 @@ export function NewGamePanel({ setup }: { setup: GameSetupState }) {
           {error && (
             <p className="mb-2 text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>
           )}
+          {/* 这里创建的是**房间**，不是直接开局——按钮得说它真正做的事。开局在大厅里，
+              那也是换角色、放真人空席、发邀请码的地方。 */}
           <button
             onClick={() => void startGame()}
             disabled={!allSeatsFilled}
             className="btn-primary"
           >
-            开始冒险（{seats.length} 名玩家）
+            创建房间（{seats.length} 名玩家）
           </button>
+          <p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            下一步进入房间：可再调整座位与角色、把席位留给真人，确认后由你开局。
+          </p>
         </>
       )}
     </div>

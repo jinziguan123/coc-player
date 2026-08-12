@@ -93,6 +93,11 @@ def start_onboarding(db: Session, token: str) -> tuple[GameSession, bool]:
             creator_token=token,
             commit=False,
         )
+        # 引导流程**显式跳过大厅**。建局恒落 setup 是给「建局＝建房」这个心智服务的，
+        # 而新手引导的全部意义就是把人直接放进一局游戏里——先让他面对一个只有自己、
+        # 且已经配好的房间，多一步没有任何信息量的确认，正好卡在最不该有摩擦的地方。
+        # 这里是唯一的例外，且只对它自己造的这一局生效。
+        game.status = "active"
         db.commit()
         db.refresh(game)
         return game, False

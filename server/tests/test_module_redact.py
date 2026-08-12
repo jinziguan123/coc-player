@@ -127,3 +127,87 @@ def test_只改这三个字段其余一律不动(monkeypatch, field):
     assert out[field] == "洗过的内容"
     assert out["truth"] == _parsed()["truth"]              # 真相不受影响
     assert out["npcs"] and out["clues"]
+
+
+# ── 车卡建议的防剧透自检 ──
+#
+# 与三段玩家可见文本同一个道理，但失败模式更隐蔽：车卡建议从来没被喂过真相与线索，
+# 泄漏是**推断**出来的。实测样本：常暗之箱「大量用到侦查、聆听、潜行、逃跑」（等于预告
+# 会被追）、分离焦虑「懂遗传学以便理解罕见病线索」、闇暗山「考古学家：剧情场景不涉及古迹」。
+
+
+class _Module:
+    rule_system = "coc"
+    title = "常暗之箱"
+    description = "深夜末班电车中醒来，乘客消失。"
+    world_setting = {"era": "2013", "region": "城市"}
+    truth = "奈亚化身把调查员拖进梦境电车，放出怪物追逐他们。"
+    npcs = [{"name": "黑衣男子", "secrets": "奈亚拉托提普的化身"}]
+    clues = [{"name": "便签"}]
+
+
+def _guidance():
+    return {
+        "summary": "适合被困末班电车的普通现代人。",
+        "recommended": ["上班族", "大学生"],
+        "avoid": ["黑客（电车上没有网络可用）"],
+        "notes": ["本子会大量用到侦查、聆听、潜行、逃跑、急救等技能"],
+    }
+
+
+def test_理由从句里的泄漏被删掉(monkeypatch):
+    llm = _LLM(json.dumps({
+        "summary": "适合被困末班电车的普通现代人。",
+        "recommended": ["上班族", "大学生"],
+        "avoid": ["黑客（现代都市题材，网络在此类封闭场景用处有限）"],
+        "notes": ["侦查、聆听与急救会派上用场"],
+        "changed": ["notes：潜行/逃跑的组合预告了会被追"],
+    }, ensure_ascii=False))
+    monkeypatch.setattr(ms, "get_fast_llm", lambda: llm)
+
+    out = asyncio.run(ms.redact_character_guidance(_guidance(), _Module()))
+    assert "逃跑" not in "".join(out["notes"])
+    assert out["recommended"] == ["上班族", "大学生"]      # 安全的部分原样保留
+    assert "奈亚" in llm.prompt                            # 真相要喂进去当比对面
+
+
+def test_把建议删废的产出被弃用(monkeypatch):
+    """删到只剩空话等于把功能废掉——宁可留着原来那份。"""
+    monkeypatch.setattr(ms, "get_fast_llm", lambda: _LLM(json.dumps(
+        {"summary": "", "recommended": [], "avoid": [], "notes": []}, ensure_ascii=False)))
+    assert asyncio.run(ms.redact_character_guidance(_guidance(), _Module())) == _guidance()
+
+
+def test_无真相或无建议时不调用(monkeypatch):
+    called = []
+    monkeypatch.setattr(ms, "get_fast_llm", lambda: called.append(1))
+
+    class _NoTruth(_Module):
+        truth = ""
+
+    assert asyncio.run(ms.redact_character_guidance(_guidance(), _NoTruth())) == _guidance()
+    assert asyncio.run(ms.redact_character_guidance({}, _Module())) == {}
+    assert not called
+
+
+def test_车卡建议审查失败时原样返回(monkeypatch):
+    class _Boom:
+        async def complete(self, *a, **k):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(ms, "get_fast_llm", lambda: _Boom())
+    assert asyncio.run(ms.redact_character_guidance(_guidance(), _Module())) == _guidance()
+
+
+def test_生成函数内部就过审查(monkeypatch):
+    """接在生成函数内部，调用方不必各记得加一遍。"""
+    seen = {}
+
+    async def fake_redact(guidance, module):
+        seen["called"] = True
+        return {**guidance, "notes": ["已审查"]}
+
+    monkeypatch.setattr(ms, "get_llm", lambda: _LLM(json.dumps(_guidance(), ensure_ascii=False)))
+    monkeypatch.setattr(ms, "redact_character_guidance", fake_redact)
+    out = asyncio.run(ms.generate_character_guidance(_Module()))
+    assert seen.get("called") and out["notes"] == ["已审查"]

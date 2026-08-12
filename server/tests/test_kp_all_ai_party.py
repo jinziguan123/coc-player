@@ -47,7 +47,7 @@ def test_全AI玩家席建局主角保持AI且非legacy(tmp_path):
     assert primary.role == "ai" and primary.character_id == a1.id   # 主角锚点允许是 AI
     assert session.identity_version == 2                            # 不被误判为 legacy 双席位
     assert session.player_character_id == a1.id
-    assert session.status == "active"                               # 无空真人席 → 直接开局
+    assert session.status == "setup"                                # 建局恒进大厅（含全 AI 局）
     kp = next(p for p in parts if p.role == "kp")
     assert kp.owner_token == "kp-token"
     assert session_service.is_kp(db, session.id, "kp-token")
