@@ -16,6 +16,7 @@ from app.services import (
     image_store,
     module_image_service,
     module_map_service,
+    module_ocr,
     module_rag_service,
     module_service,
 )
@@ -140,11 +141,19 @@ def _normalize_image(pil, data: bytes) -> tuple[bytes, str] | None:
         return None
 
 
-def _select_pdf_images(reader, max_images: int = 8, min_bytes: int = 3000) -> list[tuple[bytes, str]]:
-    """从 PdfReader 抽取内嵌位图（地图/手稿插图），按体积降序取前 N 张并规整为合法 JPEG。
+def _select_pdf_images(
+    reader, max_images: int = 8, min_bytes: int = 3000, keep_page_order: bool = False,
+) -> list[tuple[bytes, str]]:
+    """从 PdfReader 抽取内嵌位图并规整为合法 JPEG。
 
-    地图通常是页面里最大的那张图，故按原始体积排序优先；每张经 Pillow 重新编码
-    （统一 RGB JPEG、限尺寸），无法解码的直接跳过——避免把畸形图发给视觉接口触发 400。
+    两种取法，对应两种用途：
+    - 默认（喂视觉解析）：**按体积降序**取前 N 张。地图通常是页面里最大的那张图，
+      而那次调用只塞得下几张，得优先挑信息量大的。
+    - ``keep_page_order``（喂 OCR 前置）：**保持页序**。扫描件每页就是一整张图，
+      按体积挑等于随机丢页、还把顺序打乱，OCR 出来的原文会前言不搭后语。
+
+    每张经 Pillow 重新编码（统一 RGB JPEG、限尺寸），无法解码的直接跳过——
+    避免把畸形图发给视觉接口触发 400。
     """
     candidates: list[tuple[object, bytes, int]] = []
     for page in reader.pages:
@@ -157,7 +166,8 @@ def _select_pdf_images(reader, max_images: int = 8, min_bytes: int = 3000) -> li
             except Exception:
                 pil = None
             candidates.append((pil, data, len(data)))
-    candidates.sort(key=lambda t: t[2], reverse=True)
+    if not keep_page_order:
+        candidates.sort(key=lambda t: t[2], reverse=True)
     out: list[tuple[bytes, str]] = []
     for pil, data, _ in candidates:
         norm = _normalize_image(pil, data)
@@ -165,14 +175,28 @@ def _select_pdf_images(reader, max_images: int = 8, min_bytes: int = 3000) -> li
             out.append(norm)
         if len(out) >= max_images:
             break
+    if len(candidates) > len(out):
+        # 不做无声截断：读日志的人得知道这本书还有多少页没进解析。
+        logger.warning(
+            "PDF 内嵌图 %s 张，本次只取 %s 张（上限 %s）", len(candidates), len(out), max_images,
+        )
     return out
 
 
-def _extract_pdf_images(content: bytes, max_images: int = 8) -> list[tuple[bytes, str]]:
+#: OCR 前置的取图上限。扫描件一页一张图，8 张连一章都盖不住；OCR 是逐张独立调用、
+#: 有并发闸，页数多只是慢一点，不像视觉解析那样受单次上下文限制。
+OCR_MAX_PAGES = 60
+
+
+def _extract_pdf_images(
+    content: bytes, max_images: int = 8, keep_page_order: bool = False,
+) -> list[tuple[bytes, str]]:
     import io
 
     from pypdf import PdfReader
-    return _select_pdf_images(PdfReader(io.BytesIO(content)), max_images=max_images)
+    return _select_pdf_images(
+        PdfReader(io.BytesIO(content)), max_images=max_images, keep_page_order=keep_page_order,
+    )
 
 
 def _convert_doc_to_text(content: bytes) -> str | None:
@@ -249,12 +273,29 @@ def _extract_doc_text(content: bytes, filename: str) -> str:
 
 async def _run_upload_job(
     job_id: str, raw_text: str, images: list[tuple[bytes, str]], rule_system: str,
+    ocr_prepass: bool = False,
 ) -> None:
     """后台执行模组解析全流程（首轮解析 → 查漏自检 → 入库 → 触发原文索引），逐段汇报进度。
+
+    ``ocr_prepass``：先把图片逐张 OCR 成文字，然后**当纯文本模组解析**。图片路径是一次性
+    调用，而文本路径有断点续写与对照原文的查漏自检——后者对图文模组此前根本没机会生效
+    （没有原文可对照，supplement_parse 直接原样返回）。开关默认关，便于同一份文件 A/B。
 
     异常不外抛：一律落成 job 的 failed 状态 + 可读 detail（沿用旧同步端点的错误文案）。
     """
     try:
+        if images and ocr_prepass:
+            _job_update(job_id, stage=f"OCR 识别图片文字（{len(images)} 张）", percent=8)
+            pages = await module_ocr.ocr_images(images)
+            hit, total = module_ocr.ocr_coverage(pages)
+            if hit:
+                raw_text = module_ocr.merge_ocr_text(pages, raw_text)
+                images = []          # 已转成文字，后面完全走文本链路
+                _job_update(job_id, stage=f"OCR 完成（{hit}/{total} 页识出文字）", percent=14)
+            else:
+                # 一张都没认出来（没有视觉模型 / 全部失败）→ 回落原来的图片路径，
+                # 别让一个实验开关把本来能解析的模组变成解析不了。
+                logger.warning("OCR 前置未识出任何文字，回落图片解析路径：job=%s", job_id)
         _job_update(job_id, stage="AI 解析模组结构（大模组需数分钟）", percent=15)
         if images:
             # 图文/扫描件模组：用视觉模型据图片（+ 任何文字）识别提取
@@ -331,10 +372,14 @@ async def _run_upload_job(
 async def upload_module(
     files: list[UploadFile],
     rule_system: str = "coc",
+    ocr_prepass: bool = False,
 ):
     """上传模组：同步做文件抽取与格式校验（错误立即可见），解析转后台任务。
 
     返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。
+
+    ``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，
+    以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。
     """
     if not files:
         raise HTTPException(400, "请至少上传一个文件")
@@ -359,7 +404,12 @@ async def upload_module(
             images.append((content, ct or "image/png"))
         elif fn.endswith(".pdf") or ct == "application/pdf":
             text = _read_pdf_text(content)
-            pdf_imgs = _extract_pdf_images(content) if vision else []
+            # OCR 前置要页序、要全本；视觉解析只塞得下几张，仍按体积挑最有信息量的。
+            pdf_imgs = _extract_pdf_images(
+                content,
+                max_images=OCR_MAX_PAGES if ocr_prepass else 8,
+                keep_page_order=ocr_prepass,
+            ) if vision else []
             if text.strip():
                 parts.append(f"=== 文件：{f.filename} ===\n{text}" if len(files) > 1 else text)
             images.extend(pdf_imgs)
@@ -377,7 +427,7 @@ async def upload_module(
     raw_text = "\n\n".join(parts)
 
     job_id = _job_new()
-    asyncio.create_task(_run_upload_job(job_id, raw_text, images, rule_system))
+    asyncio.create_task(_run_upload_job(job_id, raw_text, images, rule_system, ocr_prepass))
     return {"job_id": job_id}
 
 
