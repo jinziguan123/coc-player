@@ -86,4 +86,9 @@ def get_vision_llm() -> LLMProvider:
     profile = load_vision_profile()
     if not profile:
         return get_llm()
+    # 把某个配置**放进视觉槽位**这个动作，本身就是用户在断言「这个模型会看图」。
+    # 还要求他再去编辑表单里勾一次 vision 复选框，是个纯粹的重复劳动，而且失败得很难懂：
+    # 名字里没有 -vl 的多模态模型（qwen3.7-plus、gpt-5 这类）会被名字启发式判成纯文本，
+    # 于是「我明明设了视觉模型」却报「没有可用于看图的模型」。槽位即能力。
+    profile = profile.model_copy(update={"vision": True})
     return _provider_from_profile(profile)

@@ -40,10 +40,16 @@ def _imgs(n):
     return [(f"page{i}".encode(), "image/png") for i in range(n)]
 
 
+#: 测试用的「像样的一页正文」——短于 _MIN_PAGE_CHARS 的产物会被当成没认出东西丢掉，
+#: 所以桩数据得有真实体量，不能用「第一页」这种两三个字的占位。
+def _page(n: int) -> str:
+    return f"第{n}页 陵墓探查\n沙丘之下露出半截石阶，风把碎沙吹进门缝里，调查员们停在阶前。"
+
+
 def test_逐页识别保持入参顺序():
-    llm = _Vision(texts=["第一页", "第二页", "第三页"])
+    llm = _Vision(texts=[_page(1), _page(2), _page(3)])
     pages = asyncio.run(module_ocr.ocr_images(_imgs(3), llm=llm))
-    assert pages == ["第一页", "第二页", "第三页"]
+    assert pages == [_page(1), _page(2), _page(3)]
     assert llm.calls[0] == module_ocr.OCR_PROMPT
 
 
@@ -51,10 +57,10 @@ def test_单页失败只丢那一页():
     import base64
 
     bad = base64.b64encode(b"page1").decode()
-    llm = _Vision(texts=["A", "C"], fail_on=[bad])
+    llm = _Vision(texts=[_page(1), _page(3)], fail_on=[bad])
     pages = asyncio.run(module_ocr.ocr_images(_imgs(3), llm=llm))
     assert pages[1] == ""                      # 坏的那页留空，不炸整本
-    assert [p for p in pages if p] == ["A", "C"]
+    assert [p for p in pages if p] == [_page(1), _page(3)]
 
 
 def test_并发不超过闸门():
@@ -161,3 +167,30 @@ def test_pdf抽图两种取法():
         assert monkey == [b"L", b"m", b"s"]      # 体积降序
     finally:
         modules_api._normalize_image = orig
+
+
+def test_插画自述被丢弃而不是拼进原文():
+    """模组 PDF 里混着大量插画与装饰底纹，模型会老实回一段「这张图没有文字」。
+    那些自述若原样拼进解析输入，等于给解析器灌无关描述，比不做 OCR 还差。"""
+    llm = _Vision(texts=[
+        "这张图片中没有包含任何文字内容。\n\n它展示的是一本打开的空白旧书，页面顶部有红色装饰边框。",
+        "第一章 陵墓入口\n沙丘之下露出半截石阶，风把碎沙吹进门缝里。调查员们停在阶前。",
+        "经过仔细检查，这张图片是一幅插画（描绘了探险者面对木乃伊的场景），图片中没有任何可见的文字内容。",
+        "无字",   # 太短：同样视为没认出东西
+    ])
+    pages = asyncio.run(module_ocr.ocr_images(_imgs(4), llm=llm))
+    assert pages[0] == "" and pages[2] == "" and pages[3] == ""
+    assert pages[1].startswith("第一章 陵墓入口")
+    assert module_ocr.ocr_coverage(pages) == (1, 4)
+    merged = module_ocr.merge_ocr_text(pages)
+    assert "没有" not in merged and "插画" not in merged   # 自述一个字都没进原文
+    assert "=== 第 1 页 ===" in merged                      # 有效页重新编号
+
+
+def test_正文末尾附带说明不会整页丢掉():
+    """真有正文的页面偶尔会在末尾附一句说明，只看开头判定，不该误伤。"""
+    llm = _Vision(texts=[
+        "第二章 石棺\n棺盖上刻着一行看不懂的楔形文字。\n\n（注：图片右下角有污渍，部分文字无法辨认）",
+    ])
+    pages = asyncio.run(module_ocr.ocr_images(_imgs(1), llm=llm))
+    assert pages[0].startswith("第二章 石棺")

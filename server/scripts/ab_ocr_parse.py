@@ -71,7 +71,21 @@ async def main(paths: list[Path]) -> int:
     if not images:
         print("没有可用的图片——这个对比只对图文/扫描件模组有意义")
         return 2
-    print(f"输入：{len(images)} 张图，已有文字层 {len(raw_text)} 字\n")
+    print(f"输入：{len(images)} 张图，已有文字层 {len(raw_text)} 字")
+    # 样本挑错了就别烧钱：OCR 前置的收益只在「文字层缺失或很少」的扫描件上。
+    # 文字层已经很厚的本子，那些内嵌图多半是插画与装饰底纹（陵墓那本 35 张全是），
+    # OCR 出来的是一堆「这张图没有文字」，对解析毫无增量。
+    if len(raw_text) >= 3000:
+        print(
+            f"\n  ⚠ 这本 PDF 已有 {len(raw_text)} 字的文字层，不是扫描件——"
+            "它的内嵌图多半是插画/底纹。\n"
+            "    OCR 前置是给「没有文字层的扫描件」用的，对这本大概率零增量、还要烧"
+            f" {len(images)} 次视觉调用。\n"
+            "    要继续请加 --force；换一本扫描版模组才测得出真实差距。\n"
+        )
+        if "--force" not in sys.argv:
+            return 3
+    print()
     out_dir = Path(__file__).resolve().parent.parent.parent / "output" / "ab_ocr"
     out_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, dict] = {}

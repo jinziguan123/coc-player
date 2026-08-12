@@ -35,6 +35,27 @@ MAX_CONCURRENCY = 3
 #: 单张图的超时。扫描页可能很密，给足；但不能让一张坏图把整个上传任务钉死。
 PER_IMAGE_TIMEOUT_S = 180
 
+#: 「这张图没有文字」的自述特征。模组 PDF 里混着大量插画与装饰底纹（陵墓那本 35 张内嵌图
+#: 全是插画），模型对它们会老老实实回一段「图片中没有任何可见的文字内容，它展示的是……」。
+#: 插件那边不做这一步——它是给人看的单张工具，回一句说明正合适。可这里的产物要直接当模组
+#: 原文喂进解析，35 段这样的自述拼进去，等于给解析器灌了 35 段无关描述，比不做 OCR 还差。
+_NO_TEXT_MARKERS = (
+    "没有任何可见的文字", "没有包含任何文字", "没有任何文字", "不包含任何文字",
+    "没有文字内容", "无法进行OCR", "无法提取文字", "未发现文字", "没有可识别的文字",
+)
+#: 短于此长度的产物一律视为没认出东西（真有正文的扫描页不会只有十几个字）。
+_MIN_PAGE_CHARS = 24
+
+
+def _looks_like_no_text(text: str) -> bool:
+    """这一页的产物是「文字」还是「模型在描述这张图没有文字」。
+
+    只看**开头一段**：真有正文的页面偶尔也会在末尾附一句说明，不该整页丢掉；
+    而自述型回答的否定句必定出现在开头。
+    """
+    head = text[:120]
+    return any(m in head for m in _NO_TEXT_MARKERS)
+
 
 async def ocr_images(images: list[tuple[bytes, str]], llm=None) -> list[str]:
     """并发把每张图 OCR 成文字，按入参顺序返回；失败的那张返回空串（fail-open）。
@@ -70,7 +91,11 @@ async def ocr_images(images: list[tuple[bytes, str]], llm=None) -> list[str]:
             except Exception:
                 logger.exception("第 %s 张图 OCR 失败（跳过该张）", index + 1)
                 return ""
-        return (raw or "").strip() if isinstance(raw, str) else ""
+        text = (raw or "").strip() if isinstance(raw, str) else ""
+        if len(text) < _MIN_PAGE_CHARS or _looks_like_no_text(text):
+            logger.info("第 %s 张图没有可用文字（插画/装饰底纹），丢弃该页产物", index + 1)
+            return ""
+        return text
 
     return list(await asyncio.gather(*(one(i, im) for i, im in enumerate(images))))
 
