@@ -160,6 +160,7 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: dict | None = None,
+        timeout: float | None = None,
     ) -> str:
         # **内部走流式**再拼回完整字符串：长输出（如模组解析）用非流式常被 DeepSeek 等
         # 中途掐断连接（RemoteProtocolError: incomplete chunked read）——流式增量下发能避免。
@@ -184,6 +185,7 @@ class OpenAICompatProvider(LLMProvider):
                 parts: list[str] = []
                 async with self._client.stream(
                     "POST", self._api_url, headers=self._headers(), json=payload,
+                    **({"timeout": timeout} if timeout is not None else {}),
                 ) as resp:
                     # 流式响应默认不读取错误正文；先读完 4xx/5xx，后续日志才能给出供应商的
                     # 具体参数错误（且只记录返回体，不记录请求体/API Key）。
@@ -240,24 +242,64 @@ class OpenAICompatProvider(LLMProvider):
 
     async def complete_vision(
         self, prompt: str, images: list[tuple[str, str]], max_tokens: int | None = None,
+        timeout: float | None = None,
     ) -> str:
+        """据图片 + 提示词生成文本。**内部走流式**，理由与 complete() 完全相同。
+
+        此前这里是一次非流式 POST，于是同时踩中两个坑：
+        - 非流式的读超时覆盖**整个等待过程**——模型要把整份产物生成完才有第一个字节。
+          模组解析一次要输出几千 token 的 JSON，客户端 120s 的读超时必然先到，
+          报出来的还是个 message 为空的 ReadTimeout（用户实测）。流式下读超时的语义
+          变成「块与块之间」，长输出天然不受影响。
+        - 长输出被中途掐断（RemoteProtocolError）——complete() 当初改流式就是为了这个，
+          而视觉解析的输出比它更长，反倒一直留在非流式路径上。
+        """
         content: list[dict] = [{"type": "text", "text": prompt}]
         for b64, mime in images:
             content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
-        payload: dict = {"model": self.model, "messages": [{"role": "user", "content": content}], "temperature": 0.4}
+        payload: dict = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0.4,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         self._apply_reasoning(payload)
-        resp = await self._client.post(self._api_url, headers=self._headers(), json=payload)
-        if resp.status_code >= 400:
-            # 把服务端返回体带上，便于定位（如图片格式/数量/尺寸被拒），并给出可读错误
-            body = (resp.text or "")[:500]
-            raise RuntimeError(f"视觉接口返回 {resp.status_code}：{body}")
-        data = resp.json()
-        if data.get("usage"):
-            self.last_usage = data["usage"]
-            usage_tracker.add(data["usage"])
-        return data["choices"][0]["message"]["content"]
+
+        kwargs = {"timeout": timeout} if timeout is not None else {}
+        parts: list[str] = []
+        async with self._client.stream(
+            "POST", self._api_url, headers=self._headers(), json=payload, **kwargs,
+        ) as resp:
+            if getattr(resp, "status_code", 200) >= 400:
+                # 流式响应默认不读错误正文；先读完才拿得到「图片格式/数量/尺寸被拒」这类具体原因
+                try:
+                    await resp.aread()
+                except Exception:
+                    pass
+                raise RuntimeError(f"视觉接口返回 {resp.status_code}：{(resp.text or '')[:500]}")
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:]
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue   # 心跳/非 JSON 行
+                if chunk.get("usage"):
+                    self.last_usage = chunk["usage"]
+                    usage_tracker.add(chunk["usage"])
+                choices = chunk.get("choices") or []
+                if choices and (piece := (choices[0].get("delta") or {}).get("content")):
+                    parts.append(piece)
+        text = "".join(parts)
+        if not text.strip():
+            self._warn_empty_completion()
+        return text
 
     def supports_tools(self) -> bool:
         return True  # OpenAI 兼容协议均有 tools 字段；个别端点不支持时由配置层关闭

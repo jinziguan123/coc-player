@@ -51,3 +51,47 @@ def test_applied_on_every_call_path():
 
     src = inspect.getsource(OpenAICompatProvider)
     assert src.count("self._apply_reasoning(payload)") == 4
+
+
+def test_视觉调用走流式且可覆盖超时():
+    """complete_vision 此前是一次非流式 POST，同时踩两个坑：
+
+    - 非流式的读超时覆盖**整个等待过程**（要等模型把几千 token 的 JSON 全生成完才有第一个
+      字节），客户端 120s 必然先到——用户实测报的就是 ReadTimeout('')。
+    - 长输出被中途掐断，正是当初把 complete() 改流式的原因，而视觉解析输出更长。
+    """
+    import asyncio
+    import json
+
+    from app.ai.providers.openai_compat import OpenAICompatProvider
+
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+
+        async def aiter_lines(self):
+            for piece in ("{\"title\":", "\"某模组\"}"):
+                yield "data: " + json.dumps({"choices": [{"delta": {"content": piece}}]})
+            yield "data: [DONE]"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Client:
+        def stream(self, method, url, **kw):
+            seen["method"] = method
+            seen["stream_flag"] = kw["json"].get("stream")
+            seen["timeout"] = kw.get("timeout")
+            return _Resp()
+
+    p = OpenAICompatProvider(model="qwen3.7-plus", base_url="http://x", api_key="k", vision=True)
+    p._client = _Client()
+    out = asyncio.run(p.complete_vision("认字", [("YmFzZTY0", "image/png")], timeout=600))
+
+    assert out == '{"title":"某模组"}'          # 分块拼回完整产物
+    assert seen["stream_flag"] is True          # 确实走了流式
+    assert seen["timeout"] == 600               # 按调用覆盖超时

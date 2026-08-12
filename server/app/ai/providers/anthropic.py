@@ -166,6 +166,7 @@ class AnthropicProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: dict | None = None,
+        timeout: float | None = None,
     ) -> str:
         system_blocks, user_messages = self._split_system(messages)
         payload: dict = {
@@ -193,6 +194,7 @@ class AnthropicProvider(LLMProvider):
 
     async def complete_vision(
         self, prompt: str, images: list[tuple[str, str]], max_tokens: int | None = None,
+        timeout: float | None = None,
     ) -> str:
         content: list[dict] = [
             {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}}

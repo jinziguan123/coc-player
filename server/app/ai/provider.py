@@ -67,7 +67,12 @@ class LLMProvider(ABC):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: dict | None = None,
+        timeout: float | None = None,
     ) -> str: ...
+    # ``timeout``（秒，None=用 Provider 默认）：**非流式**调用的读超时覆盖整个等待过程——
+    # 模型要把整份产物生成完才会有第一个字节，这与流式「块与块之间」的语义完全不同。
+    # 模组解析这种一次输出几千 token 的后台任务需要显著更长的值；跑团回合内的调用不该改，
+    # 那里宁可早点报错也不能让玩家干等。
 
     @abstractmethod
     async def stream(
@@ -108,6 +113,7 @@ class LLMProvider(ABC):
 
     async def complete_vision(
         self, prompt: str, images: list[tuple[str, str]], max_tokens: int | None = None,
+        timeout: float | None = None,
     ) -> str:
         """据若干图片 + 文本提示生成文本（多模态）。images=[(base64, mime), …]。非视觉 Provider 不实现。"""
         raise NotImplementedError("当前模型不支持多模态")
