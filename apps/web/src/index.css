@@ -2342,6 +2342,80 @@ select.input option {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ===== 「新增游戏」入口分岔：全屏遮罩 + 两张大卡片 ===== */
+.entry-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  /* 压黑而不是纯黑：底下的页面还隐约在，用户知道自己只是叠了一层、没有跳走 */
+  background: rgba(10, 8, 5, 0.82);
+  backdrop-filter: blur(3px);
+  animation: modalBackdropIn 0.2s ease-out both;
+}
+.entry-choices {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 1.5rem;
+}
+.entry-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: min(20rem, 40vw);
+  min-width: 15rem;
+  padding: 2.5rem 1.75rem;
+  text-align: center;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  /* 错峰浮入：两张卡先后到位，比一起蹦出来从容 */
+  animation: entryCardIn 0.38s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--enter-delay, 0ms);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.25s ease;
+}
+.entry-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 22px rgba(212, 162, 78, 0.28);
+}
+.entry-card:active { transform: translateY(-1px); }
+.entry-card > svg { font-size: 2.4rem; color: var(--color-text-accent); }
+.entry-card > strong { font-size: 1.15rem; color: var(--color-text-primary); }
+.entry-card > span {
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+@keyframes entryCardIn {
+  from { opacity: 0; transform: translateY(18px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.entry-dismiss {
+  padding: 0.4rem 1.4rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius, 8px);
+  background: transparent;
+  cursor: pointer;
+  animation: fadeIn 0.3s ease-out 0.2s both;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.entry-dismiss:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
 /* 骰子事件卡入场：微旋转 + 缩放弹入（骰子落定的仪式感） */
 .dice-enter {
   animation: diceEnter 0.42s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;

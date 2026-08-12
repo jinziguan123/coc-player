@@ -1,5 +1,4 @@
-import { Search, Sparkles } from 'lucide-react'
-import { SeatIcon } from '@/components/game/SeatIcon'
+import { Search } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -22,21 +21,8 @@ export function NewGamePanel({ setup }: { setup: GameSetupState }) {
     moduleId,
     kpMode,
     setKpMode,
-    selectedModule,
-    range,
-    minSeats,
-    seats,
-    seatHints,
-    setSeatHint,
-    generatingSeat,
     error,
     onSelectModule,
-    changeSeatCount,
-    assignSeat,
-    seatOptions,
-    generateForSeat,
-    setSeatRole,
-    allSeatsFilled,
     startGame,
   } = setup
 
@@ -185,116 +171,9 @@ export function NewGamePanel({ setup }: { setup: GameSetupState }) {
               {kpMode === 'human' ? '创建者只占 KP 席；玩家席等待其他真人用房间码加入。' : '由 AI 自动主持剧情。'}
             </span>
           </div>
-          <div className="mb-1 flex items-center gap-2">
-            <span className="text-sm font-medium">玩家人数</span>
-            <button
-              onClick={() => changeSeatCount(-1)}
-              disabled={seats.length <= minSeats}
-              className="btn-secondary !px-2 !py-0.5 disabled:opacity-40"
-              aria-label="减少玩家人数"
-            >
-              −
-            </button>
-            <span
-              className="w-6 text-center font-semibold"
-              style={{ color: 'var(--color-text-accent)' }}
-            >
-              {seats.length}
-            </span>
-            <button
-              onClick={() => changeSeatCount(1)}
-              disabled={seats.length >= range.max}
-              className="btn-secondary !px-2 !py-0.5 disabled:opacity-40"
-              aria-label="增加玩家人数"
-            >
-              ＋
-            </button>
-          </div>
-          <p className="mb-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            本模组推荐 {range.min}–{range.max} 人 · {kpMode === 'human' ? '真人 KP' : 'AI KP'} · {kpMode === 'human' ? '真人玩家席' : '你 1 人'} + AI 队友{' '}
-            {Math.max(seats.length - 1, 0)} 人
-            {range.min === 1 && range.max === 6 && !selectedModule?.world_setting?.player_count
-              ? '（模组未标注人数，按默认范围）'
-              : ''}
-          </p>
-
-          <div className="mb-3">
-            {seats.map((seat, index) => {
-              const emptyHuman = seat.role === 'human' && (index > 0 || kpMode === 'human')
-              return (
-                <div key={index} className="mb-2">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="badge inline-flex whitespace-nowrap items-center gap-1"
-                      style={index === 0 ? {
-                        borderColor: 'var(--color-accent)',
-                        color: 'var(--color-text-accent)',
-                      } : undefined}
-                    >
-                      <SeatIcon kind={emptyHuman ? 'empty' : kpMode !== 'human' && index === 0 ? 'me' : 'ai'} size={12} />
-                      {kpMode === 'human'
-                        ? (emptyHuman ? `真人玩家 ${index + 1}` : `AI 队友 ${index + 1}`)
-                        : index === 0 ? '你（真人）' : emptyHuman ? `真人 ${index + 1}` : `AI 队友 ${index}`}
-                    </span>
-                    {emptyHuman ? (
-                      <span
-                        className="flex-1 text-xs italic"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        {kpMode === 'human' && index === 0
-                          ? '留空 · 创建者以 KP 身份进入，等待真人玩家加入认领'
-                          : '留空 · 开局后分享房间码，等真人加入认领'}
-                      </span>
-                    ) : (
-                      <Select value={seat.charId} onValueChange={(value) => assignSeat(index, value)}>
-                        <SelectTrigger className="flex-1">
-                          <SelectValue placeholder={kpMode !== 'human' && index === 0 ? '选择你的角色' : '选择 AI 队友角色'} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {seatOptions(index).map((character) => (
-                            <SelectItem key={character.id} value={character.id}>
-                              {character.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {(index > 0 || kpMode === 'human') && (
-                      <button
-                        onClick={() => setSeatRole(index, emptyHuman ? 'ai' : 'human')}
-                        className="btn-secondary whitespace-nowrap !px-2 !py-1 text-xs"
-                        title="在「AI 队友」与「留空待真人加入」之间切换"
-                      >
-                        {emptyHuman ? '改为 AI' : '设为真人空席'}
-                      </button>
-                    )}
-                    {!emptyHuman && (
-                      <button
-                        onClick={() => void generateForSeat(index)}
-                        disabled={generatingSeat !== null}
-                        className="btn-secondary inline-flex whitespace-nowrap items-center gap-1 !px-2 !py-1 text-xs"
-                        title="让 AI 现场生成一张贴合模组的角色卡填入此席位"
-                      >
-                        {generatingSeat === index ? '生成中…' : (
-                          <><Sparkles size={11} /> 生成</>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                  {!emptyHuman && (
-                    <input
-                      value={seatHints[index] ?? ''}
-                      onChange={(event) => setSeatHint(index, event.target.value)}
-                      placeholder="AI 生成提示（可选）：如 胆小的记者、退伍军医、通晓神秘学的教授"
-                      className="input mt-1 w-full !py-0.5 text-xs"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    />
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
+          {/* 人数、谁坐哪、AI 队友用哪张卡——全部挪进大厅了。
+              「模组是房间的身份（建房时定），座位是房间的内容（房间里配）」：
+              这一屏只回答「跑哪个本子、谁当 KP」，其余进房间再说。 */}
           {error && (
             <p className="mb-2 text-sm" style={{ color: 'var(--color-danger)' }}>{error}</p>
           )}
@@ -302,13 +181,12 @@ export function NewGamePanel({ setup }: { setup: GameSetupState }) {
               那也是换角色、放真人空席、发邀请码的地方。 */}
           <button
             onClick={() => void startGame()}
-            disabled={!allSeatsFilled}
             className="btn-primary"
           >
-            创建房间（{seats.length} 名玩家）
+            创建房间
           </button>
           <p className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            下一步进入房间：可再调整座位与角色、把席位留给真人，确认后由你开局。
+            下一步进入房间：在那里定人数、选角色、把席位留给真人，确认后由你开局。
           </p>
         </>
       )}

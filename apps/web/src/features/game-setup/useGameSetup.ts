@@ -332,22 +332,19 @@ export function useGameSetup() {
     )))
   }
 
+  /** 建房：只带一个空的房主席进大厅。人数、角色、真人空席全部在房间里配。 */
   const startGame = async () => {
-    if (!moduleId || !allSeatsFilled) return
+    if (!moduleId) return
     setError('')
     try {
-      const participants = seats.map((seat, index) => ({
-        character_id: seat.charId || null,
-        role: seat.role,
-        is_primary: index === 0,
-      }))
-      const session = await createSession(moduleId, participants, kpMode)
-      // 建局恒进大厅：队友全是 AI 也一样。这里曾经按 status 分岔（无空真人席就直接跳进
-      // 游戏），代价是心智不一致、且建完就改不动了。大厅才是改座位、换角色、放真人空席
-      // 并发邀请码的地方；全 AI 局落进去时门槛已经满了，点一下就开。
+      // 一个空席即可——「模组是房间的身份（建房时定），座位是房间的内容（房间里配）」。
+      // 真人 KP 模式下创建者会另占 KP 席（后端按 kp_mode 补），这个空席留给第一个玩家。
+      const session = await createSession(
+        moduleId, [{ character_id: null, role: 'human', is_primary: true }], kpMode,
+      )
       navigate(`/room/${session.id}`)
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : '创建游戏失败')
+      setError(reason instanceof Error ? reason.message : '创建房间失败')
     }
   }
 

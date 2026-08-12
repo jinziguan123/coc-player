@@ -7,7 +7,7 @@ import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
 import { GiReturnArrow } from 'react-icons/gi'
-import { Copy, Sparkles, Check, Eye, ScanSearch } from 'lucide-react'
+import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
 interface Character {
   id: string
@@ -50,6 +50,7 @@ export function RoomLobbyPage() {
   const [room, setRoom] = useState<RoomData | null>(null)
   const [moduleDesc, setModuleDesc] = useState('')
   const [myChars, setMyChars] = useState<Character[]>([])
+  const [aiChars, setAiChars] = useState<Character[]>([])
   const [localChars, setLocalChars] = useState<Character[]>([])
   const [characterHint, setCharacterHint] = useState('')
   const [chat, setChat] = useState<ChatLine[]>([])
@@ -147,6 +148,14 @@ export function RoomLobbyPage() {
       const mine = await api.get<Character[]>('/characters?available=true&is_player=true&mine=true')
       if (cancelled) return
       setMyChars(mine)
+      // AI 席用的队友卡池（is_player=false）。与真人席的角色池是两批，别混用：
+      // 真人挑的是自己的调查员，AI 席挑的是队友。
+      try {
+        const allies = await api.get<Character[]>('/characters?available=true&is_player=false')
+        if (!cancelled) setAiChars(allies)
+      } catch {
+        // 拉不到就只是下拉为空，不影响房间其余功能
+      }
       if (getServerUrl()) {
         try {
           const local = await localApi.get<Character[]>('/characters?available=true&is_player=true&mine=true')
@@ -322,6 +331,41 @@ export function RoomLobbyPage() {
     } finally { setBusy(false) }
   }
 
+  /* ── 座位管理：人数与 AI 队友都在房间里配 ──
+     建房那一屏只回答「跑哪个本子、谁当 KP」，其余全在这里。 */
+
+  const addSeat = async (role: 'ai' | 'human') => {
+    if (!room) return
+    setBusy(true)
+    try {
+      setRoom(await api.post<RoomData>(`/sessions/${room.id}/seats`, { role }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '添加席位失败')
+    } finally { setBusy(false) }
+  }
+
+  const removeSeat = async (seatOrder: number) => {
+    if (!room) return
+    setBusy(true)
+    try {
+      setRoom(await api.delete<RoomData>(`/sessions/${room.id}/seats/${seatOrder}`))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '删除席位失败')
+    } finally { setBusy(false) }
+  }
+
+  const assignAiChar = async (seatOrder: number, characterId: string | null) => {
+    if (!room) return
+    setBusy(true)
+    try {
+      setRoom(await api.post<RoomData>(
+        `/sessions/${room.id}/seats/${seatOrder}/character`, { character_id: characterId },
+      ))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '指派角色失败')
+    } finally { setBusy(false) }
+  }
+
   const viewSeat = async (charId: string | null) => {
     if (!charId) return
     try {
@@ -427,15 +471,34 @@ export function RoomLobbyPage() {
                         background: p.is_online ? 'var(--color-success)' : 'var(--color-border)' }}
                     />
                   )}
-                  <button
-                    onClick={() => viewSeat(p.character_id)}
-                    disabled={!p.character_id}
-                    className="text-sm text-left flex-1 disabled:cursor-default"
-                    style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}
-                  >
-                    {seatLabel}
-                    {p.is_host ? ' · 房主' : ''}{p.is_mine ? '（我）' : ''}
-                  </button>
+                  {/* AI 席由房主直接指派队友卡（真人席只能本人认领，走 /claim） */}
+                  {p.role === 'ai' && amHost ? (
+                    <select
+                      value={p.character_id || ''}
+                      onChange={(e) => void assignAiChar(p.seat_order, e.target.value || null)}
+                      disabled={busy}
+                      className="input flex-1 !py-0.5 text-sm"
+                      aria-label={`AI 队友 ${p.seat_order + 1} 的角色`}
+                    >
+                      <option value="">— 选择 AI 队友角色 —</option>
+                      {p.character_id && !aiChars.some((c) => c.id === p.character_id) && (
+                        <option value={p.character_id}>{p.character_name || '当前角色'}</option>
+                      )}
+                      {aiChars.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <button
+                      onClick={() => viewSeat(p.character_id)}
+                      disabled={!p.character_id}
+                      className="text-sm text-left flex-1 disabled:cursor-default"
+                      style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}
+                    >
+                      {seatLabel}
+                      {p.is_host ? ' · 房主' : ''}{p.is_mine ? '（我）' : ''}
+                    </button>
+                  )}
                   {p.character_id && (
                     <button
                       onClick={() => viewSeat(p.character_id)}
@@ -471,10 +534,46 @@ export function RoomLobbyPage() {
                       title="移出该玩家（席位回到空席）"
                     >移出</button>
                   )}
+                  {/* 删座位：房主专用，且不能把自己或最后一个座位删掉（后端也拦） */}
+                  {amHost && !p.is_mine && seats.length > 1 && (
+                    <button
+                      onClick={() => void removeSeat(p.seat_order)}
+                      disabled={busy}
+                      className="btn-secondary !px-1.5 !py-1"
+                      title="删除该席位"
+                      aria-label="删除该席位"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
                 </div>
               )
             })}
           </div>
+
+          {/* 人数在房间里调——建房那一屏只定模组与 KP 模式 */}
+          {amHost && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => void addSeat('ai')}
+                disabled={busy}
+                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs"
+              >
+                <UserPlus size={12} /> 加 AI 队友
+              </button>
+              <button
+                onClick={() => void addSeat('human')}
+                disabled={busy}
+                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs"
+                title="留一个空席，把房间码发给朋友来认领"
+              >
+                <UserPlus size={12} /> 留真人空席
+              </button>
+              <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                AI 席选好角色即就绪；真人空席要本人加入后自己点准备
+              </span>
+            </div>
+          )}
 
           {/* 我的操作区 */}
           <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
