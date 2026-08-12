@@ -144,7 +144,8 @@ async def main(key: str, sources: list[Path]) -> int:
     (out_dir / "地图图片.jpg").write_bytes(images[found["index"]][0])
 
     # 方位一致率：拿地图本身当标准答案，看两组落位各自还原对了多少
-    truth = {sid: (x, y) for sid, x, y in module_map_vision.match_labels(found["detections"], scenes)}
+    # 标准答案取**最终配对**（含 LLM 补上的那些），而不是只用字符串匹配的那一份
+    truth = {p[0]: (p[1], p[2]) for p in found.get("pairs") or []}
     a_ok, a_all = _agreement(a_coords, truth)
     b_ok, b_all = _agreement(b_coords, truth)
     print("\n=== 方位一致率（以地图为准，每对场景比东西/南北两个轴）===")

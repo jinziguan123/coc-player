@@ -113,3 +113,124 @@ def test_没有视觉模型时安静退出():
 
     got = asyncio.run(mmv.locate_scenes_on_map([(b"a", "image/jpeg")], _scenes(), llm=TextOnly()))
     assert got["proposals"] == [] and got["matched"] == 0
+
+
+class _FastLLM:
+    """假的文本快模型：按预设返回配对 JSON，并记录收到的输入。"""
+
+    def __init__(self, reply):
+        self.reply = reply
+        self.payload = None
+
+    async def complete(self, messages, **kw):
+        self.payload = json.loads(messages[-1]["content"])
+        return self.reply
+
+
+def test_配对补上叫法不同的地点():
+    """鬼屋实测：地图写「闹鬼的房子」而场景叫「科比特的老房子」，字符串匹配认不出。"""
+    scenes = [
+        {"id": "s1", "title": "科比特的老房子", "kind": "location"},
+        {"id": "s2", "title": "委托与准备", "kind": "location"},
+        {"id": "s3", "title": "中央图书馆", "kind": "location"},
+    ]
+    det = json.dumps([
+        {"label": "闹鬼的房子", "bbox_2d": [100, 300, 160, 360]},
+        {"label": "出发地", "bbox_2d": [800, 100, 860, 160]},
+        {"label": "中央图书馆", "bbox_2d": [500, 300, 560, 360]},
+    ], ensure_ascii=False)
+    pair = _FastLLM(json.dumps({"pairs": [
+        {"label": "闹鬼的房子", "id": "s1"},
+        {"label": "出发地", "id": "s2"},
+    ]}, ensure_ascii=False))
+
+    got = asyncio.run(mmv.locate_scenes_on_map(
+        [(b"m", "image/png")], scenes, llm=_Vision([det]), pair_llm=pair,
+    ))
+    assert got["matched"] == 3                                  # 1 个字符串 + 2 个配对
+    assert {p["id"] for p in got["proposals"]} == {"s1", "s2", "s3"}
+    # 只把「字符串没认出的」交给配对，不重复问已经确定的
+    assert pair.payload["map_labels"] == ["闹鬼的房子", "出发地"]
+    assert {s["id"] for s in pair.payload["scenes"]} == {"s1", "s2"}
+
+
+def test_配对结果过确定性校验():
+    """编造的 id、重复占用、没检出过的 label 一律丢弃——AI 提议仍要确定性收口。"""
+    scenes = [{"id": "s1", "title": "甲", "kind": "location"}]
+    bad = json.dumps({"pairs": [
+        {"label": "某地", "id": "不存在的id"},
+        {"label": "没检出过的标签", "id": "s1"},
+    ]}, ensure_ascii=False)
+    got = asyncio.run(mmv.pair_with_llm(["某地"], scenes, llm=_FastLLM(bad)))
+    assert got == {}
+
+
+def test_配对失败时退回字符串结果():
+    class _Boom:
+        async def complete(self, *a, **k):
+            raise RuntimeError("boom")
+
+    assert asyncio.run(mmv.pair_with_llm(["某地"], [{"id": "s1", "title": "甲"}], llm=_Boom())) == {}
+
+
+def test_零字符串命中时也会试一次配对():
+    """地图整套换了叫法（一个都没字面命中）→ 取检出最多的那张，交给配对判断。"""
+    scenes = [
+        {"id": "s1", "title": "旧宅", "kind": "location"},
+        {"id": "s2", "title": "码头", "kind": "location"},
+        {"id": "s3", "title": "灯塔", "kind": "location"},
+    ]
+    det = json.dumps([
+        {"label": "凶宅", "bbox_2d": [100, 100, 160, 160]},
+        {"label": "渔港", "bbox_2d": [500, 200, 560, 260]},
+        {"label": "白塔", "bbox_2d": [800, 600, 860, 660]},
+    ], ensure_ascii=False)
+    pair = _FastLLM(json.dumps({"pairs": [
+        {"label": "凶宅", "id": "s1"}, {"label": "渔港", "id": "s2"}, {"label": "白塔", "id": "s3"},
+    ]}, ensure_ascii=False))
+    got = asyncio.run(mmv.locate_scenes_on_map(
+        [(b"m", "image/png")], scenes, llm=_Vision([det]), pair_llm=pair,
+    ))
+    assert got["matched"] == 3
+
+
+def test_上传流程默认按地图落位(monkeypatch):
+    """默认开：解析完在入库前把地图坐标写成提议，交给既有的确定性修复器收口。"""
+    from app.api import modules as modules_api
+
+    captured = {}
+
+    async def fake_locate(images, scenes, llm=None, pair_llm=None):
+        captured["scenes"] = [s["id"] for s in scenes]
+        return {"index": 0, "matched": 2, "detections": [], "pairs": [],
+                "proposals": [{"id": "s1", "q": 3, "r": -1}, {"id": "s2", "q": -2, "r": 2}]}
+
+    monkeypatch.setattr(modules_api.module_map_vision, "locate_scenes_on_map", fake_locate)
+    parsed = {"scenes": [{"id": "s1", "title": "甲"}, {"id": "s2", "title": "乙"}, {"id": "s3", "title": "丙"}]}
+    job = modules_api._job_new()
+    asyncio.run(modules_api._apply_map_grounding(job, parsed, [(b"m", "image/png")]))
+
+    assert parsed["scenes"][0]["map"] == {"q": 3, "r": -1}
+    assert parsed["scenes"][1]["map"] == {"q": -2, "r": 2}
+    assert "map" not in parsed["scenes"][2]        # 没认出的不动，留给文字落位
+    assert captured["scenes"] == ["s1", "s2", "s3"]
+
+    # 写进去的提议要能被入库前的归一化原样继承（「合法提议保留」）
+    from app.services import hex_map, module_service
+    normalized = module_service._normalize_scenes([dict(s) for s in parsed["scenes"]])
+    assert hex_map.scene_coord(normalized[0]) == (3, -1)
+    assert hex_map.scene_coord(normalized[1]) == (-2, 2)
+    assert hex_map.scene_coord(normalized[2]) is not None   # 第三个由修复器补
+
+
+def test_地图定位失败不影响模组入库(monkeypatch):
+    """整段 fail-open：沙盘落位是锦上添花，模组本身已经解析好了。"""
+    from app.api import modules as modules_api
+
+    async def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(modules_api.module_map_vision, "locate_scenes_on_map", boom)
+    parsed = {"scenes": [{"id": "s1", "title": "甲"}]}
+    asyncio.run(modules_api._apply_map_grounding(modules_api._job_new(), parsed, [(b"m", "image/png")]))
+    assert "map" not in parsed["scenes"][0]        # 安静跳过，不抛

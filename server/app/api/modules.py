@@ -16,6 +16,7 @@ from app.services import (
     image_store,
     module_image_service,
     module_map_service,
+    module_map_vision,
     module_ocr,
     module_rag_service,
     module_service,
@@ -33,6 +34,9 @@ _MAX_UPLOAD_JOBS = 20
 _BACKDROP_TIMEOUT_S = 90
 # 车卡建议只喂设定摘要、输出很短，比底图快得多；超时即跳过，可在详情页手动补。
 _GUIDANCE_TIMEOUT_S = 60
+# 地图定位最多试 5 张候选图（各一次 vision）+ 一次配对，给足；超时即跳过，
+# 回落到按文字推断位置，之后仍可在沙盘页手动点「AI 沙盘补全」。
+_MAP_GROUNDING_TIMEOUT_S = 240
 
 
 def _job_new() -> str:
@@ -271,6 +275,43 @@ def _extract_doc_text(content: bytes, filename: str) -> str:
         raise HTTPException(e.status_code, f"「{filename}」{e.detail}")
 
 
+async def _apply_map_grounding(job_id: str, parsed: dict, images: list) -> None:
+    """在图里找出本模组的地图，把认出的地点位置写成 parsed 里的 (q,r) 提议。
+
+    整段 fail-open：模组本身已经解析好了，沙盘落位是锦上添花——没有地图、认不出地名、
+    模型调用失败，一律安静跳过，回落到「按文字推断位置」的既有行为。
+    """
+    scenes = [s for s in (parsed.get("scenes") or []) if isinstance(s, dict) and s.get("id")]
+    if not scenes:
+        return
+    try:
+        _job_update(job_id, stage="从模组地图上定位场景", percent=72)
+        found = await asyncio.wait_for(
+            module_map_vision.locate_scenes_on_map(images, scenes),
+            timeout=_MAP_GROUNDING_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("地图定位超时，跳过：job=%s", job_id)
+        return
+    except Exception:
+        logger.warning("地图定位失败，跳过：job=%s", job_id, exc_info=True)
+        return
+
+    by_id = {str(s["id"]): s for s in scenes}
+    applied = 0
+    for prop in found.get("proposals") or []:
+        target = by_id.get(str(prop.get("id")))
+        if target is None:
+            continue
+        m = dict(target.get("map")) if isinstance(target.get("map"), dict) else {}
+        m["q"], m["r"] = int(prop["q"]), int(prop["r"])
+        target["map"] = m
+        applied += 1
+    if applied:
+        logger.info("地图定位：%s 个场景按图落位（job=%s）", applied, job_id)
+        _job_update(job_id, stage=f"已按模组地图定位 {applied} 个场景", percent=76)
+
+
 async def _run_upload_job(
     job_id: str, raw_text: str, images: list[tuple[bytes, str]], rule_system: str,
     ocr_prepass: bool = False,
@@ -284,6 +325,9 @@ async def _run_upload_job(
     异常不外抛：一律落成 job 的 failed 状态 + 可读 detail（沿用旧同步端点的错误文案）。
     """
     try:
+        # OCR 前置会把 images 清空（整本已转成文字），但地图 grounding 还要用原图，
+        # 所以先留一份。两件事看的是同一批图，只是一个读字、一个读几何。
+        map_images = list(images)
         if images and ocr_prepass:
             _job_update(job_id, stage=f"OCR 识别图片文字（{len(images)} 张）", percent=8)
             pages = await module_ocr.ocr_images(images)
@@ -308,6 +352,13 @@ async def _run_upload_job(
         _job_update(job_id, stage="查漏自检（对照原文补遗漏）", percent=60)
         parsed = await module_service.supplement_parse(raw_text, parsed, rule_system)
         parsed["rule_system"] = rule_system
+
+        # 模组自带地图 → 沙盘坐标。落在入库**之前**是有意的：写进 parsed 的 q/r 就是一份
+        # 「AI 提议」，create_module 里的修复器按「合法提议保留、冲突重排」照常收口，
+        # 与既有的「AI 提议 → 确定性修复 → KP 修正」管线完全同构，不需要新的落库路径。
+        # 只看位置——地貌与连通仍归文字链路，图上看不出沼泽还是原野、门通不通。
+        if map_images:
+            await _apply_map_grounding(job_id, parsed, map_images)
 
         _job_update(job_id, stage="入库", percent=90)
         db = SessionLocal()
