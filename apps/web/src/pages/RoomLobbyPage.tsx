@@ -90,6 +90,8 @@ export function RoomLobbyPage() {
   const [aiChars, setAiChars] = useState<Character[]>([])
   const [localChars, setLocalChars] = useState<Character[]>([])
   const [characterHint, setCharacterHint] = useState('')
+  /** 角色库搜索词：卡多了得能找，而不是滚半天。只在超过 6 张时才露出输入框。 */
+  const [charFilter, setCharFilter] = useState('')
   const [chat, setChat] = useState<ChatLine[]>([])
   const [chatInput, setChatInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -478,6 +480,14 @@ export function RoomLobbyPage() {
     )
   }
 
+  /** 按姓名或职业筛角色卡；搜索词为空时原样返回。 */
+  const matchChars = (list: Character[]) => {
+    const q = charFilter.trim().toLowerCase()
+    if (!q) return list
+    return list.filter((c) =>
+      c.name.toLowerCase().includes(q) || occupationOf(c).toLowerCase().includes(q))
+  }
+
   const copyCode = () => {
     if (room?.room_code) { navigator.clipboard?.writeText(room.room_code); toast.success('房间码已复制') }
   }
@@ -725,18 +735,33 @@ export function RoomLobbyPage() {
                       还没有可用的角色卡，用下面的方式现场生成一张。
                     </p>
                   )}
-                  {myChars.length > 0 && (
-                    <div className="char-grid">
-                      {myChars.map((c) => renderCharCard(c, 'mine'))}
+                  {/* 卡多了不能一路铺下去：限高滚动 + 搜索。角色库上二十张是常态，
+                      全平铺会把席位、聊天、开始按钮全挤出屏幕。 */}
+                  {(myChars.length + localChars.length > 6) && (
+                    <input
+                      value={charFilter}
+                      onChange={(e) => setCharFilter(e.target.value)}
+                      placeholder={`在 ${myChars.length + localChars.length} 张卡里找：姓名或职业`}
+                      className="input mb-2 w-full !py-1 text-sm"
+                    />
+                  )}
+                  {matchChars(myChars).length > 0 && (
+                    <div className="char-grid char-grid--scroll">
+                      {matchChars(myChars).map((c) => renderCharCard(c, 'mine'))}
                     </div>
+                  )}
+                  {myChars.length > 0 && matchChars(myChars).length === 0 && (
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      没有匹配「{charFilter}」的角色卡
+                    </p>
                   )}
                   {localChars.length > 0 && (
                     <div className="mt-2">
                       <div className="seat-pick-sub">
                         本机角色 · 入座时会同步一份副本给房主，你自己这份不受影响
                       </div>
-                      <div className="char-grid">
-                        {localChars.map((c) => renderCharCard(c, 'local'))}
+                      <div className="char-grid char-grid--scroll">
+                        {matchChars(localChars).map((c) => renderCharCard(c, 'local'))}
                       </div>
                     </div>
                   )}

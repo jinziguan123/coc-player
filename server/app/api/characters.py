@@ -268,8 +268,16 @@ def list_characters(
     if is_player is not None:
         chars = [c for c in chars if c.is_player == is_player]
     if mine:
-        # 仅返回当前 token 拥有的角色（认领席位时用）
-        chars = [c for c in chars if c.owner_token and c.owner_token == token]
+        # 「我的」= 我 token 名下的 + **无主的**（认领席位时用）。
+        #
+        # 无主那一半不能漏：上面那道通用过滤（`not c.owner_token or ...`）就明确放行了它们，
+        # 理由是「否则房主会突然看不到自己以前建的角色」。这里如果反过来要求 owner_token
+        # 非空，同一批卡就会出现「角色页看得见、进大厅却选不了」的自相矛盾——而实测库里
+        # 24 张卡有 12 张无主（identity 机制之前建的、清过 localStorage 换了 token 的、
+        # AI 生成的），用户会看到「我建了一堆角色，待选却只有三个」。
+        #
+        # 暴露面没有变大：无主的卡本来就对所有人可见（见上），这里只是不再比它更严。
+        chars = [c for c in chars if not c.owner_token or c.owner_token == token]
     if available:
         occupied = session_service.active_character_ids(db)
         chars = [c for c in chars if c.id not in occupied]

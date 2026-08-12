@@ -58,11 +58,12 @@ def isolated_app(tmp_path, monkeypatch):
     net_access.reset_cache()
 
 
-def _client(token: str) -> TestClient:
-    return TestClient(app, headers={"X-Player-Token": token})
+def _client(token: str | None) -> TestClient:
+    """token=None 模拟「没带身份」的调用——这类调用建出来的卡就是无主卡。"""
+    return TestClient(app, headers={"X-Player-Token": token} if token else {})
 
 
-def _create(token: str, name: str, is_player: bool = True) -> str:
+def _create(token: str | None, name: str, is_player: bool = True) -> str:
     r = _client(token).post(
         "/api/characters",
         json={"name": name, "rule_system": "coc", "is_player": is_player},
@@ -71,7 +72,7 @@ def _create(token: str, name: str, is_player: bool = True) -> str:
     return r.json()["id"]
 
 
-def _names(token: str, **params) -> list[str]:
+def _names(token: str | None, **params) -> list[str]:
     r = _client(token).get("/api/characters", params=params)
     assert r.status_code == 200, r.text
     return [c["name"] for c in r.json()]
@@ -99,9 +100,29 @@ def test_unowned_cards_remain_visible_to_everyone():
     assert "AI 队友" in _names("stranger-tok")
 
 
-def test_mine_filter_still_excludes_unowned():
-    """`mine=true`（认领席位时用）比默认过滤更严：必须确实属于我。"""
-    _create("host-tok", "我的卡")
-    _create("host-tok", "无主卡", is_player=False)
+def test_mine_filter_includes_unowned_player_cards():
+    """`mine=true`（认领席位时用）= 我 token 名下的 + **无主的**。
 
-    assert _names("host-tok", mine=True) == ["我的卡"]
+    「无主」不等于「别人的」——它是「没人认领过归属」：identity 机制之前建的卡、
+    没带 token 建的卡都是这一类。此前这里比默认过滤更严（要求 owner_token 非空），
+    结果同一批卡「角色页看得见、进大厅却选不了」：用户建了一堆角色，待选却只有三个
+    （实测库里 24 张卡有 12 张无主）。
+
+    AI 队友不该出现在认领候选里——但那该由 `is_player=true` 挡，不该靠归属挡：
+    大厅取真人席候选用的就是 `?available=true&is_player=true&mine=true`。
+    """
+    _create("host-tok", "我的卡")
+    _create(None, "早期建的无主卡")
+    _create("other-tok", "别人的卡")
+
+    got = _names("host-tok", mine=True)
+    assert "我的卡" in got and "早期建的无主卡" in got
+    assert "别人的卡" not in got            # 别人的仍然不给
+
+
+def test_mine_filter_still_excludes_ai_teammates_by_is_player():
+    """AI 队友靠 is_player 过滤挡在真人席候选之外，与归属无关。"""
+    _create("host-tok", "我的卡")
+    _create("host-tok", "AI 队友卡", is_player=False)
+
+    assert _names("host-tok", mine=True, is_player=True) == ["我的卡"]

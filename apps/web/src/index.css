@@ -2459,6 +2459,13 @@ select.input option {
   grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
   gap: 0.5rem;
 }
+/* 限高滚动：约两行卡的高度。角色库上二十张是常态，全平铺会把席位、聊天、
+   开始按钮全挤出屏幕——而那几样才是大厅真正要办的事。 */
+.char-grid--scroll {
+  max-height: 15rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
 .char-card {
   display: flex;
   align-items: flex-start;
