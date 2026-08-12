@@ -599,17 +599,6 @@ export function RoomLobbyPage() {
                         </SelectContent>
                       </Select>
                     ) : null}
-                    {/* 下拉同样是盲选：房主看不到这张队友卡的技能与背景。给个直达的查看入口。 */}
-                    {p.role === 'ai' && amHost && p.character_id && (
-                      <button
-                        onClick={() => viewSeat(p.character_id)}
-                        className="btn-secondary !px-1.5 !py-1"
-                        title="查看这张队友卡"
-                        aria-label="查看队友卡"
-                      >
-                        <Eye size={13} />
-                      </button>
-                    )}
                     {!(p.role === 'ai' && amHost) && (
                       <button
                         onClick={() => viewSeat(p.character_id)}
@@ -621,11 +610,14 @@ export function RoomLobbyPage() {
                         {p.is_host ? ' · 房主' : ''}{p.is_mine ? '（我）' : ''}
                       </button>
                     )}
+                    {/* 唯一的「看卡」入口：AI 席也走它。从前 AI 席另有一颗一模一样的眼睛
+                        （理由是下拉盲选、房主看不到队友卡），可这颗本来就对所有有角色的席位
+                        都渲染，于是房主视角下 AI 席并排两颗眼睛、点哪颗都一样。 */}
                     {p.character_id && (
                       <button
                         onClick={() => viewSeat(p.character_id)}
                         className="btn-secondary !px-1.5 !py-1"
-                        title="查看角色卡"
+                        title={p.role === 'ai' ? '查看这张队友卡' : '查看角色卡'}
                         aria-label="查看角色卡"
                       >
                         <Eye size={13} />

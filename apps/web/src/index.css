@@ -1460,26 +1460,85 @@ body {
 }
 .kp-quick-action--on:hover { color: var(--color-on-accent); }
 
-/* 导演信号常驻条：整条可点，直达导演台 */
-.kp-signal-strip {
+/* ===== 回合条：本回合还差什么 + 把回合交还给玩家 =====
+   常驻（不随标签切换消失）：冷场/卡关/待回收都是时效信号，KP 正翻模组资料时同样要看得见。
+   「开放行动」从抬头挪到这里——它是本回合的事，不该和导航挤在同一排。 */
+.kp-turn-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.35rem 0.3rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+.kp-turn-signals {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.3rem;
-  width: 100%;
-  margin-bottom: 0.5rem;
-  padding: 0.3rem 0.45rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  flex: 1;
+  min-width: 0;
   color: var(--color-text-secondary);
   text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
 }
-.kp-signal-strip:hover {
-  border-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+.kp-turn-signals:disabled { cursor: default; }
+.kp-turn-signals:not(:disabled):hover { color: var(--color-text-accent); }
+.kp-turn-idle { font-size: var(--text-2xs); }
+
+/* 资料的二级标签：比一级低一档，看得出是「某一档下面的」 */
+.kp-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.kp-subtab {
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.kp-subtab:hover { color: var(--color-text-primary); border-color: var(--color-border); }
+.kp-subtab--active {
+  color: var(--color-text-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+/* ===== 写作台：动作切换 → 输入 → 发出，收进同一张卡 =====
+   从前这三段是各自漂浮的元素，KP 得自己把「我在干什么」拼起来。 */
+.kp-composer {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.kp-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem 0.45rem;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-accent) 4%, transparent);
+}
+.kp-composer-form { padding: 0.5rem 0.45rem; }
+.kp-composer-submit {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0.45rem 0.5rem;
 }
 
 /* ===== 新手引导浮层 ===== */

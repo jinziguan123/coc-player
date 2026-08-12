@@ -305,13 +305,20 @@ const QUICK_ACTIONS: Array<{ id: KpAction; label: string; icon: ComponentType<{ 
 ]
 const QUICK_IDS = new Set<KpAction>(QUICK_ACTIONS.map((item) => item.id))
 
-const TABS: Array<{ id: PanelTab; label: string; icon: typeof WandSparkles }> = [
-  { id: 'tools', label: '主持', icon: WandSparkles },
+/**
+ * 标签压成两层：一级只有「主持」和「资料」。
+ *
+ * 从前五个标签平铺（主持/参谋/配图与队友/导演台/模组资料），在 334px 的侧栏里要换行，
+ * 且个个同等份量——可 KP 九成时间只待在主持页，另外四个是**查阅**，不是并列的工作台。
+ * 平铺的结果是主持这一档被另外四个稀释掉了。
+ */
+const REFERENCE_TABS: Array<{ id: PanelTab; label: string; icon: typeof WandSparkles }> = [
   { id: 'advisor', label: '参谋', icon: Bot },
   { id: 'assets', label: '配图与队友', icon: Image },
   { id: 'director', label: '导演台', icon: NotebookPen },
   { id: 'source', label: '模组资料', icon: BookOpen },
 ]
+const REFERENCE_IDS = new Set<PanelTab>(REFERENCE_TABS.map((t) => t.id))
 
 function imageUrl(src: string): string {
   if (/^https?:\/\//i.test(src)) return src
@@ -345,6 +352,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   const collapsed = sidebar ? false : collapsedInline
   const setCollapsed = setCollapsedInline
   const [tab, setTab] = useState<PanelTab>('tools')
+  /** 点「资料」回到上次看的那一页，而不是每次都从参谋重新找。 */
+  const [lastRefTab, setLastRefTab] = useState<PanelTab>('advisor')
   const [action, setAction] = useState<KpAction>('narration')
   const [busy, setBusy] = useState('')
   const [fields, setFields] = useState<Record<string, string>>({})
@@ -800,42 +809,35 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
 
   return (
     <section className={`kp-console rounded-md px-3 py-2 ${sidebar ? 'kp-console--sidebar' : 'mx-3 mb-2'}`}>
-      {/* 侧栏形态：抬头固定，标签栏可换行（宽度够，不再把「模组资料」挤出可视区） */}
-      <div className={`${collapsed ? '' : 'mb-2'} flex items-center gap-1.5 ${sidebar ? 'flex-wrap' : 'overflow-x-auto'}`}>
+      {/* 抬头：身份徽标 + 两个一级标签 + 收起。「开放行动」挪去下面的回合条——
+          它是「把回合交还给玩家」，属于本回合的事，不该和导航挤在同一排。 */}
+      <div className={`${collapsed ? '' : 'mb-2'} flex items-center gap-1.5`}>
         <span className="kp-console-badge mr-1 whitespace-nowrap">真人 KP</span>
         {!collapsed && (
-          <div className={`kp-tabs inline-flex items-center gap-0.5 ${sidebar ? 'flex-wrap' : 'flex-shrink-0'}`}>
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setTab(id)
-                  if (id === 'source') {
-                    if (sourceOpen) setSourceOpen(false)
-                    else void openModuleSource()
-                  }
-                }}
-                className={`kp-tab inline-flex items-center gap-1 whitespace-nowrap ${tab === id ? 'kp-tab--active' : ''}`}
-                aria-pressed={tab === id}
-              >
-                <Icon size={13} /> {label}
-              </button>
-            ))}
+          <div className="kp-tabs inline-flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => setTab('tools')}
+              className={`kp-tab inline-flex items-center gap-1 whitespace-nowrap ${tab === 'tools' ? 'kp-tab--active' : ''}`}
+              aria-pressed={tab === 'tools'}
+            >
+              <WandSparkles size={13} /> 主持
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab(lastRefTab)}
+              className={`kp-tab inline-flex items-center gap-1 whitespace-nowrap ${REFERENCE_IDS.has(tab) ? 'kp-tab--active' : ''}`}
+              aria-pressed={REFERENCE_IDS.has(tab)}
+              title="参谋、配图与队友、导演台、模组资料"
+            >
+              <BookOpen size={13} /> 资料
+            </button>
           </div>
         )}
         <button
           type="button"
-          onClick={() => void endTurn()}
-          disabled={!!busy}
-          className="btn-primary ml-auto inline-flex items-center gap-1 whitespace-nowrap !px-2 !py-1 text-xs"
-        >
-          <Send size={13} /> {busy === 'end-turn' ? '处理中…' : '开放行动'}
-        </button>
-        <button
-          type="button"
           onClick={() => (sidebar ? onCollapse?.() : setCollapsed((value) => !value))}
-          className="btn-secondary !p-1.5"
+          className="btn-secondary ml-auto !p-1.5"
           aria-expanded={!collapsed}
           title={sidebar ? '收起 KP 控制台' : collapsed ? '展开 KP 控制台' : '收起 KP 控制台'}
         >
@@ -843,23 +845,61 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
         </button>
       </div>
 
-      {/* 导演信号常驻条：冷场/卡关/节奏/待回收都是**时效**信号，此前只活在「导演台」标签页里，
-          KP 不主动切过去就永远看不到。这里做成抬头下的一行提示灯，有信号才出现，点击直达导演台。 */}
-      {!collapsed && !!signalChips.length && (
-        <button
-          type="button"
-          onClick={() => setTab('director')}
-          className="kp-signal-strip"
-          title="点击查看导演台详情"
-        >
-          <Info size={12} className="flex-shrink-0" />
-          {signalChips.map((chip) => (
-            <span key={chip.key} className={`chip ${chip.tone}`}>{chip.label}</span>
-          ))}
-        </button>
+      {/* 回合条：本回合还差什么 + 把回合交还给玩家。常驻（不随标签切换消失）——
+          冷场/卡关/待回收都是**时效**信号，KP 正在翻模组资料时同样要看得见。 */}
+      {!collapsed && (
+        <div className="kp-turn-bar">
+          <button
+            type="button"
+            onClick={() => setTab(signalChips.length ? 'director' : tab)}
+            className="kp-turn-signals"
+            disabled={!signalChips.length}
+            title={signalChips.length ? '点击查看导演台详情' : undefined}
+          >
+            <Info size={12} className="flex-shrink-0" />
+            {signalChips.length
+              ? signalChips.map((chip) => (
+                <span key={chip.key} className={`chip ${chip.tone}`}>{chip.label}</span>
+              ))
+              : <span className="kp-turn-idle">本回合没有待办信号</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => void endTurn()}
+            disabled={!!busy}
+            className="btn-primary inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap !px-2 !py-1 text-xs"
+            title="结束 KP 回合，把行动权交还给玩家"
+          >
+            <Send size={13} /> {busy === 'end-turn' ? '处理中…' : '开放行动'}
+          </button>
+        </div>
       )}
 
-      {/* 侧栏形态：抬头以下整体滚动，抬头（含「开放行动」）常驻 */}
+      {/* 资料的二级标签：只在「资料」这一档下出现 */}
+      {!collapsed && REFERENCE_IDS.has(tab) && (
+        <div className="kp-subtabs">
+          {REFERENCE_TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setTab(id)
+                setLastRefTab(id)
+                if (id === 'source') {
+                  if (sourceOpen) setSourceOpen(false)
+                  else void openModuleSource()
+                }
+              }}
+              className={`kp-subtab inline-flex items-center gap-1 whitespace-nowrap ${tab === id ? 'kp-subtab--active' : ''}`}
+              aria-pressed={tab === id}
+            >
+              <Icon size={12} /> {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 侧栏形态：抬头与回合条常驻，其下整体滚动 */}
       <div className={sidebar ? 'kp-console-body' : ''}>
 
       {!collapsed && tab === 'tools' && (
@@ -869,9 +909,13 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               当前还没有真人玩家角色。玩家入座并选择角色后，参谋才能生成针对具体玩家的裁定建议。
             </div>
           )}
+          {/* 写作台：动作切换 → 输入 → 发出，三段收进同一张卡里。
+              从前它们是三块各自漂浮的元素，KP 得自己把「我在干什么」拼起来。
+              切动作只换输入区的形态，不换页面。 */}
+          <div className="kp-composer">
           {/* 高频三件事做直达按钮，其余收进「更多」——此前 12 个动作平铺在一个下拉里，
               每发一句旁白都要「开下拉→找条目→填表」。 */}
-          <div className="mb-2 flex flex-wrap items-center gap-1">
+          <div className="kp-composer-actions">
             {QUICK_ACTIONS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
@@ -901,7 +945,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               </SelectContent>
             </Select>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="kp-composer-form flex flex-wrap gap-2">
             {action === 'narration' && (
               <div className="flex w-full items-start gap-2">
                 <textarea
@@ -1027,10 +1071,14 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               />
               <KpInput name="trigger" placeholder="开战原因（可选）" fields={fields} onChange={setField} />
             </>}
+          </div>
+          {/* 主按钮单独一行、靠右：它是这条流水线的出口，文案随当前动作变 */}
+          <div className="kp-composer-submit">
             <button onClick={() => void submit()} disabled={!!busy} className="btn-primary inline-flex items-center gap-1 text-xs">
               {(['dice_check', 'opposed_check', 'generic_roll'] as KpAction[]).includes(action) ? <GiRollingDices size={13} /> : <Send size={13} />}
               {busy ? '处理中…' : ACTION_LABELS[action]}
             </button>
+          </div>
           </div>
           {lastActionResult && (
             <div className="mt-2 flex items-start gap-2 border-t pt-2 text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} aria-live="polite">
