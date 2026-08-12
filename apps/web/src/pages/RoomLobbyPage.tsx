@@ -7,6 +7,7 @@ import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
 import { GiReturnArrow } from 'react-icons/gi'
+import { parsePlayerRange } from '@/lib/module'
 import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
 interface Character {
@@ -49,6 +50,8 @@ export function RoomLobbyPage() {
   const navigate = useNavigate()
   const [room, setRoom] = useState<RoomData | null>(null)
   const [moduleDesc, setModuleDesc] = useState('')
+  /** 本模组推荐的玩家人数区间；模组未标注时 parsePlayerRange 给 1–6 的默认档。 */
+  const [seatRange, setSeatRange] = useState<{ min: number; max: number }>({ min: 1, max: 6 })
   const [myChars, setMyChars] = useState<Character[]>([])
   const [aiChars, setAiChars] = useState<Character[]>([])
   const [localChars, setLocalChars] = useState<Character[]>([])
@@ -142,9 +145,14 @@ export function RoomLobbyPage() {
         : r
       if (cancelled) return
       setRoom(joined)
-      const mods = await api.get<{ id: string; description: string }[]>('/modules')
+      const mods = await api.get<{
+        id: string; description: string; world_setting?: Record<string, unknown> | null
+      }[]>('/modules')
       if (cancelled) return
-      setModuleDesc(mods.find((m) => m.id === joined.module_id)?.description || '')
+      const mod = mods.find((m) => m.id === joined.module_id)
+      setModuleDesc(mod?.description || '')
+      // 座位数按本模组的推荐人数约束——模组既然已经选定了，人数就不该再是任意的。
+      setSeatRange(parsePlayerRange(mod?.world_setting))
       const mine = await api.get<Character[]>('/characters?available=true&is_player=true&mine=true')
       if (cancelled) return
       setMyChars(mine)
@@ -534,8 +542,8 @@ export function RoomLobbyPage() {
                       title="移出该玩家（席位回到空席）"
                     >移出</button>
                   )}
-                  {/* 删座位：房主专用，且不能把自己或最后一个座位删掉（后端也拦） */}
-                  {amHost && !p.is_mine && seats.length > 1 && (
+                  {/* 删座位：房主专用；不能删自己，也不能低于模组推荐下限（后端另有硬拦） */}
+                  {amHost && !p.is_mine && seats.length > Math.max(seatRange.min, 1) && (
                     <button
                       onClick={() => void removeSeat(p.seat_order)}
                       disabled={busy}
@@ -551,26 +559,28 @@ export function RoomLobbyPage() {
             })}
           </div>
 
-          {/* 人数在房间里调——建房那一屏只定模组与 KP 模式 */}
+          {/* 人数在房间里调，但按本模组的推荐区间约束——模组既然已经选定，人数就不该再是任意的 */}
           {amHost && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
                 onClick={() => void addSeat('ai')}
-                disabled={busy}
-                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs"
+                disabled={busy || seats.length >= seatRange.max}
+                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs disabled:opacity-40"
               >
                 <UserPlus size={12} /> 加 AI 队友
               </button>
               <button
                 onClick={() => void addSeat('human')}
-                disabled={busy}
-                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs"
+                disabled={busy || seats.length >= seatRange.max}
+                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs disabled:opacity-40"
                 title="留一个空席，把房间码发给朋友来认领"
               >
                 <UserPlus size={12} /> 留真人空席
               </button>
               <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                AI 席选好角色即就绪；真人空席要本人加入后自己点准备
+                本模组推荐 {seatRange.min}–{seatRange.max} 人
+                {seats.length >= seatRange.max ? ' · 已达上限' : ''}
+                　AI 席选好角色即就绪；真人空席要本人加入后自己点准备
               </span>
             </div>
           )}
@@ -605,38 +615,59 @@ export function RoomLobbyPage() {
                     <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>以 KP 身份加入后，就不再占用玩家席位</span>
                   </div>
                 )}
-                <p className="text-sm mb-2" style={{ color: 'var(--color-text-secondary)' }}>或选择玩家角色入座空席：</p>
-                <textarea
-                  value={characterHint}
-                  onChange={(e) => setCharacterHint(e.target.value)}
-                  disabled={busy}
-                  rows={2}
-                  placeholder="角色提示词（可选）：职业、性格、背景或你想扮演的概念"
-                  className="input mb-2 w-full resize-y text-sm"
-                />
-                <div className="flex flex-wrap gap-2">
-                  {myChars.map((c) => (
-                    <button key={c.id} onClick={() => claimWithChar(c.id)} disabled={busy}
-                      className="px-2.5 py-1 rounded-full text-xs border"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                      {c.name}
-                    </button>
-                  ))}
-                  {localChars.length > 0 && (
-                    <span className="basis-full text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      本机角色（入座时会把角色同步给房主，你自己这份不受影响）
-                    </span>
+                {/* 两件事，两块区域，不再挤在同一排：
+                    「挑一张现成的」和「现场造一张」是不同的操作，从前它们同在一个
+                    flex-wrap 里视觉同级；更别扭的是那个提示词输入框——它只服务「AI 生成」，
+                    却被放在最前面，中间还隔着一堆已有角色，读下来逻辑是断的。 */}
+                <div className="seat-pick">
+                  <div className="seat-pick-head">选一张已有的角色卡</div>
+                  {myChars.length === 0 && localChars.length === 0 && (
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      还没有可用的角色卡，用下面的方式现场生成一张。
+                    </p>
                   )}
-                  {localChars.map((c) => (
-                    <button key={`local-${c.id}`} onClick={() => void importAndClaim(c)} disabled={busy}
-                      className="px-2.5 py-1 rounded-full text-xs border"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                      title="选它入座。房主的规则引擎要读写角色数据才跑得动，所以会同步一份副本过去；它不会进入房主的角色库">
-                      {c.name}
-                    </button>
-                  ))}
-                  <button onClick={generateAndClaim} disabled={busy} className="btn-secondary !px-2 !py-1 text-xs inline-flex items-center gap-1">
-                    {busy ? '处理中…' : <><Sparkles size={12} /> AI 生成角色并入座</>}
+                  {myChars.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {myChars.map((c) => (
+                        <button key={c.id} onClick={() => claimWithChar(c.id)} disabled={busy}
+                          className="seat-chip">
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {localChars.length > 0 && (
+                    <div className="mt-2">
+                      <div className="seat-pick-sub">
+                        本机角色 · 入座时会同步一份副本给房主，你自己这份不受影响
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {localChars.map((c) => (
+                          <button key={`local-${c.id}`} onClick={() => void importAndClaim(c)} disabled={busy}
+                            className="seat-chip"
+                            title="选它入座。房主的规则引擎要读写角色数据才跑得动，所以会同步一份副本过去；它不会进入房主的角色库">
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="seat-pick">
+                  <div className="seat-pick-head">或让 AI 现场生成一张</div>
+                  {/* 提示词紧挨着它唯一服务的那个按钮 */}
+                  <textarea
+                    value={characterHint}
+                    onChange={(e) => setCharacterHint(e.target.value)}
+                    disabled={busy}
+                    rows={2}
+                    placeholder="想扮演什么？如 胆小的记者、退伍军医、通晓神秘学的教授（留空则由 AI 按模组自由发挥）"
+                    className="input mb-2 w-full resize-y text-sm"
+                  />
+                  <button onClick={generateAndClaim} disabled={busy}
+                    className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs">
+                    {busy ? '处理中…' : <><Sparkles size={12} /> 生成角色并入座</>}
                   </button>
                 </div>
               </div>

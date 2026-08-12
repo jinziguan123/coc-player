@@ -2416,6 +2416,44 @@ select.input option {
   border-color: var(--color-border);
 }
 
+/* ===== 大厅入座区：两种取得角色的方式，各自成块 ===== */
+.seat-pick {
+  padding: 0.75rem;
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius, 8px);
+  background: var(--surface-2, rgba(255, 255, 255, 0.02));
+}
+.seat-pick:last-child { margin-bottom: 0; }
+.seat-pick-head {
+  margin-bottom: 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+.seat-pick-sub {
+  margin-bottom: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+/* 角色卡 chip：与「按钮」区分开——它是一个可挑选的对象，不是一个动作 */
+.seat-chip {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.seat-chip:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-text-accent);
+  background: rgba(212, 162, 78, 0.08);
+}
+.seat-chip:disabled { opacity: 0.45; cursor: default; }
+
 /* 骰子事件卡入场：微旋转 + 缩放弹入（骰子落定的仪式感） */
 .dice-enter {
   animation: diceEnter 0.42s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
