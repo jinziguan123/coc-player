@@ -67,8 +67,8 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   const [moveMode, setMoveMode] = useState<'none' | 'move' | 'dash'>('none')
   useEffect(() => { setMoveMode('none') }, [combat.turn])   // 回合切换 → 退出移动模式
 
-  // 沉浸布局棋盘自适应格长：按中央区域可用宽高取 min，夹在 40~64px（嵌入基准 46，紧凑视口
-  // 允许略缩到 40）；仍放不下时交给 overflow 滚动。ResizeObserver 跟随窗口/侧栏折叠实时重算。
+  // 沉浸布局棋盘自适应格长：按中央区域可用宽高取 min，上限 64px；放不下时才交给 overflow 滚动。
+  // ResizeObserver 跟随窗口/侧栏折叠实时重算。
   const boardAreaRef = useRef<HTMLDivElement>(null)
   const [fitCell, setFitCell] = useState(56)
   const gridCols = combat.grid?.cols ?? 0
@@ -81,15 +81,16 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
       const r = el.getBoundingClientRect()
       // 预留：横向滚动条余量 12px；纵向「战场」标签 + 移动按钮行约 40px
       const c = Math.floor(Math.min((r.width - 12) / gridCols, (r.height - 40) / gridRows))
-      // 下限 32：KP 控制台独立成栏后，战场/聊天/控制台三栏并列时中段会更窄，
-      // 原来的下限 40 会让 10 列棋盘放不下而横向截断。32px 仍够放一个汉字令牌。
-      setFitCell(Math.max(32, Math.min(64, c)))
+      // 下限 26：下限本身不能高到「反而放不下」——从前是 32，中段被挤到 148px 时
+      // 12 列 ×32 = 384px 直接横向溢出，棋盘只剩五列可见（见 narrowRow 的注释）。
+      setFitCell(Math.max(26, Math.min(64, c)))
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
   }, [immersive, gridCols, gridRows])
+
 
   // 武器下拉项：拳头置顶（永远有）+ 角色卡武器栏（去重、保留伤害提示）+ 其它(手填)。
   const weaponOptions = useMemo(() => {
@@ -296,14 +297,18 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
 
   // B2 参战方卡片列（我方 / 敌方），带 HP 动画（B3）。
   const sideCol = (label: string, list: Combatant[], alignRight = false) => (
-    <div className="flex flex-col gap-1.5">
-      <div className={`combat-label${alignRight ? ' text-right' : ''}`}>{label}</div>
+    <>
+      <div className={`combat-label${alignRight ? ' combat-label--right' : ''}`}>{label}</div>
       {list.length === 0
-        ? <div className={`text-[length:var(--text-2xs)]${alignRight ? ' text-right' : ''}`} style={{ color: 'var(--color-text-secondary)' }}>无</div>
-        : list.map((c) => (
-          <CombatantCard key={c.id} c={c} mine={!!(myCharId && c.id === myCharId)} active={c.id === combat.turn} diff={diffs[c.id]} />
-        ))}
-    </div>
+        ? <div className={`combat-side-empty${alignRight ? ' combat-label--right' : ''}`}>无</div>
+        : (
+          <div className="combat-side-list">
+            {list.map((c) => (
+              <CombatantCard key={c.id} c={c} mine={!!(myCharId && c.id === myCharId)} active={c.id === combat.turn} diff={diffs[c.id]} />
+            ))}
+          </div>
+        )}
+    </>
   )
 
   // B4 反应提示 / B5 主动动作栏 / 等待提示（两种布局都钉在舞台底部）。
@@ -529,19 +534,20 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
         <div className="flex-shrink-0">
           <InitiativeTrack order={order} turn={combat.turn} myCharId={myCharId} />
         </div>
-        {/* 中段：己方卡列（左）| 棋盘居中放大 | 敌方卡列（右）；回合横幅覆盖顶部 */}
-        <div className="relative flex-1 min-h-0 flex items-stretch gap-3 mt-1">
+        {/* 中段：己方卡列（左）| 棋盘居中放大 | 敌方卡列（右）；回合横幅覆盖顶部。
+            窄中段时（见 index.css 的 @container）自动改成「卡片横排一条 + 棋盘占满整宽」——
+            两条 160px 卡列不让位的话，被压扁的只会是棋盘，它是这里唯一可伸缩的东西。 */}
+        <div className="combat-mid">
           <TurnBanner banner={banner} />
-          <div className="w-40 flex-shrink-0 overflow-y-auto chat-scroll">
-            {sideCol('我方', allies)}
+          {/* display:contents（宽）/ flex（窄）：同一份 DOM 走两套排布，不做条件渲染 */}
+          <div className="combat-sides">
+            <div className="combat-side">{sideCol('我方', allies)}</div>
+            <div className="combat-side combat-side--enemy">{sideCol('敌方', enemies, true)}</div>
           </div>
-          <div ref={boardAreaRef} className="flex-1 min-w-0 flex flex-col justify-center overflow-auto chat-scroll">
+          <div ref={boardAreaRef} className="combat-board chat-scroll">
             {combat.grid
               ? gridSection(fitCell)
               : <div className="text-xs text-center py-6" style={{ color: 'var(--color-text-secondary)' }}>本场战斗没有方格战场</div>}
-          </div>
-          <div className="w-40 flex-shrink-0 overflow-y-auto chat-scroll">
-            {sideCol('敌方', enemies, true)}
           </div>
         </div>
         {/* 动作栏/反应区/掷伤害 + 战斗日志：钉在舞台底部 */}
@@ -593,9 +599,10 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
         {/* B1.5 方格战场：令牌 + 移动。移动模式仅本人回合可用。 */}
         {gridSection(46)}
         {/* B2 两栏参战方卡片（左己方 / 右敌方） */}
+        {/* sideCol 返回的是「标题 + 卡片列」两段，得各自有个壳，否则四段会被两列网格拆散 */}
         <div className="grid grid-cols-2 gap-2 mt-2">
-          {sideCol('我方', allies)}
-          {sideCol('敌方', enemies, true)}
+          <div className="flex min-w-0 flex-col gap-1.5">{sideCol('我方', allies)}</div>
+          <div className="flex min-w-0 flex-col gap-1.5">{sideCol('敌方', enemies, true)}</div>
         </div>
       </div>
 

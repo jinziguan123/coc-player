@@ -504,7 +504,8 @@ export function RoomLobbyPage() {
     // 整页锁在视口高度里：头部（返回/房间码）和底部（开始游戏）钉住，只有中段滚。
     // 从前这一层没有 min-h-0、中段也没有 overflow，内容一路外溢到 AppShell 的 main 去滚，
     // 于是角色卡一多，「开始游戏」就被顶到折线以下（实测已入座时内容 793px > 视口 720px）。
-    <div className="flex h-full min-h-0 gap-0">
+    // relative：聊天是浮层（absolute 右侧居中），它的定位原点就是这一层
+    <div className="relative flex h-full min-h-0 gap-0">
       <div className="flex flex-col flex-1 min-w-0 min-h-0 max-w-3xl mx-auto w-full">
         <div className="flex flex-shrink-0 items-center gap-3 pb-2 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <button onClick={() => navigate('/game')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
@@ -886,14 +887,15 @@ export function RoomLobbyPage() {
         </aside>
       )}
 
-      {/* 聊天钉在最右侧、可收起。它高度取自这一行的 h-full，日志内部滚动，
-          所以「聊得再多也不会把大厅顶长」——这正是它从主栏搬出来的原因。 */}
+      {/* 聊天是右侧浮层：收起成一颗圆 token，展开是一张悬浮卡。它不占布局宽度、
+          也不参与页面高度——「聊得再多也不会把大厅顶长」。 */}
       <LobbyChatDock
         lines={chat}
         typingName={typingName}
         canSpeak={!!myChatSeat}
         onSend={(text) => void sendChat(text)}
         onTyping={notifyTyping}
+        shifted={!!(preview || panelChar)}
       />
     </div>
   )

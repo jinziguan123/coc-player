@@ -6,6 +6,7 @@ import {
   BookOpen,
   Bot,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Crosshair,
   Image,
@@ -15,7 +16,6 @@ import {
   Maximize2,
   Move,
   NotebookPen,
-  PanelRightClose,
   RefreshCw,
   Search,
   Send,
@@ -839,7 +839,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
           aria-expanded={!collapsed}
           title={sidebar ? '收起 KP 控制台' : collapsed ? '展开 KP 控制台' : '收起 KP 控制台'}
         >
-          {sidebar ? <PanelRightClose size={15} /> : collapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+          {sidebar ? <ChevronRight size={15} /> : collapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
         </button>
       </div>
 

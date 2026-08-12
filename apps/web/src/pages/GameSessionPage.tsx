@@ -53,8 +53,8 @@ import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntr
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { Modal } from '../components/ui/modal'
-import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk } from 'react-icons/gi'
-import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, PanelLeftOpen, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
+import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
+import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
 import { useRepairableImage, type ModuleImageKind } from '../components/module/ModuleImage'
@@ -1362,12 +1362,15 @@ export function GameSessionPage() {
           />
         </div>
       )}
-      {/* 聊天侧栏折叠后的窄条：点击展开；折叠期间新消息给未读徽标 */}
+      {/* 聊天侧栏折叠后的把手：一颗圆 token（与大厅聊天同一套视觉语言），
+          从前是一条 2.4rem 的窄板 + lucide 面板图标，既看不出是什么、也和全站不搭。 */}
       {immersiveOn && chatCollapsed && (
-        <button onClick={toggleChatCollapsed} className="chat-rail flex-shrink-0" title="展开聊天侧栏">
-          <PanelRightOpen size={16} />
-          {chatUnread > 0 && <span className="chat-unread-badge">{chatUnread > 99 ? '99+' : chatUnread}</span>}
-        </button>
+        <div className="side-token-rail">
+          <button onClick={toggleChatCollapsed} className="side-token" title="展开聊天侧栏">
+            <GiTalk size={19} aria-hidden="true" />
+            {chatUnread > 0 && <span className="side-token-dot">{chatUnread > 99 ? '99+' : chatUnread}</span>}
+          </button>
+        </div>
       )}
       <div
         className={`flex-col relative ${immersiveOn
@@ -2354,16 +2357,18 @@ export function GameSessionPage() {
       )}
 
       {/* KP 控制台侧栏：与叙事流并列而非争抢竖向空间。
-          收起后留一条窄条（与聊天侧栏的 .chat-rail 同一套交互），偏好存 localStorage。 */}
+          收起后留一颗圆 token（与聊天侧栏同一套交互与视觉），偏好存 localStorage。 */}
       {isKp && kpCollapsed && (
-        <button
-          onClick={() => setKpCollapsed(false)}
-          className="chat-rail flex-shrink-0"
-          title="展开 KP 控制台"
-        >
-          <PanelLeftOpen size={16} />
-          <span className="kp-rail-label">KP</span>
-        </button>
+        <div className="side-token-rail">
+          <button
+            onClick={() => setKpCollapsed(false)}
+            className="side-token"
+            title="展开 KP 控制台"
+          >
+            <GiTheaterCurtains size={19} aria-hidden="true" />
+            <span className="side-token-label">KP</span>
+          </button>
+        </div>
       )}
       {showCoach && (
         <OnboardingCoach

@@ -1482,14 +1482,6 @@ body {
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
-/* 收起窄条上的竖排「KP」字样 */
-.kp-rail-label {
-  writing-mode: vertical-rl;
-  letter-spacing: 0.18em;
-  font-family: var(--font-title);
-  font-size: var(--text-2xs);
-}
-
 /* ===== 新手引导浮层 ===== */
 .coach-body {
   font-size: var(--text-sm);
@@ -2526,22 +2518,77 @@ select.input option {
   white-space: nowrap;
 }
 
-/* ===== 大厅聊天 dock：右侧可收起面板 =====
-   高度由外层 h-full 给定，日志区 flex:1 + min-height:0 内部滚动，**不参与页面高度**：
-   聊多久大厅都不会被顶长。从前它是主栏里的一张卡，反被自己的 minHeight 压成 29px。 */
+/* ===== 大厅聊天：右侧悬浮聊天卡 =====
+   浮层而非栏位：absolute 定位、右侧垂直居中，收起是一颗圆 token，展开是一张卡。
+   它既不参与页面高度（聊再多也顶不长大厅），也不占掉主栏一条宽度。 */
+.chat-float {
+  position: absolute;
+  right: 1.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  transition: right 0.25s ease;
+}
+/* 角色卡预览开着时整体左让一栏，别盖住人家 */
+.chat-float--shifted { right: calc(20rem + 1.25rem); }
+
+/* 收起态：一颗圆 token */
+.chat-token {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 999px;
+  color: var(--color-text-accent);
+  border: 1px solid var(--color-border-strong, var(--color-border));
+  background: var(--color-bg-secondary);
+  box-shadow: 0 6px 20px var(--shadow-color-strong);
+  cursor: pointer;
+  animation: tokenIn 0.22s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.2s ease;
+}
+.chat-token:hover {
+  transform: scale(1.06);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 16px rgba(212, 162, 78, 0.3), 0 6px 20px var(--shadow-color-strong);
+}
+@keyframes tokenIn {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.chat-token-dot {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  min-width: 1.15rem;
+  padding: 0 0.25rem;
+  font-size: 0.65rem;
+  line-height: 1.15rem;
+  text-align: center;
+  color: var(--color-bg-primary);
+  background: var(--color-accent);
+  border-radius: 999px;
+  box-shadow: 0 2px 6px var(--shadow-color);
+}
+
+/* 展开态：一张悬浮卡。高度写死，日志内部滚动 */
 .chat-dock {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  width: 18rem;
-  min-height: 0;
-  border-left: 1px solid var(--color-border);
-  background: var(--color-bg-card);
-  animation: dockIn 0.22s ease-out both;
+  width: 19rem;
+  height: min(62vh, 30rem);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  box-shadow: 0 12px 34px var(--shadow-color-strong);
+  overflow: hidden;                 /* 圆角要能裁住里面的日志区 */
+  animation: dockIn 0.22s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  transform-origin: right center;
 }
 @keyframes dockIn {
-  from { opacity: 0; transform: translateX(12px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateY(-50%) scale(0.9); }
+  to { opacity: 1; transform: translateY(-50%) scale(1); }
 }
 .chat-dock-head {
   display: flex;
@@ -2586,38 +2633,6 @@ select.input option {
   padding: 0.5rem 0.6rem 0.6rem;
   border-top: 1px solid var(--color-border);
 }
-/* 收起态：一条竖排的书脊，标题竖着写——收起后仍要一眼看出这里是聊天 */
-.chat-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-  width: 2.2rem;
-  padding: 0.6rem 0;
-  color: var(--color-text-secondary);
-  border-left: 1px solid var(--color-border);
-  background: var(--color-bg-card);
-  cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-.chat-rail:hover { color: var(--color-text-accent); background: var(--surface-2, rgba(255, 255, 255, 0.03)); }
-.chat-rail-label {
-  writing-mode: vertical-rl;
-  font-size: 0.75rem;
-  letter-spacing: 0.18em;
-}
-.chat-rail-dot {
-  min-width: 1.15rem;
-  padding: 0 0.2rem;
-  font-size: 0.65rem;
-  line-height: 1.15rem;
-  text-align: center;
-  color: var(--color-bg-primary);
-  background: var(--color-accent);
-  border-radius: 999px;
-}
-
 /* 正在右栏预览的那一张：选中态要立得住，否则看完卡回头找不到自己点的是哪个 */
 .seat-chip--on {
   border-color: var(--color-accent);
@@ -3002,6 +3017,69 @@ select.input option {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* 中段按**自己有多宽**换排布，而不是按视口——同一个窗口宽度下，KP 控制台或聊天栏
+     一开一关，这里的可用宽能差出一倍。用容器查询而不是 ResizeObserver：没有测量-重排
+     的回环，也不必担心观察器在后台标签页里不回调。 */
+  container-type: inline-size;
+}
+
+/* 中段：我方卡列 | 棋盘 | 敌方卡列。宽的时候三栏并排，窄的时候卡片横排到棋盘上方。 */
+.combat-mid {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0.25rem;
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+/* display:contents → 两个 .combat-side 直接成为 .combat-mid 的 flex 项；
+   order 把棋盘夹在中间（DOM 顺序是 我方→敌方→棋盘，便于窄态直接成条） */
+.combat-sides { display: contents; }
+.combat-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  width: 10rem;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+.combat-side--enemy { order: 3; }
+.combat-side-list { display: flex; flex-direction: column; gap: 0.375rem; }
+.combat-side-empty { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.combat-label--right { text-align: right; }
+.combat-board {
+  order: 2;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: auto;
+}
+
+/* 窄中段：两条 160px 卡列不让位的话，被压扁的只有棋盘。实测 1520px 视口下
+   KP 控制台（334）+ 聊天栏（380）同时展开时中段仅 494px，棋盘只剩 148px，
+   而 12 列棋盘至少要 312px——于是只看得见五列、底下挂一条横向滚动条。
+   阈值 520 = 两列 320 + 棋盘起码 200。 */
+@container (max-width: 520px) {
+  .combat-mid { flex-direction: column; gap: 0.25rem; }
+  .combat-sides {
+    display: flex;
+    gap: 0.75rem;
+    flex-shrink: 0;
+    max-height: 7rem;
+    overflow-y: auto;
+  }
+  /* 按内容分宽而不是均分：我方两张、敌方一张时均分会把我方那两张挤到要横滚 */
+  .combat-side { width: auto; flex: 1 1 auto; overflow: visible; }
+  .combat-side--enemy { order: 0; }
+  .combat-board { order: 0; }
+  .combat-side-list { flex-direction: row; overflow-x: auto; }
+  .combat-side-list > * { width: 9rem; flex-shrink: 0; }
+  /* 右对齐的「敌方」在横排里会跑到自己那组卡片的另一头 */
+  .combat-label--right { text-align: left; }
 }
 
 /* 战场舞台入场：从暗到亮 + 自左滑入（短促一次；reduced-motion 由文件末尾统一禁用） */
@@ -3022,39 +3100,58 @@ select.input option {
   to { opacity: 1; transform: translateX(0); }
 }
 
-/* 聊天侧栏折叠后的窄条：点击展开；未读徽标垂直排布其下 */
-.chat-rail {
-  width: 2.4rem;
-  align-self: stretch;
+/* ===== 侧栏折叠把手：一颗圆 token（与大厅聊天浮层同一套语言） =====
+   从前是 2.4rem 的窄板 + lucide 面板图标：既看不出这条是什么，也和全站的 game-icons 不搭。
+   rail 只负责占住那一小条布局宽度并把 token 垂直居中；token 自己是圆的。 */
+.side-token-rail {
+  flex-shrink: 0;
+  width: 3.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.side-token {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-  padding-top: 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-}
-.chat-rail:hover {
-  color: var(--color-text-accent);
-  border-color: var(--color-accent);
-}
-.chat-unread-badge {
-  min-width: 1.1rem;
-  height: 1.1rem;
-  padding: 0 0.2rem;
-  border-radius: 999px;
-  font-size: 0.65rem;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  background: var(--color-danger-deep);
-  color: var(--color-on-danger);
+  gap: 0.1rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  color: var(--color-text-accent);
+  border: 1px solid var(--color-border-strong, var(--color-border));
+  background: var(--color-bg-secondary);
+  box-shadow: 0 6px 20px var(--shadow-color-strong);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.2s ease;
+}
+.side-token:hover {
+  transform: scale(1.06);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 16px rgba(212, 162, 78, 0.3), 0 6px 20px var(--shadow-color-strong);
+}
+.side-token-label {
+  font-family: var(--font-title);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+.side-token-dot {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.2rem;
+  min-width: 1.15rem;
+  padding: 0 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1.15rem;
+  text-align: center;
+  color: var(--color-bg-primary);
+  background: var(--color-accent);
+  border-radius: 999px;
+  box-shadow: 0 2px 6px var(--shadow-color);
 }
 
 /* 路由切换转场：新页淡入 + 轻微上移与缩放（推入/翻页的顺滑感）。

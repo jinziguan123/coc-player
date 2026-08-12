@@ -13,6 +13,8 @@ interface Props {
   onSend: (text: string) => void
   /** 每次敲键都会调；节流由调用方负责。 */
   onTyping: () => void
+  /** 右栏（角色卡预览）开着时往左让一个栏宽，别把人家盖住。 */
+  shifted?: boolean
 }
 
 const OPEN_KEY = 'trpg.lobbyChat.open'
@@ -27,10 +29,11 @@ const STICK_SLACK = 24
  * 尺寸计算里贡献 0，卡片停在 160px，日志只分到 29px（实测 25 条消息内容 560px、
  * 可视 29px），那条 `maxHeight:200` 从头到尾没生效过。
  *
- * 挪到右侧后高度由外层 `h-full` 给定，日志天然定高滚动，**不再参与页面高度**：
- * 聊多久大厅都不会被顶长。
+ * 现在它是**浮层**（absolute 定位，右侧垂直居中）：收起是一颗圆形 token，展开是一张
+ * 悬浮聊天卡。高度写死在卡片上、日志内部滚动，所以它**完全不参与页面高度**，也不再
+ * 占掉主栏一整条宽度——大厅真正要办的事（配座位、开局）拿回全部版面。
  */
-export function LobbyChatDock({ lines, typingName, canSpeak, onSend, onTyping }: Props) {
+export function LobbyChatDock({ lines, typingName, canSpeak, onSend, onTyping, shifted }: Props) {
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== '0')
   const [draft, setDraft] = useState('')
   /** 收起期间新增的条数；展开即清零。 */
@@ -73,19 +76,18 @@ export function LobbyChatDock({ lines, typingName, canSpeak, onSend, onTyping }:
     return (
       <button
         onClick={() => setOpen(true)}
-        className="chat-rail"
+        className={`chat-float chat-token${shifted ? ' chat-float--shifted' : ''}`}
         title="展开大厅聊天"
         aria-label="展开大厅聊天"
       >
-        <GiTalk size={16} aria-hidden="true" />
-        <span className="chat-rail-label">大厅聊天</span>
-        {unread > 0 && <span className="chat-rail-dot">{unread > 99 ? '99+' : unread}</span>}
+        <GiTalk size={20} aria-hidden="true" />
+        {unread > 0 && <span className="chat-token-dot">{unread > 99 ? '99+' : unread}</span>}
       </button>
     )
   }
 
   return (
-    <aside className="chat-dock">
+    <aside className={`chat-float chat-dock${shifted ? ' chat-float--shifted' : ''}`}>
       <div className="chat-dock-head">
         <GiTalk size={14} aria-hidden="true" />
         <span className="flex-1">大厅聊天</span>
