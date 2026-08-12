@@ -2526,6 +2526,98 @@ select.input option {
   white-space: nowrap;
 }
 
+/* ===== 大厅聊天 dock：右侧可收起面板 =====
+   高度由外层 h-full 给定，日志区 flex:1 + min-height:0 内部滚动，**不参与页面高度**：
+   聊多久大厅都不会被顶长。从前它是主栏里的一张卡，反被自己的 minHeight 压成 29px。 */
+.chat-dock {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 18rem;
+  min-height: 0;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  animation: dockIn 0.22s ease-out both;
+}
+@keyframes dockIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.chat-dock-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--font-title);
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  color: var(--color-text-accent);
+  border-bottom: 1px solid var(--color-border);
+}
+.chat-dock-log {
+  flex: 1;
+  min-height: 0;          /* 没有它，flex 项的自动最小尺寸会把 dock 顶开 */
+  overflow-y: auto;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.chat-dock-jump {
+  margin: 0 0.6rem 0.3rem;
+  padding: 0.2rem 0;
+  font-size: 0.72rem;
+  color: var(--color-text-accent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius, 8px);
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  cursor: pointer;
+}
+.chat-dock-typing {
+  height: 1rem;
+  padding: 0 0.6rem;
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--color-text-secondary);
+}
+.chat-dock-send {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem 0.6rem;
+  border-top: 1px solid var(--color-border);
+}
+/* 收起态：一条竖排的书脊，标题竖着写——收起后仍要一眼看出这里是聊天 */
+.chat-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  width: 2.2rem;
+  padding: 0.6rem 0;
+  color: var(--color-text-secondary);
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.chat-rail:hover { color: var(--color-text-accent); background: var(--surface-2, rgba(255, 255, 255, 0.03)); }
+.chat-rail-label {
+  writing-mode: vertical-rl;
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+}
+.chat-rail-dot {
+  min-width: 1.15rem;
+  padding: 0 0.2rem;
+  font-size: 0.65rem;
+  line-height: 1.15rem;
+  text-align: center;
+  color: var(--color-bg-primary);
+  background: var(--color-accent);
+  border-radius: 999px;
+}
+
 /* 正在右栏预览的那一张：选中态要立得住，否则看完卡回头找不到自己点的是哪个 */
 .seat-chip--on {
   border-color: var(--color-accent);

@@ -94,6 +94,37 @@ def test_ooc_endpoint_persists_without_generation(db_factory):
         app.dependency_overrides.clear()
 
 
+def test_start_game_purges_lobby_chat(db_factory):
+    """开局那一刻清掉大厅聊天，但不碰剧情事件。
+
+    大厅聊天是开局前的场外协商，开局后既不进 KP 上下文也不参与向量召回，留着只会
+    一直躺在存档里、还会混进「卷宗」检索（SEARCHABLE_EVENT_TYPES 含 ooc）。
+    """
+    db = db_factory()
+    module, hero, session = _seed(db)
+    session_service.add_event(db, session.id, "ooc", "我带医生你带记者", actor_name="房主")
+    session_service.add_event(db, session.id, "ooc", "等我五分钟", actor_name="玩家")
+    session_service.add_event(db, session.id, "narration", "夜色渐深", actor_name="KP")
+
+    session_service.start_game(db, session.id, None)
+
+    kinds = [e.event_type for e in session_service.get_session_events(db, session.id)]
+    assert kinds == ["narration"]
+    db.close()
+
+
+def test_ooc_after_start_is_kept(db_factory):
+    """只清大厅那一批：开局后游戏内的 OOC 照常入库、照常保留。"""
+    db = db_factory()
+    module, hero, session = _seed(db)
+    session_service.start_game(db, session.id, None)
+    session_service.add_event(db, session.id, "ooc", "我去倒杯水", actor_name="玩家")
+
+    events = session_service.get_session_events(db, session.id)
+    assert [e.content for e in events if e.event_type == "ooc"] == ["我去倒杯水"]
+    db.close()
+
+
 def test_ooc_endpoint_allows_reserved_human_kp_without_character(db_factory):
     engine_session = db_factory
 

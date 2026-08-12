@@ -6,6 +6,7 @@ import { api, connectSSE, getServerUrl, localApi } from '../api/client'
 import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
+import { LobbyChatDock, type ChatLine } from '../components/game/LobbyChatDock'
 import { GiReturnArrow } from 'react-icons/gi'
 import { parsePlayerRange } from '@/lib/module'
 import {
@@ -67,7 +68,9 @@ function topSkills(c: Character, n = 3): string[] {
     .map(([k, v]) => `${k} ${v}`)
 }
 
-interface ChatLine { id: string; name: string; content: string }
+/** 大厅聊天最多留这么多条：房间挂一晚上，DOM 不能跟着无限涨。 */
+const MAX_CHAT_LINES = 200
+
 interface CharacterEvaluation {
   compatible: boolean
   warnings: string[]
@@ -93,7 +96,6 @@ export function RoomLobbyPage() {
   /** 角色库搜索词：卡多了得能找，而不是滚半天。只在超过 6 张时才露出输入框。 */
   const [charFilter, setCharFilter] = useState('')
   const [chat, setChat] = useState<ChatLine[]>([])
-  const [chatInput, setChatInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [panelChar, setPanelChar] = useState<Character | null>(null)
   /**
@@ -107,7 +109,6 @@ export function RoomLobbyPage() {
   const [evaluation, setEvaluation] = useState<CharacterEvaluation | null>(null)
   const [evaluating, setEvaluating] = useState(false)
   const [typingName, setTypingName] = useState('')
-  const chatRef = useRef<HTMLDivElement>(null)
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTypingSent = useRef(0)
   const myNameRef = useRef<string | null>(null)
@@ -173,7 +174,8 @@ export function RoomLobbyPage() {
       if (c.type === 'ooc') {
         setChat((prev) => prev.some((x) => x.id === c.id)
           ? prev
-          : [...prev, { id: c.id || `${Date.now()}`, name: c.actor_name || '玩家', content: c.content || '' }])
+          : [...prev, { id: c.id || `${Date.now()}`, name: c.actor_name || '玩家', content: c.content || '' }]
+            .slice(-MAX_CHAT_LINES))
       }
     }
 
@@ -218,7 +220,10 @@ export function RoomLobbyPage() {
       }
       const ev = await api.get<{ events: { id: string; event_type: string; actor_name: string; content: string }[] }>(`/sessions/${sessionId}/events`)
       if (cancelled) return
-      setChat(ev.events.filter((e) => e.event_type === 'ooc').map((e) => ({ id: e.id, name: e.actor_name, content: e.content })))
+      setChat(ev.events
+        .filter((e) => e.event_type === 'ooc')
+        .map((e) => ({ id: e.id, name: e.actor_name, content: e.content }))
+        .slice(-MAX_CHAT_LINES))
 
       while (!cancelled) {
         try {
@@ -234,10 +239,6 @@ export function RoomLobbyPage() {
     init().catch(() => navigate('/game', { replace: true }))
     return () => { cancelled = true; ac.abort() }
   }, [sessionId, navigate, refreshRoom])
-
-  useEffect(() => {
-    chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight })
-  }, [chat.length])
 
   const claimWithChar = async (charId: string, notify = true): Promise<string | null> => {
     if (!room) return '房间状态尚未加载'
@@ -349,10 +350,8 @@ export function RoomLobbyPage() {
     }
   }
 
-  const sendChat = async () => {
-    const text = chatInput.trim()
-    if (!text || !room || !myChatSeat) return
-    setChatInput('')
+  const sendChat = async (text: string) => {
+    if (!room || !myChatSeat) return
     try {
       await api.post(`/sessions/${room.id}/ooc`, {
         content: text,
@@ -361,8 +360,8 @@ export function RoomLobbyPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : '发送失败') }
   }
 
-  const onChatInput = (v: string) => {
-    setChatInput(v)
+  /** 「正在输入」广播：每 2 秒最多一次，别把敲键盘变成刷接口。 */
+  const notifyTyping = () => {
     if (!room || !myChatSeat) return
     const now = Date.now()
     if (now - lastTypingSent.current > 2000) {
@@ -502,9 +501,12 @@ export function RoomLobbyPage() {
   const openKpSeat = kpSeats.find((p) => !p.claimed)
 
   return (
-    <div className="flex h-full gap-0">
-      <div className="flex flex-col flex-1 min-w-0 max-w-3xl mx-auto w-full">
-        <div className="flex items-center gap-3 pb-2 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+    // 整页锁在视口高度里：头部（返回/房间码）和底部（开始游戏）钉住，只有中段滚。
+    // 从前这一层没有 min-h-0、中段也没有 overflow，内容一路外溢到 AppShell 的 main 去滚，
+    // 于是角色卡一多，「开始游戏」就被顶到折线以下（实测已入座时内容 793px > 视口 720px）。
+    <div className="flex h-full min-h-0 gap-0">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 max-w-3xl mx-auto w-full">
+        <div className="flex flex-shrink-0 items-center gap-3 pb-2 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <button onClick={() => navigate('/game')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
             <GiReturnArrow /> 返回
           </button>
@@ -519,326 +521,296 @@ export function RoomLobbyPage() {
           )}
         </div>
 
-        {moduleDesc && (
+        {/* 可滚中段：模组简介 + 席位 + 选角色。pr-1 给滚动条留道，免得贴着卡片边 */}
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+          {moduleDesc && (
+            <div className="card mb-3">
+              <h3 className="card-title">模组简介</h3>
+              <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{moduleDesc}</p>
+            </div>
+          )}
+
+          {/* 席位 */}
           <div className="card mb-3">
-            <h3 className="card-title">模组简介</h3>
-            <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{moduleDesc}</p>
-          </div>
-        )}
-
-        {/* 席位 */}
-        <div className="card mb-3">
-          <h3 className="card-title">玩家席位（{seats.filter((s) => s.character_id).length}/{seats.length}）</h3>
-          {kpSeats.length > 0 && (
-            <div className="mb-2 space-y-1.5">
-              {kpSeats.map((p) => (
-                <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
-                  <SeatIcon kind={p.is_host ? 'host' : 'human'} size={15} />
-                  <span className="text-sm flex-1" style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}>
-                    {p.claimed ? '真人 KP' : '空席 · 等待真人 KP 加入'}
-                    {p.is_host ? ' · 房主' : ''}{p.is_mine ? '（我）' : ''}
-                  </span>
-                  {p.claimed && <span className="text-xs" style={{ color: 'var(--color-success)' }}>已加入</span>}
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="space-y-1.5">
-            {seats.map((p) => {
-              const readyBadge = p.role === 'human' && p.character_id
-                ? (p.ready ? '已准备' : '待准备')
-                : (p.character_id ? '就绪' : '')
-              const showDot = p.role === 'human' && p.character_id
-              // 新身份模型中一号玩家不等于房主；房主可以移出除自己外的任意真人玩家。
-              const canKick = amHost && p.claimed && p.role === 'human' && !p.is_mine
-              const seatLabel = p.character_id
-                ? p.character_name || '未知角色'
-                : p.claimed
-                  ? (p.is_mine ? '已加入，等待选择角色' : '已预留 · 等待玩家选择角色')
-                  : '空席 · 等待真人加入'
-              return (
-                <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
-                  <SeatIcon kind={seatKind(p)} size={15} />
-                  {showDot && (
-                    <span
-                      title={p.is_online ? '在线' : '离线'}
-                      style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                        background: p.is_online ? 'var(--color-success)' : 'var(--color-border)' }}
-                    />
-                  )}
-                  {/* AI 席由房主直接指派队友卡（真人席只能本人认领，走 /claim） */}
-                  {/* 用项目自己的 Select（Radix + 主题变量）。原生 <select> 的弹层由系统绘制，
-                      在这套羊皮纸配色里会突兀地弹出一片深蓝系统菜单，和站内其它下拉也不一致。 */}
-                  {p.role === 'ai' && amHost ? (
-                    <Select
-                      value={p.character_id || '__none'}
-                      onValueChange={(v) => void assignAiChar(p.seat_order, v === '__none' ? null : v)}
-                      disabled={busy}
-                    >
-                      <SelectTrigger className="flex-1" aria-label={`AI 队友 ${p.seat_order + 1} 的角色`}>
-                        <SelectValue placeholder="— 选择 AI 队友角色 —" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none">— 未指派 —</SelectItem>
-                        {p.character_id && !aiChars.some((c) => c.id === p.character_id) && (
-                          <SelectItem value={p.character_id}>{p.character_name || '当前角色'}</SelectItem>
-                        )}
-                        {aiChars.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.name}
-                            {occupationOf(c) && (
-                              <span style={{ color: 'var(--color-text-secondary)' }}>（{occupationOf(c)}）</span>
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : null}
-                  {/* 下拉同样是盲选：房主看不到这张队友卡的技能与背景。给个直达的查看入口。 */}
-                  {p.role === 'ai' && amHost && p.character_id && (
-                    <button
-                      onClick={() => viewSeat(p.character_id)}
-                      className="btn-secondary !px-1.5 !py-1"
-                      title="查看这张队友卡"
-                      aria-label="查看队友卡"
-                    >
-                      <Eye size={13} />
-                    </button>
-                  )}
-                  {!(p.role === 'ai' && amHost) && (
-                    <button
-                      onClick={() => viewSeat(p.character_id)}
-                      disabled={!p.character_id}
-                      className="text-sm text-left flex-1 disabled:cursor-default"
-                      style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}
-                    >
-                      {seatLabel}
+            <h3 className="card-title">玩家席位（{seats.filter((s) => s.character_id).length}/{seats.length}）</h3>
+            {kpSeats.length > 0 && (
+              <div className="mb-2 space-y-1.5">
+                {kpSeats.map((p) => (
+                  <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
+                    <SeatIcon kind={p.is_host ? 'host' : 'human'} size={15} />
+                    <span className="text-sm flex-1" style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}>
+                      {p.claimed ? '真人 KP' : '空席 · 等待真人 KP 加入'}
                       {p.is_host ? ' · 房主' : ''}{p.is_mine ? '（我）' : ''}
-                    </button>
-                  )}
-                  {p.character_id && (
-                    <button
-                      onClick={() => viewSeat(p.character_id)}
-                      className="btn-secondary !px-1.5 !py-1"
-                      title="查看角色卡"
-                      aria-label="查看角色卡"
-                    >
-                      <Eye size={13} />
-                    </button>
-                  )}
-                  {p.character_id && p.role === 'human' && (myKpSeat || (room.kp_mode === 'human' && amHost)) && (
-                    <button
-                      onClick={() => void evaluateSeat(p.character_id)}
-                      disabled={evaluating}
-                      className="btn-secondary !px-1.5 !py-1"
-                      title="评估角色是否适合本模组"
-                      aria-label="评估角色适配性"
-                    >
-                      <ScanSearch size={13} />
-                    </button>
-                  )}
-                  {readyBadge && (
-                    <span className="text-xs inline-flex items-center gap-0.5" style={{ color: p.ready || p.role !== 'human' ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
-                      {(p.ready || p.role !== 'human') && <Check size={12} />}{readyBadge}
                     </span>
-                  )}
-                  {canKick && (
-                    <button
-                      onClick={() => kick(p.seat_order)}
-                      disabled={busy}
-                      className="text-xs px-1.5 py-0.5 rounded"
-                      style={{ color: 'var(--color-danger)', border: '1px solid var(--color-danger)' }}
-                      title="移出该玩家（席位回到空席）"
-                    >移出</button>
-                  )}
-                  {/* 删座位：房主专用；不能删自己，也不能低于模组推荐下限（后端另有硬拦） */}
-                  {amHost && !p.is_mine && seats.length > Math.max(seatRange.min, 1) && (
-                    <button
-                      onClick={() => void removeSeat(p.seat_order)}
-                      disabled={busy}
-                      className="btn-secondary !px-1.5 !py-1"
-                      title="删除该席位"
-                      aria-label="删除该席位"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* 人数在房间里调，但按本模组的推荐区间约束——模组既然已经选定，人数就不该再是任意的 */}
-          {amHost && (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => void addSeat('ai')}
-                disabled={busy || seats.length >= seatRange.max}
-                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs disabled:opacity-40"
-              >
-                <UserPlus size={12} /> 加 AI 队友
-              </button>
-              <button
-                onClick={() => void addSeat('human')}
-                disabled={busy || seats.length >= seatRange.max}
-                className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs disabled:opacity-40"
-                title="留一个空席，把房间码发给朋友来认领"
-              >
-                <UserPlus size={12} /> 留真人空席
-              </button>
-              <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                本模组推荐 {seatRange.min}–{seatRange.max} 人
-                {seats.length >= seatRange.max ? ' · 已达上限' : ''}
-                　AI 席选好角色即就绪；真人空席要本人加入后自己点准备
-              </span>
-            </div>
-          )}
-
-          {/* 我的操作区 */}
-          <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-            {strictKpIdentity ? (
-              <div className="flex items-center gap-3">
-                <span className="text-sm" style={{ color: 'var(--color-text-accent)' }}>你已作为真人 KP 加入</span>
-                {myKpSeat.is_host && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>房主权限独立于玩家席</span>}
-              </div>
-            ) : !mySeat || needsCharacter || changingChar ? (
-              <div>
-                {changingChar && (
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                      选一张新的角色卡替换「{mySeat?.character_name}」：
-                    </span>
-                    <button
-                      onClick={() => setChangingChar(false)}
-                      className="btn-secondary !px-2 !py-0.5 text-xs"
-                    >
-                      取消
-                    </button>
+                    {p.claimed && <span className="text-xs" style={{ color: 'var(--color-success)' }}>已加入</span>}
                   </div>
-                )}
-                {openKpSeat && (
-                  <div className="mb-3 flex items-center gap-2">
-                    <button onClick={claimKp} disabled={busy} className="btn-primary !px-2.5 !py-1 text-sm">
-                      以真人 KP 身份加入
-                    </button>
-                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>以 KP 身份加入后，就不再占用玩家席位</span>
-                  </div>
-                )}
-                {/* 两件事，两块区域，不再挤在同一排：
-                    「挑一张现成的」和「现场造一张」是不同的操作，从前它们同在一个
-                    flex-wrap 里视觉同级；更别扭的是那个提示词输入框——它只服务「AI 生成」，
-                    却被放在最前面，中间还隔着一堆已有角色，读下来逻辑是断的。 */}
-                <div className="seat-pick">
-                  <div className="seat-pick-head">选一张已有的角色卡</div>
-                  {myChars.length === 0 && localChars.length === 0 && (
-                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      还没有可用的角色卡，用下面的方式现场生成一张。
-                    </p>
-                  )}
-                  {/* 卡多了不能一路铺下去：限高滚动 + 搜索。角色库上二十张是常态，
-                      全平铺会把席位、聊天、开始按钮全挤出屏幕。 */}
-                  {(myChars.length + localChars.length > 6) && (
-                    <input
-                      value={charFilter}
-                      onChange={(e) => setCharFilter(e.target.value)}
-                      placeholder={`在 ${myChars.length + localChars.length} 张卡里找：姓名或职业`}
-                      className="input mb-2 w-full !py-1 text-sm"
-                    />
-                  )}
-                  {matchChars(myChars).length > 0 && (
-                    <div className="char-grid char-grid--scroll">
-                      {matchChars(myChars).map((c) => renderCharCard(c, 'mine'))}
-                    </div>
-                  )}
-                  {myChars.length > 0 && matchChars(myChars).length === 0 && (
-                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      没有匹配「{charFilter}」的角色卡
-                    </p>
-                  )}
-                  {localChars.length > 0 && (
-                    <div className="mt-2">
-                      <div className="seat-pick-sub">
-                        本机角色 · 入座时会同步一份副本给房主，你自己这份不受影响
-                      </div>
-                      <div className="char-grid char-grid--scroll">
-                        {matchChars(localChars).map((c) => renderCharCard(c, 'local'))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="seat-pick">
-                  <div className="seat-pick-head">或让 AI 现场生成一张</div>
-                  {/* 提示词紧挨着它唯一服务的那个按钮 */}
-                  <textarea
-                    value={characterHint}
-                    onChange={(e) => setCharacterHint(e.target.value)}
-                    disabled={busy}
-                    rows={2}
-                    placeholder="想扮演什么？如 胆小的记者、退伍军医、通晓神秘学的教授（留空则由 AI 按模组自由发挥）"
-                    className="input mb-2 w-full resize-y text-sm"
-                  />
-                  <button onClick={generateAndClaim} disabled={busy}
-                    className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs">
-                    {busy ? '处理中…' : <><Sparkles size={12} /> 生成角色并入座</>}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <button onClick={toggleReady} className={mySeat.ready ? 'btn-secondary' : 'btn-primary'}>
-                  {mySeat.ready ? '取消准备' : '准备'}
-                </button>
-                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  你已入座为「{mySeat.character_name}」
-                </span>
-                <button
-                  onClick={() => setChangingChar(true)}
-                  className="btn-secondary !px-2 !py-0.5 text-xs"
-                  title="开局前可以换一张角色卡"
-                >
-                  更换角色
-                </button>
+                ))}
               </div>
             )}
-          </div>
-        </div>
+            <div className="space-y-1.5">
+              {seats.map((p) => {
+                const readyBadge = p.role === 'human' && p.character_id
+                  ? (p.ready ? '已准备' : '待准备')
+                  : (p.character_id ? '就绪' : '')
+                const showDot = p.role === 'human' && p.character_id
+                // 新身份模型中一号玩家不等于房主；房主可以移出除自己外的任意真人玩家。
+                const canKick = amHost && p.claimed && p.role === 'human' && !p.is_mine
+                const seatLabel = p.character_id
+                  ? p.character_name || '未知角色'
+                  : p.claimed
+                    ? (p.is_mine ? '已加入，等待选择角色' : '已预留 · 等待玩家选择角色')
+                    : '空席 · 等待真人加入'
+                return (
+                  <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
+                    <SeatIcon kind={seatKind(p)} size={15} />
+                    {showDot && (
+                      <span
+                        title={p.is_online ? '在线' : '离线'}
+                        style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                          background: p.is_online ? 'var(--color-success)' : 'var(--color-border)' }}
+                      />
+                    )}
+                    {/* AI 席由房主直接指派队友卡（真人席只能本人认领，走 /claim） */}
+                    {/* 用项目自己的 Select（Radix + 主题变量）。原生 <select> 的弹层由系统绘制，
+                        在这套羊皮纸配色里会突兀地弹出一片深蓝系统菜单，和站内其它下拉也不一致。 */}
+                    {p.role === 'ai' && amHost ? (
+                      <Select
+                        value={p.character_id || '__none'}
+                        onValueChange={(v) => void assignAiChar(p.seat_order, v === '__none' ? null : v)}
+                        disabled={busy}
+                      >
+                        <SelectTrigger className="flex-1" aria-label={`AI 队友 ${p.seat_order + 1} 的角色`}>
+                          <SelectValue placeholder="— 选择 AI 队友角色 —" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none">— 未指派 —</SelectItem>
+                          {p.character_id && !aiChars.some((c) => c.id === p.character_id) && (
+                            <SelectItem value={p.character_id}>{p.character_name || '当前角色'}</SelectItem>
+                          )}
+                          {aiChars.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                              {occupationOf(c) && (
+                                <span style={{ color: 'var(--color-text-secondary)' }}>（{occupationOf(c)}）</span>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                    {/* 下拉同样是盲选：房主看不到这张队友卡的技能与背景。给个直达的查看入口。 */}
+                    {p.role === 'ai' && amHost && p.character_id && (
+                      <button
+                        onClick={() => viewSeat(p.character_id)}
+                        className="btn-secondary !px-1.5 !py-1"
+                        title="查看这张队友卡"
+                        aria-label="查看队友卡"
+                      >
+                        <Eye size={13} />
+                      </button>
+                    )}
+                    {!(p.role === 'ai' && amHost) && (
+                      <button
+                        onClick={() => viewSeat(p.character_id)}
+                        disabled={!p.character_id}
+                        className="text-sm text-left flex-1 disabled:cursor-default"
+                        style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}
+                      >
+                        {seatLabel}
+                        {p.is_host ? ' · 房主' : ''}{p.is_mine ? '（我）' : ''}
+                      </button>
+                    )}
+                    {p.character_id && (
+                      <button
+                        onClick={() => viewSeat(p.character_id)}
+                        className="btn-secondary !px-1.5 !py-1"
+                        title="查看角色卡"
+                        aria-label="查看角色卡"
+                      >
+                        <Eye size={13} />
+                      </button>
+                    )}
+                    {p.character_id && p.role === 'human' && (myKpSeat || (room.kp_mode === 'human' && amHost)) && (
+                      <button
+                        onClick={() => void evaluateSeat(p.character_id)}
+                        disabled={evaluating}
+                        className="btn-secondary !px-1.5 !py-1"
+                        title="评估角色是否适合本模组"
+                        aria-label="评估角色适配性"
+                      >
+                        <ScanSearch size={13} />
+                      </button>
+                    )}
+                    {readyBadge && (
+                      <span className="text-xs inline-flex items-center gap-0.5" style={{ color: p.ready || p.role !== 'human' ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
+                        {(p.ready || p.role !== 'human') && <Check size={12} />}{readyBadge}
+                      </span>
+                    )}
+                    {canKick && (
+                      <button
+                        onClick={() => kick(p.seat_order)}
+                        disabled={busy}
+                        className="text-xs px-1.5 py-0.5 rounded"
+                        style={{ color: 'var(--color-danger)', border: '1px solid var(--color-danger)' }}
+                        title="移出该玩家（席位回到空席）"
+                      >移出</button>
+                    )}
+                    {/* 删座位：房主专用；不能删自己，也不能低于模组推荐下限（后端另有硬拦） */}
+                    {amHost && !p.is_mine && seats.length > Math.max(seatRange.min, 1) && (
+                      <button
+                        onClick={() => void removeSeat(p.seat_order)}
+                        disabled={busy}
+                        className="btn-secondary !px-1.5 !py-1"
+                        title="删除该席位"
+                        aria-label="删除该席位"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
 
-        {/* 大厅聊天 */}
-        <div className="card mb-3 flex flex-col" style={{ minHeight: 160 }}>
-          <h3 className="card-title">大厅聊天</h3>
-          <div ref={chatRef} className="flex-1 overflow-auto mb-2 space-y-1" style={{ maxHeight: 200 }}>
-            {chat.length === 0 ? (
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>还没有人发言。开局前可以在这里商量。</p>
-            ) : chat.map((m) => (
-              <div key={m.id} className="text-sm">
-                <span className="font-semibold" style={{ color: 'var(--color-text-accent)' }}>{m.name}：</span>
-                <span>{m.content}</span>
+            {/* 人数在房间里调，但按本模组的推荐区间约束——模组既然已经选定，人数就不该再是任意的 */}
+            {amHost && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => void addSeat('ai')}
+                  disabled={busy || seats.length >= seatRange.max}
+                  className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs disabled:opacity-40"
+                >
+                  <UserPlus size={12} /> 加 AI 队友
+                </button>
+                <button
+                  onClick={() => void addSeat('human')}
+                  disabled={busy || seats.length >= seatRange.max}
+                  className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs disabled:opacity-40"
+                  title="留一个空席，把房间码发给朋友来认领"
+                >
+                  <UserPlus size={12} /> 留真人空席
+                </button>
+                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  本模组推荐 {seatRange.min}–{seatRange.max} 人
+                  {seats.length >= seatRange.max ? ' · 已达上限' : ''}
+                  　AI 席选好角色即就绪；真人空席要本人加入后自己点准备
+                </span>
               </div>
-            ))}
-          </div>
-          <div className="h-4 text-xs italic mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {typingName ? `${typingName} 正在输入…` : ''}
-          </div>
-          <div className="flex gap-2">
-            <input
-              value={chatInput}
-              onChange={(e) => onChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                // 输入法合成中（中文选词/确认）的回车不当作发送
-                if (e.nativeEvent.isComposing) return
-                if (e.key === 'Enter') { e.preventDefault(); sendChat() }
-              }}
-              placeholder={myChatSeat ? '说点什么…' : '加入房间后可发言'}
-              disabled={!myChatSeat}
-              className="input flex-1"
-            />
-            <button onClick={sendChat} disabled={!myChatSeat || !chatInput.trim()} className="btn-primary">发送</button>
+            )}
+
+            {/* 我的操作区 */}
+            <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              {strictKpIdentity ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm" style={{ color: 'var(--color-text-accent)' }}>你已作为真人 KP 加入</span>
+                  {myKpSeat.is_host && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>房主权限独立于玩家席</span>}
+                </div>
+              ) : !mySeat || needsCharacter || changingChar ? (
+                <div>
+                  {changingChar && (
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                        选一张新的角色卡替换「{mySeat?.character_name}」：
+                      </span>
+                      <button
+                        onClick={() => setChangingChar(false)}
+                        className="btn-secondary !px-2 !py-0.5 text-xs"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  )}
+                  {openKpSeat && (
+                    <div className="mb-3 flex items-center gap-2">
+                      <button onClick={claimKp} disabled={busy} className="btn-primary !px-2.5 !py-1 text-sm">
+                        以真人 KP 身份加入
+                      </button>
+                      <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>以 KP 身份加入后，就不再占用玩家席位</span>
+                    </div>
+                  )}
+                  {/* 两件事，两块区域，不再挤在同一排：
+                      「挑一张现成的」和「现场造一张」是不同的操作，从前它们同在一个
+                      flex-wrap 里视觉同级；更别扭的是那个提示词输入框——它只服务「AI 生成」，
+                      却被放在最前面，中间还隔着一堆已有角色，读下来逻辑是断的。 */}
+                  <div className="seat-pick">
+                    <div className="seat-pick-head">选一张已有的角色卡</div>
+                    {myChars.length === 0 && localChars.length === 0 && (
+                      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        还没有可用的角色卡，用下面的方式现场生成一张。
+                      </p>
+                    )}
+                    {/* 卡多了不能一路铺下去：限高滚动 + 搜索。角色库上二十张是常态，
+                        全平铺会把席位、聊天、开始按钮全挤出屏幕。 */}
+                    {(myChars.length + localChars.length > 6) && (
+                      <input
+                        value={charFilter}
+                        onChange={(e) => setCharFilter(e.target.value)}
+                        placeholder={`在 ${myChars.length + localChars.length} 张卡里找：姓名或职业`}
+                        className="input mb-2 w-full !py-1 text-sm"
+                      />
+                    )}
+                    {matchChars(myChars).length > 0 && (
+                      <div className="char-grid char-grid--scroll">
+                        {matchChars(myChars).map((c) => renderCharCard(c, 'mine'))}
+                      </div>
+                    )}
+                    {myChars.length > 0 && matchChars(myChars).length === 0 && (
+                      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        没有匹配「{charFilter}」的角色卡
+                      </p>
+                    )}
+                    {localChars.length > 0 && (
+                      <div className="mt-2">
+                        <div className="seat-pick-sub">
+                          本机角色 · 入座时会同步一份副本给房主，你自己这份不受影响
+                        </div>
+                        <div className="char-grid char-grid--scroll">
+                          {matchChars(localChars).map((c) => renderCharCard(c, 'local'))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="seat-pick">
+                    <div className="seat-pick-head">或让 AI 现场生成一张</div>
+                    {/* 提示词紧挨着它唯一服务的那个按钮 */}
+                    <textarea
+                      value={characterHint}
+                      onChange={(e) => setCharacterHint(e.target.value)}
+                      disabled={busy}
+                      rows={2}
+                      placeholder="想扮演什么？如 胆小的记者、退伍军医、通晓神秘学的教授（留空则由 AI 按模组自由发挥）"
+                      className="input mb-2 w-full resize-y text-sm"
+                    />
+                    <button onClick={generateAndClaim} disabled={busy}
+                      className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs">
+                      {busy ? '处理中…' : <><Sparkles size={12} /> 生成角色并入座</>}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <button onClick={toggleReady} className={mySeat.ready ? 'btn-secondary' : 'btn-primary'}>
+                    {mySeat.ready ? '取消准备' : '准备'}
+                  </button>
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    你已入座为「{mySeat.character_name}」
+                  </span>
+                  <button
+                    onClick={() => setChangingChar(true)}
+                    className="btn-secondary !px-2 !py-0.5 text-xs"
+                    title="开局前可以换一张角色卡"
+                  >
+                    更换角色
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* 开局 */}
-        <div className="card mb-6">
+        {/* 开局条钉在底部：无论上面配到多少张角色卡，「开始游戏」永远在屏幕上 */}
+        <div className="card flex-shrink-0 mt-3">
           {amHost ? (
             <div className="flex items-center gap-3">
               <button onClick={startGame} disabled={busy || seatGaps.length > 0} className="btn-primary">
@@ -913,6 +885,16 @@ export function RoomLobbyPage() {
           </div>
         </aside>
       )}
+
+      {/* 聊天钉在最右侧、可收起。它高度取自这一行的 h-full，日志内部滚动，
+          所以「聊得再多也不会把大厅顶长」——这正是它从主栏搬出来的原因。 */}
+      <LobbyChatDock
+        lines={chat}
+        typingName={typingName}
+        canSpeak={!!myChatSeat}
+        onSend={(text) => void sendChat(text)}
+        onTyping={notifyTyping}
+      />
     </div>
   )
 }

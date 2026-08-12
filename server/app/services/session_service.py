@@ -787,10 +787,29 @@ def start_game(db: Session, session_id: str, token: str | None) -> GameSession:
     gaps = lobby_gaps(db, session_id)
     if gaps:
         raise ValueError("；".join(gaps))
+    purge_lobby_chat(db, session_id)
     session.status = "active"
     db.commit()
     db.refresh(session)
     return session
+
+
+def purge_lobby_chat(db: Session, session_id: str) -> int:
+    """清掉开局前的大厅聊天，返回删除条数。
+
+    大厅聊天是**开局前的场外协商**（「你带医生我带记者」「等我五分钟」），开局那一刻
+    就失去全部价值：它既不进 KP 上下文、也不参与向量召回（见 event_recall 的
+    `INDEXABLE_TYPES` 明确排除 ooc），却会一直躺在存档里、混进「卷宗」检索
+    （`SEARCHABLE_EVENT_TYPES` 含 ooc）。
+
+    只在 setup→active 这一次调用，所以删掉的必然是大厅那批；开局后游戏内的 OOC
+    照常入库、照常保留。
+    """
+    return (
+        db.query(EventLog)
+        .filter(EventLog.session_id == session_id, EventLog.event_type == "ooc")
+        .delete(synchronize_session=False)
+    )
 
 
 def resolve_actor(
