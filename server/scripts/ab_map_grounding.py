@@ -1,6 +1,10 @@
 """沙盘落位 A/B：文字猜位置 vs 照着模组自带的地图摆。
 
-    cd server && .venv/bin/python scripts/ab_map_grounding.py <模组标题或id> <该模组的PDF>
+    cd server && .venv/bin/python scripts/ab_map_grounding.py <模组标题或id> <PDF / 图片 / 文件夹...>
+
+素材可以混着给。真实模组的地图常常**不在 PDF 里**——鬼屋那本的城市地图就是配套图片包里的
+一张独立 PNG，PDF 内嵌的反而是用数字编号房间的楼层平面图（编号对不上任何场景名）。
+给文件夹时按体积降序取前几张候选，与从 PDF 抽图同一口径。
 
 现状（A）：``enrich_module_map`` 只看文字，让 LLM 凭常识猜每个场景的 (q,r)。
 实验（B）：先在 PDF 的图里找出本模组的地图，grounding 出每个地点的位置，换算成 axial 坐标。
@@ -26,6 +30,31 @@ from app.api.modules import _extract_pdf_images  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models.module import Module  # noqa: E402
 from app.services import hex_map, module_map_vision  # noqa: E402
+
+
+_IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+
+
+def _collect_images(sources: list[Path]) -> list[tuple[bytes, str, str]]:
+    """把 PDF / 散图 / 文件夹统一收成 ``[(字节, mime, 出处)]``，按体积降序取前几张候选。
+
+    地图未必在 PDF 里：鬼屋那本的城市地图是配套图片包里的独立 PNG，
+    PDF 内嵌的反而是用数字编号房间的楼层平面图。
+    """
+    out: list[tuple[bytes, str, str]] = []
+    for src in sources:
+        paths = sorted(src.rglob("*")) if src.is_dir() else [src]
+        for p in paths:
+            if p.suffix.lower() == ".pdf":
+                for i, (data, mime) in enumerate(
+                    _extract_pdf_images(p.read_bytes(), max_images=module_map_vision.MAX_CANDIDATES), 1,
+                ):
+                    out.append((data, mime, f"{p.name} 内嵌图 {i}"))
+            elif p.suffix.lower() in _IMG_EXT:
+                mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+                out.append((p.read_bytes(), mime, p.name))
+    out.sort(key=lambda t: len(t[0]), reverse=True)
+    return out[:module_map_vision.MAX_CANDIDATES]
 
 
 def _agreement(coords: dict[str, tuple[int, int]], truth: dict[str, tuple[float, float]]) -> tuple[int, int]:
@@ -65,7 +94,7 @@ def _ascii_map(coords: dict[str, tuple[int, int]], names: dict[str, str]) -> str
     return "\n".join(out)
 
 
-async def main(key: str, pdf: Path) -> int:
+async def main(key: str, sources: list[Path]) -> int:
     db = SessionLocal()
     module = (
         db.get(Module, key)
@@ -86,9 +115,12 @@ async def main(key: str, pdf: Path) -> int:
     print("=== A 现状：文字猜的落位 ===")
     print(_ascii_map(a_coords, names))
 
-    # B：实验——从 PDF 的图里找地图，grounding 出位置
-    images = _extract_pdf_images(pdf.read_bytes(), max_images=module_map_vision.MAX_CANDIDATES)
+    # B：实验——在给定素材里找地图，grounding 出位置
+    images = _collect_images(sources)
     print(f"\n候选图 {len(images)} 张（按体积降序，地图通常是最大的那几张之一）")
+    for i, (_, _, tag) in enumerate(images, 1):
+        print(f"  {i}. {tag}")
+    images = [(data, mime) for data, mime, _ in images]
     found = await module_map_vision.locate_scenes_on_map(images, scenes)
     if not found["proposals"]:
         print(
@@ -129,4 +161,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print(__doc__)
         raise SystemExit(2)
-    raise SystemExit(asyncio.run(main(sys.argv[1], Path(sys.argv[2]))))
+    raise SystemExit(asyncio.run(main(sys.argv[1], [Path(a) for a in sys.argv[2:]])))
