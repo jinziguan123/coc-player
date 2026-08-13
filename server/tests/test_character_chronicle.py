@@ -200,8 +200,14 @@ def test_归档整体失败不抛(db, monkeypatch):
     assert asyncio.run(character_chronicle.archive_session(db, gs.id)) == 0
 
 
-def test_ai_队友不归档(db, monkeypatch):
-    """经历是给真人玩家的卡攒的；AI 队友的卡是会话资产。"""
+def test_上过桌的角色一律归档(db, monkeypatch):
+    """AI 队友也攒经历。
+
+    从前这里跳过 is_player=False 的卡，理由是「经历是给真人玩家的卡攒的」。但那个
+    标志只是「建卡时点了哪个按钮」，与谁在演它无关（谁演看的是席位的 role）——同一张
+    卡这局由 AI 驱动、下局被真人认领，经历却因此断掉一截。它一样在场、一样掷骰、
+    一样可能死在里面，没有理由不留记录。
+    """
     gs, module, chars = _seed(db)
     ai = Character(name="AI 队友", rule_system="coc", is_player=False, module_id=module.id)
     db.add(ai)
@@ -209,8 +215,8 @@ def test_ai_队友不归档(db, monkeypatch):
     _patch_party(monkeypatch, [*chars, ai])
     _patch_llm(monkeypatch, _LLM())
 
-    assert asyncio.run(character_chronicle.archive_session(db, gs.id)) == 1
-    assert not db.get(Character, ai.id).experiences
+    assert asyncio.run(character_chronicle.archive_session(db, gs.id)) == 2
+    assert db.get(Character, ai.id).experiences
 
 
 # ── 参战副本回写原件 ────────────────────────────────────────────────────

@@ -95,10 +95,15 @@ def append_experience(db: Session, char: Character, entry: dict) -> None:
 
 
 async def archive_session(db: Session, session_id: str) -> int:
-    """给本局所有玩家角色归档经历，返回成功归档的份数。
+    """给本局**所有上过桌的角色**归档经历，返回成功归档的份数。
 
     在**收场白生成之后**调用：那时故事真的讲完了，滚动摘要也已收进最后一批事件，
     素材最全。全程 fail-open。
+
+    从前这里跳过 `is_player=False` 的卡，于是 AI 队友走完整个模组也不留一行记录。
+    可它和玩家角色一样在场、一样掷骰、一样可能死在里面——而且那个标志本就只是
+    「建卡时点了哪个按钮」，与谁在演它无关（谁演看的是席位的 role）。同一张卡这局
+    由 AI 驱动、下局被真人认领，经历却因此断掉一截，说不通。
     """
     try:
         game_session = db.get(GameSession, session_id)
@@ -129,7 +134,7 @@ async def archive_session(db: Session, session_id: str) -> int:
         llm = get_llm()
         archived = 0
         for char in chars:
-            if not char.is_player or already_archived(char, session_id):
+            if already_archived(char, session_id):
                 continue
             try:
                 raw = await llm.complete(

@@ -234,9 +234,13 @@ def create_character(
     token: str | None = Depends(player_token),
 ):
     try:
-        # 真人角色绑定到创建者 token；AI 角色（is_player=false）不绑定
+        # 谁建的卡就归谁，不再看 is_player。
+        #
+        # 从前「AI 队友卡不绑归属」，于是它对全网可见——那是为了让房主能在 AI 席下拉里
+        # 挑到它。可归属与「谁来演」是两回事：卡归建它的人，演它的是坐上去的那个席位。
+        # 按 is_player 决定绑不绑，等于让「建卡时点了哪个按钮」顺带决定这张卡的可见范围。
         payload = data.model_dump()
-        if data.is_player and token:
+        if token:
             payload["owner_token"] = token
         char = character_service.create_character(db, payload)
         return char
@@ -266,6 +270,9 @@ def list_characters(
     # 看不到自己以前建的角色。
     chars = [c for c in chars if not c.owner_token or c.owner_token == token]
     if is_player is not None:
+        # 保留这个查询参数只为不打断旧客户端；站内已经不再按它分池——一张卡是给真人演
+        # 还是给 AI 演，是**席位**的事，不是卡的属性（谁驱动看的是 SessionParticipant.role）。
+        # 按它分池的直接后果是：同一张卡因为建卡时点了哪个按钮，就永久进不了另一种席位。
         chars = [c for c in chars if c.is_player == is_player]
     if mine:
         # 「我的」= 我 token 名下的 + **无主的**（认领席位时用）。

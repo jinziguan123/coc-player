@@ -25,7 +25,7 @@ interface Props {
   moduleId: string
   /** 本模组的车卡建议：写提示词时正需要它，否则只能凭空猜这个本子要什么人。 */
   guidance?: CharacterGuidance | null
-  /** true=给「我自己」生成调查员（is_player，绑归属）；默认是给 AI 席生成队友。 */
+  /** true=这一次是给「我自己」生成。只影响文案：卡本身不分真人/AI，谁演它看席位。 */
   forPlayer?: boolean
   /** 关闭对话框（无论走的是哪条出口）。 */
   onClose: () => void
@@ -56,11 +56,11 @@ export function AiTeammateDialog({ open, moduleId, guidance, forPlayer = false, 
     setPhase('generating')
     try {
       const spec = await api.post<Record<string, unknown>>('/characters/ai-generate', {
-        module_id: moduleId, hint: hint.trim(), is_player: forPlayer,
+        module_id: moduleId, hint: hint.trim(),
       })
       const created = await api.post<TeammateDraft>('/characters', {
         name: spec.name, module_id: moduleId, rule_system: (spec.rule_system as string) || 'coc',
-        is_player: forPlayer, age: spec.age ?? 25, base_attributes: spec.base_attributes,
+        age: spec.age ?? 25, base_attributes: spec.base_attributes,
         skills: spec.skills, system_data: spec.system_data, backstory: spec.backstory ?? '',
       })
       setDraft(created)

@@ -91,13 +91,16 @@ def test_others_cards_stay_out_of_your_library():
 def test_unowned_cards_remain_visible_to_everyone():
     """无主的卡仍要可见。
 
-    AI 队友（is_player=false，不绑 owner_token）与 identity 机制之前的旧数据都没有
-    归属，一并过滤掉会让房主突然看不到自己以前建的角色。
-    """
-    _create("host-tok", "AI 队友", is_player=False)
+    identity 机制之前建的、以及任何没带 token 建出来的卡都没有归属，一并过滤掉会让
+    房主突然看不到自己以前建的角色。
 
-    assert "AI 队友" in _names("host-tok")
-    assert "AI 队友" in _names("stranger-tok")
+    注意「无主」现在只剩这一种来源：AI 队友卡曾经也不绑归属（按 is_player 决定绑不绑），
+    但归属与「谁来演」是两回事——现在谁建的卡就归谁，不看 is_player。
+    """
+    _create(None, "早年建的卡")
+
+    assert "早年建的卡" in _names("host-tok")
+    assert "早年建的卡" in _names("stranger-tok")
 
 
 def test_mine_filter_includes_unowned_player_cards():
@@ -108,8 +111,7 @@ def test_mine_filter_includes_unowned_player_cards():
     结果同一批卡「角色页看得见、进大厅却选不了」：用户建了一堆角色，待选却只有三个
     （实测库里 24 张卡有 12 张无主）。
 
-    AI 队友不该出现在认领候选里——但那该由 `is_player=true` 挡，不该靠归属挡：
-    大厅取真人席候选用的就是 `?available=true&is_player=true&mine=true`。
+    大厅取候选用的就是 `?available=true&mine=true`。
     """
     _create("host-tok", "我的卡")
     _create(None, "早期建的无主卡")
@@ -120,8 +122,12 @@ def test_mine_filter_includes_unowned_player_cards():
     assert "别人的卡" not in got            # 别人的仍然不给
 
 
-def test_mine_filter_still_excludes_ai_teammates_by_is_player():
-    """AI 队友靠 is_player 过滤挡在真人席候选之外，与归属无关。"""
+def test_is_player_查询参数仍按值过滤():
+    """`is_player` 作为查询参数仍然有效（留给旧客户端），但站内已不再用它分池。
+
+    分池的直接后果是：同一张卡因为建卡时点了哪个按钮，就永久进不了另一种席位。
+    谁来演一个角色，看的是席位的 role，不是卡上的标志。
+    """
     _create("host-tok", "我的卡")
     _create("host-tok", "AI 队友卡", is_player=False)
 
@@ -131,9 +137,9 @@ def test_mine_filter_still_excludes_ai_teammates_by_is_player():
 def test_真人认领队友卡时转正为玩家角色():
     """AI 队友卡被真人坐上去，就该变成一张玩家调查员卡。
 
-    is_player 决定的只是归档口径（结局后只给玩家角色写模组经历）与它出现在哪个
-    候选池里；谁驱动这个角色看的是席位的 role。不转正的话，玩家认领完一张队友卡，
-    下次在「我的角色」里再也找不到它——卡还是那张卡，只因为当初点的是哪个按钮。
+    站内已经不按 is_player 分池了，这条保的是**存量数据与旧客户端**：库里还有一批
+    is_player=false 的卡，而 `?is_player=true` 这个查询参数仍然有效。真人认领后把它
+    置真，这些卡才不会在按旧口径过滤的地方凭空消失。
     """
     from app.models import Character as Char
 

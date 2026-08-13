@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Copy, Sparkles, Check, ChevronDown, ChevronRight, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
+import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
 interface Character {
   id: string
@@ -94,13 +94,13 @@ export function RoomLobbyPage() {
   const [guidance, setGuidance] = useState<CharacterGuidance | null>(null)
   /** 本模组推荐的玩家人数区间；模组未标注时 parsePlayerRange 给 1–6 的默认档。 */
   const [seatRange, setSeatRange] = useState<{ min: number; max: number }>({ min: 1, max: 6 })
+  /** 房间里可选的全部角色卡（我名下的 + 无主的，且没被别的会话占用）。
+      不再按 is_player 分成「调查员池 / 队友池」——一张卡给真人演还是给 AI 演，
+      是**席位**的事，不是卡的属性。 */
   const [myChars, setMyChars] = useState<Character[]>([])
-  const [aiChars, setAiChars] = useState<Character[]>([])
   const [localChars, setLocalChars] = useState<Character[]>([])
   /** 角色库搜索词：卡多了得能找，而不是滚半天。只在超过 6 张时才露出输入框。 */
   const [charFilter, setCharFilter] = useState('')
-  /** 是否在真人席的候选里摊开 AI 队友卡池（默认折叠，见那一段的注释）。 */
-  const [showAllyPool, setShowAllyPool] = useState(false)
   const [chat, setChat] = useState<ChatLine[]>([])
   const [busy, setBusy] = useState(false)
   /** 「生成 AI 队友」对话框是为哪一席打开的（null=没开）。 */
@@ -175,16 +175,11 @@ export function RoomLobbyPage() {
    */
   const refreshCharPools = useCallback(async () => {
     try {
-      setMyChars(await api.get<Character[]>('/characters?available=true&is_player=true&mine=true'))
+      setMyChars(await api.get<Character[]>('/characters?available=true&mine=true'))
     } catch { /* 拉不到就维持现状，不影响房间其余功能 */ }
-    // AI 席用的队友卡池（is_player=false）。与真人席的角色池是两批，别混用：
-    // 真人挑的是自己的调查员，AI 席挑的是队友。
-    try {
-      setAiChars(await api.get<Character[]>('/characters?available=true&is_player=false'))
-    } catch { /* 同上 */ }
     if (getServerUrl()) {
       try {
-        setLocalChars(await localApi.get<Character[]>('/characters?available=true&is_player=true&mine=true'))
+        setLocalChars(await localApi.get<Character[]>('/characters?available=true&mine=true'))
       } catch { /* 本机后端不可用时仍可使用房主主机上的角色 */ }
     }
   }, [])
@@ -302,7 +297,6 @@ export function RoomLobbyPage() {
         // 把结果写回自己库里的原件，见 features/characters/syncBack.ts。
         origin_character_id: character.id,
         rule_system: character.rule_system || 'coc',
-        is_player: true,
         base_attributes: character.base_attributes,
         skills: character.skills,
         system_data: character.system_data,
@@ -605,10 +599,10 @@ export function RoomLobbyPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none">— 未指派 —</SelectItem>
-                          {p.character_id && !aiChars.some((c) => c.id === p.character_id) && (
+                          {p.character_id && !myChars.some((c) => c.id === p.character_id) && (
                             <SelectItem value={p.character_id}>{p.character_name || '当前角色'}</SelectItem>
                           )}
-                          {aiChars.map((c) => (
+                          {myChars.map((c) => (
                             <SelectItem key={c.id} value={c.id}>
                               {c.name}
                               {occupationOf(c) && (
@@ -802,26 +796,6 @@ export function RoomLobbyPage() {
                         <div className="char-grid char-grid--scroll">
                           {matchChars(localChars).map((c) => renderCharCard(c, 'local'))}
                         </div>
-                      </div>
-                    )}
-                    {/* 队友卡也能自己用。
-                        「给 AI 用」还是「自己演」是**席位**的事，不是卡的属性——一张按队友
-                        生成的卡，除了当初点的是哪个按钮，和调查员卡没有任何区别。默认折叠是
-                        因为常见情况下它只是噪音：库里的队友卡对所有人可见，摊开会淹掉自己的卡。 */}
-                    {aiChars.length > 0 && (
-                      <div className="mt-2">
-                        <button
-                          onClick={() => setShowAllyPool((v) => !v)}
-                          className="seat-pick-sub inline-flex items-center gap-1 hover:opacity-80"
-                        >
-                          {showAllyPool ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          也看看 AI 队友卡（{aiChars.length}）· 选中即成为你的调查员
-                        </button>
-                        {showAllyPool && (
-                          <div className="char-grid char-grid--scroll mt-1">
-                            {matchChars(aiChars).map((c) => renderCharCard(c, 'mine'))}
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>

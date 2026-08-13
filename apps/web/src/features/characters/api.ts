@@ -33,17 +33,16 @@ export interface CharacterExperience {
 export interface GenerateCharacterRequest {
   module_id: string
   hint: string
-  is_player?: boolean
 }
 
 export function listCharacters() {
   return api.get<Character[]>('/characters')
 }
 
-export function listAvailableCharacters(isPlayer: boolean) {
-  return api.get<Character[]>(
-    `/characters?available=true&is_player=${isPlayer ? 'true' : 'false'}`,
-  )
+/** 当前可用的角色卡（没被别的会话占用）。不再按 is_player 分池——
+    一张卡给真人演还是给 AI 演，是**席位**的事，不是卡的属性。 */
+export function listAvailableCharacters() {
+  return api.get<Character[]>('/characters?available=true')
 }
 
 export function generateCharacter<T = Record<string, unknown>>(

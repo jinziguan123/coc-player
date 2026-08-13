@@ -46,8 +46,8 @@ export function useGameSetup() {
   const { createSession, fetchSessions, sessions } = useSessionStore()
   const { modules, fetchModules } = useModuleStore()
   const navigate = useNavigate()
+  /** 可选角色卡（一份，不分调查员/队友）。 */
   const [heroes, setHeroes] = useState<SetupCharacter[]>([])
-  const [allies, setAllies] = useState<SetupCharacter[]>([])
   const [moduleId, setModuleId] = useState('')
   const [kpMode, setKpModeState] = useState<'ai' | 'human'>('ai')
   const [seats, setSeats] = useState<SetupSeat[]>([])
@@ -84,12 +84,7 @@ export function useGameSetup() {
   const usedIds = seats.map((seat) => seat.charId).filter(Boolean)
 
   const refreshCharacters = useCallback(async () => {
-    const [availableHeroes, availableAllies] = await Promise.all([
-      listAvailableCharacters(true),
-      listAvailableCharacters(false),
-    ])
-    setHeroes(availableHeroes)
-    setAllies(availableAllies)
+    setHeroes(await listAvailableCharacters())
   }, [])
 
   useEffect(() => {
@@ -133,36 +128,31 @@ export function useGameSetup() {
   }
 
   const seatOptions = (index: number): SetupCharacter[] => {
-    const pool = seats[index].role === 'human' ? heroes : allies
-    return pool.filter((character) => (
+    return heroes.filter((character) => (
       character.id === seats[index].charId || !usedIds.includes(character.id)
     ))
   }
 
   const generateForSeat = async (index: number) => {
     if (!moduleId || generatingSeat !== null) return
-    const isPlayer = seats[index].role === 'human'
     setGeneratingSeat(index)
     setError('')
     try {
       const draft = await generateCharacter<Record<string, unknown>>({
         module_id: moduleId,
         hint: (seatHints[index] || '').trim(),
-        is_player: isPlayer,
       })
       const created = await createCharacter<SetupCharacter>({
         name: draft.name,
         module_id: moduleId,
         rule_system: (draft.rule_system as string) || 'coc',
-        is_player: isPlayer,
         age: draft.age ?? 25,
         base_attributes: draft.base_attributes,
         skills: draft.skills,
         system_data: draft.system_data,
         backstory: draft.backstory ?? '',
       })
-      if (isPlayer) setHeroes((current) => [created, ...current])
-      else setAllies((current) => [created, ...current])
+      setHeroes((current) => [created, ...current])
       assignSeat(index, created.id)
       setSeatHints((current) => ({ ...current, [index]: '' }))
       toast.success(
