@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
+import { Copy, Sparkles, Check, Eye, Loader2, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
 interface Character {
   id: string
@@ -97,6 +97,8 @@ export function RoomLobbyPage() {
   const [charFilter, setCharFilter] = useState('')
   const [chat, setChat] = useState<ChatLine[]>([])
   const [busy, setBusy] = useState(false)
+  /** 正在为哪一席现场生成队友卡（null=没有）。生成要等一分多钟，转圈得标在那一席上。 */
+  const [genSeat, setGenSeat] = useState<number | null>(null)
   const [panelChar, setPanelChar] = useState<Character | null>(null)
   /**
    * 正在预览、尚未入座的候选角色。
@@ -155,6 +157,30 @@ export function RoomLobbyPage() {
     setRoom(r)
   }, [sessionId, navigate])
 
+  /**
+   * 重新拉取可选角色池。
+   *
+   * `?available=true` 是**服务端**按「当前是否已被某个会话占用」算的，所以它一坐一退都会变。
+   * 从前这三个池子只在 init 里拉一次：把林知微指派给 2 号 AI 席、刷新页面、再删掉那个席位，
+   * 她已经空出来了，可 3/4 号席的下拉里没有她——因为那份列表是刷新那一刻拉的，那时她还占着座。
+   * 再刷一次页面又冒出来，正是「只在挂载时拉一次」的典型症状。
+   */
+  const refreshCharPools = useCallback(async () => {
+    try {
+      setMyChars(await api.get<Character[]>('/characters?available=true&is_player=true&mine=true'))
+    } catch { /* 拉不到就维持现状，不影响房间其余功能 */ }
+    // AI 席用的队友卡池（is_player=false）。与真人席的角色池是两批，别混用：
+    // 真人挑的是自己的调查员，AI 席挑的是队友。
+    try {
+      setAiChars(await api.get<Character[]>('/characters?available=true&is_player=false'))
+    } catch { /* 同上 */ }
+    if (getServerUrl()) {
+      try {
+        setLocalChars(await localApi.get<Character[]>('/characters?available=true&is_player=true&mine=true'))
+      } catch { /* 本机后端不可用时仍可使用房主主机上的角色 */ }
+    }
+  }, [])
+
   useEffect(() => {
     if (!sessionId) return
     const ac = new AbortController()
@@ -162,7 +188,13 @@ export function RoomLobbyPage() {
 
     const handleChunk = (c: Chunk) => {
       if (c.type === 'started') { navigate(`/game/${sessionId}`, { replace: true }); return }
-      if (c.type === 'lobby' || c.type === 'seat' || c.type === 'presence') { void refreshRoom(); return }
+      if (c.type === 'lobby' || c.type === 'seat' || c.type === 'presence') {
+        void refreshRoom()
+        // 席位一动，「谁还空着」就变了——别人入座/退座同样要反映到我这边的候选里。
+        // presence 只是在线心跳，不影响占用，不必跟着刷。
+        if (c.type !== 'presence') void refreshCharPools()
+        return
+      }
       if (c.type === 'typing') {
         if (c.actor_name && c.actor_name !== myNameRef.current) {
           setTypingName(c.actor_name)
@@ -199,25 +231,8 @@ export function RoomLobbyPage() {
       setModuleDesc(mod?.description || '')
       // 座位数按本模组的推荐人数约束——模组既然已经选定了，人数就不该再是任意的。
       setSeatRange(parsePlayerRange(mod?.world_setting))
-      const mine = await api.get<Character[]>('/characters?available=true&is_player=true&mine=true')
+      await refreshCharPools()
       if (cancelled) return
-      setMyChars(mine)
-      // AI 席用的队友卡池（is_player=false）。与真人席的角色池是两批，别混用：
-      // 真人挑的是自己的调查员，AI 席挑的是队友。
-      try {
-        const allies = await api.get<Character[]>('/characters?available=true&is_player=false')
-        if (!cancelled) setAiChars(allies)
-      } catch {
-        // 拉不到就只是下拉为空，不影响房间其余功能
-      }
-      if (getServerUrl()) {
-        try {
-          const local = await localApi.get<Character[]>('/characters?available=true&is_player=true&mine=true')
-          if (!cancelled) setLocalChars(local)
-        } catch {
-          // 本机后端不可用时仍可使用房主主机上的角色。
-        }
-      }
       const ev = await api.get<{ events: { id: string; event_type: string; actor_name: string; content: string }[] }>(`/sessions/${sessionId}/events`)
       if (cancelled) return
       setChat(ev.events
@@ -238,7 +253,7 @@ export function RoomLobbyPage() {
     }
     init().catch(() => navigate('/game', { replace: true }))
     return () => { cancelled = true; ac.abort() }
-  }, [sessionId, navigate, refreshRoom])
+  }, [sessionId, navigate, refreshRoom, refreshCharPools])
 
   const claimWithChar = async (charId: string, notify = true): Promise<string | null> => {
     if (!room) return '房间状态尚未加载'
@@ -330,6 +345,34 @@ export function RoomLobbyPage() {
     } finally { setBusy(false) }
   }
 
+  /** AI 席旁的「快速生成」：按本模组现造一张队友卡并直接坐下，免得为了一张卡跳去角色页。 */
+  const generateAiTeammate = async (seatOrder: number) => {
+    if (!room) return
+    setBusy(true)
+    // 实测这一步要等一分多钟（一次完整的建卡生成）。只把按钮置灰的话，这段时间里
+    // 界面看不出任何事情正在发生——转圈标在发起的那一席上，等的是哪一格一目了然。
+    setGenSeat(seatOrder)
+    try {
+      const draft = await api.post<Record<string, unknown>>('/characters/ai-generate', {
+        module_id: room.module_id,
+        hint: '',
+        is_player: false,
+      })
+      const created = await api.post<Character>('/characters', {
+        name: draft.name, module_id: room.module_id, rule_system: (draft.rule_system as string) || 'coc',
+        is_player: false, age: draft.age ?? 25, base_attributes: draft.base_attributes,
+        skills: draft.skills, system_data: draft.system_data, backstory: draft.backstory ?? '',
+      })
+      setRoom(await api.post<RoomData>(
+        `/sessions/${room.id}/seats/${seatOrder}/character`, { character_id: created.id },
+      ))
+      await refreshCharPools()
+      toast.success(`已生成队友「${created.name}」并入座`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'AI 生成队友失败')
+    } finally { setBusy(false); setGenSeat(null) }
+  }
+
   const toggleReady = async () => {
     if (!room || !mySeat?.character_id) return
     try {
@@ -376,6 +419,7 @@ export function RoomLobbyPage() {
     try {
       const updated = await api.post<RoomData>(`/sessions/${room.id}/kick/${seatOrder}`)
       setRoom(updated)
+      await refreshCharPools()
       toast.success('玩家已移出房间')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '移出失败')
@@ -400,6 +444,8 @@ export function RoomLobbyPage() {
     setBusy(true)
     try {
       setRoom(await api.delete<RoomData>(`/sessions/${room.id}/seats/${seatOrder}`))
+      // 删座位会把那张卡放回候选池——不刷新的话它在其余席位的下拉里就此消失
+      await refreshCharPools()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '删除席位失败')
     } finally { setBusy(false) }
@@ -412,6 +458,8 @@ export function RoomLobbyPage() {
       setRoom(await api.post<RoomData>(
         `/sessions/${room.id}/seats/${seatOrder}/character`, { character_id: characterId },
       ))
+      // 指派占用一张、清空释放一张，两个方向都要让其余席位的下拉跟上
+      await refreshCharPools()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '指派角色失败')
     } finally { setBusy(false) }
@@ -599,6 +647,21 @@ export function RoomLobbyPage() {
                         </SelectContent>
                       </Select>
                     ) : null}
+                    {/* 下拉里没有合适的？就地造一张。否则为了一张队友卡要跳去角色页、
+                        建完再回来——而这一步本来就发生在「配座位」的当口。 */}
+                    {p.role === 'ai' && amHost && (
+                      <button
+                        onClick={() => void generateAiTeammate(p.seat_order)}
+                        disabled={busy}
+                        className="btn-secondary !px-1.5 !py-1 disabled:opacity-40"
+                        title="按本模组现场生成一张队友卡并指派到这个席位"
+                        aria-label="快速生成 AI 队友"
+                      >
+                        {genSeat === p.seat_order
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : <Sparkles size={13} />}
+                      </button>
+                    )}
                     {!(p.role === 'ai' && amHost) && (
                       <button
                         onClick={() => viewSeat(p.character_id)}
