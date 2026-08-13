@@ -150,6 +150,99 @@ def test_没有模组时不遮任何东西(db_factory):
     assert mask(MONSTER) == MONSTER
 
 
+def _seed_haunting(db):
+    """《鬼屋》的真实数据形状：委托人、同姓的一家三口、以宅子命名的巫师。"""
+    module, hero, session = _seed(db)
+    module.npcs = [
+        {"id": "n_knott", "name": "史蒂芬·诺特", "aliases": ["诺特先生", "诺特"],
+         "unknown_as": "陌生男性"},
+        {"id": "n_corbitt", "name": "沃尔特·科比特", "aliases": [], "unknown_as": "不明存在"},
+        {"id": "n_teresa", "name": "特蕾莎·马卡里奥", "aliases": ["马卡里奥"],
+         "unknown_as": "不明存在"},
+        {"id": "n_vittorio", "name": "维托里奥·马卡里奥", "aliases": ["马卡里奥"],
+         "unknown_as": "陌生男性"},
+    ]
+    module.world_setting = {
+        "player_brief": "1920年代，玩家受房东诺特先生委托，调查波士顿市中心科比特老房子。",
+    }
+    db.commit()
+    return module, hero, session
+
+
+def test_叙事里叫的是别名_也算认得这个人(db_factory):
+    """截图里的那一幕：叙事写了 10 次「诺特先生」，气泡仍是「陌生男性」——
+    档案存的是全名「史蒂芬·诺特」，而场上没人这么叫他。"""
+    db = db_factory()
+    module, _hero, session = _seed_haunting(db)
+    _narrate(db, session.id, "诺特先生本已走到门边，听莫妮卡这么一问，脚步顿住了。")
+    assert ni.build_masker(db, session.id, module)("史蒂芬·诺特") == "史蒂芬·诺特"
+
+
+def test_委托人开场即真名_房子的名字不解锁住在里面的东西(db_factory):
+    """同一句 player_brief 里「诺特先生」与「科比特老房子」并存：
+    前者是人，后者是建筑——只有前者算认得人。"""
+    db = db_factory()
+    module, _hero, session = _seed_haunting(db)
+    mask = ni.build_masker(db, session.id, module)
+    assert mask("史蒂芬·诺特") == "史蒂芬·诺特"        # 委托人，开场就认识
+    assert mask("沃尔特·科比特") == "不明存在"          # 房子叫科比特老宅，人还没露面
+
+
+def test_同姓一家人共用的别名谁也解锁不了(db_factory):
+    """「前租户马卡里奥一家搬走后」——这句话此刻指不到具体某个人。"""
+    db = db_factory()
+    module, _hero, session = _seed_haunting(db)
+    _narrate(db, session.id, "前租户马卡里奥一家搬走后，房子就空到现在。")
+    mask = ni.build_masker(db, session.id, module)
+    assert mask("特蕾莎·马卡里奥") == "不明存在"
+    assert mask("维托里奥·马卡里奥") == "陌生男性"
+    # 但点名道姓写全名时照常认得
+    _narrate(db, session.id, "疗养院的登记簿上写着维托里奥·马卡里奥。")
+    assert ni.build_masker(db, session.id, module)("维托里奥·马卡里奥") == "维托里奥·马卡里奥"
+
+
+def test_只有一个人列了共用的姓_照样不算数(db_factory):
+    """回归：导入期的裁决不保证在一家人身上前后一致——实测「马卡里奥」在两位身上被否决、
+    第三位漏了。只查「多人都列了」的话，漏网那个反而成了独占别名，
+    一句「马卡里奥一家」就把活尸小女孩的身份解锁了。"""
+    db = db_factory()
+    module, _hero, session = _seed_haunting(db)
+    for npc in module.npcs:
+        if npc["id"] != "n_teresa":
+            npc["aliases"] = [a for a in npc["aliases"] if a != "马卡里奥"]
+    module.npcs = list(module.npcs)      # JSON 列整体重赋值才会脏
+    db.commit()
+    _narrate(db, session.id, "前租户马卡里奥一家搬走后，房子就空到现在。")
+    assert ni.build_masker(db, session.id, module)("特蕾莎·马卡里奥") == "不明存在"
+
+
+def test_别名命中也显示档案全名(db_factory):
+    """免得同一个人一会儿「诺特先生」一会儿「史蒂芬·诺特」地跳。"""
+    db = db_factory()
+    module, _hero, session = _seed_haunting(db)
+    _narrate(db, session.id, "诺特点点头。")
+    assert ni.build_masker(db, session.id, module)("史蒂芬·诺特") == "史蒂芬·诺特"
+
+
+def test_单字别名不收(db_factory):
+    """「金·戴伯伦」的「金」在中文里随便一句话都撞得上，收了等于不遮。"""
+    db = db_factory()
+    module, _hero, session = _seed(db)
+    module.npcs = [{"id": "n_kim", "name": "金·戴伯伦", "aliases": ["金", "戴伯伦"],
+                    "unknown_as": "陌生女性"}]
+    db.commit()
+    _narrate(db, session.id, "窗外金色的夕照落在长桌上。")
+    assert ni.build_masker(db, session.id, module)("金·戴伯伦") == "陌生女性"
+
+
+def test_call_names_收口():
+    npc = {"name": "田间潜随者（莎布·尼古拉丝化身）", "aliases": ["潜随者", "它", "", "潜随者"]}
+    # 括号里的神话身份不进称呼表（那是「知道它是什么」，不是「怎么称呼它」）；
+    # 单字与重复项丢弃
+    assert ni.call_names(npc) == ["田间潜随者", "潜随者"]
+    assert ni.call_names({"name": "香澄澪"}) == ["香澄澪"]
+
+
 def test_模组说玩家本就认识的人_开场就报真名(db_factory):
     """《鬼屋》的调查员是诺特请来的，开场白里没理由管他叫「陌生男性」。
 

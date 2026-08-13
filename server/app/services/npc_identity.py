@@ -141,6 +141,63 @@ def split_name(name: str) -> tuple[str, str]:
     return text[: m.start()].strip(), m.group(1).strip()
 
 
+#: 一个字的别名不收。中文里单字（「金·戴伯伦」的「金」）随便一句话都撞得上，
+#: 收进来等于不遮。这不是在推断语义，是数据卫生。
+_MIN_ALIAS_LEN = 2
+
+
+def call_names(npc: dict) -> list[str]:
+    """场上可能怎么称呼这个 NPC：档案全名（去掉神话身份那层）+ 模组给的别名。
+
+    **为什么需要别名。** 档案里存的是全名「史蒂芬·诺特」，而 KP 和玩家在场上永远说
+    「诺特先生」——中文音译名是「名·姓」，日常称呼用「姓+敬称」。只拿全名做子串匹配，
+    「诺特先生」里并不含「史蒂芬·诺特」，于是这位委托人整局都是「陌生男性」。
+
+    别名由模组导入时生成（那时 LLM 看得到整本模组，分得清「科比特老宅」和沃尔特本人），
+    不在运行时猜——运行时无论怎么拆姓名都分不清这两者。
+    """
+    base, _epithet = split_name(str(npc.get("name") or "").strip())
+    names = [base] if base else []
+    for raw in npc.get("aliases") or []:
+        alias = str(raw or "").strip()
+        if len(alias) >= _MIN_ALIAS_LEN and alias not in names:
+            names.append(alias)
+    return names
+
+
+def _disambiguate(npcs: dict[str, dict]) -> dict[str, tuple[str, ...]]:
+    """算出每个 NPC **专属于他**的那些称呼：指认不到唯一一个人的别名一律不作数。
+
+    马卡里奥一家三口共姓，「前租户马卡里奥一家搬走后」这句话谁也不该解锁——此刻这个
+    称呼指不到具体某个人。这不是又一条启发式，是逻辑上的必然：歧义的称呼不能当识别依据。
+
+    两种歧义都要挡，缺一不可：
+
+    1. **多个 NPC 都列了这个别名**（三口人的 aliases 里都有「马卡里奥」）。
+    2. **它是另一个 NPC 全名的一部分**（只有特蕾莎列了「马卡里奥」，另两位没列）。
+       导入期的裁决不保证在一家人身上前后一致，实测就出现过这种一漏两中；只查第 1 条的话
+       漏网的那个反而成了「独占」别名，一句「马卡里奥一家」就把活尸小女孩的身份解锁了。
+
+    档案全名无条件保留（它是这个 NPC 的规范名，KP 写全名就是点名道姓），只有别名参与消歧。
+    """
+    owners: dict[str, set[str]] = {}
+    for name, npc in npcs.items():
+        for call in call_names(npc):
+            owners.setdefault(call, set()).add(name)
+    bases = {name: split_name(name)[0] for name in npcs}
+    out: dict[str, tuple[str, ...]] = {}
+    for name, npc in npcs.items():
+        base = bases[name]
+        others = [b for other, b in bases.items() if other != name]
+        out[name] = tuple(
+            c for c in call_names(npc)
+            if c == base or (
+                len(owners.get(c, ())) == 1 and not any(c in b for b in others)
+            )
+        )
+    return out
+
+
 class NameMasker:
     """按「这局玩家看过的叙事」把 NPC 名换成对外称呼。
 
@@ -155,13 +212,16 @@ class NameMasker:
             name = str(npc.get("name") or "").strip()
             if name:
                 self._npcs[name] = npc
+        self._calls = _disambiguate(self._npcs)
 
     def _resolve(self, name: str, npc: dict, prose: str) -> str:
         base, epithet = split_name(name)
         # 知道了神话身份，再遮外号没有意义——全名照给
         if epithet and epithet in prose:
             return name
-        if base and base in prose:
+        # 任一称呼在叙事里出现过，就算玩家认得这个人了。显示仍用档案里的 base，
+        # 免得同一个人一会儿「诺特先生」一会儿「史蒂芬·诺特」地跳。
+        if base and any(c in prose for c in self._calls.get(name, (base,))):
             return base
         return unknown_label(npc)
 
