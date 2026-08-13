@@ -11,12 +11,15 @@ from app.models.module import Module
 from app.schemas.character import (
     ApplyAgeRequest,
     ApplyAgeResponse,
+    BaseSkillsRequest,
+    BaseSkillsResponse,
     CharacterCreate,
     CharacterRead,
     CharacterUpdate,
     RollAttributesResponse,
 )
 from app.rules.coc.character import apply_age_modifiers, roll_luck
+from app.rules.registry import get_engine
 from app.rules.coc.equipment import get_available_equipment
 from app.rules.coc.occupations import (
     COC_OCCUPATIONS,
@@ -225,6 +228,20 @@ def apply_age(data: ApplyAgeRequest, rule_system: str = "coc"):
     return ApplyAgeResponse(
         base_attributes=attrs, notes=notes, luck=luck, luck_rolls=luck_rolls,
     )
+
+
+@router.post("/rules/{rule_system}/base-skills", response_model=BaseSkillsResponse)
+def base_skills(data: BaseSkillsRequest, rule_system: str = "coc"):
+    """这组属性下、未加任何点时的技能起始值（母语=EDU、闪避=DEX//2 已填好）。
+
+    建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避
+    是占位的 0，界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的
+    `max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 RuleEngine 里实现一次。
+    """
+    try:
+        return BaseSkillsResponse(skills=get_engine(rule_system).base_skills(data.base_attributes))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/characters", response_model=CharacterRead)

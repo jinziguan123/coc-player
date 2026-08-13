@@ -18,6 +18,7 @@ from app.ai.llm_factory import get_llm
 from app.models.module import Module
 from app.rules.coc.character import (
     COC_DEFAULT_SKILLS,
+    apply_attr_derived_skills,
     build_default_skills,
     compute_derived,
     derive_assets,
@@ -34,7 +35,11 @@ from app.rules.coc.occupations import (
 logger = logging.getLogger(__name__)
 
 # 建卡时不可分配的技能：克苏鲁神话恒为 0；母语 = EDU，由引擎设置
-NON_ALLOCATABLE = {"克苏鲁神话", "母语"}
+#: 真正不可加点的只有克苏鲁神话。母语曾经也在这里，但它的特殊之处是**基础值等于 EDU**，
+#: 不是「不能加」——本仓自己的职业表里，母语就列在会计/作家/律师/记者等职业的本职技能里，
+#: 本职技能表的含义正是「这些可以花本职点加」。锁掉它等于和自己的数据打架，也和手动
+#: 建卡那条路（只锁克苏鲁神话）对不上。
+NON_ALLOCATABLE = {"克苏鲁神话"}
 
 BACKSTORY_LABELS = {
     "personalDescription": "个人描述",
@@ -154,8 +159,6 @@ def _parse_json(raw: Any) -> dict | None:
 # --------------------------------------------------------------------------- #
 def _assemble(module: Module, attrs: dict[str, int], ai: dict) -> dict[str, Any]:
     age = _clamp_int(ai.get("age"), 15, 89, 25)
-    dex = attrs.get("DEX", 50)
-    edu = attrs.get("EDU", 50)
 
     occ = get_occupation(str(ai.get("occupation", "")))
     if occ is None:
@@ -167,8 +170,7 @@ def _assemble(module: Module, attrs: dict[str, int], ai: dict) -> dict[str, Any]
     int_points = calc_interest_points(attrs)
     occ_points_remaining = max(0, occ_points - cr)  # 信用评级占用本职点
 
-    base = build_default_skills(attrs)
-    base["闪避"] = dex // 2          # 规避 build_default_skills 的 DEX 取值 bug
+    base = build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
     base["信用评级"] = 0
 
     # 仅保留名单内、可分配的技能
@@ -206,11 +208,13 @@ def _assemble(module: Module, attrs: dict[str, int], ai: dict) -> dict[str, Any]
     for k, d in {**occ_delta, **int_delta}.items():
         final[k] = base.get(k, 0) + d
     final["信用评级"] = cr
-    final["母语"] = edu
     for k in list(final):
         if k != "克苏鲁神话":
             final[k] = min(90, max(0, final[k]))
     final["克苏鲁神话"] = 0
+    # 90 是「建卡时加点不得超过」的上限，不该去砍属性派生的**基础值**：EDU 上限 99，
+    # 一个 EDU=95 的角色母语就该是 95。收口之后重新兜一次底线，与手动建卡同一个函数。
+    apply_attr_derived_skills(final, attrs)
 
     return _build_result(attrs, age, occ_name, cr, final, ai)
 
@@ -276,15 +280,11 @@ def _fill_assets(system_data: dict[str, Any], cr: int) -> None:
 # --------------------------------------------------------------------------- #
 def _rule_only_fallback(module: Module, attrs: dict[str, int]) -> dict[str, Any]:
     occ = _default_occupation(module)
-    dex = attrs.get("DEX", 50)
-    edu = attrs.get("EDU", 50)
     cr = occ.credit_min
     occ_points_remaining = max(0, calc_occupation_points(occ.name, attrs) - cr)
 
-    base = build_default_skills(attrs)
-    base["闪避"] = dex // 2
+    base = build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
     base["信用评级"] = cr
-    base["母语"] = edu
 
     occ_skills = [s for s in occ.skills if s in base and s not in NON_ALLOCATABLE]
     if occ_skills and occ_points_remaining > 0:
@@ -296,6 +296,7 @@ def _rule_only_fallback(module: Module, attrs: dict[str, int]) -> dict[str, Any]
         if k != "克苏鲁神话":
             base[k] = min(90, max(0, base[k]))
     base["克苏鲁神话"] = 0
+    apply_attr_derived_skills(base, attrs)   # 同 _assemble：90 不该砍属性派生的基础值
 
     system_data = compute_derived(attrs, 25)
     system_data["occupation"] = occ.name

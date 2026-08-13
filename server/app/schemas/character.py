@@ -66,6 +66,16 @@ class ApplyAgeRequest(BaseModel):
     age: int = 25
 
 
+class BaseSkillsRequest(BaseModel):
+    base_attributes: dict[str, int]
+
+
+class BaseSkillsResponse(BaseModel):
+    """这组属性下、未加任何点时的技能起始值（含属性派生项）。"""
+
+    skills: dict[str, int]
+
+
 class AgeNote(BaseModel):
     """一条年龄修正明细，供界面把「属性为什么变了」摊开给玩家看。"""
 

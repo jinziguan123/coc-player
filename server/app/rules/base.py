@@ -35,6 +35,18 @@ class RuleEngine(ABC):
         """返回角色卡字段定义 (JSON Schema 格式)"""
         ...
 
+    def base_skills(self, attrs: dict[str, int]) -> dict[str, int]:
+        """这组属性下、**未加任何点**时的技能起始值。
+
+        与 `get_character_schema()["default_skills"]` 的区别只在于属性派生项：CoC 的
+        母语=EDU、闪避=DEX//2 依赖具体角色，静态表里只能占位成 0。建卡界面必须拿这一份，
+        否则会把占位的 0 当成真起始值展示——玩家为了把它填上去而花掉的点，落库时会被
+        兜底的 `max(提交值, 派生值)` 顶掉，凭空蒸发。
+
+        默认实现就是静态表：没有属性派生技能的规则系统无需覆写。
+        """
+        return dict(self.get_character_schema().get("default_skills") or {})
+
     @abstractmethod
     def create_character(self, data: dict) -> dict:
         """根据输入创建角色，自动计算派生属性"""

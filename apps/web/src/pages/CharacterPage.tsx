@@ -360,8 +360,16 @@ export function CharacterPage() {
 
   // ---- 技能 ----
   const goToSkills = async () => {
-    const schema = await api.get<{ default_skills: Record<string, number> }>('/rules/coc/character-schema')
-    setDefaultSkills(schema.default_skills || {})
+    // 起始值必须按**本卡属性**现算：母语=EDU、闪避=DEX//2 是属性派生的，
+    // character-schema 里那两项是占位的 0。照着 0 展示的后果是——玩家以为这两项一片
+    // 空白，往里加点填平，池子实实在在扣了点，可落库时后端的 `max(提交值, 派生值)`
+    // 会把它顶回派生值：加到 EDU 以下的部分全部凭空蒸发。
+    const { skills } = effectiveAttrs
+      ? await api.post<{ skills: Record<string, number> }>(
+        '/rules/coc/base-skills', { base_attributes: effectiveAttrs })
+      : { skills: (await api.get<{ default_skills: Record<string, number> }>(
+        '/rules/coc/character-schema')).default_skills }
+    setDefaultSkills(skills || {})
     if (!isImported) setSkillAlloc({})
     setStep('技能加点')
   }

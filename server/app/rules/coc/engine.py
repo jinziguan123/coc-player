@@ -31,8 +31,14 @@ class CoCRuleEngine(RuleEngine):
             ],
             "derived": ["HP", "MP", "SAN", "MOV", "伤害加值", "体格", "幸运"],
             "system_specific_fields": ["sanity", "luck", "age", "occupation"],
+            # 注意：母语/闪避在这里是占位的 0——它们由属性派生，静态表填不了真值。
+            # 要拿「这组属性下的真实起始值」请走 base_skills()。
             "default_skills": COC_DEFAULT_SKILLS,
         }
+
+    def base_skills(self, attrs: dict[str, int]) -> dict[str, int]:
+        """CoC：静态表 + 母语(=EDU)、闪避(=DEX//2) 两项属性派生值。"""
+        return build_default_skills(attrs)
 
     def create_character(self, data: dict) -> dict:
         attrs = data.get("base_attributes", {})
