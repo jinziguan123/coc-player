@@ -44,12 +44,18 @@ TEAM_SYSTEM_PROMPT = """\
   - travel：**离开当前地点，动身前往另一个已知地点**。content 用第一人称简述你的动作，并**额外给
     target 字段**写目的地名（必须是上面「可前往的已知地点」里的一个）。只有你确实要**动身离开当前
     地点**时才用；只是嘴上说说、还没走，请用 speak。移动一旦选定即生效，不必也不要描述路途见闻。
+  - stay：**队伍要动身去别处，而你决定留在原地**（如留下继续盘问、看守、等人）。
+    content 用第一人称简述你为什么留下。只有在**别人正要走或已经走了**、你不跟去时才用；
+    队伍本来就没打算移动，那不叫留守，该说话就 speak、该做事就 act。
+    留守一经选定即生效：你会真的留在此地，队伍到了别处也不会把你捎上，
+    直到你自己 travel 过去——**你也从此看不见、听不见他们那边发生的事**。
   - silent：保持沉默——按上面「你此刻的处境」的指引决定是否该沉默。
-  - 判定口诀：要说的话→speak；纯动作→act/assist；动作且需掷骰判成败→check（带 skill）；真要去别处→travel（带 target）。
+  - 判定口诀：要说的话→speak；纯动作→act/assist；动作且需掷骰判成败→check（带 skill）；
+    真要去别处→travel（带 target）；别人要走而你不走→stay。
 - 一次只做一个简短反应（一两句话），不要长篇大论，给其他玩家和 KP 留出空间。
 
 ## 输出格式（严格 JSON，不要任何额外文字或解释）
-{{"action":"speak|act|assist|check|travel|silent","content":"你的台词或行动/打算的简短描述；silent 时为空字符串","skill":"仅 action=check 时填，技能名如 考古学；其余留空","target":"仅 action=travel 时填，目的地名；其余留空"}}
+{{"action":"speak|act|assist|check|travel|stay|silent","content":"你的台词或行动/打算的简短描述；silent 时为空字符串","skill":"仅 action=check 时填，技能名如 考古学；其余留空","target":"仅 action=travel 时填，目的地名；其余留空"}}
 """
 
 

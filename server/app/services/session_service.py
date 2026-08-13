@@ -1631,6 +1631,30 @@ def set_char_location(db: Session, session_id: str, char_id: str, scene_id: str)
     db.commit()
 
 
+#: 「本轮明确留守」的事件标记。位置默认跟随队伍，只有显式表过态的人自理。
+STAY_META_KEY = "stay"
+
+
+def stayed_char_ids(db: Session, session_id: str) -> set[str]:
+    """本回合明确说过「我留在这儿」的角色 id。
+
+    队伍位置的默认语义是**跟随**：没有位置记录的人被 `get_char_location` 回落到当前场景，
+    主角一走就跟着走。这对绝大多数回合是对的，但它让「你们仨去街区，我留下继续问诺特」
+    这个意图在系统里无处安放——莫妮卡人被判定在街区，KP 却还在演她留在事务所。
+
+    留守做成**本轮事件**而不是持久状态：它描述的是这一次移动跟不跟，不是一种长期属性；
+    队友下一轮想跟上，正常行动即可，不必再撤销一个标志位。
+    """
+    from app.services.turn_context import _current_turn_events
+
+    out: set[str] = set()
+    for ev in _current_turn_events(get_session_events(db, session_id)):
+        meta = ev.metadata_ or {}
+        if meta.get(STAY_META_KEY) and ev.actor_id:
+            out.add(str(ev.actor_id))
+    return out
+
+
 # 地点名常见的「设施类型」后缀：按长度从长到短，供从场景标题析出可被对话提及的关键词。
 _FACILITY_SUFFIXES = [
     "疗养院", "图书馆", "档案馆", "博物馆", "派出所", "警察局", "礼拜堂", "老房子",

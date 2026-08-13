@@ -105,7 +105,7 @@ def _parse_team_decision(raw) -> dict | None:
     else:
         return None
     action = str(data.get("action") or "").strip().lower()
-    if action not in TEAM_ACTION_EVENT and action not in ("silent", "travel"):
+    if action not in TEAM_ACTION_EVENT and action not in ("silent", "travel", "stay"):
         return None
     return {
         "action": action,
@@ -262,6 +262,32 @@ async def _run_team_turn(
                     lambda ws, _tid=teammate.id, _q=ev.sequence_num, _s=f"前往了{label}":
                         world_memory.record_team_deed(ws, _tid, _q, _s),
                 )
+            continue
+        # 队友「留守」：队伍要走而他不走。位置默认跟随（无记录者由 get_char_location 回落到
+        # 当前场景），所以留下必须显式说出来——把当前所在写成他自己的记录，并给事件盖上
+        # stay 标记，主角随后移动时据此跳过他（session_service.stayed_char_ids）。
+        # 这也是分头行动唯一能被真正触发的入口之一：他留在原地，队伍走到别处，归并才会出现两组。
+        if action == "stay":
+            here = session_service.get_char_location(game_session, teammate.id)
+            if here:
+                session_service.set_char_location(db, session_id, teammate.id, here)
+                db.refresh(game_session)
+            label = _scene_name(module, here) if here else ""
+            text = content or f"（留在{label}）"
+            ev = session_service.add_event(
+                db, session_id, "action", text,
+                actor_id=teammate.id, actor_name=teammate.name,
+                metadata={session_service.STAY_META_KEY: True, "scene_id": here},
+            )
+            yield _make_chunk(
+                "action", text, actor_name=teammate.name,
+                event_id=ev.id, actor_id=teammate.id,
+            )
+            _apply_world_memory(
+                db, game_session,
+                lambda ws, _tid=teammate.id, _q=ev.sequence_num, _s=f"留在了{label}":
+                    world_memory.record_team_deed(ws, _tid, _q, _s),
+            )
             continue
         if action == "silent" or not content:
             continue

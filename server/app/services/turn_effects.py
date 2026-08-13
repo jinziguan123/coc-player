@@ -797,10 +797,15 @@ async def _exec_scene_change(
             logger.warning("SCENE_CHANGE 目标不连通，拒绝切换：%s -> %s", old, sid)
             return [], None, note
         # 主角明确移动到新场景：更新其位置（→ current_scene_id、已访问、地图跟随）；
-        # 同处一地的队友一同前往，分头在别处的队友留在原地。
+        # 同处一地的队友一同前往，分头在别处、或本轮明确留守的队友留在原地。
         session_service.set_char_location(db, session_id, player_char.id, sid)
+        # 「同处」含从未表过态的队友：位置是懒写入的，没动过的人没有记录，
+        # get_char_location 会把他们回落到当前场景，因此判据自然成立。
+        stayed = session_service.stayed_char_ids(db, session_id)
         for t in (teammates or []):
             if session_service.get_char_location(game_session, t.id) == old:
+                if t.id in stayed:
+                    continue    # 本轮明确说了留下 → 不跟着走
                 session_service.set_char_location(db, session_id, t.id, sid)
         db.refresh(game_session)
         # 首次抵达新场景 → 追加一张场景配图卡（chunk 随本次切换一并广播/重排）

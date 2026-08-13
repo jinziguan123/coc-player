@@ -24,7 +24,7 @@ from app.models import (  # noqa: F401 — 注册全部表
     Module,
     SessionParticipant,
 )
-from app.services import chat_service, session_service, team_turn_service
+from app.services import chat_service, session_service, team_turn_service, turn_context
 
 
 @pytest.fixture
@@ -771,3 +771,105 @@ def test_team_turn_uses_main_model_not_fast(db_factory, monkeypatch):
 
     assert used["tag"] == "main"          # 队友：主模型
     assert used["planner_tag"] == "fast"  # planner：仍是快模型
+
+
+def _seed_stay(db):
+    """一间事务所、一条街：留守用例的公共起手（两处连通，人都在事务所）。"""
+    module = Module(
+        title="鬼屋", rule_system="coc", npcs=[],
+        scenes=[
+            {"id": "office", "name": "诺特事务所", "connections": ["street"]},
+            {"id": "street", "name": "街区", "connections": ["office"]},
+        ],
+    )
+    hero = Character(name="陈守一", rule_system="coc", is_player=True)
+    mate = Character(name="莫妮卡", rule_system="coc", is_player=False)
+    db.add_all([module, hero, mate])
+    db.commit()
+    session = session_service.create_session(
+        db, module.id,
+        [{"character_id": hero.id, "is_primary": True},
+         {"character_id": mate.id, "role": "ai"}],
+    )
+    session.current_scene_id = "office"
+    session.world_state = {**(session.world_state or {}), "visited_scenes": ["office", "street"]}
+    db.commit()
+    return db.get(GameSession, session.id), module, hero, mate
+
+
+def test_team_stay_pins_location_and_marks_event(db_factory, monkeypatch):
+    """留守：把当前所在写成自己的显式记录，并给事件盖 stay 标记。"""
+    db = db_factory()
+    session, module, hero, mate = _seed_stay(db)
+
+    async def fake_decide(self, messages):
+        return '{"action":"stay","content":"我留下继续问诺特先生"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, [mate], llm=None,
+    )))
+
+    session = db.get(GameSession, session.id)
+    assert (session.world_state.get("party_locations") or {}).get(mate.id) == "office"
+    ev = next(e for e in session_service.get_session_events(db, session.id)
+              if e.actor_id == mate.id)
+    assert (ev.metadata_ or {}).get(session_service.STAY_META_KEY) is True
+    assert "我留下继续问诺特先生" in (ev.content or "")
+    assert session_service.stayed_char_ids(db, session.id) == {mate.id}
+
+
+def test_stayed_teammate_is_not_dragged_along(db_factory, monkeypatch):
+    """回归《鬼屋》那一局：三人去街区、莫妮卡留在事务所继续问诺特，而系统把她判定成
+    也在街区——KP 那边只好一边演街区一边演事务所，分栏与在场约束全部落空。
+
+    留守之后主角再移动，她必须留在原地，归并才会真的出现两组。
+    """
+    from app.services import turn_effects
+
+    db = db_factory()
+    session, module, hero, mate = _seed_stay(db)
+
+    async def fake_decide(self, messages):
+        return '{"action":"stay","content":"我留下继续问诺特先生"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, [mate], llm=None,
+    )))
+    session = db.get(GameSession, session.id)
+
+    asyncio.run(turn_effects._exec_scene_change(
+        db, session.id, session, module, "街区", hero, [mate],
+    ))
+    session = db.get(GameSession, session.id)
+    assert session_service.get_char_location(session, hero.id) == "street"
+    assert session_service.get_char_location(session, mate.id) == "office"   # 没被捎走
+
+    groups = turn_context._location_groups(session, module, hero, [mate])
+    assert len(groups) == 2                       # 这才是分头行动能被触发的形状
+    assert {g["label"] for g in groups} == {"街区", "诺特事务所"}
+
+
+def test_teammate_without_stay_follows_the_party(db_factory, monkeypatch):
+    """没表过态的队友照常跟着走——默认语义不能被留守特性带偏。"""
+    from app.services import turn_effects
+
+    db = db_factory()
+    session, module, hero, mate = _seed_stay(db)
+
+    async def fake_decide(self, messages):
+        return '{"action":"speak","content":"我也去看看。"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, [mate], llm=None,
+    )))
+    session = db.get(GameSession, session.id)
+
+    asyncio.run(turn_effects._exec_scene_change(
+        db, session.id, session, module, "街区", hero, [mate],
+    ))
+    session = db.get(GameSession, session.id)
+    assert session_service.get_char_location(session, mate.id) == "street"
+    assert len(turn_context._location_groups(session, module, hero, [mate])) == 1
