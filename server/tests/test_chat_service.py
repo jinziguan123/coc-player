@@ -574,8 +574,13 @@ def test_bare_quotes_never_extracted():
         assert kw in result[0]                   # 都留在旁白
 
 
-def test_group_tags_split_scenes(db_factory):
-    """分头行动：[GROUP] 标记把各组内容落库到对应 group，供前端分栏。"""
+def test_kp_self_declared_group_is_ignored(db_factory):
+    """KP 自己打的 [GROUP] 只剥标记、不采纳分组——分组是确定性状态，轮不到它宣布。
+
+    回归《鬼屋》那一局：全队都在街区，KP 从历史里几句「我们分头吧」推断队伍已分开，
+    自行标出一个模组里不存在的「诺特的事务所」组，整轮只演那一组；系统判定的是单场景、
+    只跑一次生成，于是同轮另外三人的行动与一次侦查检定再没有下文。
+    """
     npcs = [{"name": "护工"}]
     text = (
         "[GROUP: scene=档案馆]亨利在档案馆翻查旧卷宗，灰尘扑面。\n\n"
@@ -591,9 +596,12 @@ def test_group_tags_split_scenes(db_factory):
     import json as _json
     evs = session_service.get_session_events(db_factory(), session_id)
     groups = [(_json.loads(e.metadata_ or "{}") if isinstance(e.metadata_, str) else (e.metadata_ or {})).get("group") for e in evs]
-    # 两组内容各自带 group；标记本身不出现在旁白文本里
-    assert "档案馆" in groups and "疗养院" in groups
+    # 分组一律不采纳（真分头时由后端按 party_locations 注入，见下一个用例）……
+    assert all(g is None for g in groups)
+    # ……但标记本身仍要从旁白里剥干净，别漏到玩家眼前
     assert all("[GROUP" not in (e.content or "") for e in evs)
+    assert any("亨利在档案馆翻查旧卷宗" in (e.content or "") for e in evs)
+    assert any("莫妮卡走进疗养院走廊" in (e.content or "") for e in evs)
 
 
 def test_group_label_tags_all_output(db_factory):

@@ -23,7 +23,9 @@ from app.ai.prompts.kp_system import (
     MODULE_EXCERPT_SECTION,
     MODULE_LOOKUP_INSTRUCTION,
     RECALL_HISTORY_INSTRUCTION,
-    GROUP_INSTRUCTION,
+    PARTY_LOCATION_SECTION,
+    PARTY_SPLIT_NOTE,
+    PARTY_TOGETHER_NOTE,
     RULE_EXCERPT_SECTION,
     RULE_LOOKUP_INSTRUCTION,
     PLOT_FLAG_INSTRUCTION,
@@ -946,6 +948,7 @@ def build_kp_context(
     rule_excerpts: list[dict] | None = None,
     context_budget: int | None = None,
     recall_enabled: bool = False,
+    scene_groups: list[dict] | None = None,
 ) -> list[dict]:
     # 本函数保持纯粹（不触数据库）：module_excerpts 是调用方（turn_orchestrator）检索好的
     # 模组原文片段（[{"text", ...}]），未建索引/检索失败时传 None → 行为与无此特性时完全一致。
@@ -1101,8 +1104,6 @@ def build_kp_context(
         segs.append(_Seg(RECALL_HISTORY_INSTRUCTION, SYS_TIER_STATIC, 0, "recall-ad"))
     if not is_opening and _has_plot_state(module):
         segs.append(_Seg(PLOT_FLAG_INSTRUCTION, SYS_TIER_STATIC, 0, "plot-flag-ad"))
-    if not is_opening and teammates:
-        segs.append(_Seg(GROUP_INSTRUCTION, SYS_TIER_STATIC, 0, "group-ad"))
 
     # ── 半静态段：模组数据随已访问场景/剧情推进而变，同一轮内稳定 ──────────
     segs.append(_Seg(
@@ -1126,6 +1127,24 @@ def build_kp_context(
         segs.append(_Seg(TRUTH_SECTION.format(truth=truth), SYS_TIER_SEMI, 0, "truth"))
 
     # ── 易变段：每轮都可能变，排在最后，不污染上面两块的缓存前缀 ───────────
+    # 队伍位置：**每轮无条件全量渲染**（开场除外，那时还没人动过）。权重给得高——
+    # 它是「这一轮该演谁、演在哪」的前提，被裁掉的话 KP 又只能从对话历史里猜分头。
+    if not is_opening and scene_groups:
+        lines = "\n".join(
+            f"- {g.get('label') or '未知地点'}：{'、'.join(g.get('members') or []) or '（无人）'}"
+            for g in scene_groups
+        )
+        if len(scene_groups) >= 2:
+            focus = next(
+                (g.get("label") for g in scene_groups if g.get("scene_id") == viewer_scene_id),
+                scene_groups[0].get("label") or "",
+            )
+            note = PARTY_SPLIT_NOTE.format(focus=focus)
+        else:
+            note = PARTY_TOGETHER_NOTE
+        segs.append(_Seg(PARTY_LOCATION_SECTION.format(lines=lines, note=note),
+                         SYS_TIER_VOLATILE, 2, "party-location"))
+
     if has_multi_location:
         blocked = world_memory.blocked_scenes(session.world_state or {})
         if blocked:

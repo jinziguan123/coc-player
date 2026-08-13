@@ -419,9 +419,14 @@ async def filter_narration_stream(
                     if inner_s.startswith("MAP_MARK:") or inner_s.startswith("MAP_MARK "):
                         continue
                     if inner_s.startswith("GROUP:") or inner_s.startswith("GROUP "):
-                        kv = _parse_tag_kv(inner_s.split(":", 1)[-1] if ":" in inner_s else inner_s[len("GROUP"):])
-                        label = (kv.get("scene") or kv.get("group") or kv.get("name") or "").strip()
-                        group_marks.append((len(narration), label or None))
+                        # 只剥掉标记本身，**不采纳** KP 自定的分组。分组是确定性状态：分头时
+                        # 由后端按 party_locations 归并、逐组生成并注入 group_label（见上方
+                        # group_marks 初始化），全队在一起时压根不该有分组。
+                        #
+                        # 曾经这里是照单全收的，于是《鬼屋》那局全队都在街区，KP 从历史里
+                        # 几句「我们分头吧」推断队伍已分开，自行标出一个模组里不存在的
+                        # 「诺特的事务所」组，整轮只演那一组——同轮另外三人的行动与一次
+                        # 侦查检定再没有下文（系统判定的是单场景，只跑一次生成，没有第二组）。
                         continue
                     if inner_s.startswith("SAY:") or inner_s.startswith("SAY "):
                         out = _flush_pending()

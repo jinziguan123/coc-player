@@ -432,6 +432,9 @@ async def _run_generation(
         module_lookup_enabled=module_rag_enabled,
         rule_excerpts=rule_excerpts,
         recall_enabled=event_recall.is_enabled(game_session),
+        # 走到这里就是「系统判定全队在一起」（≥2 组已在上面分流）。把这个结论明写给 KP，
+        # 否则它只看得到一个全局当前场景，会拿历史里的「我们分头吧」当已经分头了。
+        scene_groups=scene_groups,
     )
     # 战斗结果摘要已注入本轮上下文 → 清除，避免下一轮重复注入（读一次）。
     if (game_session.world_state or {}).get("combat_result"):
@@ -663,6 +666,9 @@ async def _run_split_generation(
             # 规则要点不依赖场景：各分组共用调用方预取的同一份（与模组摘录注入现状对齐）
             rule_excerpts=rule_excerpts,
             recall_enabled=event_recall.is_enabled(game_session),
+            # 全部分组都给，配合 viewer_scene_id 指明本轮聚焦哪一组：KP 得知道别组的人
+            # 此刻不在场，才不会把他们写进这一列。
+            scene_groups=groups,
         )
         if plan_message is not None:
             messages.append(plan_message)
