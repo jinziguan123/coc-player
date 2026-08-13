@@ -64,13 +64,17 @@ interface KnownLocation {
   id: string; name: string; current: boolean; visited: boolean
   connections?: string[]; party?: string[]
   clues?: { id: string; name: string; status: string }[]
-  map?: { q: number; r: number; biome: string } | null   // 沙盘坐标与地貌
+  // 沙盘坐标与地貌。parent＝这一格属于哪个子沙盘（空＝顶层）；各层坐标空间彼此独立，
+  // 丢了它，子层的格子会拿着子层坐标画进顶层，两层直接叠在一起。
+  map?: { q: number; r: number; biome: string; parent?: string } | null
   known?: boolean                                        // KP 上帝视角下玩家是否已知
   image?: string                                         // 场景配图（氛围底的色调来源）
   sceneId?: string
   nodeKind?: 'scene' | 'terrain'
 }
-interface MapNodePayload { id: string; q: number; r: number; biome: string; scene_id?: string | null }
+interface MapNodePayload {
+  id: string; q: number; r: number; biome: string; scene_id?: string | null; parent?: string
+}
 
 // 距底多少像素以内算「已经在最新处」。留一点余量：markdown 渲染完成后高度会有零点几像素的
 // 抖动，卡死 0 会让按钮在贴底时忽隐忽现。
@@ -911,15 +915,23 @@ export function GameSessionPage() {
 
   const sandboxLocations = useMemo(() => {
     const scenesById = new Map(locations.map((loc) => [loc.id, loc]))
+    // map 是整体覆盖 loc.map 的，parent 必须显式带上——漏了它，子沙盘里的场景与地面会
+    // 拿着子层坐标一起画进顶层：《鬼屋》的街区内景正好压在疗养院与礼拜堂那两格上，
+    // 把它们盖成不可点的空地（透明命中区吃掉点击，而地貌格本身不响应「前往」）。
+    // 层级以**场景**为准（map_nodes 只同步坐标与地貌），地貌节点则用它自己身上的 parent。
     const sceneNodes = mapNodes.filter((node) => node.scene_id && scenesById.has(node.scene_id)).map((node) => {
       const loc = scenesById.get(node.scene_id!)!
-      return { ...loc, id: node.id, sceneId: loc.id, nodeKind: 'scene' as const, map: { q: node.q, r: node.r, biome: node.biome } }
+      return {
+        ...loc, id: node.id, sceneId: loc.id, nodeKind: 'scene' as const,
+        map: { q: node.q, r: node.r, biome: node.biome, parent: loc.map?.parent ?? node.parent },
+      }
     })
     const included = new Set(sceneNodes.map((node) => node.sceneId))
     const fallbackScenes = locations.filter((loc) => !included.has(loc.id)).map((loc) => ({ ...loc, sceneId: loc.id, nodeKind: 'scene' as const }))
     const terrainNodes = mapNodes.filter((node) => !node.scene_id).map((node) => ({
       id: node.id, name: '', current: false, visited: true, known: true,
-      nodeKind: 'terrain' as const, map: { q: node.q, r: node.r, biome: node.biome },
+      nodeKind: 'terrain' as const,
+      map: { q: node.q, r: node.r, biome: node.biome, parent: node.parent },
     }))
     return [...sceneNodes, ...fallbackScenes, ...terrainNodes]
   }, [locations, mapNodes])

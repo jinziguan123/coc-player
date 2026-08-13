@@ -317,13 +317,19 @@ def ensure_module_map(db, module) -> bool:
     """存量模组懒回填：scenes 过归组与修复器，有改动才落库（幂等；JSON 列须整体重赋值）。
 
     归组必须排在落位之前：`ensure_scene_maps` 是按 parent 分层落位的，先定层再落格。
+
+    **改动判定要连 map_nodes 一起看**，不能只看 scenes 变没变：map_nodes 是坐标与层级的
+    第二份拷贝，它自己会过时。scenes 早已归好组、而节点上还缺 parent 的存量模组，两个
+    修复器都会说「没改动」，于是同步永远轮不到——那一格就一直拿着子层坐标画在顶层。
     """
     scenes = [dict(s) if isinstance(s, dict) else s for s in (module.scenes or [])]
     changed = infer_scene_parents(scenes)
-    if not ensure_scene_maps(scenes) and not changed:
+    changed = ensure_scene_maps(scenes) or changed
+    nodes = _synced_map_nodes(module, scenes)
+    if not changed and nodes == list(getattr(module, "map_nodes", None) or []):
         return False
     module.scenes = scenes
-    module.map_nodes = _synced_map_nodes(module, scenes)
+    module.map_nodes = nodes
     db.add(module)
     db.commit()
     return True
@@ -336,6 +342,11 @@ def _synced_map_nodes(module, scenes: list) -> list:
     这一条路在维护。归组会把子级场景重排到**子层坐标空间**，不同步就会出现：详情页按旧的
     顶层坐标把四间屋子摊在子沙盘的四个角上——数据是对的，看着却像没归组。
     地貌节点（无 scene_id）不动，它们本就只属于顶层。
+
+    **坐标和层级要一起同步**：坐标进了子层、层级还留在顶层，这份拷贝就自相矛盾了。
+    详情页读得出场景、能拿 scene.map.parent 兜住，局内大地图却不行——玩家还没发现的场景
+    会被清掉 scene_id 当作地貌格下发（见 list_visible_map_nodes），那时唯一的层级来源就是
+    节点自己身上的 parent，缺了它，这一格就拿着子层坐标画进顶层，和顶层的格子叠在一起。
     """
     by_id = {str(s.get("id")): s for s in scenes if isinstance(s, dict) and s.get("id")}
     out = []
@@ -348,6 +359,11 @@ def _synced_map_nodes(module, scenes: list) -> list:
         if coord is not None:
             node["q"], node["r"] = coord
             node["biome"] = (scene.get("map") or {}).get("biome") or node.get("biome") or "plain"
+            parent = scene_parent(scene)
+            if parent:
+                node["parent"] = parent
+            else:
+                node.pop("parent", None)
         out.append(node)
     return out
 

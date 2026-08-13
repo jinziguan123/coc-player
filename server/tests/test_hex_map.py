@@ -482,6 +482,54 @@ class TestSceneHierarchy:
         assert (nodes["hut"]["q"], nodes["hut"]["r"]) == hex_map.scene_coord(by["hut"])
         assert nodes["hut"]["biome"] == "interior"
         assert (nodes["t1"]["q"], nodes["t1"]["r"]) == (3, 3)   # 地貌节点原样保留
+        # 坐标进了子层，层级也得一起进：玩家还没发现这个场景时它会被清掉 scene_id 当地貌格
+        # 下发，那时节点自己身上的 parent 是唯一的层级来源，缺了就拿着子层坐标画进顶层。
+        assert nodes["hut"]["parent"] == "village"
+        assert "parent" not in nodes["t1"]           # 地貌节点恒属顶层
+
+    def test_scenes没变但节点缺层级时仍要落库(self):
+        """回归：改动判定原先只看 scenes。归组早就跑完、节点上却漏了 parent 的存量模组，
+        两个修复器都说「没改动」，同步永远轮不到——《鬼屋》的街区内景就一直拿着子层坐标
+        画在顶层，正好压住疗养院那一格，把它盖成点不动的空地。"""
+        class _M:
+            scenes = [
+                _loc("village", "ruin", ["hut"]),
+                _loc("hut", "interior", ["village"]),
+                _loc("road", "road", ["village"]),
+            ]
+            map_nodes: list = []
+
+        class _DB:
+            def __init__(self): self.commits = 0
+            def add(self, _v): pass
+            def commit(self): self.commits += 1
+
+        m, db = _M(), _DB()
+        m.scenes = [dict(s) for s in m.scenes]
+        hex_map.infer_scene_parents(m.scenes)
+        hex_map.ensure_scene_maps(m.scenes)          # scenes 先修到位：此后它不再变
+        m.map_nodes = [
+            {"id": s["id"], "scene_id": s["id"], **{k: s["map"][k] for k in ("q", "r", "biome")}}
+            for s in m.scenes
+        ]                                             # 节点有坐标、独缺 parent
+        assert hex_map.ensure_module_map(db, m) is True
+        assert {n["id"]: n.get("parent") for n in m.map_nodes} == {
+            "village": None, "hut": "village", "road": None,
+        }
+        assert hex_map.ensure_module_map(db, m) is False   # 幂等：补完就不再落库
+        assert db.commits == 1
+
+    def test_场景移回顶层时清掉节点上的旧层级(self):
+        """否则它会永远卡在一个已经不存在的子沙盘里，顶层再也看不到这一格。"""
+        class _M:
+            scenes = [_loc("hut", "interior", [])]
+            map_nodes = [{"id": "hut", "scene_id": "hut", "q": 1, "r": 1,
+                          "biome": "interior", "parent": "村庄遗址"}]
+        m = _M()
+        scenes = [dict(s) for s in m.scenes]
+        hex_map.ensure_scene_maps(scenes)            # 无邻居可挂 → 留在顶层
+        nodes = {n["id"]: n for n in hex_map._synced_map_nodes(m, scenes)}
+        assert "parent" not in nodes["hut"]
 
     def test_子沙盘留出原点给父级(self):
         """模组里的连通几乎总是星形（四间屋子各自只连村庄、彼此不相连）。父级不在场，
