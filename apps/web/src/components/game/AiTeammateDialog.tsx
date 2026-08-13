@@ -25,6 +25,8 @@ interface Props {
   moduleId: string
   /** 本模组的车卡建议：写提示词时正需要它，否则只能凭空猜这个本子要什么人。 */
   guidance?: CharacterGuidance | null
+  /** true=给「我自己」生成调查员（is_player，绑归属）；默认是给 AI 席生成队友。 */
+  forPlayer?: boolean
   /** 关闭对话框（无论走的是哪条出口）。 */
   onClose: () => void
   /** 玩家确认保留：把这张卡指派到发起的那个席位。 */
@@ -32,13 +34,14 @@ interface Props {
 }
 
 /**
- * AI 队友的「写提示词 → 生成 → 过目/编辑 → 决定去留」。
+ * AI 建卡的「写提示词 → 生成 → 过目/编辑 → 决定去留」。真人席与 AI 席共用一套：
+ * 两边都该有得看、有得改，凭生成时点的是哪个按钮就少一道把关是说不通的。
  *
  * 一键直接生成并入座太粗暴：玩家既说不上想要什么，生成完也没机会看一眼就已经坐下了。
  * 这里拆成三步，中间那步是真正的把关点——卡先落库（编辑弹窗要 PUT 一个已存在的角色），
  * 但**不指派席位**；玩家弃用就连卡一起删掉，库里不留垃圾。
  */
-export function AiTeammateDialog({ open, moduleId, guidance, onClose, onConfirm }: Props) {
+export function AiTeammateDialog({ open, moduleId, guidance, forPlayer = false, onClose, onConfirm }: Props) {
   const [hint, setHint] = useState('')
   const [phase, setPhase] = useState<'hint' | 'generating' | 'review'>('hint')
   const [draft, setDraft] = useState<TeammateDraft | null>(null)
@@ -46,22 +49,24 @@ export function AiTeammateDialog({ open, moduleId, guidance, onClose, onConfirm 
   const [busy, setBusy] = useState(false)
 
   const reset = () => { setHint(''); setPhase('hint'); setDraft(null); setEditing(false) }
+  /** 同一套流程服务两种席位，只有称呼不同——「我的调查员」和「AI 队友」。 */
+  const noun = forPlayer ? '调查员' : '队友'
 
   const generate = async () => {
     setPhase('generating')
     try {
       const spec = await api.post<Record<string, unknown>>('/characters/ai-generate', {
-        module_id: moduleId, hint: hint.trim(), is_player: false,
+        module_id: moduleId, hint: hint.trim(), is_player: forPlayer,
       })
       const created = await api.post<TeammateDraft>('/characters', {
         name: spec.name, module_id: moduleId, rule_system: (spec.rule_system as string) || 'coc',
-        is_player: false, age: spec.age ?? 25, base_attributes: spec.base_attributes,
+        is_player: forPlayer, age: spec.age ?? 25, base_attributes: spec.base_attributes,
         skills: spec.skills, system_data: spec.system_data, backstory: spec.backstory ?? '',
       })
       setDraft(created)
       setPhase('review')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'AI 生成队友失败')
+      toast.error(e instanceof Error ? e.message : `AI 生成${noun}失败`)
       setPhase('hint')
     }
   }
@@ -117,20 +122,20 @@ export function AiTeammateDialog({ open, moduleId, guidance, onClose, onConfirm 
         >
           <DialogHeader>
             <DialogTitle>
-              {phase === 'review' ? '过目这张队友卡' : '生成 AI 队友'}
+              {phase === 'review' ? `过目这张${noun}卡` : `生成${forPlayer ? '我的调查员' : ' AI 队友'}`}
             </DialogTitle>
           </DialogHeader>
 
           {phase === 'hint' && (
             <div>
-              {/* 先给判据再让人写：不然「想要什么样的队友」只能凭空猜这个本子要什么人 */}
+              {/* 先给判据再让人写：不然「想要什么样的人」只能凭空猜这个本子要什么人 */}
               {hasGuidance(guidance) && (
                 <div className="mb-2 max-h-44 overflow-y-auto">
                   <CharacterGuidanceCard guidance={guidance!} />
                 </div>
               )}
               <p className="mb-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                想要个什么样的队友？留空则由 AI 按本模组自由发挥。
+                想要个什么样的{noun}？留空则由 AI 按本模组自由发挥。
               </p>
               <textarea
                 value={hint}
@@ -154,7 +159,7 @@ export function AiTeammateDialog({ open, moduleId, guidance, onClose, onConfirm 
           {phase === 'generating' && (
             <div className="flex flex-col items-center gap-3 py-8" style={{ color: 'var(--color-text-secondary)' }}>
               <Loader2 size={28} className="animate-spin" style={{ color: 'var(--color-text-accent)' }} />
-              <p className="text-sm">正在按本模组生成队友卡…</p>
+              <p className="text-sm">正在按本模组生成{noun}卡…</p>
               {/* 实测一分多钟。不说清楚的话，这段静默会被当成卡死 */}
               <p className="text-xs">整张卡要现算属性、技能与背景，通常要一分钟左右</p>
             </div>

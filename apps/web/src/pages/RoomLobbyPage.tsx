@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
+import { Copy, Sparkles, Check, ChevronDown, ChevronRight, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
 interface Character {
   id: string
@@ -97,13 +97,16 @@ export function RoomLobbyPage() {
   const [myChars, setMyChars] = useState<Character[]>([])
   const [aiChars, setAiChars] = useState<Character[]>([])
   const [localChars, setLocalChars] = useState<Character[]>([])
-  const [characterHint, setCharacterHint] = useState('')
   /** 角色库搜索词：卡多了得能找，而不是滚半天。只在超过 6 张时才露出输入框。 */
   const [charFilter, setCharFilter] = useState('')
+  /** 是否在真人席的候选里摊开 AI 队友卡池（默认折叠，见那一段的注释）。 */
+  const [showAllyPool, setShowAllyPool] = useState(false)
   const [chat, setChat] = useState<ChatLine[]>([])
   const [busy, setBusy] = useState(false)
   /** 「生成 AI 队友」对话框是为哪一席打开的（null=没开）。 */
   const [genSeat, setGenSeat] = useState<number | null>(null)
+  /** 同一个对话框，为「我自己这一席」打开：生成的是玩家调查员，确认后走认领。 */
+  const [genSelf, setGenSelf] = useState(false)
   const [panelChar, setPanelChar] = useState<Character | null>(null)
   /**
    * 正在预览、尚未入座的候选角色。
@@ -325,30 +328,6 @@ export function RoomLobbyPage() {
       await refreshRoom()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '加入 KP 席失败')
-    } finally { setBusy(false) }
-  }
-
-  const generateAndClaim = async () => {
-    if (!room) return
-    setBusy(true)
-    try {
-      const draft = await api.post<Record<string, unknown>>('/characters/ai-generate', {
-        module_id: room.module_id,
-        hint: characterHint.trim(),
-        is_player: true,
-      })
-      const created = await api.post<Character>('/characters', {
-        name: draft.name, module_id: room.module_id, rule_system: (draft.rule_system as string) || 'coc',
-        is_player: true, age: draft.age ?? 25, base_attributes: draft.base_attributes,
-        skills: draft.skills, system_data: draft.system_data, backstory: draft.backstory ?? '',
-      })
-      const claimError = await claimWithChar(created.id, false)
-      if (claimError) {
-        setMyChars((prev) => prev.some((c) => c.id === created.id) ? prev : [...prev, created])
-        toast.error(`角色已生成，但入座失败：${claimError}。可从角色列表重试`)
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'AI 生成角色失败')
     } finally { setBusy(false) }
   }
 
@@ -825,22 +804,39 @@ export function RoomLobbyPage() {
                         </div>
                       </div>
                     )}
+                    {/* 队友卡也能自己用。
+                        「给 AI 用」还是「自己演」是**席位**的事，不是卡的属性——一张按队友
+                        生成的卡，除了当初点的是哪个按钮，和调查员卡没有任何区别。默认折叠是
+                        因为常见情况下它只是噪音：库里的队友卡对所有人可见，摊开会淹掉自己的卡。 */}
+                    {aiChars.length > 0 && (
+                      <div className="mt-2">
+                        <button
+                          onClick={() => setShowAllyPool((v) => !v)}
+                          className="seat-pick-sub inline-flex items-center gap-1 hover:opacity-80"
+                        >
+                          {showAllyPool ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          也看看 AI 队友卡（{aiChars.length}）· 选中即成为你的调查员
+                        </button>
+                        {showAllyPool && (
+                          <div className="char-grid char-grid--scroll mt-1">
+                            {matchChars(aiChars).map((c) => renderCharCard(c, 'mine'))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
+                  {/* 和 AI 席那颗 ✨ 走同一个对话框：写提示词 → 生成 → 过目/编辑 → 决定去留。
+                      从前这里是「填提示词 → 一键生成并入座」，等了一分多钟直接就坐下了，
+                      连看一眼的机会都没有——而旁边 AI 席反倒有得看，两处凭什么不一样。 */}
                   <div className="seat-pick">
                     <div className="seat-pick-head">或让 AI 现场生成一张</div>
-                    {/* 提示词紧挨着它唯一服务的那个按钮 */}
-                    <textarea
-                      value={characterHint}
-                      onChange={(e) => setCharacterHint(e.target.value)}
-                      disabled={busy}
-                      rows={2}
-                      placeholder="想扮演什么？如 胆小的记者、退伍军医、通晓神秘学的教授（留空则由 AI 按模组自由发挥）"
-                      className="input mb-2 w-full resize-y text-sm"
-                    />
-                    <button onClick={generateAndClaim} disabled={busy}
+                    <p className="mb-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      写一句想扮演的人物，生成后可以先过目、编辑，再决定要不要入座。
+                    </p>
+                    <button onClick={() => setGenSelf(true)} disabled={busy}
                       className="btn-secondary inline-flex items-center gap-1 !px-2 !py-1 text-xs">
-                      {busy ? '处理中…' : <><Sparkles size={12} /> 生成角色并入座</>}
+                      <Sparkles size={12} /> 生成我的调查员
                     </button>
                   </div>
                 </div>
@@ -951,6 +947,16 @@ export function RoomLobbyPage() {
           guidance={guidance}
           onClose={() => setGenSeat(null)}
           onConfirm={(char) => adoptTeammate(genSeat, char.id, char.name)}
+        />
+      )}
+      {genSelf && room && (
+        <AiTeammateDialog
+          open
+          forPlayer
+          moduleId={room.module_id}
+          guidance={guidance}
+          onClose={() => setGenSelf(false)}
+          onConfirm={async (char) => { await claimWithChar(char.id) }}
         />
       )}
 

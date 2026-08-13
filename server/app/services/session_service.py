@@ -402,6 +402,13 @@ def claim_seat(
     if strict_identity:
         seat.identity_version = 2
     char.owner_token = token
+    # 真人坐上去了，这张卡就是一张玩家调查员卡——哪怕它当初是按「AI 队友」生成的。
+    #
+    # is_player 决定的只是**归档口径**（结局后只给玩家角色写模组经历）和**它出现在
+    # 哪个候选池**里；谁来驱动这个角色看的是席位的 role，与这个标志无关。不在这里
+    # 转正的话，玩家认领完一张队友卡，下次在「我的角色」里就再也找不到它，结局也
+    # 不给它归档——卡还是那张卡，只因为当初点的是哪个按钮。
+    char.is_player = True
     try:
         db.commit()
     except IntegrityError as exc:

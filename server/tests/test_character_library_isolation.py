@@ -126,3 +126,40 @@ def test_mine_filter_still_excludes_ai_teammates_by_is_player():
     _create("host-tok", "AI 队友卡", is_player=False)
 
     assert _names("host-tok", mine=True, is_player=True) == ["我的卡"]
+
+
+def test_真人认领队友卡时转正为玩家角色():
+    """AI 队友卡被真人坐上去，就该变成一张玩家调查员卡。
+
+    is_player 决定的只是归档口径（结局后只给玩家角色写模组经历）与它出现在哪个
+    候选池里；谁驱动这个角色看的是席位的 role。不转正的话，玩家认领完一张队友卡，
+    下次在「我的角色」里再也找不到它——卡还是那张卡，只因为当初点的是哪个按钮。
+    """
+    from app.models import Character as Char
+
+    client = _client("host-tok")
+    ally_id = _create(None, "AI 生成的队友", is_player=False)
+    mod = client.post("/api/modules", json={
+        "title": "认领测试模组", "rule_system": "coc", "description": "",
+    })
+    assert mod.status_code == 200, mod.text
+    room = client.post("/api/sessions", json={
+        "module_id": mod.json()["id"],
+        "participants": [{"character_id": None, "role": "human", "is_primary": True}],
+    })
+    assert room.status_code == 200, room.text
+
+    claimed = client.post(
+        f"/api/sessions/{room.json()['id']}/claim",
+        json={"seat_order": 0, "character_id": ally_id},
+    )
+    assert claimed.status_code == 200, claimed.text
+
+    # 转正后它才会回到「我的角色」候选里
+    assert "AI 生成的队友" in _names("host-tok", mine=True, is_player=True)
+
+    db = next(iter(app.dependency_overrides[get_db]()))
+    try:
+        assert db.get(Char, ally_id).is_player is True
+    finally:
+        db.close()
