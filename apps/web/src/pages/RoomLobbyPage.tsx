@@ -7,6 +7,7 @@ import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
 import { LobbyChatDock, type ChatLine } from '../components/game/LobbyChatDock'
+import { AiTeammateDialog } from '../components/game/AiTeammateDialog'
 import { GiReturnArrow } from 'react-icons/gi'
 import { parsePlayerRange } from '@/lib/module'
 import {
@@ -16,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Copy, Sparkles, Check, Eye, Loader2, ScanSearch, Trash2, UserPlus } from 'lucide-react'
+import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
 interface Character {
   id: string
@@ -97,7 +98,7 @@ export function RoomLobbyPage() {
   const [charFilter, setCharFilter] = useState('')
   const [chat, setChat] = useState<ChatLine[]>([])
   const [busy, setBusy] = useState(false)
-  /** 正在为哪一席现场生成队友卡（null=没有）。生成要等一分多钟，转圈得标在那一席上。 */
+  /** 「生成 AI 队友」对话框是为哪一席打开的（null=没开）。 */
   const [genSeat, setGenSeat] = useState<number | null>(null)
   const [panelChar, setPanelChar] = useState<Character | null>(null)
   /**
@@ -345,32 +346,18 @@ export function RoomLobbyPage() {
     } finally { setBusy(false) }
   }
 
-  /** AI 席旁的「快速生成」：按本模组现造一张队友卡并直接坐下，免得为了一张卡跳去角色页。 */
-  const generateAiTeammate = async (seatOrder: number) => {
+  /** 过目对话框里点「保留并入座」：这张卡已经落库，剩下的只是指派到发起的那个席位。 */
+  const adoptTeammate = async (seatOrder: number, charId: string, name: string) => {
     if (!room) return
-    setBusy(true)
-    // 实测这一步要等一分多钟（一次完整的建卡生成）。只把按钮置灰的话，这段时间里
-    // 界面看不出任何事情正在发生——转圈标在发起的那一席上，等的是哪一格一目了然。
-    setGenSeat(seatOrder)
     try {
-      const draft = await api.post<Record<string, unknown>>('/characters/ai-generate', {
-        module_id: room.module_id,
-        hint: '',
-        is_player: false,
-      })
-      const created = await api.post<Character>('/characters', {
-        name: draft.name, module_id: room.module_id, rule_system: (draft.rule_system as string) || 'coc',
-        is_player: false, age: draft.age ?? 25, base_attributes: draft.base_attributes,
-        skills: draft.skills, system_data: draft.system_data, backstory: draft.backstory ?? '',
-      })
       setRoom(await api.post<RoomData>(
-        `/sessions/${room.id}/seats/${seatOrder}/character`, { character_id: created.id },
+        `/sessions/${room.id}/seats/${seatOrder}/character`, { character_id: charId },
       ))
       await refreshCharPools()
-      toast.success(`已生成队友「${created.name}」并入座`)
+      toast.success(`「${name}」已入座`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'AI 生成队友失败')
-    } finally { setBusy(false); setGenSeat(null) }
+      toast.error(e instanceof Error ? e.message : '指派角色失败')
+    }
   }
 
   const toggleReady = async () => {
@@ -651,15 +638,13 @@ export function RoomLobbyPage() {
                         建完再回来——而这一步本来就发生在「配座位」的当口。 */}
                     {p.role === 'ai' && amHost && (
                       <button
-                        onClick={() => void generateAiTeammate(p.seat_order)}
+                        onClick={() => setGenSeat(p.seat_order)}
                         disabled={busy}
                         className="btn-secondary !px-1.5 !py-1 disabled:opacity-40"
-                        title="按本模组现场生成一张队友卡并指派到这个席位"
-                        aria-label="快速生成 AI 队友"
+                        title="写一句提示词，让 AI 现场生成一张队友卡"
+                        aria-label="生成 AI 队友"
                       >
-                        {genSeat === p.seat_order
-                          ? <Loader2 size={13} className="animate-spin" />
-                          : <Sparkles size={13} />}
+                        <Sparkles size={13} />
                       </button>
                     )}
                     {!(p.role === 'ai' && amHost) && (
@@ -940,6 +925,17 @@ export function RoomLobbyPage() {
             <CharacterPanel character={preview?.char ?? panelChar!} />
           </div>
         </aside>
+      )}
+
+      {/* 写提示词 → 生成 → 过目/编辑 → 决定去留。卡在「过目」这一步已经落库但**未入座**，
+          玩家弃用就连卡一起删掉；点「保留并入座」才走到指派。 */}
+      {genSeat !== null && room && (
+        <AiTeammateDialog
+          open
+          moduleId={room.module_id}
+          onClose={() => setGenSeat(null)}
+          onConfirm={(char) => adoptTeammate(genSeat, char.id, char.name)}
+        />
       )}
 
       {/* 聊天是右侧浮层：收起成一颗圆 token，展开是一张悬浮卡。它不占布局宽度、
