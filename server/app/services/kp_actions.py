@@ -136,9 +136,16 @@ def _exec_say(
             npc_name = n.get("name") or who
             break
     # 气泡上的说话人是玩家可见面：玩家还没认出这东西时不能报出真名。
-    # 这句台词本身也算判据（自报家门当场改口）。
+    # 判据要带上**本轮到此为止玩家已经看到的正文**：masker 读的是库里的快照，而本轮旁白
+    # 要到回合收尾 _persist_narration 才落库、本轮台词也还只在 result 里攒着。不带上就会
+    # 出现「旁白刚写完『诺特先生放下账本』，紧接着的气泡还叫他陌生男性」，以及自报家门
+    # 那一刻的「不明存在：我叫香澄澪」。
     if masker is not None:
-        npc_name = masker(npc_name, extra_prose=text)
+        seen = [result[0] if result else ""]
+        if len(result) > 2:
+            seen += [t for _who, t in result[2]]
+        seen.append(text)
+        npc_name = masker(npc_name, extra_prose="\n".join(s for s in seen if s))
     # 偏移＝此刻已累计旁白长度（本步旁白已并入 result[0]）→ 台词插在本步旁白之后、下步之前。
     offset = len(result[0])
     if len(result) > 3:

@@ -150,6 +150,38 @@ def test_没有模组时不遮任何东西(db_factory):
     assert mask(MONSTER) == MONSTER
 
 
+def test_模组说玩家本就认识的人_开场就报真名(db_factory):
+    """《鬼屋》的调查员是诺特请来的，开场白里没理由管他叫「陌生男性」。
+
+    player_brief 按定义只写玩家角色本就清楚的前情（受谁委托、为何而来），
+    委托人必然在里面——不认它的话，开场第一句叙事之前所有 NPC 一律陌生人。
+    """
+    db = db_factory()
+    module, _hero, session = _seed(db)
+    module.npcs = module.npcs + [
+        {"id": "npc_knott", "name": "史蒂芬·诺特先生", "description": "一位焦虑的中年男子。"},
+    ]
+    module.world_setting = {
+        "player_brief": "你们受房主史蒂芬·诺特先生委托，去查看那栋出过事的房子。",
+    }
+    db.commit()
+
+    mask = ni.build_masker(db, session.id, module)
+    assert mask("史蒂芬·诺特先生") == "史蒂芬·诺特先生"
+    # 同一模组里 player_brief 没提的，照常遮着——这不是「有 brief 就全放行」
+    assert mask(MONSTER) == ni.UNKNOWN_LABEL
+    assert mask(STUDENT) == "陌生人"
+
+
+def test_世界观导入不算认识(db_factory):
+    """intro 是氛围铺陈，里面提到的名字不代表调查员认识本人。"""
+    db = db_factory()
+    module, _hero, session = _seed(db)
+    module.world_setting = {"intro": f"山民世代传说着{MONSTER}的故事。"}
+    db.commit()
+    assert ni.build_masker(db, session.id, module)(MONSTER) == ni.UNKNOWN_LABEL
+
+
 def test_reveals_报告是否照实显示(db_factory):
     db = db_factory()
     module, _hero, session = _seed(db)

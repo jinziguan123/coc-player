@@ -10,6 +10,12 @@
 不需要额外标注，也不给 KP 加负担，而且自动跟上剧情：等玩家读到典籍、
 NPC 说破身份、KP 在叙事里直呼其名的那一刻，机制界面自然跟着改口。
 
+**外加一条开局判据**：模组的 ``player_brief``。光看本局叙事的话，开场第一句话之前
+prose 是空的，模组里每个 NPC 一律先按陌生人处理——《鬼屋》的调查员分明是诺特请来的，
+气泡上却写着「陌生男性」。player_brief 的定义（见 module_service）就是「玩家角色开场
+本就合法知道的前情：身份动机、受谁委托、为何来到起始地点」，委托人、雇主、同行的同事
+必然写在里面，而需要玩家自己发现的东西一概不许写进去——正好就是这里要的那份名单。
+
 模组里的名字普遍写成「外号（神话身份）」这种形式（田间潜随者（莎布·尼古拉丝化身）、
 呼子（蠕虫行者）），括号里那层本就是给 KP 看的，所以揭示分三级：
 神话身份出现过 → 全名；只有外号出现过 → 只给外号；都没出现 → 中性称呼。
@@ -193,13 +199,27 @@ def _player_visible_prose(db: Session, session_id: str) -> str:
     return "\n".join(parts)
 
 
+def _pre_known_prose(module: Module | None) -> str:
+    """模组写明的「玩家开场就已经知道的前情」，与本局叙事同等对待。
+
+    只取 ``player_brief``，不取 ``intro``：后者是世界观与基调的铺陈，里面出现的名字
+    （地名、传说人物）不代表调查员认识本人。
+    """
+    ws = getattr(module, "world_setting", None) if module is not None else None
+    if not isinstance(ws, dict):
+        return ""
+    return str(ws.get("player_brief") or "").strip()
+
+
 def build_masker(db: Session, session_id: str, module: Module | None) -> NameMasker:
     """按当前进度构建一个对外称呼表。"""
     npcs = list(getattr(module, "npcs", None) or []) if module is not None else []
     npcs = [n for n in npcs if isinstance(n, dict)]
     if not npcs:
         return NameMasker("", [])
-    return NameMasker(_player_visible_prose(db, session_id), npcs)
+    prose = _player_visible_prose(db, session_id)
+    known = _pre_known_prose(module)
+    return NameMasker(f"{known}\n{prose}" if known else prose, npcs)
 
 
 def public_name(

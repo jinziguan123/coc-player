@@ -555,6 +555,40 @@ def test_say_tool_self_introduction_switches_name_immediately(db_factory):
     assert result[3][0][1] == "史蒂芬·诺特先生"
 
 
+def test_say_tool_counts_this_turn_narration(db_factory):
+    """本轮旁白刚点过名，气泡就该改口——旁白要到回合收尾才落库，masker 读的是库里的
+    快照，不把 result[0] 算进判据就会出现「旁白写着诺特先生、气泡叫他陌生男性」。"""
+    db, session_id, session, module, hero = _seed_say(db_factory)
+    result = ["柜台后的史蒂芬·诺特先生放下账本。", "", [], [], []]
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], llm=None, result=result,
+    )
+    asyncio.run(execute(ToolCall(
+        id="1", name="say", arguments={"who": "史蒂芬·诺特先生", "text": "欢迎光临。"},
+    )))
+    assert result[3][0][1] == "史蒂芬·诺特先生"
+
+
+def test_say_tool_counts_earlier_line_this_turn(db_factory):
+    """别人先喊过他的名字，轮到他开口时也该是真名。"""
+    db, session_id, session, module, hero = _seed_say(db_factory)
+    result = ["", "", [], [], []]
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], llm=None, result=result,
+    )
+
+    async def _go():
+        await execute(ToolCall(id="1", name="say", arguments={
+            "who": "报童", "text": "史蒂芬·诺特先生，您的报纸。",
+        }))
+        await execute(ToolCall(id="2", name="say", arguments={
+            "who": "史蒂芬·诺特先生", "text": "搁那儿吧。",
+        }))
+
+    asyncio.run(_go())
+    assert result[3][1][1] == "史蒂芬·诺特先生"
+
+
 def test_reorder_turn_events_interleaves_by_broadcast_offset(db_factory):
     """收尾重排：loop 内先落库的工具事件(小序号) + 旁白后落库(大序号)，按广播偏移重排后，
     resync 顺序恢复为「旁白→骰子→旁白」的交错，而非「骰子→旁白→旁白」。"""
