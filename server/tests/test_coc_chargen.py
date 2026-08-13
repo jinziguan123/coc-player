@@ -10,8 +10,10 @@ import pytest
 from app.rules.coc.character import (
     EDU_MAX,
     apply_age_modifiers,
+    asset_tier,
     compute_derived,
     damage_bonus,
+    derive_assets,
     roll_luck,
 )
 
@@ -181,6 +183,47 @@ def test_派生值公式():
     assert d["hitPoints"]["max"] == 13        # (60+70)/10
     assert d["magicPoints"]["max"] == 11      # 55/5
     assert d["sanity"]["current"] == 55       # = POW
+
+
+# ── 信用评级换算 ────────────────────────────────────────────────────────
+#
+# 整张表钉在这里，与前端 useCocData.test.ts 的用例逐格对应：同一张表在两侧各有一份
+# （编辑器里的「按信用评级换算」要即时出数，不值得为查表走一次往返），任一侧漂移都得红。
+
+
+@pytest.mark.parametrize(
+    "cr,tier,spending,cash,assets",
+    [
+        # 信用, 等级,        消费水平, 现金,  资产
+        (0, "一贫如洗", 0.5, 0.5, 0),
+        (5, "贫穷", 2, 5, 50),
+        (9, "贫穷", 2, 9, 90),
+        (10, "普通", 10, 20, 500),
+        (30, "普通", 10, 60, 1500),
+        (49, "普通", 10, 98, 2450),
+        (50, "富裕", 50, 250, 25000),
+        (89, "富裕", 50, 445, 44500),
+        (90, "富有", 250, 1800, 180000),
+        (98, "富有", 250, 1960, 196000),
+        (99, "巨富", 5000, 50000, 5000000),
+    ],
+)
+def test_信用评级换算(cr, tier, spending, cash, assets):
+    assert derive_assets(cr) == {
+        "tier": tier, "spendingLevel": spending, "cash": cash, "assets": assets,
+    }
+    assert asset_tier(cr) == tier
+
+
+def test_现金远小于资产():
+    """现金是随身的钱，不是身家。
+
+    前端那一列一度是 ×2/×20/×50/×100，比规则书高一个量级，普通阶层一上来就揣着
+    六百刀。后端这份从一开始按修正后的倍率写，这条用来防它被「照着旧版抄回去」。
+    """
+    for cr in (5, 30, 70, 95):
+        d = derive_assets(cr)
+        assert d["cash"] < d["assets"]
 
 
 # ── apply-age 接口 ──────────────────────────────────────────────────────

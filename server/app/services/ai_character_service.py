@@ -20,6 +20,7 @@ from app.rules.coc.character import (
     COC_DEFAULT_SKILLS,
     build_default_skills,
     compute_derived,
+    derive_assets,
     roll_attributes,
 )
 from app.rules.coc.occupations import (
@@ -116,13 +117,15 @@ def _build_prompt(module: Module, hint: str, attrs: dict[str, int]) -> str:
 {skill_names}
 3. credit_rating：信用评级整数（会被钳制到所选职业的合理范围）
 4. name / age（15-89，且与设定相符）/ gender
-5. 六段结构化背景，各 1-2 句中文：personalDescription、ideologyBeliefs、significantPeople、meaningfulLocations、treasuredPossessions、traits
-6. equipment：5-10 件贴合职业与 {era} 年代的随身物品名（字符串数组，物品须符合年代，不要武器以外的现代物品）
+5. residence / birthplace：居住地与出生地，各写一个具体地名（贴合模组的地域与 {era} 年代；
+   两者可以相同，但更常见的是「生于某地、现居案发城市」）
+6. 六段结构化背景，各 1-2 句中文：personalDescription、ideologyBeliefs、significantPeople、meaningfulLocations、treasuredPossessions、traits
+7. equipment：5-10 件贴合职业与 {era} 年代的随身物品名（字符串数组，物品须符合年代，不要武器以外的现代物品）
 
 注意：{era} 年代不应出现不符合时代的科技、概念或物品。
 
 ## 返回格式（严格 JSON，不要任何额外文字或解释）
-{{"name":"","age":25,"gender":"","occupation":"","credit_rating":0,"skills":{{"侦查":60,"聆听":50}},"equipment":["笔记本","怀表"],"personalDescription":"","ideologyBeliefs":"","significantPeople":"","meaningfulLocations":"","treasuredPossessions":"","traits":"","backstory":""}}"""
+{{"name":"","age":25,"gender":"","residence":"","birthplace":"","occupation":"","credit_rating":0,"skills":{{"侦查":60,"聆听":50}},"equipment":["笔记本","怀表"],"personalDescription":"","ideologyBeliefs":"","significantPeople":"","meaningfulLocations":"","treasuredPossessions":"","traits":"","backstory":""}}"""
 
 
 # --------------------------------------------------------------------------- #
@@ -219,9 +222,11 @@ def _build_result(
     system_data = compute_derived(attrs, age)
     system_data["occupation"] = occ_name
     system_data["creditRating"] = cr
-    gender = str(ai.get("gender") or "").strip()
-    if gender:
-        system_data["gender"] = gender
+    _fill_assets(system_data, cr)
+    for key in ("gender", "residence", "birthplace"):
+        val = str(ai.get(key) or "").strip()
+        if val:
+            system_data[key] = val
 
     backstory_parts: list[str] = []
     for key, label in BACKSTORY_LABELS.items():
@@ -250,6 +255,20 @@ def _build_result(
         "backstory": "\n".join(backstory_parts),
         "equipment": equipment,
     }
+
+
+def _fill_assets(system_data: dict[str, Any], cr: int) -> None:
+    """按信用评级把现金/消费水平/资产算进 system_data。
+
+    这一步此前完全缺席：AI 建出来的卡只有一个 creditRating，现金与资产是空的，
+    要玩家自己去编辑器里点一次「按信用评级换算」才补上——可那正是一步纯查表，
+    没有任何需要人来决定的东西。字段名与前端编辑器读写的一致（见 readAssets）。
+    """
+    d = derive_assets(cr)
+    system_data["cash"] = d["cash"]
+    system_data["spendingLevel"] = d["spendingLevel"]
+    # assets 在角色卡上是一行自由描述；换算给出的是金额，与编辑器那颗按钮同样的写法
+    system_data["assets"] = f"约 ${d['assets']:,}"
 
 
 # --------------------------------------------------------------------------- #
@@ -281,6 +300,7 @@ def _rule_only_fallback(module: Module, attrs: dict[str, int]) -> dict[str, Any]
     system_data = compute_derived(attrs, 25)
     system_data["occupation"] = occ.name
     system_data["creditRating"] = cr
+    _fill_assets(system_data, cr)
 
     return {
         "name": "待命名调查员",

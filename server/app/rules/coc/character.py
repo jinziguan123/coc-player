@@ -239,6 +239,46 @@ def compute_derived(attrs: dict[str, int], age: int = 25) -> dict:
     }
 
 
+def asset_tier(cr: int) -> str:
+    """信用评级 → 财富等级。"""
+    if cr <= 0:
+        return "一贫如洗"
+    if cr <= 9:
+        return "贫穷"
+    if cr <= 49:
+        return "普通"
+    if cr <= 89:
+        return "富裕"
+    if cr <= 98:
+        return "富有"
+    return "巨富"
+
+
+def derive_assets(cr: int) -> dict:
+    """信用评级 → 消费水平 / 现金 / 资产（7 版标准表，1920s 美元）。
+
+    与前端 `apps/web/src/components/character/useCocData.ts` 的 `deriveAssets` 是同一张表，
+    两边各有一份是因为编辑器里的「按信用评级换算」按钮要即时出数、不值得为一张查找表走
+    一次往返。**改一边必须改另一边**：两侧都有把具体数值钉死的用例（本仓 tests 与
+    useCocData.test.ts），任一侧漂移都会红。
+
+    现金那一列一度比规则书高一个量级（×2/×20/×50/×100），建出来的调查员一上来就揣着
+    十倍的钱；前端已经修过，这里从一开始就按修正后的倍率写。
+    """
+    tier = asset_tier(cr)
+    if cr <= 0:
+        return {"tier": tier, "spendingLevel": 0.5, "cash": 0.5, "assets": 0}
+    if cr <= 9:
+        return {"tier": tier, "spendingLevel": 2, "cash": cr * 1, "assets": cr * 10}
+    if cr <= 49:
+        return {"tier": tier, "spendingLevel": 10, "cash": cr * 2, "assets": cr * 50}
+    if cr <= 89:
+        return {"tier": tier, "spendingLevel": 50, "cash": cr * 5, "assets": cr * 500}
+    if cr <= 98:
+        return {"tier": tier, "spendingLevel": 250, "cash": cr * 20, "assets": cr * 2000}
+    return {"tier": tier, "spendingLevel": 5000, "cash": 50000, "assets": 5000000}
+
+
 def apply_attr_derived_skills(
     skills: dict[str, int], attrs: dict[str, int]
 ) -> dict[str, int]:
