@@ -5,6 +5,8 @@ import { api } from '@/api/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { CharacterPanel } from '@/components/character/CharacterPanel'
 import { CharacterEditModal } from '@/components/character/CharacterEditModal'
+import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
+import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 
 /** 与大厅页共用的最小角色形状；编辑弹窗要的字段是它的子集。 */
 export interface TeammateDraft {
@@ -21,6 +23,8 @@ export interface TeammateDraft {
 interface Props {
   open: boolean
   moduleId: string
+  /** 本模组的车卡建议：写提示词时正需要它，否则只能凭空猜这个本子要什么人。 */
+  guidance?: CharacterGuidance | null
   /** 关闭对话框（无论走的是哪条出口）。 */
   onClose: () => void
   /** 玩家确认保留：把这张卡指派到发起的那个席位。 */
@@ -34,7 +38,7 @@ interface Props {
  * 这里拆成三步，中间那步是真正的把关点——卡先落库（编辑弹窗要 PUT 一个已存在的角色），
  * 但**不指派席位**；玩家弃用就连卡一起删掉，库里不留垃圾。
  */
-export function AiTeammateDialog({ open, moduleId, onClose, onConfirm }: Props) {
+export function AiTeammateDialog({ open, moduleId, guidance, onClose, onConfirm }: Props) {
   const [hint, setHint] = useState('')
   const [phase, setPhase] = useState<'hint' | 'generating' | 'review'>('hint')
   const [draft, setDraft] = useState<TeammateDraft | null>(null)
@@ -119,6 +123,12 @@ export function AiTeammateDialog({ open, moduleId, onClose, onConfirm }: Props) 
 
           {phase === 'hint' && (
             <div>
+              {/* 先给判据再让人写：不然「想要什么样的队友」只能凭空猜这个本子要什么人 */}
+              {hasGuidance(guidance) && (
+                <div className="mb-2 max-h-44 overflow-y-auto">
+                  <CharacterGuidanceCard guidance={guidance!} />
+                </div>
+              )}
               <p className="mb-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 想要个什么样的队友？留空则由 AI 按本模组自由发挥。
               </p>

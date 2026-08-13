@@ -8,6 +8,8 @@ import { CharacterPanel } from '../components/character/CharacterPanel'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
 import { LobbyChatDock, type ChatLine } from '../components/game/LobbyChatDock'
 import { AiTeammateDialog } from '../components/game/AiTeammateDialog'
+import { CharacterGuidanceCard } from '../components/module/CharacterGuidanceCard'
+import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { GiReturnArrow } from 'react-icons/gi'
 import { parsePlayerRange } from '@/lib/module'
 import {
@@ -88,6 +90,8 @@ export function RoomLobbyPage() {
   const navigate = useNavigate()
   const [room, setRoom] = useState<RoomData | null>(null)
   const [moduleDesc, setModuleDesc] = useState('')
+  /** 本模组的车卡建议：挑角色/写生成提示词时都要看它，此前只挂在角色页上。 */
+  const [guidance, setGuidance] = useState<CharacterGuidance | null>(null)
   /** 本模组推荐的玩家人数区间；模组未标注时 parsePlayerRange 给 1–6 的默认档。 */
   const [seatRange, setSeatRange] = useState<{ min: number; max: number }>({ min: 1, max: 6 })
   const [myChars, setMyChars] = useState<Character[]>([])
@@ -226,10 +230,12 @@ export function RoomLobbyPage() {
       setRoom(joined)
       const mods = await api.get<{
         id: string; description: string; world_setting?: Record<string, unknown> | null
+        character_guidance?: CharacterGuidance | null
       }[]>('/modules')
       if (cancelled) return
       const mod = mods.find((m) => m.id === joined.module_id)
       setModuleDesc(mod?.description || '')
+      setGuidance(mod?.character_guidance ?? null)
       // 座位数按本模组的推荐人数约束——模组既然已经选定了，人数就不该再是任意的。
       setSeatRange(parsePlayerRange(mod?.world_setting))
       await refreshCharPools()
@@ -769,6 +775,15 @@ export function RoomLobbyPage() {
                       <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>以 KP 身份加入后，就不再占用玩家席位</span>
                     </div>
                   )}
+                  {/* 车卡建议钉在挑角色之前：本模组适合什么、忌讳什么，正是此刻要用的判据。
+                      此前它只挂在角色页——玩家进了大厅才决定演谁，那时已经看不到它了。
+                      放在这个分支里（而不是页面顶部）是因为它只在「我正在挑」时才有用，
+                      挑完就是噪音，也不该把席位挤下去。 */}
+                  {hasGuidance(guidance) && (
+                    <div className="mb-2">
+                      <CharacterGuidanceCard guidance={guidance!} moduleTitle={room.module_title} />
+                    </div>
+                  )}
                   {/* 两件事，两块区域，不再挤在同一排：
                       「挑一张现成的」和「现场造一张」是不同的操作，从前它们同在一个
                       flex-wrap 里视觉同级；更别扭的是那个提示词输入框——它只服务「AI 生成」，
@@ -933,6 +948,7 @@ export function RoomLobbyPage() {
         <AiTeammateDialog
           open
           moduleId={room.module_id}
+          guidance={guidance}
           onClose={() => setGenSeat(null)}
           onConfirm={(char) => adoptTeammate(genSeat, char.id, char.name)}
         />
