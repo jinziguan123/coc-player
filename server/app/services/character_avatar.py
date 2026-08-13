@@ -75,18 +75,20 @@ async def generate_avatar(db: Session, char: Character) -> str | None:
     if not image_llm.supports_image_gen():
         return None
     module = db.get(Module, char.module_id) if char.module_id else None
+    # 写提示词与出图共用同一份画风（见 module_image_service.style_discipline）
+    suffix = module_image_service.style_suffix_for(module)
     try:
         raw = await get_fast_llm().complete(
             [
-                {"role": "system", "content": _AVATAR_PROMPT_SYS},
+                {"role": "system",
+                 "content": _AVATAR_PROMPT_SYS + module_image_service.style_discipline(suffix)},
                 {"role": "user", "content": _prompt_user(char, module)},
             ],
             temperature=0.7,
         )
-        prompt = (raw or "").strip().splitlines()[0].strip()[:500] if raw else ""
+        prompt = module_image_service.trim_prompt(raw)
         if not prompt:
             return None
-        suffix = module_image_service.style_suffix_for(module)
         b64 = await image_llm.generate_image(f"{prompt}, {suffix}")
         if not b64:
             return None

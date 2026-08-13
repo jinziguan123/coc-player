@@ -43,6 +43,75 @@ def style_suffix_for(module=None, session=None) -> str:
         getattr(module, "default_image_style", "") if module is not None else "",
     )
 
+
+#: 正文允许的最大词数。CLIP 一次只吃 77 token，画风后缀本身就占掉三十来词；正文再长，
+#: 后缀就掉进第二个 chunk、权重骤降，模型回落到自己的写实倾向。实测同一句正文、同一个后缀，
+#: 27 词出标准墨线漫画，63 词出写实照片——长度是那次对照里唯一的变量。
+PROMPT_MAX_WORDS = 35
+
+
+def trim_prompt(raw: str, max_words: int = PROMPT_MAX_WORDS) -> str:
+    """把快模型写的提示词收进词数上限：取首行，按逗号累加到超限为止。
+
+    砍在逗号处而不是词中间——SD 提示词是逗号分隔的短语列表，从中间截断会留下半个短语。
+    首个短语哪怕自己就超限也保留（它是画面主体，砍了就什么都不剩）。
+
+    必须在代码里硬截：提示词里写了词数要求，模型照做与否是概率问题，而超限一次就是
+    一张风格跑掉的图。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    text = text.splitlines()[0].strip()[:500]
+    out: list[str] = []
+    used = 0
+    for part in text.split(","):
+        chunk = part.strip()
+        if not chunk:
+            continue
+        n = len(chunk.split())
+        if out and used + n > max_words:
+            break
+        out.append(chunk)
+        used += n
+    return ", ".join(out)
+
+
+def style_discipline(suffix: str) -> str:
+    """拼进 *_PROMPT_SYS 的一段：告诉写提示词的模型，成图将是什么画风。
+
+    **为什么写内容的模型必须知道画风。** 原先的分工是「快模型只管写内容，画风由系统在
+    末尾统一追加」，而各 *_PROMPT_SYS 又明确要求它写「光影、天气与年代质感」。它照做了，
+    于是写出 ``warm golden sunlight``、``vibrant market atmosphere``、``urban realism``
+    ——正好和默认画风要的 ``muted low-saturation, gritty dark comic`` 顶着来。后缀还挂在
+    四十来词正文的最末尾，权重被稀释，生图模型每次倒向哪一半近乎随机：《鬼屋》里同一天、
+    同一份代码出的两张场景图，一张是高反差黑白照片、一张是纯白底线稿，连后缀自己要的
+    网点与主色倾向都没吃到。
+
+    光影本身还是要写的（它是画面信息），只是把**色调**的裁量权收回给画风那一段。
+
+    **禁的是整类，不是几个词。** 头一版只列了 vibrant / colorful / saturated 这些，
+    模型立刻换了个说法接着犯：它写 ``muted sepia tones``——低饱和确实照做了，可 sepia
+    正是老照片的颜色，媒介当场跑偏，出来又是一张写实照片。它并不知道目标画风想要什么色调，
+    所以任何由它自选的色调词都是在赌。列举永远追不上换词，只能整类收走。
+    """
+    return (
+        "\n\n【画风纪律】本次成图会在你的提示词之后统一追加下面这段画风词，"
+        "你写的内容**必须与它兼容**：\n"
+        f"{suffix}\n"
+        f"另外，整条提示词**不得超过 {PROMPT_MAX_WORDS} 个英文词**：画风词要和你的正文挤在"
+        "同一个 CLIP 窗口里，正文一长，画风就被挤出去、成图直接跑回写实照片。"
+        "挑最能立住这个画面的几样东西写，不要面面俱到。\n"
+        "两条硬要求：\n"
+        "1. 不写任何**媒介或渲染方式**（photo、photograph、realistic、realism、3d render、"
+        "cinematic、hyperrealistic、film still 等）——媒介已经由上面那段画风词定死了。\n"
+        "2. 不写任何**整体色调/ 调色**的描述。不只是 vibrant、colorful 这类，"
+        "sepia、monochrome、warm tones、muted tones、golden hour、色温与胶片色一概不写，"
+        "哪怕你觉得它符合上面的画风——色调完全由画风那一段决定，你写的每一个色调词都在跟它抢。\n"
+        "光影照写，但只写**光源与明暗关系**：光从哪来（吊灯、窗、街灯）、照亮什么、"
+        "投下什么阴影。物体本身固有的颜色（红砖、黑漆门）可以写，那是画面信息不是调色。"
+    )
+
 #: 写提示词的那个模型要守的内容红线，拼进每个 *_PROMPT_SYS。
 #:
 #: 三道闸各管一段，缺一不可：
@@ -62,6 +131,12 @@ SCENE_PROMPT_SYS = (
     "只描绘该地点的空镜画面内容——环境/建筑、光影、天气与年代质感，按给定年代取材"
     "（如 abandoned train car, flickering lights）。危险度越高画面越阴沉压抑。画风词不用写，系统会统一追加。"
     "不要出现人物面孔与真实人名，不要引号，只输出提示词本身。"
+    # 章节类场景（「委托与准备」这种）说的是一段情节、不是一个地方，直接照「画这个地点」
+    # 去写，模型只能自己现编：同一条描述三次取样编出了公寓走廊、白天街道、黄昏郊区街。
+    # 描述里其实藏着地点（「接受房东的委托」→ 房东的会客处），指出来让它去找。
+    "\n若给定的是一段情节而非具体地点（描述写的是「做了什么」），"
+    "先从描述里推断这件事**发生在哪儿**，再画那个地方的空镜；推断不出就画一处符合"
+    "年代与氛围的中性室内景，不要凭空另编一个与描述无关的地方，也不要画人物动作。"
     + SAFETY_PROMPT_RULE
 )
 
@@ -229,18 +304,20 @@ async def regenerate_module_image(
     image_llm = get_image_llm()
     if not image_llm.supports_image_gen():
         return None
+    # 写提示词与出图必须用**同一份**画风：分别取两次，中途改了模组画风就会一半新一半旧。
+    suffix = style_suffix_for(module)
     try:
         raw = await get_fast_llm().complete(
             [
-                {"role": "system", "content": prompt_sys},
+                {"role": "system", "content": prompt_sys + style_discipline(suffix)},
                 {"role": "user", "content": _prompt_user(kind, item, module, expected_field)},
             ],
             temperature=0.7,
         )
-        prompt = (raw or "").strip().splitlines()[0].strip()[:500] if raw else ""
+        prompt = trim_prompt(raw)
         if not prompt:
             return None
-        b64 = await image_llm.generate_image(f"{prompt}, {style_suffix_for(module)}")
+        b64 = await image_llm.generate_image(f"{prompt}, {suffix}")
         if not b64:
             return None
         url = image_store.save_image_b64(b64)

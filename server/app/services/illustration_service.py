@@ -76,18 +76,20 @@ async def _illustrate_event(
     from app.database import SessionLocal
     from app.services.image_store import save_image_b64
 
+    # 写提示词与出图用**同一份**画风：取两次的话，中途改了本局画风就会一半新一半旧。
+    suffix = _style_suffix(session_id)
     try:
         raw = await get_fast_llm().complete(
             [
-                {"role": "system", "content": prompt_sys},
+                {"role": "system", "content": prompt_sys + module_image_service.style_discipline(suffix)},
                 {"role": "user", "content": prompt_user},
             ],
             temperature=0.7,
         )
-        sd_prompt = (raw or "").strip().splitlines()[0].strip()[:500] if isinstance(raw, str) and raw.strip() else ""
+        sd_prompt = module_image_service.trim_prompt(raw if isinstance(raw, str) else "")
         if not sd_prompt:
             return
-        sd_prompt = f"{sd_prompt}, {_style_suffix(session_id)}"
+        sd_prompt = f"{sd_prompt}, {suffix}"
         b64 = await get_image_llm().generate_image(sd_prompt)
         if not b64:
             return

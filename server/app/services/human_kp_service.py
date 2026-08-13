@@ -353,20 +353,20 @@ async def generate_image_preview(
     image_llm = get_image_llm()
     if not image_llm.supports_image_gen():
         raise ValueError("尚未配置生图模型：请到「设置 → AI 配置 → 生图模型」添加并激活一个")
+    suffix = module_image_service.style_suffix_for(module, session)
     translated = await get_fast_llm().complete(
         [
             {
                 "role": "system",
-                "content": "把真人 KP 的画面描述改写成一行英文文生图提示词。保留主体、环境、光线与年代，不要解释。",
+                "content": "把真人 KP 的画面描述改写成一行英文文生图提示词。保留主体、环境、光线与年代，不要解释。"
+                + module_image_service.style_discipline(suffix),
             },
             {"role": "user", "content": prompt.strip()},
         ],
         temperature=0.4,
     )
-    visual_prompt = str(translated or prompt).strip().splitlines()[0][:700]
-    b64 = await image_llm.generate_image(
-        f"{visual_prompt}, {module_image_service.style_suffix_for(module, session)}",
-    )
+    visual_prompt = module_image_service.trim_prompt(str(translated or prompt))
+    b64 = await image_llm.generate_image(f"{visual_prompt}, {suffix}")
     url = image_store.save_image_b64(b64 or "")
     if not url:
         raise ValueError("图片生成失败")
