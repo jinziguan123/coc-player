@@ -174,6 +174,15 @@ docs/                  设计、路线图、打包和架构文档
 >   而直接 `dict(session.world_state)` + 整段回写的旧调用点仍有 27 处。适配器立起来了，
 >   但「唯一读写口径」尚未成为事实约束，仍靠人自觉。
 > - ADR-003 说的拆表（战斗、追逐、回合、用量）**一项都没做**。
+>
+> **现状（2026-08-14，分支 refactor/world-state-split）**：ADR-003 的拆表已落地——
+> 战斗 → `combat_states`、追逐 → `chase_states`、用量/RAG 统计 → `session_stats`、
+> 战报 → `session_recaps`（1:N）、回合锁 `turn_confirm` → 既有 `turn_state` 列；
+> 剧情记忆保留 JSON 并建立 Pydantic schema（`WorldStateSchema`，`extra=allow` + fail-open 校验）、
+> `SCHEMA_VERSION` 1 → 2。仍留 `world_state` 的回合级 `pending_*`、分头 `party_locations`、
+> 幂等台账 `san_checked`/`scene_events_seen` 属可选后续，走 schema 的 `extra=allow` 放行。
+> 直接 `dict(session.world_state)` 的旧调用点从 36 处降到个位数（战斗/追逐/用量/战报/回合锁
+> 均已走各自唯一口径），但 `world_state` 里残留的叙事键写入尚未全部收敛到 adapter。
 
 ## 5. 关键运行链路
 
