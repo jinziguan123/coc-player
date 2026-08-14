@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import (  # noqa: F401 注册表
     Base, Character, EventLog, GameSession, Module, SessionParticipant,
 )
+from app.models.session_navigation import SessionNavigation
 from app.services import chat_service, npc_identity, session_service
 
 
@@ -261,10 +262,10 @@ def test_roll_generation_settles_pending_san_check(db_factory, monkeypatch):
     assert dice[0]["metadata"]["san_loss"] == 2
     assert dice[0]["metadata"]["old_san"] == 50
     assert dice[0]["metadata"]["new_san"] == 48
-    state = fresh.get(GameSession, session.id).world_state or {}
-    turn = fresh.get(GameSession, session.id).turn_state or {}
+    gs = fresh.get(GameSession, session.id)
+    turn = gs.turn_state or {}
     assert check_id not in (turn.get("pending_checks") or {})
-    assert f"腐尸|{hero.id}" in (state.get("san_checked") or [])
+    assert f"腐尸|{hero.id}" in (gs.ledger.san_checked if gs.ledger else [])
 
 
 def test_group_san_waits_until_all_human_players_roll(db_factory, monkeypatch):
@@ -586,7 +587,7 @@ def test_group_check_scene_filtered(db_factory, monkeypatch):
     module, hero, teammates, session = _seed(db)
     # 主角在 hall，队友阿尔法分头去了 study
     session.current_scene_id = "hall"
-    session.world_state = {"party_locations": {hero.id: "hall", teammates[0].id: "study"}}
+    session.navigation = SessionNavigation(party_locations={hero.id: "hall", teammates[0].id: "study"})
     db.add(session)
     db.commit()
     chunks = _run(

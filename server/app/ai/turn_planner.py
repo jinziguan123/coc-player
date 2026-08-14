@@ -451,8 +451,8 @@ class TurnPlan(BaseModel):
 
 
 def _visible_scene_ids(session: GameSession) -> set[str]:
-    world_state = session.world_state or {}
-    visible = set(world_state.get("visited_scenes") or [])
+    nav = session.navigation
+    visible = set(nav.visited_scenes if nav else [])
     if session.current_scene_id:
         visible.add(session.current_scene_id)
     return visible

@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module  # noqa: F401
+from app.models.session_navigation import SessionNavigation
 from app.services import session_service
 
 
@@ -32,7 +33,7 @@ def _seed(db):
     db.add(module); db.add(pc); db.add(ally); db.flush()
     session = GameSession(
         module_id=module.id, player_character_id=pc.id, status="active",
-        current_scene_id="a", world_state={"visited_scenes": ["a"]},
+        current_scene_id="a", navigation=SessionNavigation(visited_scenes=["a"]),
     )
     db.add(session); db.commit()
     return session.id, pc.id, ally.id, module.id
@@ -115,8 +116,7 @@ def test_locations_chapter_scenes_hidden_unless_current(db_factory):
     module.scenes = _SCENES + [{"id": "ch", "title": "委托与准备", "kind": "chapter", "connections": []}]
     db.commit()
     session = db.get(GameSession, sid)
-    ws = dict(session.world_state); ws["visited_scenes"] = ["a", "ch"]
-    session.world_state = ws; db.commit()
+    session.navigation.visited_scenes = ["a", "ch"]; db.commit()
     # 已访问但非当前 → 不显示
     locs = session_service.list_known_locations(module, session, char_id=pc_id, events=[])
     assert "ch" not in {x["id"] for x in locs}
@@ -132,10 +132,10 @@ def test_locations_party_distribution(db_factory):
     sid, pc_id, ally_id, mod_id = _seed(db)
     session = db.get(GameSession, sid)
     module = db.get(Module, mod_id)
-    ws = dict(session.world_state)
-    ws["visited_scenes"] = ["a", "c"]
-    ws["party_locations"] = {ally_id: "c"}   # 亨利分头去了档案馆；莫妮卡缺省在主场景 a
-    session.world_state = ws; db.commit()
+    nav = session.navigation
+    nav.visited_scenes = ["a", "c"]
+    nav.party_locations = {ally_id: "c"}   # 亨利分头去了档案馆；莫妮卡缺省在主场景 a
+    db.commit()
     locs = session_service.list_known_locations(
         module, session, char_id=pc_id, events=[],
         char_names={pc_id: "莫妮卡", ally_id: "亨利"},
@@ -256,7 +256,7 @@ def test_scene_change_moves_player_and_colocated_party(db_factory):
     session = db.get(GameSession, sid)
     assert session_service.get_char_location(session, pc_id) == "c"     # 主角移动
     assert session_service.get_char_location(session, ally_id) == "c"   # 同处队友一同前往
-    assert "c" in (session.world_state or {}).get("visited_scenes")     # 目的地变已访问
+    assert "c" in session_service.get_visited_scenes(session)          # 目的地变已访问
     assert "c" in session_service.known_scene_ids(module, session, [])  # 已访问即可见
 
 
@@ -317,7 +317,7 @@ def test_set_char_location_moves_player(db_factory):
     session = db.get(GameSession, sid)
     assert session.current_scene_id == "c"                 # 主角移动同步 current_scene_id
     assert session_service.get_char_location(session, pc_id) == "c"
-    assert "c" in (session.world_state or {}).get("visited_scenes")
+    assert "c" in session_service.get_visited_scenes(session)
 
 
 
@@ -359,7 +359,7 @@ def test_split_party_each_sees_own_scene_as_current(db_factory):
     module.scenes = scenes
     session = db.get(GameSession, sid)
     # 队友分头去了图书馆；会话锚点仍在门厅
-    session.world_state = {**session.world_state, "party_locations": {ally_id: "b"}}
+    session.navigation.party_locations = {ally_id: "b"}
     db.commit()
 
     events = [_Ev("narration", "门上挂着牌子：图书馆、档案馆。")]

@@ -42,7 +42,7 @@ def seeded(tmp_path):
         db, module.id, [{"character_id": hero.id, "is_primary": True}],
     )
     session.current_scene_id = "hall"
-    session.world_state = {"visited_scenes": ["hall"]}
+    session.navigation.visited_scenes = ["hall"]
     db.commit()
     yield db, module, session, hero
     db.close()
@@ -224,7 +224,7 @@ def train(tmp_path):
     )
     session.current_scene_id = "s3"
     # 一路从 6 号走到 3 号；2 号车厢有怪物挡着，没进去过
-    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3"]}
+    session.navigation.visited_scenes = ["s6", "s5", "s4", "s3"]
     db.commit()
     yield db, module, session, hero
     db.close()
@@ -264,7 +264,7 @@ def test_suggestion_allowed_for_the_next_leg(train):
 def test_far_place_becomes_reachable_once_the_leg_is_visited(train):
     """2 号车厢去过之后，先头车厢就是正常的多跳目标了。"""
     db, module, session, _hero = train
-    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3", "s2"]}
+    session.navigation.visited_scenes = ["s6", "s5", "s4", "s3", "s2"]
     db.commit()
     chunks, _note = turn_effects.travel_suggest_event(db, session.id, session, module, "head")
     assert len(chunks) == 1
@@ -279,7 +279,7 @@ def test_far_place_becomes_reachable_once_the_leg_is_visited(train):
 def test_blocked_scene_is_not_a_valid_leg(train):
     """标记为过不去之后，取道该处的更远目标不再可达，且拒绝理由带上 KP 给的原因。"""
     db, module, session, _hero = train
-    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3", "s2"]}
+    session.navigation.visited_scenes = ["s6", "s5", "s4", "s3", "s2"]
     db.commit()
     # 先确认没标记时是通的
     assert len(turn_effects.travel_suggest_event(db, session.id, session, module, "head")[0]) == 1
@@ -296,7 +296,7 @@ def test_blocked_scene_is_not_a_valid_leg(train):
 def test_blocked_scene_is_still_a_valid_destination(train):
     """封的是「借道穿过去」，不是「不许去」——走进危险是玩家的自由。"""
     db, module, session, _hero = train
-    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3"]}
+    session.navigation.visited_scenes = ["s6", "s5", "s4", "s3"]
     db.commit()
     turn_effects.set_path_block(db, session.id, session, module, "s2", "怪物", blocked=True)
 
@@ -307,7 +307,7 @@ def test_blocked_scene_is_still_a_valid_destination(train):
 
 def test_unblock_restores_the_route(train):
     db, module, session, _hero = train
-    session.world_state = {"visited_scenes": ["s6", "s5", "s4", "s3", "s2"]}
+    session.navigation.visited_scenes = ["s6", "s5", "s4", "s3", "s2"]
     db.commit()
     turn_effects.set_path_block(db, session.id, session, module, "s2", "怪物", blocked=True)
     assert "s2" not in session_service.passable_scene_ids(session)

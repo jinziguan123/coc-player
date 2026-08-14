@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ai.turn_planner import SanityPolicy, TurnPlan
 from app.models import Base, Character, GameSession, Module, SessionParticipant  # noqa: F401
+from app.models.session_ledger import SessionLedger
 from app.services import chat_service as cs
 from app.services import dice_runtime, session_service
 
@@ -230,7 +231,7 @@ def test_scene_san_reaches_teammates_who_read_source_later(db_factory, monkeypat
         status="active",
         current_scene_id="scene_5",
         # 旧存档仍保存模型自由命名的来源；运行时只做兼容比较，不迁移存档。
-        world_state={"san_checked": [f"报纸新闻|{hero.id}"]},
+        ledger=SessionLedger(san_checked=[f"报纸新闻|{hero.id}"]),
     )
     db.add(session); db.flush()
     db.add_all([
@@ -289,7 +290,7 @@ def test_scene_san_reaches_teammates_who_read_source_later(db_factory, monkeypat
     ]
     assert {event.metadata_["actor"] for event in san_events} == {"林知微", "相马直树"}
     db.refresh(session)
-    checked = set((session.world_state or {}).get("san_checked") or [])
+    checked = set((session.ledger.san_checked if session.ledger else []) or [])
     assert checked == {
         f"报纸新闻|{hero.id}",
         f"{source_key}|{ally_a.id}",

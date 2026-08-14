@@ -322,7 +322,8 @@ def _party_distribution_section(
     这是 NPC 感知边界（隔墙有耳 bug）的结构性提醒——KP 每回合都看得见「谁和谁不在一处」，
     而不是从事件流里自行脑补。全员同处一地（或无位置记录）返回空串，不注入（行为不变）。
     """
-    locs = (session.world_state or {}).get("party_locations") or {}
+    nav = session.navigation
+    locs = dict(nav.party_locations if nav else {})
     fallback = session.current_scene_id
     by_scene: dict[str, list[str]] = {}
     for m in party:
@@ -520,7 +521,8 @@ def _visible_scenes(session: GameSession, scene_id: str | None, module: Module) 
 
     = 当前场景 + 最近 N 个去过的场景 + 任何还挂着未了结线索的场景。
     """
-    visited = list((session.world_state or {}).get("visited_scenes") or [])
+    nav = session.navigation
+    visited = list(nav.visited_scenes if nav else [])
     visible = set(visited[-VISITED_SCENE_WINDOW:])
     if scene_id:
         visible.add(scene_id)
@@ -1223,8 +1225,10 @@ def build_kp_context(
                                  SYS_TIER_VOLATILE, 5, "clue-ledger"))
             # 当前场景机制点进度：events 逐条标已发生/未发生。与台账同档 priority——
             # 丢了 KP 就会把「被手拖进屋」这类一次性桥段照着场景 JSON 重演一遍，玩家直接可感。
+            led = session.ledger
+            seen = led.scene_events_seen if led else {}
             scene_events_section = world_memory.format_scene_events_section(
-                ws_mem, current_scene,
+                seen, current_scene,
             )
             if scene_events_section:
                 segs.append(_Seg("\n\n" + scene_events_section,

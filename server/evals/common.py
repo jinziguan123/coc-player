@@ -17,6 +17,8 @@ from sqlalchemy import inspect as sa_inspect
 
 from app.ai.turn_planner import TurnPlan
 from app.models import Character, EventLog, GameSession, Module
+from app.models.session_ledger import SessionLedger
+from app.models.session_navigation import SessionNavigation
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -95,9 +97,11 @@ def load_fixture(path: Path) -> ReplayCase:
     plan_data = payload.get("plan")
     events = [dict_to_model(EventLog, e) for e in payload.get("events") or []]
     events.sort(key=lambda e: e.sequence_num or 0)
+    session = dict_to_model(GameSession, payload["session"])
+    _attach_split_state(session)
     return ReplayCase(
         name=meta.get("name") or path.stem,
-        session=dict_to_model(GameSession, payload["session"]),
+        session=session,
         module=dict_to_model(Module, payload["module"]),
         player_char=dict_to_model(Character, payload["player_char"]),
         teammates=[dict_to_model(Character, t) for t in payload.get("teammates") or []],
@@ -111,6 +115,21 @@ def load_fixture(path: Path) -> ReplayCase:
         plan_expect=payload.get("plan_expect") or None,
         narration_expect=payload.get("narration_expect") or None,
     )
+
+
+def _attach_split_state(session: GameSession) -> None:
+    """拆表后：旧 fixture 的 world_state 里可能还带着导航/台账键，搬到关系上（脱库也可用）。
+
+    build_kp_context / turn_planner 对脱库 session 只做属性访问，navigation/ledger 关系
+    直接赋值即可被读到，无需临时库。
+    """
+    ws = session.world_state or {}
+    nav = {k: ws.pop(k) for k in ("party_locations", "visited_scenes") if k in ws}
+    if nav:
+        session.navigation = SessionNavigation(**nav)
+    led = {k: ws.pop(k) for k in ("san_checked", "scene_events_seen") if k in ws}
+    if led:
+        session.ledger = SessionLedger(**led)
 
 
 def iter_fixtures(suite: str | None = None, name: str | None = None) -> list[Path]:

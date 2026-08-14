@@ -11,6 +11,7 @@ from app.models.character import Character
 from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
+from app.models.session_navigation import SessionNavigation
 from app.models.session_participant import SessionParticipant
 from app.services import world_memory
 
@@ -206,7 +207,6 @@ def create_session(
         identity_version=identity_version,
         room_code=_gen_room_code(db),
         current_scene_id=first_scene_id,
-        world_state={"visited_scenes": [first_scene_id] if first_scene_id else []},
     )
     for order, seat in enumerate(seats):
         claimed = bool(seat["character_id"])
@@ -247,6 +247,11 @@ def create_session(
             )
         )
     db.add(game_session)
+    if first_scene_id:
+        # 初始 visited_scenes 落在导航表：先 flush 让 game_session.id 落库
+        # （navigation 是共享主键，session_id 即主键），再补一行。
+        db.flush()
+        db.add(SessionNavigation(session_id=game_session.id, visited_scenes=[first_scene_id]))
     # 创建者的主角绑定到其 token
     if creator_token and primary_id and not (kp_mode == "human" and not legacy_human_kp):
         char = db.get(Character, primary_id)
@@ -1584,20 +1589,29 @@ def update_scene(db: Session, session_id: str, scene_id: str) -> None:
     if not session:
         return
     session.current_scene_id = scene_id
-    ws = dict(session.world_state or {})
-    visited = ws.get("visited_scenes", [])
+    nav = db.get(SessionNavigation, session_id)
+    if nav is None:
+        nav = SessionNavigation(session_id=session_id)
+        db.add(nav)
+    visited = list(nav.visited_scenes or [])
     if scene_id not in visited:
         visited.append(scene_id)
-    ws["visited_scenes"] = visited
-    session.world_state = ws
+    nav.visited_scenes = visited
     db.commit()
 
 
 # ── 按角色位置 / 已知地点（分头行动 + 大地图前往）──────────────────
 
 def get_party_locations(session: GameSession) -> dict:
-    """world_state.party_locations：{角色 id: 所在场景 id}。缺省时按需回落到当前场景。"""
-    return dict((session.world_state or {}).get("party_locations") or {})
+    """session_navigation.party_locations：{角色 id: 所在场景 id}。缺省时按需回落到当前场景。"""
+    nav = session.navigation
+    return dict(nav.party_locations if nav else {})
+
+
+def get_visited_scenes(session: GameSession) -> list:
+    """session_navigation.visited_scenes：队伍真正到访过的场景 id（只进不出）。"""
+    nav = session.navigation
+    return list(nav.visited_scenes if nav else [])
 
 
 def get_char_location(session: GameSession, char_id: str | None) -> str | None:
@@ -1617,15 +1631,17 @@ def set_char_location(db: Session, session_id: str, char_id: str, scene_id: str)
     session = db.get(GameSession, session_id)
     if not session:
         return
-    ws = dict(session.world_state or {})
-    locs = dict(ws.get("party_locations") or {})
+    nav = db.get(SessionNavigation, session_id)
+    if nav is None:
+        nav = SessionNavigation(session_id=session_id)
+        db.add(nav)
+    locs = dict(nav.party_locations or {})
     locs[char_id] = scene_id
-    ws["party_locations"] = locs
-    visited = list(ws.get("visited_scenes") or [])
+    nav.party_locations = locs
+    visited = list(nav.visited_scenes or [])
     if scene_id not in visited:
         visited.append(scene_id)
-    ws["visited_scenes"] = visited
-    session.world_state = ws
+    nav.visited_scenes = visited
     if char_id == session.player_character_id:
         session.current_scene_id = scene_id
     db.commit()
@@ -1770,7 +1786,7 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
     参与解锁；带场景元数据的「下一节车厢」等确定性相对称呼也会解析为真实场景。
     """
     by_id = {s.get("id"): s for s in (module.scenes or []) if s.get("id")}
-    known = set((session.world_state or {}).get("visited_scenes") or [])
+    known = set(get_visited_scenes(session))
     if session.current_scene_id:
         known.add(session.current_scene_id)
     visible_events = [
@@ -1901,10 +1917,10 @@ def visited_scene_ids(session: GameSession) -> set[str]:
     地点（它们要在大地图上看得见、可作为**终点**），``visited`` 只含真正去过的
     （只有这些能当**途经点**）。玩家听说过驾驶室，不等于知道怎么绕过中间那节车厢。
     """
-    out = set((session.world_state or {}).get("visited_scenes") or [])
+    out = set(get_visited_scenes(session))
     if session.current_scene_id:
         out.add(session.current_scene_id)
-    for sid in ((session.world_state or {}).get("party_locations") or {}).values():
+    for sid in get_party_locations(session).values():
         if sid:
             out.add(str(sid))
     return out
@@ -1923,7 +1939,7 @@ def list_known_locations(
       前端「玩家视角」开关据此纯客户端过滤；玩家侧永远走迷雾路径（known 恒 True）。
     """
     by_id = {s.get("id"): s for s in (module.scenes or []) if s.get("id")}
-    visited = set((session.world_state or {}).get("visited_scenes") or [])
+    visited = set(get_visited_scenes(session))
     cur = get_char_location(session, char_id)
     # 层级门禁：挂在某个父级地点之下的场景，父级被**真正到过**之前一律不可见。
     # 这既是防剧透（开局就不该知道村里有几间屋子），也让子沙盘有个明确的解锁时刻。
@@ -1947,7 +1963,7 @@ def list_known_locations(
     # 队伍分布：各成员所在场景（party_locations 缺省回落主场景）
     party_at: dict[str, list[str]] = {}
     if char_names:
-        pl = (session.world_state or {}).get("party_locations") or {}
+        pl = get_party_locations(session)
         for cid, name in char_names.items():
             sid = pl.get(cid) or session.current_scene_id
             if sid:

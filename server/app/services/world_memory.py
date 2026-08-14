@@ -157,14 +157,17 @@ def scene_event_key(scene_id: str, index: int) -> str:
     return f"{str(scene_id or '').strip()}:{int(index)}"
 
 
-def scene_event_seen(ws: dict, scene_id: str, index: int) -> bool:
-    """某场景机制点是否已经发生过（``scene_events_seen`` 是唯一真源）。"""
+def scene_event_seen(seen: dict, scene_id: str, index: int) -> bool:
+    """某场景机制点是否已经发生过（``scene_events_seen`` 是唯一真源）。
+
+    ``seen`` 是台账本体（拆表后即 session_ledger.scene_events_seen），不再包 world_state。
+    """
     key = scene_event_key(scene_id, index)
-    return key in dict((ws or {}).get("scene_events_seen") or {})
+    return key in dict(seen or {})
 
 
 def record_scene_event_seen(
-    ws: dict, scene_id: str, index: int, seq: int, note: str = "",
+    seen: dict, scene_id: str, index: int, seq: int, note: str = "",
 ) -> dict:
     """把「场景 events 里的这条机制点已经演过了」写进台账。纯函数，重复记只保留首次。
 
@@ -178,13 +181,11 @@ def record_scene_event_seen(
     """
     scene_id = str(scene_id or "").strip()
     if not scene_id:
-        return dict(ws or {})
-    out = dict(ws or {})
-    seen = dict(out.get("scene_events_seen") or {})
+        return dict(seen or {})
+    out = dict(seen or {})
     key = scene_event_key(scene_id, index)
-    if key not in seen:
-        seen[key] = {"seq": int(seq or 0), "note": _truncate(note)}
-    out["scene_events_seen"] = seen
+    if key not in out:
+        out[key] = {"seq": int(seq or 0), "note": _truncate(note)}
     return out
 
 
@@ -639,8 +640,10 @@ def format_clue_ledger_section(
     return "\n".join(lines)
 
 
-def format_scene_events_section(ws: dict, scene: dict | None) -> str:
+def format_scene_events_section(seen: dict, scene: dict | None) -> str:
     """渲染当前场景的「机制点进度」小节：events 逐条标已发生/未发生。
+
+    ``seen`` 是台账本体（session_ledger.scene_events_seen），不再包 world_state。
 
     当前场景整份 JSON（含 ``events``）每轮明文注入 KP 上下文，而此前没有任何一条带着
     「这个桥段已经演过了」的标记——KP 便照单重演（详见 ``record_scene_event_seen``）。
@@ -653,8 +656,8 @@ def format_scene_events_section(ws: dict, scene: dict | None) -> str:
     lines = ["【本场景机制点进度】（内部资料，绝不向玩家复述本清单）"]
     for index, event in enumerate(events):
         trigger = str(event.get("trigger") or "").strip() or f"机制点 {index + 1}"
-        seen = scene_event_seen(ws, scene_id, index)
-        lines.append(f"- {trigger}：{'已发生' if seen else '尚未发生'}")
+        is_seen = scene_event_seen(seen, scene_id, index)
+        lines.append(f"- {trigger}：{'已发生' if is_seen else '尚未发生'}")
     lines.append(
         "标「已发生」的桥段本局已经演过，绝不要重演、也不要换个说法再来一次；"
         "标「尚未发生」的按模组写明的触发条件照常裁定。"

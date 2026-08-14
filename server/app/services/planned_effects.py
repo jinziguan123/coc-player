@@ -13,6 +13,7 @@ from app.ai import turn_planner
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.models.session_ledger import SessionLedger
 from app.services import (
     dice_runtime,
     inventory_service,
@@ -546,8 +547,10 @@ def record_narrated_progress(
         seq = session_service.get_next_sequence_num(db, session_id) - 1
 
         ws = dict(game_session.world_state or {})
+        led = game_session.ledger
+        seen = dict(led.scene_events_seen if led else {})
         before = json.dumps(
-            [ws.get("scene_events_seen"), ws.get("clue_ledger")], sort_keys=True,
+            [seen, ws.get("clue_ledger")], sort_keys=True,
         )
 
         # 场景机制点：模组写明的一次性桥段，叙事对上 trigger 就算演过了。
@@ -560,11 +563,11 @@ def record_narrated_progress(
                 if not isinstance(event, dict):
                     continue
                 trigger = str(event.get("trigger") or "").strip()
-                if not trigger or world_memory.scene_event_seen(ws, sid, index):
+                if not trigger or world_memory.scene_event_seen(seen, sid, index):
                     continue
                 if _scene_event_narrated(trigger, narration):
-                    ws = world_memory.record_scene_event_seen(
-                        ws, sid, index, seq, note=trigger,
+                    seen = world_memory.record_scene_event_seen(
+                        seen, sid, index, seq, note=trigger,
                     )
 
         # 线索：只认玩家此刻所在场景（或无绑定场景）的，别把别处的线索凭一个同名词记掉。
@@ -581,9 +584,13 @@ def record_narrated_progress(
                 )
 
         after = json.dumps(
-            [ws.get("scene_events_seen"), ws.get("clue_ledger")], sort_keys=True,
+            [seen, ws.get("clue_ledger")], sort_keys=True,
         )
         if before != after:
+            if led is None:
+                led = SessionLedger(session_id=game_session.id)
+                db.add(led)
+            led.scene_events_seen = seen
             game_session.world_state = ws
             db.commit()
     except Exception:
@@ -802,7 +809,7 @@ async def _ensure_planned_sanity(
 
     模型仍负责识别本轮是否目睹恐怖及其强度；一旦结构化计划肯定裁定，SAN 检定就由后端确定性
     发出（真人挂待投请求，AI 角色自动结算）。若 KP 本轮已自行发起 SAN（任意恐怖源），本守卫幂等跳过；
-    同一角色对同一恐怖源的去重仍由 _exec_san_check（world_state.san_checked）保证。
+    同一角色对同一恐怖源的去重仍由 _exec_san_check（session_ledger.san_checked）保证。
     """
     asked = plan is not None and plan.sanity.trigger
     plan = plan or turn_planner.TurnPlan()
@@ -1288,8 +1295,12 @@ async def _ensure_scene_entry_checks(
             ws[_ENTRY_CHECK_STATE_KEY] = sorted(recorded)
             # 同一件事记两本账：上面那本是后端私有的逐角色幂等键（拦重复发骰），
             # 这本进 KP 上下文（拦 KP 照着场景 events 明文把同一桥段重演一遍）。
-            ws = world_memory.record_scene_event_seen(
-                ws, scene_id, index,
+            led = db.get(SessionLedger, game_session.id)
+            if led is None:
+                led = SessionLedger(session_id=game_session.id)
+                db.add(led)
+            led.scene_events_seen = world_memory.record_scene_event_seen(
+                led.scene_events_seen, scene_id, index,
                 session_service.get_next_sequence_num(db, session_id) - 1,
                 note=kv["source"],
             )

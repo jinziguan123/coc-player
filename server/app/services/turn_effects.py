@@ -13,6 +13,7 @@ from app.ai.image_gen import get_image_llm
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.models.session_ledger import SessionLedger
 from app.rules.coc.checks import display_skill_name
 from app.rules.registry import get_engine
 from app.services import (
@@ -157,9 +158,9 @@ async def _exec_san_check(
     source = _canonical_san_source(module, game_session.current_scene_id, source)
     targets = _resolve_san_targets(kv.get("chars"), player_char, teammates)
 
-    # 同一角色对同一恐怖源只检定一次：用 world_state.san_checked 记 "source|char_id"。
-    ws = dict(game_session.world_state or {})
-    san_checked = set(ws.get("san_checked") or [])
+    # 同一角色对同一恐怖源只检定一次：用 session_ledger.san_checked 记 "source|char_id"。
+    led = game_session.ledger
+    san_checked = set((led.san_checked if led else []) or [])
     canonical_checked: set[str] = set()
     for item in san_checked:
         stored_source, separator, stored_char_id = str(item).rpartition("|")
@@ -230,13 +231,13 @@ def _mark_san_checked(
     """在结算完成后记录恐怖源幂等键；待投路径须在 housekeeping 收尾后调用。"""
     if not source:
         return
-    db.refresh(game_session)
-    ws = dict(game_session.world_state or {})
-    checked = set(ws.get("san_checked") or [])
+    led = db.get(SessionLedger, game_session.id)
+    if led is None:
+        led = SessionLedger(session_id=game_session.id)
+        db.add(led)
+    checked = set(led.san_checked or [])
     checked.add(f"{source}|{char_id}")
-    ws["san_checked"] = sorted(checked)
-    game_session.world_state = ws
-    db.add(game_session)
+    led.san_checked = sorted(checked)
     db.commit()
 
 
@@ -1085,12 +1086,14 @@ def _exec_mark_seen(
             notes.append(f"对不上的机制点：{ref}（照「本场景机制点进度」里的原文写）。")
         else:
             sid, index, trigger = found
-            _apply_world_memory(
-                db, game_session,
-                lambda ws, _s=sid, _i=index, _t=trigger: world_memory.record_scene_event_seen(
-                    ws, _s, _i, seq, note=_t,
-                ),
+            led = db.get(SessionLedger, game_session.id)
+            if led is None:
+                led = SessionLedger(session_id=game_session.id)
+                db.add(led)
+            led.scene_events_seen = world_memory.record_scene_event_seen(
+                led.scene_events_seen, sid, index, seq, note=trigger,
             )
+            db.commit()
             notes.append(f"机制点「{trigger}」已记为发生过（后续不要重演）。")
 
     if not notes:

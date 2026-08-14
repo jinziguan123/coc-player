@@ -32,11 +32,13 @@ def test_run_migrations_builds_full_schema(tmp_path, monkeypatch):
     assert "module_chunks" in tables
     assert "modules" in tables
     assert "game_sessions" in tables
-    # 战斗/追逐/运行统计/战报拆表（20260814）：四张独立表在迁移链里
+    # 战斗/追逐/运行统计/战报/导航/台账拆表（20260814）：六张独立表在迁移链里
     assert "combat_states" in tables
     assert "chase_states" in tables
     assert "session_stats" in tables
     assert "session_recaps" in tables
+    assert "session_navigation" in tables
+    assert "session_ledger" in tables
 
     # Handouts 迁移（20260703）：modules 表带 handouts JSON 列
     con = sqlite3.connect(db_file)
@@ -431,6 +433,69 @@ def test_turn_ephemeral_migration_moves_to_turn_state(tmp_path, monkeypatch):
     assert ts["item_delta_keys"] == ["g|1|怀表|c1"]
     ws = json.loads(ws_raw)
     for key in ("pending_checks", "pending_item_gains", "item_delta_keys"):
+        assert key not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_navigation_and_ledger_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里导航/台账键升级时搬进 session_navigation / session_ledger。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "nav-ledger-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "party_locations": {"c1": "scene_a"},
+                    "visited_scenes": ["scene_a"],
+                    "san_checked": ["源|c1"],
+                    "scene_events_seen": {"scene_a:0": {"seq": 3}},
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移
+
+    con = sqlite3.connect(db_file)
+    try:
+        nav = con.execute(
+            "SELECT party_locations, visited_scenes FROM session_navigation "
+            "WHERE session_id = 's1'"
+        ).fetchone()
+        led = con.execute(
+            "SELECT san_checked, scene_events_seen FROM session_ledger "
+            "WHERE session_id = 's1'"
+        ).fetchone()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert nav is not None
+    assert json.loads(nav[0]) == {"c1": "scene_a"}
+    assert json.loads(nav[1]) == ["scene_a"]
+    assert led is not None
+    assert json.loads(led[0]) == ["源|c1"]
+    assert json.loads(led[1]) == {"scene_a:0": {"seq": 3}}
+    ws = json.loads(ws_raw[0])
+    for key in ("party_locations", "visited_scenes", "san_checked", "scene_events_seen"):
         assert key not in ws
     assert ws["flags"] == {"door_open": True}
 

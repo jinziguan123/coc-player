@@ -28,7 +28,6 @@ class WorldStateSchema(BaseModel):
     improvised_npcs: list = Field(default_factory=list)     # 临场 NPC 卡
     story_summary: str = ""                                  # 滚动剧情摘要
     story_summary_seq: int = 0                              # 摘要游标（已浓缩到的 seq）
-    visited_scenes: list = Field(default_factory=list)      # 已访问场景 id
     handouts_issued: list = Field(default_factory=list)     # 已发放 handouts
     ending_reached: bool = False
     epilogue_done: bool = False
