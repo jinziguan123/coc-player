@@ -32,8 +32,9 @@ def test_run_migrations_builds_full_schema(tmp_path, monkeypatch):
     assert "module_chunks" in tables
     assert "modules" in tables
     assert "game_sessions" in tables
-    # 战斗态拆表（20260814）：combat_states 独立表在迁移链里
+    # 战斗/追逐态拆表（20260814）：combat_states / chase_states 独立表在迁移链里
     assert "combat_states" in tables
+    assert "chase_states" in tables
 
     # Handouts 迁移（20260703）：modules 表带 handouts JSON 列
     con = sqlite3.connect(db_file)
@@ -131,8 +132,8 @@ def test_combat_state_migration_backfills_old_saves(tmp_path, monkeypatch):
     db_file = tmp_path / "combat-backfill.db"
     monkeypatch.setattr(settings, "db_path", db_file)
     database.run_migrations()
-    # 回退到本迁移之前，模拟「旧库：战斗态还在 world_state 里」
-    command.downgrade(database._alembic_config(), "-1")
+    # 回退到拆表迁移之前（固定版本，而非相对步数），模拟「旧库：战斗态还在 world_state 里」
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
 
     con = sqlite3.connect(db_file)
     try:
@@ -171,6 +172,58 @@ def test_combat_state_migration_backfills_old_saves(tmp_path, monkeypatch):
     assert row[1] == 1
     ws = json.loads(ws_raw[0])
     assert "combat" not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_chase_state_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里 world_state.chase 在升级时搬进 chase_states，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "chase-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    # 回退到拆表迁移之前（固定版本），模拟「旧库：追逐态还在 world_state 里」
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "chase": {"active": True, "round": 2, "gap": 1},
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用 combat + chase 迁移：回填 + 移除
+
+    con = sqlite3.connect(db_file)
+    try:
+        row = con.execute(
+            "SELECT state, version FROM chase_states WHERE session_id = 's1'"
+        ).fetchone()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert row is not None
+    assert json.loads(row[0]) == {"active": True, "round": 2, "gap": 1}
+    assert row[1] == 1
+    ws = json.loads(ws_raw[0])
+    assert "chase" not in ws
     assert ws["flags"] == {"door_open": True}
 
 
