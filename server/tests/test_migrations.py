@@ -340,6 +340,49 @@ def test_session_recaps_migration_backfills_old_saves(tmp_path, monkeypatch):
     assert ws["flags"] == {"door_open": True}
 
 
+def test_turn_confirm_migration_moves_to_turn_state(tmp_path, monkeypatch):
+    """旧存档里 world_state.turn_confirm 在升级时搬进 turn_state 列，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "turn-confirm-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({"turn_confirm": {"c1": True}, "flags": {"door_open": True}}),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移
+
+    con = sqlite3.connect(db_file)
+    try:
+        ts_raw, ws_raw = con.execute(
+            "SELECT turn_state, world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert json.loads(ts_raw) == {"c1": True}
+    ws = json.loads(ws_raw)
+    assert "turn_confirm" not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
 def test_downgrade_scenario_rejected(tmp_path, monkeypatch):
     """库版本不在代码已知迁移链内（旧程序打开新库）时，拒绝迁移而非带病运行。"""
     import sqlite3

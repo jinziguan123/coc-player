@@ -1378,18 +1378,16 @@ def human_character_ids(db: Session, session_id: str) -> set[str]:
 
 
 def set_turn_confirm(db: Session, session_id: str, char_id: str, confirmed: bool) -> None:
-    """记录/撤销某真人角色对『本回合推进』的确认（存 world_state.turn_confirm）。"""
+    """记录/撤销某真人角色对『本回合推进』的确认（存 turn_state 列——回合锁拆出 world_state）。"""
     session = db.get(GameSession, session_id)
     if not session or not char_id:
         return
-    ws = dict(session.world_state or {})
-    tc = dict(ws.get("turn_confirm") or {})
+    tc = dict(session.turn_state or {})
     if confirmed:
         tc[char_id] = True
     else:
         tc.pop(char_id, None)
-    ws["turn_confirm"] = tc
-    session.world_state = ws
+    session.turn_state = tc
     db.commit()
 
 
@@ -1413,7 +1411,7 @@ def turn_confirm_state(
             if (not p.owner_token) or (p.owner_token in online_tokens)
         ]
     required_ids = {p.character_id for p in humans}
-    tc = (session.world_state or {}).get("turn_confirm") if session else None
+    tc = (session.turn_state or {}) if session else None
     tc = tc or {}
     confirmed = sorted(cid for cid in required_ids if tc.get(cid))
     total = len(required_ids)
@@ -1436,9 +1434,7 @@ def commit_turn(db: Session, session_id: str) -> None:
             m.pop("pending_turn", None)
             ev.metadata_ = m
             flag_modified(ev, "metadata_")
-    ws = dict(session.world_state or {})
-    ws["turn_confirm"] = {}
-    session.world_state = ws
+    session.turn_state = {}
     db.commit()
 
 
