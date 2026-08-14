@@ -1,4 +1,4 @@
-"""战报 recap 编排（P4 5.2a）：加载会话素材 → 生成结构化战报 → 存入 world_state.recaps[]。
+"""战报 recap 编排（P4 5.2a）：加载会话素材 → 生成结构化战报 → 存入 session_recaps 表。
 
 fail-open：生成失败（无 LLM / 无事件 / 坏 JSON）返回 None，不落库、不阻塞。
 """
@@ -15,6 +15,7 @@ from app.ai.llm_factory import get_llm
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.models.session_recap import SessionRecap
 from app.services import session_service, world_memory
 
 logger = logging.getLogger(__name__)
@@ -39,14 +40,18 @@ def _party_status_text(party: list[Character]) -> str:
 
 
 def list_recaps(db: Session, session_id: str) -> list[dict]:
-    session = db.get(GameSession, session_id)
-    if session is None:
-        return []
-    return list((session.world_state or {}).get("recaps") or [])
+    """战报已拆到 session_recaps 表：按 ordinal 稳定排序返回 entry 列表。"""
+    rows = (
+        db.query(SessionRecap)
+        .filter(SessionRecap.session_id == session_id)
+        .order_by(SessionRecap.ordinal)
+        .all()
+    )
+    return [r.entry for r in rows]
 
 
 async def generate_and_store_recap(db: Session, session_id: str) -> dict | None:
-    """生成一份战报并追加进 world_state.recaps；成功返回该条，失败返回 None。"""
+    """生成一份战报并追加进 session_recaps；成功返回该条，失败返回 None。"""
     session = db.get(GameSession, session_id)
     if session is None:
         return None
@@ -87,9 +92,12 @@ async def generate_and_store_recap(db: Session, session_id: str) -> dict | None:
         "up_to_seq": events[-1].sequence_num or 0,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
-    # JSON 列需整体重新赋值才会被 SQLAlchemy 标脏（in-place 改不触发）。
-    ws2 = dict(session.world_state or {})
-    ws2["recaps"] = list(ws2.get("recaps") or []) + [entry]
-    session.world_state = ws2
+    # 战报拆到 session_recaps 表：每条一行，ordinal = 当前条数 + 1（追加顺序）。
+    ordinal = (
+        db.query(SessionRecap)
+        .filter(SessionRecap.session_id == session_id)
+        .count()
+    ) + 1
+    db.add(SessionRecap(session_id=session_id, ordinal=ordinal, entry=entry))
     db.commit()
     return entry

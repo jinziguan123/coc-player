@@ -422,7 +422,7 @@ def list_recaps(
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    """列出本局已生成的战报（world_state.recaps）。"""
+    """列出本局已生成的战报（session_recaps 表）。"""
     from app.services import recap_service
 
     require_session_viewer(db, session_id, token)
@@ -435,7 +435,7 @@ async def generate_recap(
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    """生成一份章节战报并存入 world_state.recaps；生成失败返回 502（不落库）。"""
+    """生成一份章节战报并存入 session_recaps；生成失败返回 502（不落库）。"""
     from app.services import recap_service
 
     require_session_token_actor(db, session_id, token)

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.chase_state import ChaseState
     from app.models.combat_state import CombatState
     from app.models.session_participant import SessionParticipant
+    from app.models.session_recap import SessionRecap
     from app.models.session_stats import SessionStats
 
 
@@ -64,4 +65,8 @@ class GameSession(Base, UUIDMixin, TimestampMixin):
     # 运行统计 1:1（拆自 world_state.session_usage/turn_usage/rag_stats）：同上。
     session_stats: Mapped["SessionStats | None"] = relationship(
         "SessionStats", cascade="all, delete-orphan", uselist=False,
+    )
+    # 战报 1:N（拆自 world_state.recaps）：删会话时经 cascade 一并清理。
+    recaps: Mapped[list["SessionRecap"]] = relationship(
+        "SessionRecap", cascade="all, delete-orphan", order_by="SessionRecap.ordinal",
     )

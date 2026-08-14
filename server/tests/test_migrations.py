@@ -32,10 +32,11 @@ def test_run_migrations_builds_full_schema(tmp_path, monkeypatch):
     assert "module_chunks" in tables
     assert "modules" in tables
     assert "game_sessions" in tables
-    # 战斗/追逐/运行统计拆表（20260814）：三张独立表在迁移链里
+    # 战斗/追逐/运行统计/战报拆表（20260814）：四张独立表在迁移链里
     assert "combat_states" in tables
     assert "chase_states" in tables
     assert "session_stats" in tables
+    assert "session_recaps" in tables
 
     # Handouts 迁移（20260703）：modules 表带 handouts JSON 列
     con = sqlite3.connect(db_file)
@@ -282,6 +283,60 @@ def test_session_stats_migration_backfills_old_saves(tmp_path, monkeypatch):
     ws = json.loads(ws_raw[0])
     for key in ("session_usage", "turn_usage", "rag_stats"):
         assert key not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_session_recaps_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里 world_state.recaps 列表在升级时摊成 session_recaps 行，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "recaps-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "recaps": [
+                        {"title": "第一战", "up_to_seq": 5},
+                        {"title": "第二战", "up_to_seq": 9},
+                    ],
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移：回填 + 移除
+
+    con = sqlite3.connect(db_file)
+    try:
+        rows = con.execute(
+            "SELECT ordinal, entry FROM session_recaps "
+            "WHERE session_id = 's1' ORDER BY ordinal"
+        ).fetchall()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert [r[0] for r in rows] == [0, 1]
+    assert [json.loads(r[1])["title"] for r in rows] == ["第一战", "第二战"]
+    ws = json.loads(ws_raw[0])
+    assert "recaps" not in ws
     assert ws["flags"] == {"door_open": True}
 
 
