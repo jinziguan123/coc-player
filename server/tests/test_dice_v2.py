@@ -106,7 +106,7 @@ def test_player_check_pends_for_manual_roll(db_factory, monkeypatch):
     assert "困难" in reqs[0]["content"] and "侦查" in reqs[0]["content"]
     # 待定检定已登记，等 /roll
     db.expire_all()
-    pending = (db.get(GameSession, session.id).world_state or {}).get("pending_checks") or {}
+    pending = (db.get(GameSession, session.id).turn_state or {}).get("pending_checks") or {}
     assert any(c["skill"] == "侦查" for c in pending.values())
 
 
@@ -145,7 +145,7 @@ def test_player_san_check_pends_for_manual_roll(db_factory, monkeypatch):
     assert requests[0]["metadata"]["char_id"] == hero.id
     assert "理智" in requests[0]["content"]
     db.expire_all()
-    pending = (db.get(GameSession, session.id).world_state or {}).get("pending_checks") or {}
+    pending = (db.get(GameSession, session.id).turn_state or {}).get("pending_checks") or {}
     assert any(check.get("kind") == "san_check" for check in pending.values())
 
 
@@ -214,7 +214,7 @@ def test_roll_generation_rolls_pending_check(db_factory, monkeypatch):
         "critical", "extreme", "hard", "regular", "fail", "fumble",
     )
     # 待定检定已被消费
-    pending = (fresh.get(GameSession, session.id).world_state or {}).get("pending_checks") or {}
+    pending = (fresh.get(GameSession, session.id).turn_state or {}).get("pending_checks") or {}
     assert "chk1" not in pending
 
 
@@ -262,7 +262,8 @@ def test_roll_generation_settles_pending_san_check(db_factory, monkeypatch):
     assert dice[0]["metadata"]["old_san"] == 50
     assert dice[0]["metadata"]["new_san"] == 48
     state = fresh.get(GameSession, session.id).world_state or {}
-    assert check_id not in (state.get("pending_checks") or {})
+    turn = fresh.get(GameSession, session.id).turn_state or {}
+    assert check_id not in (turn.get("pending_checks") or {})
     assert f"腐尸|{hero.id}" in (state.get("san_checked") or [])
 
 
@@ -322,13 +323,13 @@ def test_group_san_waits_until_all_human_players_roll(db_factory, monkeypatch):
     monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
 
     asyncio.run(chat_service.run_roll_generation(session.id, requests[0]["metadata"]["id"]))
-    midway = db_factory().get(GameSession, session.id).world_state or {}
+    midway = db_factory().get(GameSession, session.id).turn_state or {}
     assert len(midway.get("pending_checks") or {}) == 1
     assert not any(chunk["type"] == "kp_roll_ready" for chunk in broadcast)
 
     asyncio.run(chat_service.run_roll_generation(session.id, requests[1]["metadata"]["id"]))
     final_db = db_factory()
-    final_state = final_db.get(GameSession, session.id).world_state or {}
+    final_state = final_db.get(GameSession, session.id).turn_state or {}
     assert (final_state.get("pending_checks") or {}) == {}
     dice_events = [
         event for event in session_service.get_session_events(final_db, session.id)
@@ -644,7 +645,7 @@ def test_group_check_waits_until_all_human_players_roll(db_factory, monkeypatch)
     monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 10)
 
     asyncio.run(chat_service.run_roll_generation(session.id, requests[0]["metadata"]["id"]))
-    midway = db_factory().get(GameSession, session.id).world_state or {}
+    midway = db_factory().get(GameSession, session.id).turn_state or {}
     assert len(midway.get("pending_checks") or {}) == 1
     assert not any(chunk["type"] == "kp_roll_ready" for chunk in broadcast)
 
@@ -755,5 +756,5 @@ def test_dice_is_broadcast_before_waiting_on_housekeeping(db_factory, monkeypatc
 
     # 顺序变了，但语义不能变：待定检定仍须被消费掉（写入发生在 drain 之后）
     fresh = db_factory()
-    pending = (fresh.get(GameSession, session.id).world_state or {}).get("pending_checks") or {}
+    pending = (fresh.get(GameSession, session.id).turn_state or {}).get("pending_checks") or {}
     assert "chk1" not in pending, "待定检定应当在 drain 之后被消费"

@@ -263,7 +263,7 @@ def test_requires_check_fallback_rolls_deterministically(db_factory):
     assert llm.calls[0]["temperature"] == _CHECK_TURN_TEMPERATURE  # 裁定轮降温
     assert len(llm.calls) == 1                    # 补掷挂起后不再继续生成
     assert any(c.type == "check_request" for c in chunks)  # 已广播「待玩家投骰」
-    pending = (db.get(GameSession, session_id).world_state or {}).get("pending_checks") or {}
+    pending = (db.get(GameSession, session_id).turn_state or {}).get("pending_checks") or {}
     assert pending and list(pending.values())[0]["skill"] == "侦查"
 
 
@@ -290,7 +290,7 @@ def test_requires_check_model_calls_tool_no_double_roll(db_factory):
     chunks = asyncio.run(_go())
     assert len(llm.calls) == 1
     assert sum(1 for c in chunks if c.type == "check_request") == 1
-    pending = (db.get(GameSession, session_id).world_state or {}).get("pending_checks") or {}
+    pending = (db.get(GameSession, session_id).turn_state or {}).get("pending_checks") or {}
     assert len(pending) == 1
 
 

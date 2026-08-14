@@ -889,10 +889,10 @@ async def _ensure_planned_items(
 ) -> AsyncIterator[str]:
     """规划器裁定的物品增减确定性落库（获得入库、失去/消耗移除），补偿 KP 不记账——库存是权威状态。
 
-    幂等：按「本轮玩家行动锚序号 + 获/失 + 名字 + 角色」去重（存 world_state.item_delta_keys），
+    幂等：按「本轮玩家行动锚序号 + 获/失 + 名字 + 角色」去重（存 turn_state.item_delta_keys），
     重新生成不会重复增减。物品效果仍由 KP 叙述——这里只保证库存数目可靠。
 
-    **未决检定不预发收益**：本轮 requires_check=true 时，获得一律转入 world_state.pending_item_gains
+    **未决检定不预发收益**：本轮 requires_check=true 时，获得一律转入 turn_state.pending_item_gains
     暂存，等检定结算出来再由 `settle_pending_item_gains` 决定给还是不给。否则会出现「东西已经进包、
     才被要求投扒窃/撬锁」——掷输了那件东西算什么？失去/消耗不走这条：那多是尝试本身的代价
     （划掉最后一根火柴、绳子被割断），无论成败都已然发生。
@@ -919,7 +919,7 @@ async def _ensure_planned_items(
         (e.sequence_num or 0 for e in turn if e.event_type in ("action", "dialogue")),
         default=0,
     )
-    ws = dict(game_session.world_state or {})
+    ws = dict(game_session.turn_state or {})
     done = set(ws.get("item_delta_keys") or [])
     changed = False
 
@@ -981,17 +981,17 @@ async def _ensure_planned_items(
 
     if changed:
         ws["item_delta_keys"] = list(done)
-        game_session.world_state = ws
+        game_session.turn_state = ws
         db.commit()
 
 
 def _discard_pending_item_gains(db: Session, game_session: GameSession) -> bool:
     """作废暂存的待检定收益（检定失败 / 玩家干脆没投就又行动了）。返回是否真的清掉了东西。"""
-    ws = dict(game_session.world_state or {})
+    ws = dict(game_session.turn_state or {})
     if not ws.get("pending_item_gains"):
         return False
     ws["pending_item_gains"] = []
-    game_session.world_state = ws
+    game_session.turn_state = ws
     db.commit()
     return True
 
@@ -1004,7 +1004,7 @@ def settle_pending_item_gains(
     这是「先检定、后发货」的另一半——`_ensure_planned_items` 在有未决检定时只暂存不入库，
     真正决定给不给的是这里的骰子结果。玩家扒窃掷输了，那块表就不该在他包里。
     """
-    ws = dict(game_session.world_state or {})
+    ws = dict(game_session.turn_state or {})
     pending = list(ws.get("pending_item_gains") or [])
     if not pending:
         return []
@@ -1035,7 +1035,7 @@ def settle_pending_item_gains(
         ws["item_delta_keys"] = list(done)
     else:
         chunks.append(_make_chunk("inventory_update"))
-    game_session.world_state = ws
+    game_session.turn_state = ws
     db.commit()
     return chunks
 
@@ -1279,7 +1279,7 @@ async def _ensure_scene_entry_checks(
                     session_id, scene_id, kv["skill"],
                 )
                 continue
-            # 先记账再吐 chunk：_exec_dice_check 内部已改过 world_state（pending_checks），
+            # 先记账再吐 chunk：_exec_dice_check 内部已改过 turn_state（pending_checks），
             # 必须重新取一次再合并写回，否则会用旧快照把待投检定覆盖掉。
             db.refresh(game_session)
             ws = dict(game_session.world_state or {})

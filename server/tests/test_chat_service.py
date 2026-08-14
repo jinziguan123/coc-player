@@ -191,7 +191,7 @@ def test_duplicate_dice_check_deduped(db_factory):
     req1 = [c for c in c1 if c.type == "check_request"]
     req2 = [c for c in c2 if c.type == "check_request"]
     assert len(req1) == 1 and len(req2) == 0  # 第一次弹卡；第二次去重、不再弹
-    pending = (db.get(GameSession, gs.id).world_state or {}).get("pending_checks") or {}
+    pending = (db.get(GameSession, gs.id).turn_state or {}).get("pending_checks") or {}
     assert len(pending) == 1  # 只挂了一个待投检定
 
 

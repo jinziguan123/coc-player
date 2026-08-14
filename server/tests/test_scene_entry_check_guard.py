@@ -189,7 +189,8 @@ def test_guard_preserves_pending_checks_written_by_dice_exec(db_factory):
     db = db_factory(); sid, pc, mates, module = _seed(db)
     _guard(db, sid, pc, mates, module)
     ws = db.get(GameSession, sid).world_state or {}
-    assert ws.get("pending_checks")
+    turn = db.get(GameSession, sid).turn_state or {}
+    assert turn.get("pending_checks")
     assert ws.get("scene_entry_checks")
 
 

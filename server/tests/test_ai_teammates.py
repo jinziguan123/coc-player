@@ -438,7 +438,7 @@ def test_rollback_last_kp_output_keeps_inputs_and_dice(db_factory):
     assert sum(1 for e in evs if e.event_type == "dice") == 2
     # 待投骰请求对应的 pending_check 也被清掉
     sess = db.get(GameSession, session.id)
-    assert not (sess.world_state or {}).get("pending_checks")
+    assert not (sess.turn_state or {}).get("pending_checks")
 
 
 def test_old_events_summary_keeps_recent_not_opening():

@@ -383,6 +383,58 @@ def test_turn_confirm_migration_moves_to_turn_state(tmp_path, monkeypatch):
     assert ws["flags"] == {"door_open": True}
 
 
+def test_turn_ephemeral_migration_moves_to_turn_state(tmp_path, monkeypatch):
+    """旧存档里 pending_checks/pending_item_gains/item_delta_keys 升级时搬进 turn_state 列。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "turn-ephemeral-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "pending_checks": {"chk1": {"id": "chk1", "skill": "侦查"}},
+                    "pending_item_gains": [{"name": "怀表", "qty": 1}],
+                    "item_delta_keys": ["g|1|怀表|c1"],
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移
+
+    con = sqlite3.connect(db_file)
+    try:
+        ts_raw, ws_raw = con.execute(
+            "SELECT turn_state, world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    ts = json.loads(ts_raw)
+    assert ts["pending_checks"] == {"chk1": {"id": "chk1", "skill": "侦查"}}
+    assert ts["pending_item_gains"] == [{"name": "怀表", "qty": 1}]
+    assert ts["item_delta_keys"] == ["g|1|怀表|c1"]
+    ws = json.loads(ws_raw)
+    for key in ("pending_checks", "pending_item_gains", "item_delta_keys"):
+        assert key not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
 def test_downgrade_scenario_rejected(tmp_path, monkeypatch):
     """库版本不在代码已知迁移链内（旧程序打开新库）时，拒绝迁移而非带病运行。"""
     import sqlite3

@@ -1990,7 +1990,7 @@ export function GameSessionPage() {
               // 待定检定提示：携带 check_request 元数据时，渲染成带「投骰」按钮的卡片
               const checkId = msg.metadata?.check_request ? String(msg.metadata?.id ?? '') : ''
               if (checkId) {
-                const pending = (currentSession?.world_state as Record<string, unknown> | undefined)?.pending_checks as Record<string, unknown> | undefined
+                const pending = (currentSession?.turn_state as Record<string, unknown> | undefined)?.pending_checks as Record<string, unknown> | undefined
                 // 权威（pending_checks）∪ 乐观（刚到、尚未 refetch）——消除「已投骰→投骰」闪烁
                 const stillPending = (!!pending && checkId in pending) || optimisticPending.has(checkId)
                 const mine = !msg.metadata?.char_id || msg.metadata?.char_id === myCharId

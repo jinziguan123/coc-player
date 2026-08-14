@@ -960,15 +960,15 @@ def is_human_controlled(db: Session, session_id: str, char_id: str | None) -> bo
 
 
 def add_pending_check(db: Session, session_id: str, check: dict) -> None:
-    """登记一个「待玩家投骰」的检定（world_state.pending_checks，按 check_id 存）。"""
+    """登记一个「待玩家投骰」的检定（turn_state.pending_checks，按 check_id 存）。"""
     session = db.get(GameSession, session_id)
     if not session:
         return
-    ws = dict(session.world_state or {})
+    ws = dict(session.turn_state or {})
     pending = dict(ws.get("pending_checks") or {})
     pending[check["id"]] = check
     ws["pending_checks"] = pending
-    session.world_state = ws
+    session.turn_state = ws
     db.commit()
 
 
@@ -981,7 +981,7 @@ def get_pending_check(
     session = db.get(GameSession, session_id)
     if not session:
         return None
-    pending = (session.world_state or {}).get("pending_checks") or {}
+    pending = (session.turn_state or {}).get("pending_checks") or {}
     check = pending.get(check_id)
     return dict(check) if isinstance(check, dict) else None
 
@@ -994,7 +994,7 @@ def find_pending_check(
     session = db.get(GameSession, session_id)
     if not session:
         return None
-    pending = (session.world_state or {}).get("pending_checks") or {}
+    pending = (session.turn_state or {}).get("pending_checks") or {}
     for c in pending.values():
         if (
             c.get("char_id") == char_id
@@ -1012,7 +1012,7 @@ def find_pending_san_check(
     session = db.get(GameSession, session_id)
     if not session:
         return None
-    pending = (session.world_state or {}).get("pending_checks") or {}
+    pending = (session.turn_state or {}).get("pending_checks") or {}
     for check in pending.values():
         if (
             isinstance(check, dict)
@@ -1031,7 +1031,7 @@ def append_pending_batch_result(
     session = db.get(GameSession, session_id)
     if not session:
         return 0
-    ws = dict(session.world_state or {})
+    ws = dict(session.turn_state or {})
     pending = dict(ws.get("pending_checks") or {})
     remaining = 0
     for check_id, raw in list(pending.items()):
@@ -1045,7 +1045,7 @@ def append_pending_batch_result(
         remaining += 1
     if remaining:
         ws["pending_checks"] = pending
-        session.world_state = ws
+        session.turn_state = ws
         db.add(session)
         db.commit()
     return remaining
@@ -1064,7 +1064,7 @@ def append_pending_group_check_result(
     session = db.get(GameSession, session_id)
     if not session:
         return 0
-    ws = dict(session.world_state or {})
+    ws = dict(session.turn_state or {})
     pending = dict(ws.get("pending_checks") or {})
     remaining = 0
     for check_id, raw in list(pending.items()):
@@ -1080,7 +1080,7 @@ def append_pending_group_check_result(
         remaining += 1
     if remaining:
         ws["pending_checks"] = pending
-        session.world_state = ws
+        session.turn_state = ws
         db.add(session)
         db.commit()
     return remaining
@@ -1091,13 +1091,13 @@ def pop_pending_check(db: Session, session_id: str, check_id: str) -> dict | Non
     session = db.get(GameSession, session_id)
     if not session:
         return None
-    ws = dict(session.world_state or {})
+    ws = dict(session.turn_state or {})
     pending = dict(ws.get("pending_checks") or {})
     check = pending.pop(check_id, None)
     if check is None:
         return None
     ws["pending_checks"] = pending
-    session.world_state = ws
+    session.turn_state = ws
     db.commit()
     return check
 
@@ -1147,12 +1147,12 @@ def rollback_last_kp_output(db: Session, session_id: str) -> int:
         removed += 1
 
     if removed_check_ids:
-        ws = dict(session.world_state or {})
-        pending = dict(ws.get("pending_checks") or {})
+        ts = dict(session.turn_state or {})
+        pending = dict(ts.get("pending_checks") or {})
         for cid in removed_check_ids:
             pending.pop(cid, None)
-        ws["pending_checks"] = pending
-        session.world_state = ws
+        ts["pending_checks"] = pending
+        session.turn_state = ts
 
     if removed:
         db.commit()
@@ -1434,7 +1434,11 @@ def commit_turn(db: Session, session_id: str) -> None:
             m.pop("pending_turn", None)
             ev.metadata_ = m
             flag_modified(ev, "metadata_")
-    session.turn_state = {}
+    # 只清回合确认，不清 turn_state 里的其它键（pending_checks / pending_item_gains /
+    # item_delta_keys 有各自的消费/作废时机，不能随推进一起抹掉）。
+    ts = dict(session.turn_state or {})
+    ts["turn_confirm"] = {}
+    session.turn_state = ts
     db.commit()
 
 
