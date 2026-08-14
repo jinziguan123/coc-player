@@ -23,7 +23,7 @@ def resolve_chase_round(
 
     - 逃方胜 → gap +1（极难/大成功 +2）；追方胜 → gap -1（同理 -2）；平 → 不变。
     - hazard={who:'quarry'|'pursuer', skill, difficulty}：该方面对障碍检定，失败则对其不利（gap ∓1）。
-    **不改状态**：调用方据 gap_delta 更新 world_state.chase.gap。
+    **不改状态**：调用方据 gap_delta 更新 chase_states.state 的 gap。
     """
     mov_diff = (quarry_mov or 0) - (pursuer_mov or 0)
     q = resolve_skill_check(
