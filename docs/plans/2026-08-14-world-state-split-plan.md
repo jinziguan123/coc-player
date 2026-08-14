@@ -1,5 +1,10 @@
 # world_state 拆表：实施方案（2026-08-14）
 
+> 进度（2026-08-14）：Phase 1（combat → combat_states）、Phase 2（chase → chase_states）、
+> Phase 3（session_usage/turn_usage/rag_stats → session_stats）已落地并分别提交，后端
+> pytest 1669 通过 + ruff 通过。剩余 Phase 4（剧情记忆 Pydantic 校验 + 版本迁移 + 回合锁/战报
+> 等剩余键盘点）见下方清单。
+
 > 落地 ADR-003 决策第 4 条，以及 docs/architecture.md §4.2「会话状态的实际分布」与 §8 P1 表
 > 里点名「ADR-003 的拆表一项未做」的欠账。
 >
