@@ -5,7 +5,7 @@ task 内 await 的所有子调用——一个回合里 planner、主叙事、val
 子代理、战斗叙述等即便用不同的 Provider 实例，也都记进同一个累加器。
 
 Provider 每拿到服务端 usage 就 ``add()``；生成入口协程由 ``generation_manager`` 用
-``tracked()`` 包一层，结束（含取消/异常）时把本次合计累进 ``world_state.session_usage``。
+``tracked()`` 包一层，结束（含取消/异常）时把本次合计累进 ``session_stats.session_usage``。
 无累加器（如脱离生成的零散调用）时 ``add()`` 静默忽略；全程 fail-open。
 """
 
@@ -123,14 +123,12 @@ def warn_if_reasoning_dominates(snap: dict) -> None:
     )
 
 
-def accumulate(ws: dict | None, snap: dict) -> dict:
-    """把一次生成的 usage 合计累进 world_state.session_usage（纯函数，返回新 ws，单调累增）。"""
-    cur = dict((ws or {}).get("session_usage") or _zero())
+def accumulate(cur: dict | None, snap: dict) -> dict:
+    """把一次生成的 usage 合计累进累计用量（纯函数，返回新的 session_usage dict，单调累增）。"""
+    cur = dict(cur or _zero())
     for k in _FIELDS:
         cur[k] = int(cur.get(k) or 0) + int(snap.get(k) or 0)
-    new_ws = dict(ws or {})
-    new_ws["session_usage"] = cur
-    return new_ws
+    return cur
 
 
 async def tracked(session_id: str, coro) -> None:
@@ -150,13 +148,15 @@ async def tracked(session_id: str, coro) -> None:
 def _persist(session_id: str, snap: dict) -> None:
     from app.database import SessionLocal
     from app.models.session import GameSession
+    from app.services import session_stats
 
     db = SessionLocal()
     try:
-        gs = db.get(GameSession, session_id)
-        if gs is not None:
-            gs.world_state = accumulate(dict(gs.world_state or {}), snap)
-            db.commit()
+        if db.get(GameSession, session_id) is None:
+            return
+        stats = session_stats.get_or_create(db, session_id)
+        stats.session_usage = accumulate(stats.session_usage, snap)
+        db.commit()
     except Exception:
         logger.exception("累计本局 token 用量失败（忽略）: session=%s", session_id)
         db.rollback()

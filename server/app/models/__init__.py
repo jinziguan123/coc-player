@@ -7,6 +7,7 @@ from app.models.module import Module, ModuleChunk
 from app.models.rulebook import RuleChunk, Rulebook
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant
+from app.models.session_stats import SessionStats
 
 __all__ = [
     "Base",
@@ -20,4 +21,5 @@ __all__ = [
     "RuleChunk",
     "GameSession",
     "SessionParticipant",
+    "SessionStats",
 ]

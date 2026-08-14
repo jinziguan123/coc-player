@@ -16,6 +16,7 @@ from app.services import (
     rag_stats,
     rulebook_service,
     session_service,
+    session_stats,
     world_memory,
 )
 
@@ -650,15 +651,16 @@ def _record_rag(
     db: Session, game_session: GameSession | None, *,
     kind: str, mode: str, query: str, hits: list | None,
 ) -> None:
-    """把一次 RAG 检索并入本局 world_state.rag_stats（供后台评估 RAG 用量/命中质量）。
+    """把一次 RAG 检索并入本局 session_stats.rag_stats（供后台评估 RAG 用量/命中质量）。
 
     fail-open：无会话或异常都静默跳过，绝不影响生成主流程。空命中也记（看「查了没查到」比例）。
     """
     if game_session is None:
         return
     try:
-        game_session.world_state = rag_stats.record(
-            dict(game_session.world_state or {}),
+        stats = session_stats.get_or_create(db, game_session.id)
+        stats.rag_stats = rag_stats.record(
+            stats.rag_stats,
             kind=kind, mode=mode, query=query, hits=hits or [],
         )
         db.commit()
@@ -671,7 +673,7 @@ def _record_turn_usage(
     db: Session, game_session: GameSession, llm, events: list,
     messages: list[dict] | None = None,
 ) -> None:
-    """把主叙事那次调用的服务端真实 usage 落到 world_state.turn_usage，供「上下文占用」显示实测值。
+    """把主叙事那次调用的服务端真实 usage 落到 session_stats.turn_usage，供「上下文占用」显示实测值。
 
     **必须在主叙事流结束后、validator/摘要等后续 complete 覆盖 llm.last_usage 之前**调用。
     fail-open：无 usage（Provider 不支持）或异常都静默跳过，徽标回落启发式估算。
@@ -686,8 +688,7 @@ def _record_turn_usage(
     if not isinstance(pt, int):
         return
     try:
-        ws = dict(game_session.world_state or {})
-        ws["turn_usage"] = {
+        tu = {
             "prompt_tokens": pt,
             "completion_tokens": u.get("completion_tokens") or 0,
             "total_tokens": u.get("total_tokens") or 0,
@@ -701,9 +702,13 @@ def _record_turn_usage(
         if messages:
             from app.ai.context import _estimate_tokens, update_budget_scale
             estimated = sum(_estimate_tokens(m.get("content") or "") for m in messages)
-            ws["turn_usage"]["estimated_tokens"] = estimated
-            ws = update_budget_scale(ws, pt, estimated)
-        game_session.world_state = ws
+            tu["estimated_tokens"] = estimated
+            # budget_scale 仍留在 world_state：它是上下文校准系数、被纯函数
+            # build_kp_context 每轮读取，搬走会让上下文构建引入 DB 访问，得不偿失。
+            game_session.world_state = update_budget_scale(
+                dict(game_session.world_state or {}), pt, estimated)
+        stats = session_stats.get_or_create(db, game_session.id)
+        stats.turn_usage = tu
         db.commit()
     except Exception:
         logger.exception("落库回合 usage 失败（忽略）")

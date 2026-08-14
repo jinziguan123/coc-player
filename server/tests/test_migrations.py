@@ -32,9 +32,10 @@ def test_run_migrations_builds_full_schema(tmp_path, monkeypatch):
     assert "module_chunks" in tables
     assert "modules" in tables
     assert "game_sessions" in tables
-    # 战斗/追逐态拆表（20260814）：combat_states / chase_states 独立表在迁移链里
+    # 战斗/追逐/运行统计拆表（20260814）：三张独立表在迁移链里
     assert "combat_states" in tables
     assert "chase_states" in tables
+    assert "session_stats" in tables
 
     # Handouts 迁移（20260703）：modules 表带 handouts JSON 列
     con = sqlite3.connect(db_file)
@@ -224,6 +225,63 @@ def test_chase_state_migration_backfills_old_saves(tmp_path, monkeypatch):
     assert row[1] == 1
     ws = json.loads(ws_raw[0])
     assert "chase" not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_session_stats_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里 usage/rag 三个键在升级时搬进 session_stats，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "stats-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "session_usage": {"total_tokens": 999, "calls": 7},
+                    "turn_usage": {"prompt_tokens": 100},
+                    "rag_stats": {"totals": {"calls": 3}},
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用 combat/chase/session_stats 迁移：回填 + 移除
+
+    con = sqlite3.connect(db_file)
+    try:
+        row = con.execute(
+            "SELECT session_usage, turn_usage, rag_stats, version "
+            "FROM session_stats WHERE session_id = 's1'"
+        ).fetchone()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert row is not None
+    assert json.loads(row[0]) == {"total_tokens": 999, "calls": 7}
+    assert json.loads(row[1]) == {"prompt_tokens": 100}
+    assert json.loads(row[2]) == {"totals": {"calls": 3}}
+    assert row[3] == 1
+    ws = json.loads(ws_raw[0])
+    for key in ("session_usage", "turn_usage", "rag_stats"):
+        assert key not in ws
     assert ws["flags"] == {"door_open": True}
 
 

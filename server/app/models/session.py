@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.chase_state import ChaseState
     from app.models.combat_state import CombatState
     from app.models.session_participant import SessionParticipant
+    from app.models.session_stats import SessionStats
 
 
 class GameSession(Base, UUIDMixin, TimestampMixin):
@@ -59,4 +60,8 @@ class GameSession(Base, UUIDMixin, TimestampMixin):
     # 追逐态 1:1（拆自 world_state.chase）：同上。
     chase_state: Mapped["ChaseState | None"] = relationship(
         "ChaseState", cascade="all, delete-orphan", uselist=False,
+    )
+    # 运行统计 1:1（拆自 world_state.session_usage/turn_usage/rag_stats）：同上。
+    session_stats: Mapped["SessionStats | None"] = relationship(
+        "SessionStats", cascade="all, delete-orphan", uselist=False,
     )

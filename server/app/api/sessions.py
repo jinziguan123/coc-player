@@ -409,10 +409,11 @@ def get_rag_stats(
     token: str | None = Depends(player_token),
 ):
     """本局 RAG（规则书/模组原文检索）用量与命中质量统计——评估检索对跑团的实际帮助。"""
-    from app.services import rag_stats
+    from app.services import rag_stats, session_stats
 
-    session = require_session_viewer(db, session_id, token)
-    return rag_stats.summarize(session.world_state or {})
+    require_session_viewer(db, session_id, token)
+    stats = session_stats.get(db, session_id)
+    return rag_stats.summarize(stats.rag_stats if stats else None)
 
 
 @router.get("/{session_id}/recaps")

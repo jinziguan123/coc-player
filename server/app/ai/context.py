@@ -73,7 +73,7 @@ def resolve_context_budget(context_window: int) -> int:
 # 约 50%。固定系数的好处是有安全垫，代价是**永远只用到窗口的约 40%**——而逐字记忆恰恰是
 # 对抗有损摘要的唯一资源，省在这里最不划算。
 #
-# 既然每回合都能拿到服务端真实 usage（world_state.turn_usage），就用「同轮估算 / 实测」的
+# 既然每回合都能拿到服务端真实 usage（session_stats.turn_usage），就用「同轮估算 / 实测」的
 # 比值把预算放大回去，而不是继续拍一个常数。校准做在**预算侧**而非 `_estimate_tokens` 里：
 # 后者是无状态纯函数、被到处调用，给它加全局状态会让各处估算随会话漂移，难以推理。
 CALIBRATION_KEY = "budget_scale"

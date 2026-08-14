@@ -1,6 +1,6 @@
 """某局游戏的 RAG（规则书 / 模组原文检索）调用统计。
 
-落在 ``world_state.rag_stats``，供后台评估 RAG 到底被用了多少、命中质量如何——
+落在 ``session_stats.rag_stats``，供后台评估 RAG 到底被用了多少、命中质量如何——
 判断这套检索对跑团的实际帮助。纯读改写、fail-open，绝不影响生成主流程。
 
 统计维度：kind(rule|module) × mode(active|passive) 四象限的调用次数、命中行数、
@@ -18,13 +18,13 @@ def _blank() -> dict:
     return {"totals": {"calls": 0, "hits": 0, "empty": 0}, "by_kind_mode": {}, "recent": []}
 
 
-def record(ws: dict, *, kind: str, mode: str, query: str, hits: list | None) -> dict:
-    """把一次 RAG 检索并入统计并返回新的 world_state（浅拷贝，不原地改旧引用）。
+def record(stats: dict, *, kind: str, mode: str, query: str, hits: list | None) -> dict:
+    """把一次 RAG 检索并入统计并返回新的统计 dict（浅拷贝，不原地改旧引用）。
 
     ``hits`` 为检索返回的命中列表（元素含 ``score``）；空命中也记（计入 empty，
     用于看「查了却没查到」的比例——空命中多说明语料覆盖或 query 组织有问题）。
     """
-    stats = ws.get("rag_stats") or _blank()
+    stats = stats or _blank()
     totals = dict(stats.get("totals") or {"calls": 0, "hits": 0, "empty": 0})
     by_km = dict(stats.get("by_kind_mode") or {})
     recent = list(stats.get("recent") or [])
@@ -51,14 +51,12 @@ def record(ws: dict, *, kind: str, mode: str, query: str, hits: list | None) -> 
               "n_hits": n, "top_score": round(top, 4)}
     recent = ([sample] + recent)[:_MAX_SAMPLES]
 
-    new_ws = dict(ws)
-    new_ws["rag_stats"] = {"totals": totals, "by_kind_mode": by_km, "recent": recent}
-    return new_ws
+    return {"totals": totals, "by_kind_mode": by_km, "recent": recent}
 
 
-def summarize(ws: dict | None) -> dict:
+def summarize(stats: dict | None) -> dict:
     """把累计统计整理成可读汇总：四象限计数 + 命中率 + 平均 top 命中分 + 最近样本。"""
-    stats = (ws or {}).get("rag_stats") or _blank()
+    stats = stats or _blank()
     quadrants = {}
     for key, slot in (stats.get("by_kind_mode") or {}).items():
         calls = slot.get("calls") or 0
