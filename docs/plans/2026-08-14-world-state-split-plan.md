@@ -1,12 +1,14 @@
 # world_state 拆表：实施方案（2026-08-14）
 
-> 进度（2026-08-14）：**已全部落地并逐项提交**，后端 pytest 1674 通过 + ruff 通过。
-> 具体：Phase 1（combat → combat_states）、Phase 2（chase → chase_states）、
+> 进度（2026-08-14）：**已全部落地并逐项提交**，后端 pytest 1675 通过 + ruff 通过 +
+> 前端 tsc -b 通过。具体：Phase 1（combat → combat_states）、Phase 2（chase → chase_states）、
 > Phase 3（usage/rag → session_stats）、Phase 4a（recaps → session_recaps）、
 > Phase 4b（回合锁 turn_confirm → 既有 turn_state 列）、Phase 4c（剧情记忆 Pydantic
-> schema + SCHEMA_VERSION 1→2 + fail-open 校验）。仍留在 world_state 的回合级 pending_*、
-> 分头 party_locations、幂等台账 san_checked/scene_events_seen 走 schema 的 extra=allow 放行，
-> 属后续轮次可选的收尾，不阻塞本目标。
+> schema + SCHEMA_VERSION 1→2 + fail-open 校验）、Phase 5（pending_checks /
+> pending_item_gains / item_delta_keys → turn_state）。仍留在 world_state 的：
+> pending_clue_reveals（与 clue_ledger 同生同灭，刻意不切）、party_locations / visited_scenes
+> （导航）、san_checked / scene_events_seen（幂等台账），走 schema 的 extra=allow 放行，
+> 属后续可选收尾，不阻塞本目标。
 
 > 落地 ADR-003 决策第 4 条，以及 docs/architecture.md §4.2「会话状态的实际分布」与 §8 P1 表
 > 里点名「ADR-003 的拆表一项未做」的欠账。
