@@ -37,7 +37,7 @@ from app.ai.prompts.team_system import (
     TEAM_MODE_TOGETHER,
     TEAM_SYSTEM_PROMPT,
 )
-from app.services import style_presets, world_memory
+from app.services import combat_service, style_presets, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -895,7 +895,7 @@ def _format_combat_in_progress(session) -> str:
     参战方名字取战斗态里的那一份——建参战方时已经过身份遮蔽（玩家还没认出来的东西
     在战斗面板里就叫「不明存在」），这里直接沿用，不会从模组名把真名漏回来。
     """
-    combat = (getattr(session, "world_state", None) or {}).get("combat") or {}
+    combat = combat_service.get_combat(session) or {}
     if not combat.get("active"):
         return ""
     alive = [

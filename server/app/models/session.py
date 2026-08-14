@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
+    from app.models.combat_state import CombatState
     from app.models.session_participant import SessionParticipant
 
 
@@ -49,4 +50,8 @@ class GameSession(Base, UUIDMixin, TimestampMixin):
         "SessionParticipant",
         cascade="all, delete-orphan",
         order_by="SessionParticipant.seat_order",
+    )
+    # 战斗态 1:1（拆自 world_state.combat）：删会话时经 cascade 一并清理。
+    combat_state: Mapped["CombatState | None"] = relationship(
+        "CombatState", cascade="all, delete-orphan", uselist=False,
     )

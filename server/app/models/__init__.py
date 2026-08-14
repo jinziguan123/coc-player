@@ -1,5 +1,6 @@
 from app.models.base import Base
 from app.models.character import Character
+from app.models.combat_state import CombatState
 from app.models.event_log import EventLog
 from app.models.module import Module, ModuleChunk
 from app.models.rulebook import RuleChunk, Rulebook
@@ -9,6 +10,7 @@ from app.models.session_participant import SessionParticipant
 __all__ = [
     "Base",
     "Character",
+    "CombatState",
     "EventLog",
     "Module",
     "ModuleChunk",
