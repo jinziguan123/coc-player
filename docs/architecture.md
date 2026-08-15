@@ -104,7 +104,7 @@ docs/                  设计、路线图、打包和架构文档
 |---|---|---|
 | 应用入口 | `server/app/main.py` | FastAPI 生命周期、迁移、CORS、健康检查、SPA 静态托管 |
 | API 层 | `server/app/api/*.py` | 路由、参数校验、权限调用、触发异步生成 |
-| 会话域 | `session_service.py`、`models/session*.py` | 会话、席位、房主、事件分页、回合确认、场景位置 |
+| 会话域 | `session_service.py`（门面）、`event_store.py`、`turn_state_service.py`、`navigation_service.py`、`models/session*.py`<br>**已拆职责簇（2026-08-15）** | 会话、席位、房主；事件分页/检索/落库 → `event_store`，回合确认与待投检定 → `turn_state_service`，场景位置与地图可见性 → `navigation_service`。`session_service` 保留同名 re-export |
 | 聊天/生成域 | ~~`chat_service.py`~~ → `turn_orchestrator.py` 等 12 个模块<br>**已拆分（2026-07-22）** | 玩家行动、OOC、回合推进、KP 生成、文本指令、工具执行、持久化、收尾。现按职责簇分布在 `turn_orchestrator`（用例编排）、`turn_context` / `turn_effects` / `planned_effects` / `turn_event_order`（取数、确定性副作用、计划落实、事件重排）、`kp_tool_loop`（工具循环与文本兼容路径）、`narration_protocol` / `command_protocol` / `event_protocol` / `chat_event_writer`（协议与落库）、`generation_manager` / `generation_lifecycle` / `generation_housekeeping`（生命周期）。详见 §8 本轮小结 |
 | 战斗/追逐域 | `combat_service.py`、`chase_service.py`、`rules/coc/combat.py` | 战斗/追逐状态机与规则结算 |
 | 模组/规则书域 | `module_service.py`、`rulebook_service.py`、`module_rag_service.py` | 上传、解析、结构化模组、规则书切块与 RAG |
@@ -174,7 +174,7 @@ docs/                  设计、路线图、打包和架构文档
 >   而直接 `dict(session.world_state)` + 整段回写的旧调用点仍有 27 处。适配器立起来了，
 >   但「唯一读写口径」尚未成为事实约束，仍靠人自觉。
 > - ADR-003 说的拆表（战斗、追逐、回合、用量）**一项都没做**。
->
+
 > **现状（2026-08-14，分支 refactor/world-state-split）**：ADR-003 的拆表已落地——
 > 战斗 → `combat_states`、追逐 → `chase_states`、用量/RAG 统计 → `session_stats`、
 > 战报 → `session_recaps`（1:N）、回合锁 `turn_confirm` 及待结算 `pending_checks` /
@@ -186,6 +186,14 @@ docs/                  设计、路线图、打包和架构文档
 > `pending_clue_reveals`（与 clue_ledger 同生同灭，不切）。直接 `dict(session.world_state)`
 > 的旧调用点从 36 处降到个位数（高频强一致态均已走各自唯一口径），残留的叙事键写入
 > 尚未全部收敛到 adapter，仍靠人自觉。
+>
+> **现状（2026-08-15）**：`session_service.py` 的职责簇拆分落地——事件分页/检索/落库 →
+> `event_store.py`、回合确认与待投检定 → `turn_state_service.py`、场景位置/连通图/地图可见性 →
+> `navigation_service.py`；`session_service` 保留同名 re-export，旧调用路径不破。同时修复：
+> ① `turn_state.turn_confirm` 统一为嵌套口径并兼容旧迁移的顶层数据；② SPA 回退路由
+> `include_in_schema=False`，OpenAPI 导出不再依赖被 gitignore 的 `apps/web/dist`；
+> ③ 补 `server/openapi.json` / `generated.ts` 漂移；④ 增加[CoC 规则覆盖矩阵](coc-rule-coverage.md)。
+> 评估过程中发现的 `evals --smoke` 12/14 与干净 checkout 契约 diff 均已归零。
 
 ## 5. 关键运行链路
 

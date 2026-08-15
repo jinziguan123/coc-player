@@ -31,3 +31,13 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 已补场景间隔、边缘六邻格、单节点改地貌与批量保存测试；针对性 9 项测试及 TypeScript 检查通过。
 - 浏览器验收通过：相邻逻辑场景之间至少隔一个普通地形格，边缘有完整一圈填充；单选地貌、全选批量地貌、保存回读和加宽网格后的拖拽吸附均正常，控制台无错误。
 - 全量前端检查通过：47 项测试、TypeScript 检查和 Vite 生产构建；临时验收模组和 Playwright 符号链接已清理。
+
+## 2026-08-15 评审整改
+
+- 修复 `_party_distribution_section` 对 `navigation.party_locations = NULL` 的兼容，Evals smoke 回到 14/14。
+- SPA 回退路由 `include_in_schema=False`，OpenAPI 导出不再依赖被 gitignore 的 `apps/web/dist`；重导 `openapi.json` 与 `generated.ts`，干净 checkout 导出零 diff。
+- `session_service.py` 拆出 `event_store.py`（事件分页/检索/落库）、`turn_state_service.py`（回合确认/待投检定）、`navigation_service.py`（位置/连通图/地图可见性），门面保留 re-export。
+- 统一 `turn_state.turn_confirm` 嵌套口径，兼容旧迁移顶层数据；`commit_turn` 不再误伤 pending 键。
+- 前端路由级代码分割，首屏 JS 从约 1.7MB 降到约 361KB。
+- 新增 [CoC 规则覆盖矩阵](docs/coc-rule-coverage.md) 与 [发布缺口门禁](docs/release-gates.md)，把非代码可完成项显式化。
+- 验证：后端 1678 项测试通过 + Ruff；前端 289 项测试、tsc、Vite 构建通过；Rust 47 项测试通过。
