@@ -46,7 +46,7 @@ def upgrade() -> None:
                 "UPDATE game_sessions SET world_state = :ws, turn_state = :ts "
                 "WHERE id = :sid"
             ),
-            {"sid": sid, "ws": json.dumps(ws), "ts": json.dumps(tc or {})},
+            {"sid": sid, "ws": json.dumps(ws), "ts": json.dumps({"turn_confirm": tc or {}})},
         )
 
 
@@ -62,12 +62,19 @@ def downgrade() -> None:
         ts = _load(ts_raw)
         if not ts:
             continue
+        confirm = ts.get("turn_confirm") if isinstance(ts, dict) else None
+        if not isinstance(confirm, dict):
+            # 兼容本迁移旧版本铺在顶层的数据
+            confirm = {
+                k: v for k, v in ts.items()
+                if k not in ("pending_checks", "pending_item_gains", "item_delta_keys")
+            }
         ws_raw = bind.execute(
             sa.text("SELECT world_state FROM game_sessions WHERE id = :sid"),
             {"sid": sid},
         ).scalar()
         ws = _load(ws_raw)
-        ws["turn_confirm"] = ts
+        ws["turn_confirm"] = confirm
         bind.execute(
             sa.text(
                 "UPDATE game_sessions SET world_state = :ws, turn_state = NULL "

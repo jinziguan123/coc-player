@@ -379,7 +379,7 @@ def test_turn_confirm_migration_moves_to_turn_state(tmp_path, monkeypatch):
     finally:
         con.close()
 
-    assert json.loads(ts_raw) == {"c1": True}
+    assert json.loads(ts_raw) == {"turn_confirm": {"c1": True}}
     ws = json.loads(ws_raw)
     assert "turn_confirm" not in ws
     assert ws["flags"] == {"door_open": True}
