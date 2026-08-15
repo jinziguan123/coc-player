@@ -41,3 +41,11 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 前端路由级代码分割，首屏 JS 从约 1.7MB 降到约 361KB。
 - 新增 [CoC 规则覆盖矩阵](docs/coc-rule-coverage.md) 与 [发布缺口门禁](docs/release-gates.md)，把非代码可完成项显式化。
 - 验证：后端 1678 项测试通过 + Ruff；前端 289 项测试、tsc、Vite 构建通过；Rust 47 项测试通过。
+
+
+## 2026-08-15 位置意图硬闸
+
+- 玩家只提到/打算去 B 时，在 KP 生成前清洗 `plan.scene_policy.scene_change` 并注入「当前位置硬约束」。
+- 扩充 `_NON_COMMITTAL_MOVE_MARKERS`：可能/之后/吧/看看吧 等措辞不再被误判为显式移动。
+- TurnValidator 增加 `location_context` 与「位置越界」校验项，位置硬约束轮次强制终检并改写落库版本。
+- 验证：后端 1685 项测试通过、Ruff 通过、Evals smoke 14/14。

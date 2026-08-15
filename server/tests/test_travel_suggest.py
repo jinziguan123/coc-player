@@ -150,6 +150,51 @@ def test_spoken_intent_triggers_card(seeded):
     assert session.current_scene_id == "hall"      # 依旧不搬人
 
 
+def test_location_intent_guard_clears_plan_for_tentative_travel(seeded):
+    """生成前位置硬闸：『之后可能去B』必须清掉 plan.scene_change 并给出硬约束。"""
+    from app.ai.turn_planner import TurnPlan
+    from app.services import planned_effects, turn_orchestrator
+
+    db, module, session, hero = seeded
+    session.navigation.visited_scenes = ["hall", "library"]
+    db.commit()
+    _say(db, session, hero, "我们之后可能去图书馆看看")
+    events = session_service.get_session_events(db, session.id)
+    plan = TurnPlan()
+    plan.scene_policy.scene_change = "library"
+
+    guard = turn_orchestrator._location_intent_guard(
+        db, session.id, session, module, hero, events, plan,
+    )
+
+    assert plan.scene_policy.scene_change is None
+    assert "门厅" in guard and "图书馆" in guard and "最高优先级" in guard
+    assert planned_effects._explicit_player_movement(
+        db, session.id, module, hero, "library",
+    ) is False
+
+
+def test_location_intent_guard_allows_explicit_movement(seeded):
+    """『我走进图书馆』是确定性移动，位置硬闸不得误伤。"""
+    from app.ai.turn_planner import TurnPlan
+    from app.services import turn_orchestrator
+
+    db, module, session, hero = seeded
+    session.navigation.visited_scenes = ["hall", "library"]
+    db.commit()
+    _say(db, session, hero, "我走进图书馆")
+    events = session_service.get_session_events(db, session.id)
+    plan = TurnPlan()
+    plan.scene_policy.scene_change = "library"
+
+    guard = turn_orchestrator._location_intent_guard(
+        db, session.id, session, module, hero, events, plan,
+    )
+
+    assert guard == ""
+    assert plan.scene_policy.scene_change == "library"
+
+
 def test_spoken_intent_skips_disconnected_place(seeded):
     """提到了走不通的地方（阁楼自成一片）→ 不挂卡：点下去 /travel 必然 400。"""
     from app.services import turn_orchestrator
