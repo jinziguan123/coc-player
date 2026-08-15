@@ -307,6 +307,34 @@ def test_long_speaker_name_prefix_fully_stripped():
     assert "加布里埃" not in result[0]                          # 无半截名残留
 
 
+def test_unnamed_passerby_prefix_gets_own_bubble_not_module_npc():
+    """模组没写的路人开口时，必须归到路人自己名下，绝不能挂到最近一个模组 NPC 气泡上。"""
+    text = (
+        "诺特刚说完，面包房老板娘玛莎笑了笑：“几位要买面包吗？”"
+    )
+    npcs = [{"name": "史蒂芬·诺特"}]
+    result = ["", "", [], [], []]
+    asyncio.run(_collect(
+        chat_service._stream_narration_filtered(_FakeKP(text), [], result, npcs=npcs)
+    ))
+    speakers = [name for name, _ in result[2]]
+    assert speakers == ["老板娘玛莎"]
+    assert "史蒂芬·诺特" not in speakers
+    assert "面包房老板娘玛莎笑了笑：" not in result[0]  # 前缀不重复显示
+
+
+def test_quantified_generic_speaker_strips_quantifier_and_verb():
+    """「一个护工低声说：」应归给「护工」，且旁白不残留「一个」或说话前缀。"""
+    text = "一个护工低声说：“请稍等。”"
+    result = ["", "", [], [], []]
+    asyncio.run(_collect(
+        chat_service._stream_narration_filtered(_FakeKP(text), [], result)
+    ))
+    assert [name for name, _ in result[2]] == ["护工"]
+    assert "一个护工低声说：" not in result[0]
+    assert "一个" not in result[0]
+
+
 def test_last_speaker_released_after_paragraph_break():
     """上一位说话人不应跨段把后文（如另一场景读到的报纸短讯）吸成自己的台词。"""
     text = (

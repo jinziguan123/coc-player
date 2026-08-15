@@ -48,4 +48,11 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 玩家只提到/打算去 B 时，在 KP 生成前清洗 `plan.scene_policy.scene_change` 并注入「当前位置硬约束」。
 - 扩充 `_NON_COMMITTAL_MOVE_MARKERS`：可能/之后/吧/看看吧 等措辞不再被误判为显式移动。
 - TurnValidator 增加 `location_context` 与「位置越界」校验项，位置硬约束轮次强制终检并改写落库版本。
+
+## 2026-08-15 路人归属、位置旁路与沙盘实时刷新
+
+- 无名角色说话前缀改为右剥离式解析：老板娘玛莎/护工等不再被归到最近一个模组 NPC，气泡与头像不再张冠李戴。
+- 检定申请/投骰续写等旁路也接入位置意图硬闸与定点终检，堵住「人不移动但旁白先到 B」的剩余入口。
+- 前端收到旁白/对话/系统日志后节流重拉 locations，沙盘解锁新地点不再需要手动刷新。
+- 验证：后端 1687 项测试通过、Ruff 通过、Evals smoke 14/14；前端 289 项测试、tsc、构建通过。
 - 验证：后端 1685 项测试通过、Ruff 通过、Evals smoke 14/14。

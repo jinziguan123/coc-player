@@ -639,6 +639,21 @@ export function GameSessionPage() {
     }, 400)
   }, [sessionId, setCurrentSession])
 
+  // 沙盘/已知地点刷新（节流）：新地点可能因为一条旁白/一句对话/一张系统卡刚刚解锁，
+  // 不必等整轮 done 才重拉 /locations；合并 400ms 内的连续日志事件，只发一次。
+  const locationsRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleLocationsRefresh = useCallback(() => {
+    if (!sessionId || locationsRefreshTimer.current) return
+    locationsRefreshTimer.current = setTimeout(() => {
+      locationsRefreshTimer.current = null
+      setRefreshTick((x) => x + 1)
+    }, 400)
+  }, [sessionId])
+
+  useEffect(() => () => {
+    if (locationsRefreshTimer.current) clearTimeout(locationsRefreshTimer.current)
+  }, [])
+
   // 处理一条房间实时事件（/live）。
   //
   // 结构对应 room_events.py 的三分类：`log` 类走「按 id 去重 → 收流 → 落消息」的公共
@@ -770,6 +785,11 @@ export function GameSessionPage() {
     }
     setThinking(false)  // 任何具体内容（对话/检定/系统）到达 → 不再是"思考中"
     endStream(); liveTypeRef.current = ''
+    // 旁白/对话/系统卡都可能解锁新地点（known_scene_ids 会扫这些事件正文），
+    // 节流重拉 locations，沙盘不必等 done 或手动刷新。
+    if (t === 'narration_full' || t === 'dialogue' || t === 'npc_dialogue' || t === 'action' || t === 'system') {
+      scheduleLocationsRefresh()
+    }
     const isPlayer = !!(myCharIdRef.current && chunk.actor_id === myCharIdRef.current)
     if (t === 'dialogue' || t === 'npc_dialogue') {
       addMessage({ id: chunk.id || '', type: 'dialogue', content: chunk.content || '', actor_name: chunk.actor_name, metadata: { ...(chunk.metadata || {}), is_player: isPlayer } })
@@ -792,7 +812,7 @@ export function GameSessionPage() {
       // 走到这里说明有 log 类型没被渲染——加了新事件就必须在上面补一支。
       assertAllLogHandled(t)
     }
-  }, [addMessage, endStream])
+  }, [addMessage, endStream, scheduleLocationsRefresh])
 
   const handleLiveChunk = useCallback((chunk: ChunkPayload) => {
     const t = chunk.type

@@ -1209,6 +1209,11 @@ async def _run_kp_turn(
     # SAN 守卫基线：本次续写生成前的最大 seq，用于判断 KP 是否已自行掷过 SAN（幂等）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
     events = session_service.get_session_events(db, session_id)
+    # 检定申请/投骰续写等旁路同样可能踩「人在 A、旁白写 B」：这里没有 planner 清洗，
+    # 直接复用生成前位置硬闸（plan=None，只注入约束）。
+    location_guard = _location_intent_guard(
+        db, session_id, game_session, module, player_char, events, None,
+    )
     rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
     module_rag_enabled = getattr(module, "rag_status", "") == "ready"
     party_ids = {player_char.id} | {t.id for t in (party_others or [])}
@@ -1221,6 +1226,8 @@ async def _run_kp_turn(
         module_lookup_enabled=module_rag_enabled,
         recall_enabled=event_recall.is_enabled(game_session),
     )
+    if location_guard:
+        messages.append({"role": "system", "content": location_guard})
     messages.append({"role": "user", "content": user_prompt})
 
     kp = KPAgent(llm)
@@ -1233,6 +1240,17 @@ async def _run_kp_turn(
     except asyncio.CancelledError:
         _persist_narration(db, session_id, res)
         raise
+    if location_guard:
+        # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
+        validation = await turn_context.turn_validator.validate_turn_narration(
+            llm, turn_planner.TurnPlan(), res[0],
+            turn_inputs=_shown_turn_context(events, party_ids),
+            party_names={player_char.name} | {t.name for t in (party_others or [])},
+            location_context=location_guard,
+        )
+        if validation is not None and validation.violated:
+            logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
+            res[0] = validation.corrected_narration
     _persist_narration(db, session_id, res)
     # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
     _record_npc_say_memory(
