@@ -1395,7 +1395,7 @@ export function GameSessionPage() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <button
             onClick={() => navigate('/game')}
-            className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm flex-shrink-0 whitespace-nowrap"
+            className="btn-secondary btn-sm flex items-center gap-1 flex-shrink-0 whitespace-nowrap"
           >
             <GiReturnArrow /> 返回列表
           </button>
@@ -1408,8 +1408,7 @@ export function GameSessionPage() {
           {currentSession.room_code && (
             <button
               onClick={() => { navigator.clipboard?.writeText(currentSession.room_code || ''); toast.success(`房间码 ${currentSession.room_code} 已复制`) }}
-              className="text-xs px-2 py-0.5 rounded border inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap"
-              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              className="chip chip-btn font-mono flex-shrink-0"
               title="点击复制房间码，分享给队友加入"
             >
               房间码 {currentSession.room_code} <Copy size={11} />
@@ -1419,14 +1418,14 @@ export function GameSessionPage() {
             <ContextUsageBadge sessionId={currentSession.id} refreshKey={messages.length} paused={streaming} />
             <button
               onClick={() => setShowSearch((v) => !v)}
-              className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+              className="btn-secondary btn-xs flex items-center gap-1"
               title="检索本局历史记录"
             >
               <Search size={12} /> 检索
             </button>
             <button
               onClick={() => setShowRecap(true)}
-              className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+              className="btn-secondary btn-xs flex items-center gap-1"
               title="战报 / 章节小结：把本局经历浓缩成结构化小结"
             >
               <GiScrollUnfurled size={13} /> 战报
@@ -1457,7 +1456,7 @@ export function GameSessionPage() {
                   {(open) => (
                     <button
                       onClick={open}
-                      className={`text-xs !px-2 !py-0.5 flex items-center gap-1 ${endingReached ? 'btn-primary' : 'btn-secondary'}`}
+                      className={`btn-xs flex items-center gap-1 ${endingReached ? 'btn-primary' : 'btn-secondary'}`}
                       title={endingReached
                         ? `已抵达结局：${endingReached.name || ''}。全体真人玩家一致同意即可结束本局`
                         : '结束本模组：需全体真人玩家一致同意'}

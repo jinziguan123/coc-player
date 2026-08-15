@@ -26,24 +26,26 @@ export function GamePage() {
   return (
     // 开局表单是线性流程，房间列表是并列卡片——容器放到 4xl，够两列房间卡又不至于把表单拉散
     <div className="mx-auto mt-8 max-w-4xl">
-      <div className="mb-6 flex items-center gap-3">
+      <div className="page-head">
         {/* 在流程里，左上角的「返回」退回房间列表，而不是退出整个页面——
             这一层才是用户心里的上一步。 */}
         <button
           onClick={() => (mode ? setMode(null) : navigate(-1))}
-          className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm"
+          className="btn-secondary btn-sm flex items-center gap-1"
         >
           <ArrowLeft size={14} aria-hidden="true" /> 返回
         </button>
-        <h2 className="page-title !mb-0">{mode ? TITLE[mode] : '开始游戏'}</h2>
+        <h2 className="page-title">{mode ? TITLE[mode] : '开始游戏'}</h2>
         {/* 流程中不再提供「新增游戏」：此刻要么把这一步做完，要么返回。 */}
         {!mode && (
-          <button
-            onClick={() => setChooser(true)}
-            className="btn-primary ml-auto flex items-center gap-1 text-sm"
-          >
-            <Plus size={14} aria-hidden="true" /> 新增游戏
-          </button>
+          <div className="page-head-actions">
+            <button
+              onClick={() => setChooser(true)}
+              className="btn-primary btn-sm flex items-center gap-1"
+            >
+              <Plus size={14} aria-hidden="true" /> 新增游戏
+            </button>
+          </div>
         )}
       </div>
 

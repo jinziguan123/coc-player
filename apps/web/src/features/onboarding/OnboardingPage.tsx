@@ -34,7 +34,10 @@ export function OnboardingPage() {
     <main className="mx-auto flex min-h-[60vh] max-w-xl flex-col items-center justify-center px-4 text-center">
       {(state === 'checking' || state === 'creating') && (
         <>
-          <LoaderCircle className="mb-5 h-9 w-9 animate-spin" aria-hidden="true" />
+          {/* 状态图标收进纹章框（与空态/入口卡同一语言），不再裸挂 */}
+          <span className="empty-state-icon mb-5" aria-hidden="true">
+            <LoaderCircle className="h-6 w-6 animate-spin" />
+          </span>
           <h1 className="page-title">
             {state === 'checking' ? '正在检查 AI 配置' : '正在准备新手团'}
           </h1>
@@ -46,7 +49,9 @@ export function OnboardingPage() {
 
       {state === 'needs_config' && (
         <>
-          <Settings className="mb-5 h-9 w-9" aria-hidden="true" />
+          <span className="empty-state-icon mb-5" aria-hidden="true">
+            <Settings className="h-6 w-6" />
+          </span>
           <h1 className="page-title">先接一个 AI 模型</h1>
           <p className="mb-5" style={{ color: 'var(--color-text-secondary)' }}>
             守秘人（KP）由 AI 担任，所以得先给它接一个模型。
@@ -86,7 +91,9 @@ export function OnboardingPage() {
 
       {state === 'error' && (
         <>
-          <RefreshCw className="mb-5 h-9 w-9" aria-hidden="true" />
+          <span className="empty-state-icon mb-5" aria-hidden="true">
+            <RefreshCw className="h-6 w-6" />
+          </span>
           <h1 className="page-title">未能启动新手团</h1>
           <p className="mb-6" style={{ color: 'var(--color-text-secondary)' }}>
             请检查本地服务状态后重试，已创建的示例内容不会重复生成。

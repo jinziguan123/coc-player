@@ -581,7 +581,7 @@ export function ModuleDetailPage() {
       {/* 工具条吸顶：模组正文很长（场景/NPC/线索动辄几屏），编辑时「保存」若随页面滚走，
           改完底部内容还得先滚回顶部才能存。粘在视口顶端，随时可存可切视图。 */}
       <div className="module-toolbar flex items-center gap-3 mb-4">
-        <button onClick={() => navigate('/modules')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
+        <button onClick={() => navigate('/modules')} className="btn-secondary btn-sm flex items-center gap-1">
           <GiReturnArrow /> 返回
         </button>
         <h2 className="page-title !mb-0 flex items-center gap-2"><GiScrollUnfurled />{isNew ? '新建模组' : edit ? '编辑模组' : '查看模组'}</h2>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { syncCharactersBackFromHost } from '@/features/characters/syncBack'
@@ -15,7 +15,7 @@ import {
 } from '../components/character/CharacterExtraEditors'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiDiceSixFacesSix, GiCharacter, GiReturnArrow, GiUpCard, GiPadlock, GiSave, GiScrollUnfurled } from 'react-icons/gi'
-import { ChevronRight, RefreshCw } from 'lucide-react'
+import { Minus, Plus, RefreshCw } from 'lucide-react'
 import { NumberField } from '@/components/ui/number-field'
 import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
 import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
@@ -882,30 +882,32 @@ export function CharacterPage() {
       {/* 建卡流程是线性表单，窄栏更易读、自己滚；名录+详情是一本摊开的书，占满剩余高度 */}
       <div className={`flex min-h-0 flex-1 flex-col ${inCreateFlow ? 'max-w-3xl overflow-auto' : ''}`}>
         <div className="contents">
-          <div className="flex items-center gap-3 mb-6">
-            <button onClick={() => navigate(-1)} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
+          <div className="page-head">
+            <button onClick={() => navigate(-1)} className="btn-secondary btn-sm flex items-center gap-1">
               <GiReturnArrow /> 返回
             </button>
-            <h2 className="page-title !mb-0">角色管理</h2>
+            <h2 className="page-title">角色管理</h2>
             {inCreateFlow ? (
-              <button onClick={() => { setInCreateFlow(false); resetForm() }} className="ml-auto btn-secondary flex items-center gap-1 text-sm">
-                <GiReturnArrow /> 返回列表
-              </button>
+              <div className="page-head-actions">
+                <button onClick={() => { setInCreateFlow(false); resetForm() }} className="btn-secondary btn-sm flex items-center gap-1">
+                  <GiReturnArrow /> 返回列表
+                </button>
+              </div>
             ) : (
-              <div className="ml-auto flex items-center gap-2">
+              <div className="page-head-actions">
                 {/* 兜底：正常情况下进出房间会自动同步，这里给一个手动入口，
                     应对异常退出（关窗口/掉线/房主先退）后想立刻把结果取回来。 */}
                 {connectedToHost && (
                   <button
                     onClick={() => void pullBackFromHost()}
                     disabled={pulling}
-                    className="btn-secondary flex items-center gap-1 text-sm"
+                    className="btn-secondary btn-sm flex items-center gap-1"
                     title="把本局的 HP、理智、成长与物品变化写回你自己的角色卡"
                   >
                     <RefreshCw size={13} /> {pulling ? '同步中…' : '从房主处取回本局结果'}
                   </button>
                 )}
-                <button onClick={() => { resetForm(); setInCreateFlow(true) }} className="btn-primary flex items-center gap-1 text-sm">
+                <button onClick={() => { resetForm(); setInCreateFlow(true) }} className="btn-primary btn-sm flex items-center gap-1">
                   <GiUpCard /> 创建角色
                 </button>
               </div>
@@ -944,22 +946,20 @@ export function CharacterPage() {
               </button>
             </div>
 
-            {/* 步骤指示器 */}
-            <div className="flex items-center gap-1 mb-4 text-xs">
+            {/* 步骤指示器：菱形节点 + 引线。走完的步是铸印，当前步是燃着的烛 */}
+            <div className="step-track" role="list" aria-label="建卡步骤">
               {STEPS.map((s, i) => (
-                <div key={s} className="flex items-center gap-1">
-                  {i > 0 && <ChevronRight size={12} style={{ color: 'var(--color-border-strong)' }} />}
+                <Fragment key={s}>
+                  {i > 0 && <span className="step-join" aria-hidden="true" />}
                   <span
-                    className="px-2 py-0.5 rounded"
-                    style={{
-                      background: i === stepIndex ? 'var(--color-accent)' : i < stepIndex ? 'var(--color-bg-tertiary)' : 'transparent',
-                      color: i === stepIndex ? 'var(--color-on-accent)' : i < stepIndex ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                      fontWeight: i === stepIndex ? 600 : 400,
-                    }}
+                    role="listitem"
+                    aria-current={i === stepIndex ? 'step' : undefined}
+                    className={`step-item ${i === stepIndex ? 'step-item--current' : i < stepIndex ? 'step-item--done' : ''}`}
                   >
+                    <span className="step-gem" aria-hidden="true"><span>{i + 1}</span></span>
                     {s}
                   </span>
-                </div>
+                </Fragment>
               ))}
             </div>
 
@@ -1119,13 +1119,14 @@ export function CharacterPage() {
                             <span className="w-16 text-sm">
                               <span style={{ color: 'var(--color-text-secondary)' }}>{ATTR_LABELS[k]}</span>
                             </span>
+                            {/* 图标守则：± 走 lucide 矢量图标；.icon-btn 带统一 hover/焦点态 */}
                             <button
                               onClick={() => updateAttr(k, -5)}
                               disabled={val <= range.min}
-                              className="w-6 h-6 rounded text-xs border flex items-center justify-center"
-                              style={{ borderColor: 'var(--color-border)', opacity: val <= range.min ? 0.3 : 1 }}
+                              className="icon-btn !w-6 !h-6"
+                              title={`${ATTR_LABELS[k]} -5`}
                             >
-                              -
+                              <Minus size={12} />
                             </button>
                             <NumberField
                               value={val}
@@ -1139,10 +1140,10 @@ export function CharacterPage() {
                             <button
                               onClick={() => updateAttr(k, 5)}
                               disabled={val >= range.max || remainingPoints < 5}
-                              className="w-6 h-6 rounded text-xs border flex items-center justify-center"
-                              style={{ borderColor: 'var(--color-border)', opacity: (val >= range.max || remainingPoints < 5) ? 0.3 : 1 }}
+                              className="icon-btn !w-6 !h-6"
+                              title={`${ATTR_LABELS[k]} +5`}
                             >
-                              +
+                              <Plus size={12} />
                             </button>
                             <span className="text-xs ml-1" style={{ color: 'var(--color-text-secondary)' }}>
                               {range.min}-{range.max}
@@ -1494,19 +1495,18 @@ export function CharacterPage() {
                               <button
                                 onClick={() => updateSkill(skillName, -5)}
                                 disabled={alloc <= 0}
-                                className="w-6 h-6 rounded text-xs border flex items-center justify-center"
-                                style={{ borderColor: 'var(--color-border)', opacity: alloc <= 0 ? 0.3 : 1 }}
+                                className="icon-btn !w-6 !h-6"
+                                title={`${skillName} -5`}
                               >
-                                -
+                                <Minus size={12} />
                               </button>
                               <button
                                 onClick={() => updateSkill(skillName, 5)}
                                 disabled={!canAdd}
-                                title={atCap ? '已到建卡上限 90' : undefined}
-                                className="w-6 h-6 rounded text-xs border flex items-center justify-center"
-                                style={{ borderColor: 'var(--color-border)', opacity: canAdd ? 1 : 0.3 }}
+                                title={atCap ? '已到建卡上限 90' : `${skillName} +5`}
+                                className="icon-btn !w-6 !h-6"
                               >
-                                +
+                                <Plus size={12} />
                               </button>
                             </>
                           )}

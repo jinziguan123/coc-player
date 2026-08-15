@@ -1,5 +1,6 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { staggerStyle } from '@/lib/stagger'
+import { GiDiceTwentyFacesTwenty } from 'react-icons/gi'
 import type { GameSetupState } from './useGameSetup'
 
 function formatTime(timestamp?: string) {
@@ -29,9 +30,13 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
     <section>
       <h3 className="section-head">我的房间</h3>
       {activeSessions.length === 0 && remoteRooms.length === 0 && (
-        <p className="mb-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          暂无进行中的房间。点右上角「新增游戏」开新局或加入房间。
-        </p>
+        <div className="empty-state">
+          <span className="empty-state-icon"><GiDiceTwentyFacesTwenty /></span>
+          <span className="empty-state-title">还没有开着的桌</span>
+          <span className="empty-state-hint">
+            点右上角「新增游戏」开一新局，或用房间码加入队友的桌。
+          </span>
+        </div>
       )}
       <div className="grid gap-2.5 lg:grid-cols-2">
         {activeSessions.map((session, i) => (
@@ -76,7 +81,7 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
                           event.stopPropagation()
                           open()
                         }}
-                        className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                        className="chip chip--danger chip-btn chip-btn--danger"
                       >
                         删除
                       </button>
@@ -132,7 +137,7 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
                       <span className="entity-card-actions inline-flex">
                         <button
                           onClick={(event) => { event.stopPropagation(); forgetRoom(room) }}
-                          className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                          className="chip chip--danger chip-btn chip-btn--danger"
                           title="只从这个列表里移除，不影响房主那边的房间"
                         >
                           移除

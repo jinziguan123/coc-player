@@ -52,7 +52,8 @@ export function HomePage() {
             to={to}
             className={`home-entry card !p-4 flex flex-col gap-2 no-underline ${primary ? 'home-entry--primary' : ''}`}
           >
-            <Icon className="h-6 w-6" aria-hidden="true" style={{ color: 'var(--color-text-accent)' }} />
+            {/* 纹章框图标：与角色名录的 .char-sigil 同一语言，三个入口像一排铸印 */}
+            <span className="home-entry-icon" aria-hidden="true"><Icon /></span>
             <span
               className="font-semibold"
               style={{ fontFamily: 'var(--font-title)', fontSize: 'var(--text-lg)', color: 'var(--color-text-primary)' }}

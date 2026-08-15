@@ -150,7 +150,7 @@ export function CharacterList({
                     event.stopPropagation()
                     onEdit(character)
                   }}
-                  className="chip chip--accent !px-1 !py-0 !text-[0.6rem] hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
+                  className="chip chip--accent chip-btn chip-btn--accent !px-1 !py-0 !text-[0.6rem]"
                 >
                   编辑
                 </button>
@@ -166,7 +166,7 @@ export function CharacterList({
                         event.stopPropagation()
                         open()
                       }}
-                      className="chip chip--danger !px-1 !py-0 !text-[0.6rem] hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                      className="chip chip--danger chip-btn chip-btn--danger !px-1 !py-0 !text-[0.6rem]"
                     >
                       删除
                     </button>
