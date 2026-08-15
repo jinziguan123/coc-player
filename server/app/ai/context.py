@@ -323,7 +323,9 @@ def _party_distribution_section(
     而不是从事件流里自行脑补。全员同处一地（或无位置记录）返回空串，不注入（行为不变）。
     """
     nav = session.navigation
-    locs = dict(nav.party_locations if nav else {})
+    # 旧 fixture / 迁移前的存档可能出现 nav 存在但 party_locations 为 NULL，
+    # 与「缺省回落到 current_scene_id」同义，不能把 dict(None) 抛给调用方。
+    locs = dict((nav.party_locations if nav else {}) or {})
     fallback = session.current_scene_id
     by_scene: dict[str, list[str]] = {}
     for m in party:

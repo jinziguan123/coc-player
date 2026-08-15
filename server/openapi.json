@@ -470,6 +470,39 @@
         "title": "ApplyAgeResponse",
         "type": "object"
       },
+      "BaseSkillsRequest": {
+        "properties": {
+          "base_attributes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Base Attributes",
+            "type": "object"
+          }
+        },
+        "required": [
+          "base_attributes"
+        ],
+        "title": "BaseSkillsRequest",
+        "type": "object"
+      },
+      "BaseSkillsResponse": {
+        "description": "这组属性下、未加任何点时的技能起始值（含属性派生项）。",
+        "properties": {
+          "skills": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Skills",
+            "type": "object"
+          }
+        },
+        "required": [
+          "skills"
+        ],
+        "title": "BaseSkillsResponse",
+        "type": "object"
+      },
       "Body_import_from_excel_api_characters_import_excel_post": {
         "properties": {
           "file": {
@@ -4423,6 +4456,59 @@
         ]
       }
     },
+    "/api/rules/{rule_system}/base-skills": {
+      "post": {
+        "description": "这组属性下、未加任何点时的技能起始值（母语=EDU、闪避=DEX//2 已填好）。\n\n建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避\n是占位的 0，界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的\n`max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 RuleEngine 里实现一次。",
+        "operationId": "base_skills_api_rules__rule_system__base_skills_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseSkillsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseSkillsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Base Skills",
+        "tags": [
+          "characters"
+        ]
+      }
+    },
     "/api/rules/{rule_system}/calc-skill-points": {
       "post": {
         "operationId": "calc_skill_points_api_rules__rule_system__calc_skill_points_post",
@@ -7446,7 +7532,7 @@
     },
     "/api/sessions/{session_id}/recap": {
       "post": {
-        "description": "生成一份章节战报并存入 world_state.recaps；生成失败返回 502（不落库）。",
+        "description": "生成一份章节战报并存入 session_recaps；生成失败返回 502（不落库）。",
         "operationId": "generate_recap_api_sessions__session_id__recap_post",
         "parameters": [
           {
@@ -7492,7 +7578,7 @@
     },
     "/api/sessions/{session_id}/recaps": {
       "get": {
-        "description": "列出本局已生成的战报（world_state.recaps）。",
+        "description": "列出本局已生成的战报（session_recaps 表）。",
         "operationId": "list_recaps_api_sessions__session_id__recaps_get",
         "parameters": [
           {
@@ -9047,43 +9133,6 @@
         "tags": [
           "settings"
         ]
-      }
-    },
-    "/{full_path}": {
-      "get": {
-        "operationId": "_spa__full_path__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "full_path",
-            "required": true,
-            "schema": {
-              "title": "Full Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": " Spa"
       }
     }
   }

@@ -157,7 +157,10 @@ if _DIST.is_dir():
     if _assets.is_dir():
         app.mount("/assets", StaticFiles(directory=_assets), name="assets")
 
-    @app.get("/{full_path:path}")
+    # SPA 兜底路由不是 REST 契约的一部分，显式排除出 OpenAPI。
+    # 此前它是否进入 schema 取决于被 gitignore 的 apps/web/dist 是否存在，
+    # 导致干净 checkout 中「导出契约 → git diff」永远漂移。
+    @app.get("/{full_path:path}", include_in_schema=False)
     def _spa(full_path: str):
         # /api/* 未命中的一律 404（交给 API 层语义），其余非 API 路径回退到 SPA 入口，
         # 由前端路由接管（刷新 /game/:id 等深链也能正常返回 index.html）。
