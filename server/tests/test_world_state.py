@@ -70,3 +70,28 @@ def test_get_reads_key(db_factory):
 def test_migrate_stamps_version():
     out = ws_mod.migrate({"foo": 1})
     assert out["schema_version"] == ws_mod.SCHEMA_VERSION and out["foo"] == 1
+
+
+def test_schema_version_is_2():
+    assert ws_mod.SCHEMA_VERSION == 2
+
+
+def test_validate_accepts_narrative_world_state():
+    ok = ws_mod.validate({
+        "schema_version": 2,
+        "story_summary": "前情摘要",
+        "story_summary_seq": 3,
+        "visited_scenes": ["a", "b"],
+        "flags": {"door_open": True},
+        "budget_scale": 1.2,
+        # 仍在 world_state 的非剧情键走 extra=allow，不该导致校验失败
+        "pending_checks": {"c1": {}},
+        "party_locations": {"c1": "a"},
+    })
+    assert ok is not None
+    assert ok.story_summary_seq == 3 and ok.visited_scenes == ["a", "b"]
+
+
+def test_validate_is_fail_open_on_bad_shape():
+    # 稳定键类型写坏 → 校验失败但只告警（返回 None，不抛异常、不阻断）
+    assert ws_mod.validate({"story_summary_seq": "not-an-int"}) is None

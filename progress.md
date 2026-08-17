@@ -31,3 +31,56 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 已补场景间隔、边缘六邻格、单节点改地貌与批量保存测试；针对性 9 项测试及 TypeScript 检查通过。
 - 浏览器验收通过：相邻逻辑场景之间至少隔一个普通地形格，边缘有完整一圈填充；单选地貌、全选批量地貌、保存回读和加宽网格后的拖拽吸附均正常，控制台无错误。
 - 全量前端检查通过：47 项测试、TypeScript 检查和 Vite 生产构建；临时验收模组和 Playwright 符号链接已清理。
+
+## 2026-08-15 评审整改
+
+- 修复 `_party_distribution_section` 对 `navigation.party_locations = NULL` 的兼容，Evals smoke 回到 14/14。
+- SPA 回退路由 `include_in_schema=False`，OpenAPI 导出不再依赖被 gitignore 的 `apps/web/dist`；重导 `openapi.json` 与 `generated.ts`，干净 checkout 导出零 diff。
+- `session_service.py` 拆出 `event_store.py`（事件分页/检索/落库）、`turn_state_service.py`（回合确认/待投检定）、`navigation_service.py`（位置/连通图/地图可见性），门面保留 re-export。
+- 统一 `turn_state.turn_confirm` 嵌套口径，兼容旧迁移顶层数据；`commit_turn` 不再误伤 pending 键。
+- 前端路由级代码分割，首屏 JS 从约 1.7MB 降到约 361KB。
+- 新增 [CoC 规则覆盖矩阵](docs/coc-rule-coverage.md) 与 [发布缺口门禁](docs/release-gates.md)，把非代码可完成项显式化。
+- 验证：后端 1678 项测试通过 + Ruff；前端 289 项测试、tsc、Vite 构建通过；Rust 47 项测试通过。
+
+
+## 2026-08-15 位置意图硬闸
+
+- 玩家只提到/打算去 B 时，在 KP 生成前清洗 `plan.scene_policy.scene_change` 并注入「当前位置硬约束」。
+- 扩充 `_NON_COMMITTAL_MOVE_MARKERS`：可能/之后/吧/看看吧 等措辞不再被误判为显式移动。
+- TurnValidator 增加 `location_context` 与「位置越界」校验项，位置硬约束轮次强制终检并改写落库版本。
+
+## 2026-08-15 路人归属、位置旁路与沙盘实时刷新
+
+- 无名角色说话前缀改为右剥离式解析：老板娘玛莎/护工等不再被归到最近一个模组 NPC，气泡与头像不再张冠李戴。
+- 检定申请/投骰续写等旁路也接入位置意图硬闸与定点终检，堵住「人不移动但旁白先到 B」的剩余入口。
+- 前端收到旁白/对话/系统日志后节流重拉 locations，沙盘解锁新地点不再需要手动刷新。
+- 验证：后端 1687 项测试通过、Ruff 通过、Evals smoke 14/14；前端 289 项测试、tsc、构建通过。
+- 验证：后端 1685 项测试通过、Ruff 通过、Evals smoke 14/14。
+
+## 2026-08-15 大厅选人舞台优化
+
+- 真人玩家挑/换角色时，角色选择不再埋在席位卡底部：新增 `CharacterSelectStage` 选人舞台，置顶于大厅中段，标题、卡牌阵列、选中高亮与逐张浮入动画构成守望先锋/杀戮尖塔式选人界面。
+- 右侧档案栏在选人模式下常驻：未选时给提示，点选后展示大纹章、职业年龄、HP/SAN、擅长技能与确认入座按钮，下方继续展开完整角色面板。
+- 选人期间大厅聊天自动收成圆形浮标并贴在右栏与主栏之间，不遮挡卡牌阵列；席位卡中的旧角色选择区同步隐藏，避免重复出现。
+- 验证：前端 289 项测试、tsc、Vite 生产构建通过；浏览器验收（含 8 张卡 mock）确认舞台置顶、底部开始栏常驻、聊天无遮挡、选中态与右侧档案正常。
+
+## 2026-08-15 大厅候选池幽灵占用修复
+
+- 定位「角色管理可见、大厅可用调查员卡不可见」：`claim_seat` 给主角席换人时没有同步 `game_sessions.player_character_id`，`active_character_ids` 又同时读取该快捷字段，旧角色被幽灵占用。
+- `claim_seat`/`kick_seat` 在主角席变动后调用 `_reseat_primary` 同步；`active_character_ids` 改为有席位记录时只认席位、无席位记录才回落快捷字段，历史脏数据自动自愈。
+- 已备份并修复当前库中两条 `player_character_id` 与主角席不一致的数据；陈守一已恢复出现在鬼屋大厅候选池。
+- 验证：后端全量 1689 项测试通过、Ruff 通过；前端 tsc、Vite 构建通过。
+
+## 2026-08-15 大厅细节完善
+
+- 房间码按钮内部改为 inline-flex 包裹，房间码与复制 icon 固定同行，不再被全局 `.badge` 的 inline-block 覆盖。
+- 选人舞台新增「快速创建」：点击时由大厅页 POST 空白草稿（固定落本机角色库，避免 StrictMode 下 effect 双跑），再复用 `CharacterEditModal` 编辑；取消时删除草稿，保存后刷新候选池并直接进入右侧预览。
+- 移除 AI 席位行内的「生成 AI 队友」按钮与对应 `genSeat`/`adoptTeammate` 逻辑，AI 队友只通过席位下拉指派已有角色。
+- 验证：前端 289 项测试、tsc、oxlint、Vite 生产构建通过；浏览器验收房间码同行、快速创建弹窗开合、AI 席无生成按钮、8 卡工具栏无横向溢出。
+
+## 2026-08-17 首页新手介绍
+
+- 首页入口卡下方新增 `HomeIntro` 三段介绍：什么是跑团（KP/调查员/骰子三要素）、基本规则（CoC 七版 d100 成功等级表 + HP/SAN + 奖惩骰）、如何游玩本项目（接模型/挑本子/备角色/开局四步，每步挂可点入口）。
+- 成功等级阈值与「技能不到 50 时 96–100 皆大失败」的边界对齐后端 `resolve_skill_check` 判定顺序，表格右列给出技能 60 的实际骰点区间（01 / 02–12 / 13–30 / 31–60 / 61–99 / 100）。
+- 排版按「一屏读完」收敛：三段并排成三栏（900px 以下退回竖排）、容器 4xl→5xl、标题与各段间距整体收一档。1440×850 与 1280×800 均不出滚动条；1024 宽窗口仍超出约 32px。
+- 验证：前端 289 项测试、tsc、oxlint、Vite 生产构建通过；浏览器验收暗色与羊皮纸双主题、720/1024/1280/1440 四档宽度无横向溢出、无控制台错误。

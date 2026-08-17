@@ -2,6 +2,7 @@
 
 from app.ai.context import build_kp_context
 from app.models import Character, EventLog, GameSession, Module
+from app.models.session_navigation import SessionNavigation
 from app.services import hex_map, module_service, session_service
 
 
@@ -441,18 +442,18 @@ class TestSceneHierarchy:
 
         session = GameSession(
             module_id="m", status="active", current_scene_id="road",
-            world_state={"visited_scenes": ["road"]},
+            navigation=SessionNavigation(visited_scenes=["road"]),
         )
         ids = {x["id"] for x in session_service.list_known_locations(module, session, events=mention)}
         assert "hut" not in ids            # 旁白提过，但还没进村 → 仍不可见
 
         session.current_scene_id = "village"
-        session.world_state = {"visited_scenes": ["road", "village"]}
+        session.navigation.visited_scenes = ["road", "village"]
         ids = {x["id"] for x in session_service.list_known_locations(module, session, events=mention)}
         assert "hut" in ids                # 进了村 → 子沙盘解锁
 
         # KP 上帝视角：全都看得见，靠 known 标记区分玩家知不知道
-        session.world_state = {"visited_scenes": ["road"]}
+        session.navigation.visited_scenes = ["road"]
         session.current_scene_id = "road"
         god = {
             x["id"]: x for x in

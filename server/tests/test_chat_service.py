@@ -191,7 +191,7 @@ def test_duplicate_dice_check_deduped(db_factory):
     req1 = [c for c in c1 if c.type == "check_request"]
     req2 = [c for c in c2 if c.type == "check_request"]
     assert len(req1) == 1 and len(req2) == 0  # 第一次弹卡；第二次去重、不再弹
-    pending = (db.get(GameSession, gs.id).world_state or {}).get("pending_checks") or {}
+    pending = (db.get(GameSession, gs.id).turn_state or {}).get("pending_checks") or {}
     assert len(pending) == 1  # 只挂了一个待投检定
 
 
@@ -305,6 +305,34 @@ def test_long_speaker_name_prefix_fully_stripped():
     ))
     assert [n for n, _ in result[2]] == ["加布里埃尔·马卡里奥"]   # 全名归属
     assert "加布里埃" not in result[0]                          # 无半截名残留
+
+
+def test_unnamed_passerby_prefix_gets_own_bubble_not_module_npc():
+    """模组没写的路人开口时，必须归到路人自己名下，绝不能挂到最近一个模组 NPC 气泡上。"""
+    text = (
+        "诺特刚说完，面包房老板娘玛莎笑了笑：“几位要买面包吗？”"
+    )
+    npcs = [{"name": "史蒂芬·诺特"}]
+    result = ["", "", [], [], []]
+    asyncio.run(_collect(
+        chat_service._stream_narration_filtered(_FakeKP(text), [], result, npcs=npcs)
+    ))
+    speakers = [name for name, _ in result[2]]
+    assert speakers == ["老板娘玛莎"]
+    assert "史蒂芬·诺特" not in speakers
+    assert "面包房老板娘玛莎笑了笑：" not in result[0]  # 前缀不重复显示
+
+
+def test_quantified_generic_speaker_strips_quantifier_and_verb():
+    """「一个护工低声说：」应归给「护工」，且旁白不残留「一个」或说话前缀。"""
+    text = "一个护工低声说：“请稍等。”"
+    result = ["", "", [], [], []]
+    asyncio.run(_collect(
+        chat_service._stream_narration_filtered(_FakeKP(text), [], result)
+    ))
+    assert [name for name, _ in result[2]] == ["护工"]
+    assert "一个护工低声说：" not in result[0]
+    assert "一个" not in result[0]
 
 
 def test_last_speaker_released_after_paragraph_break():

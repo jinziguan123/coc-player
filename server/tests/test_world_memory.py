@@ -17,6 +17,8 @@ from app.models.character import Character
 from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
+from app.models.session_ledger import SessionLedger
+from app.models.session_navigation import SessionNavigation
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
 from app.services import chat_service, planned_effects, turn_effects, world_memory
 
@@ -71,16 +73,16 @@ def test_discovered_clue_status():
 
 
 def test_record_scene_event_seen_is_idempotent_and_pure():
-    ws = {"flags": {"x": True}}
-    out = world_memory.record_scene_event_seen(ws, "scene_8", 3, 317, note="进入最里面的小屋被拖拽")
+    seen = {}
+    out = world_memory.record_scene_event_seen(seen, "scene_8", 3, 317, note="进入最里面的小屋被拖拽")
     assert world_memory.scene_event_seen(out, "scene_8", 3)
     assert not world_memory.scene_event_seen(out, "scene_8", 4)
-    assert "scene_events_seen" not in ws            # 入参不被就地修改
-    assert out["flags"] == {"x": True}              # 其余键原样带过
+    assert seen == {}                              # 入参不被就地修改
+    assert out["scene_8:3"]["seq"] == 317
 
     # 重复记只保留首次的 seq（同一桥段不会因为后来又被提到而改写发生时点）
     again = world_memory.record_scene_event_seen(out, "scene_8", 3, 999)
-    assert again["scene_events_seen"]["scene_8:3"]["seq"] == 317
+    assert again["scene_8:3"]["seq"] == 317
 
 
 def test_scene_event_seen_on_empty_state():
@@ -141,11 +143,15 @@ def _mem_module() -> Module:
     )
 
 
-def _mem_session(world_state: dict) -> GameSession:
+def _mem_session(world_state: dict, navigation: dict | None = None, ledger: dict | None = None) -> GameSession:
     s = GameSession(
         module_id="m1", player_character_id="char_a",
         current_scene_id="scene_hall", status="active", world_state=world_state,
     )
+    if navigation:
+        s.navigation = SessionNavigation(**navigation)
+    if ledger:
+        s.ledger = SessionLedger(**ledger)
     return s
 
 
@@ -164,7 +170,6 @@ def _one_event() -> list[EventLog]:
 
 def test_kp_context_contains_clue_ledger_and_npc_memory():
     ws = {
-        "visited_scenes": ["scene_hall"],
         "clue_ledger": {"clue_key": {
             "status": "known", "discovered_by": ["char_a"], "seq": 3, "note": "暗格里找到",
         }},
@@ -175,7 +180,10 @@ def test_kp_context_contains_clue_ledger_and_npc_memory():
             "interactions": [{"seq": 2, "summary": "被亨利用心理学看穿慌张"}],
         }},
     }
-    messages = build_kp_context(_mem_session(ws), _mem_module(), _mem_char(), _one_event())
+    messages = build_kp_context(
+        _mem_session(ws, navigation={"visited_scenes": ["scene_hall"]}),
+        _mem_module(), _mem_char(), _one_event(),
+    )
     system = messages[0]["content"]
     assert "线索台账" in system
     assert "书房钥匙" in system and "完全掌握" in system
@@ -192,8 +200,10 @@ def test_kp_context_empty_ledger_still_lists_visible_clues():
     『闇暗山』那局跑了 6 个场景、台账全程为空（规划器一次都没填 clue_id），
     于是「不要重复安排发现桥段」这句硬指示从头到尾没进过上下文，KP 对着线索明文重演。
     """
-    ws = {"visited_scenes": ["scene_hall"]}
-    messages = build_kp_context(_mem_session(ws), _mem_module(), _mem_char(), _one_event())
+    messages = build_kp_context(
+        _mem_session({}, navigation={"visited_scenes": ["scene_hall"]}),
+        _mem_module(), _mem_char(), _one_event(),
+    )
     system = messages[0]["content"]
     assert "线索台账" in system
     assert "书房钥匙" in system and "尚未给出" in system
@@ -213,8 +223,10 @@ def test_kp_context_ledger_never_lists_unreached_clues():
         {"id": "clue_key", "name": "书房钥匙", "location": "scene_hall"},
         {"id": "clue_far", "name": "地窖账本", "location": "scene_cellar"},
     ]
-    ws = {"visited_scenes": ["scene_hall"]}
-    system = build_kp_context(_mem_session(ws), module, _mem_char(), _one_event())[0]["content"]
+    system = build_kp_context(
+        _mem_session({}, navigation={"visited_scenes": ["scene_hall"]}),
+        module, _mem_char(), _one_event(),
+    )[0]["content"]
     assert "书房钥匙" in system
     assert "地窖账本" not in system      # 玩家还没去过地窖
 
@@ -226,11 +238,14 @@ def test_kp_context_injects_scene_events_progress():
         {"trigger": "阅读村规", "kind": "san_check"},
         {"trigger": "进入最里面的小屋被拖拽", "kind": "dice_check", "skill": "STR"},
     ]}]
-    ws = {
-        "visited_scenes": ["scene_hall"],
-        "scene_events_seen": {"scene_hall:1": {"seq": 317, "note": ""}},
-    }
-    system = build_kp_context(_mem_session(ws), module, _mem_char(), _one_event())[0]["content"]
+    system = build_kp_context(
+        _mem_session(
+            {},
+            navigation={"visited_scenes": ["scene_hall"]},
+            ledger={"scene_events_seen": {"scene_hall:1": {"seq": 317, "note": ""}}},
+        ),
+        module, _mem_char(), _one_event(),
+    )[0]["content"]
     assert "本场景机制点进度" in system
     assert "- 阅读村规：尚未发生" in system
     assert "- 进入最里面的小屋被拖拽：已发生" in system
@@ -258,11 +273,11 @@ def test_npc_context_without_memory_unchanged():
 
 def test_turn_planner_marks_ledger_clues_discovered():
     ws = {
-        "visited_scenes": ["scene_hall"],
         "clue_ledger": {"clue_key": {"status": "known", "discovered_by": ["char_a"]}},
     }
     messages = turn_planner.build_turn_plan_messages(
-        _mem_session(ws), _mem_module(), _mem_char(), _one_event(),
+        _mem_session(ws, navigation={"visited_scenes": ["scene_hall"]}),
+        _mem_module(), _mem_char(), _one_event(),
     )
     user = messages[1]["content"]
     assert "不得再进入 candidate_clue_ids" in user
@@ -274,8 +289,8 @@ def test_turn_planner_marks_ledger_clues_discovered():
 
 def test_turn_planner_empty_ledger_backward_compatible():
     messages = turn_planner.build_turn_plan_messages(
-        _mem_session({"visited_scenes": ["scene_hall"]}), _mem_module(), _mem_char(),
-        _one_event(),
+        _mem_session({}, navigation={"visited_scenes": ["scene_hall"]}),
+        _mem_module(), _mem_char(), _one_event(),
     )
     payload = json.loads(messages[1]["content"][messages[1]["content"].index("{"):])
     assert payload["clue_ledger"] == {}
@@ -498,6 +513,12 @@ _VILLAGE = {
 }
 
 
+def _ledger_seen(session) -> dict:
+    """读 session_ledger.scene_events_seen（拆表后机制点台账本体）。"""
+    led = session.ledger
+    return dict(led.scene_events_seen if led else {})
+
+
 def _seed_village(db):
     """『闇暗山』村庄遗址：石板与村规都在本场景，绘本在没去过的树洞。"""
     module = Module(
@@ -574,8 +595,8 @@ def test_narrated_progress_records_scene_event(db_factory):
     planned_effects.record_narrated_progress(
         db, session.id, session, module, player, [], pre_gen_seq=0,
     )
-    assert world_memory.scene_event_seen(session.world_state, "scene_8", 1)
-    assert not world_memory.scene_event_seen(session.world_state, "scene_8", 0)
+    assert world_memory.scene_event_seen(_ledger_seen(session), "scene_8", 1)
+    assert not world_memory.scene_event_seen(_ledger_seen(session), "scene_8", 0)
 
 
 def test_narrated_progress_scene_event_matching_is_literal(db_factory):
@@ -591,7 +612,7 @@ def test_narrated_progress_scene_event_matching_is_literal(db_factory):
     planned_effects.record_narrated_progress(
         db, session.id, session, module, player, [], pre_gen_seq=0,
     )
-    assert not world_memory.scene_event_seen(session.world_state, "scene_8", 0)
+    assert not world_memory.scene_event_seen(_ledger_seen(session), "scene_8", 0)
 
 
 def test_narrated_progress_does_not_downgrade_known(db_factory):
@@ -671,8 +692,8 @@ def test_mark_seen_records_scene_event_by_trigger(db_factory):
     db = db_factory()
     session, module, player = _seed_village(db)
     _mark(db, session, module, player, event="进入最里面的小屋被拖拽")
-    assert world_memory.scene_event_seen(session.world_state, "scene_8", 0)
-    assert not world_memory.scene_event_seen(session.world_state, "scene_8", 1)
+    assert world_memory.scene_event_seen(_ledger_seen(session), "scene_8", 0)
+    assert not world_memory.scene_event_seen(_ledger_seen(session), "scene_8", 1)
 
 
 def test_mark_seen_scene_event_loose_match(db_factory):
@@ -680,14 +701,14 @@ def test_mark_seen_scene_event_loose_match(db_factory):
     db = db_factory()
     session, module, player = _seed_village(db)
     _mark(db, session, module, player, event="阅读村规时")
-    assert world_memory.scene_event_seen(session.world_state, "scene_8", 1)
+    assert world_memory.scene_event_seen(_ledger_seen(session), "scene_8", 1)
 
 
 def test_mark_seen_unmatched_event_is_skipped(db_factory):
     db = db_factory()
     session, module, player = _seed_village(db)
     note = _mark(db, session, module, player, event="在月亮上跳舞")
-    assert not (session.world_state or {}).get("scene_events_seen")
+    assert not _ledger_seen(session)
     assert "对不上的机制点" in note
 
 
@@ -696,7 +717,7 @@ def test_mark_seen_both_in_one_call(db_factory):
     session, module, player = _seed_village(db)
     _mark(db, session, module, player, clue="clue_3", event="阅读村规")
     assert session.world_state["clue_ledger"]["clue_3"]["status"] == "known"
-    assert world_memory.scene_event_seen(session.world_state, "scene_8", 1)
+    assert world_memory.scene_event_seen(_ledger_seen(session), "scene_8", 1)
 
 
 def test_mark_seen_requires_a_parameter(db_factory):

@@ -219,6 +219,43 @@ async def test_validate_fails_open_on_truncated_json():
     assert result is None  # 截断无法解析，按放行处理，不阻塞跑团
 
 
+def test_location_context_forces_validation_and_enters_prompt():
+    """带位置硬约束的轮次必须终检，并把当前位置约束传给裁判。"""
+    import asyncio
+
+    plan = TurnPlan(safety=SafetyPolicy(do_not_reveal=[]))
+    captured: dict = {}
+
+    class _Cap:
+        async def complete(self, messages, **kwargs):
+            captured["messages"] = messages
+            return '{"violated": false}'
+
+    result = None
+    location_context = "玩家仍在门厅，禁止提前叙述图书馆。"
+
+    async def run():
+        nonlocal result
+        result = await turn_validator.validate_turn_narration(
+            _Cap(), plan, "门把手上还留着海风的盐味。", location_context=location_context,
+        )
+
+    asyncio.run(run())
+    joined = "\n".join(message["content"] for message in captured["messages"])
+    assert "系统确定的当前位置硬约束" in joined
+    assert location_context in joined
+    assert "位置越界" in joined
+    assert result is not None
+
+
+def test_location_context_is_suspicious_on_its_own():
+    """位置约束出现时，即使没有玩家输入/秘密，也必须触发 LLM 终检。"""
+    plan = TurnPlan(safety=SafetyPolicy(do_not_reveal=[]))
+    assert turn_validator._looks_suspicious(
+        "普通旁白", plan, turn_inputs="", location_context="玩家仍在门厅",
+    ) is True
+
+
 # ── 谁算「玩家/队友」 ───────────────────────────────────────────────────
 
 

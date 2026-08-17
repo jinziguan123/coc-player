@@ -11,24 +11,45 @@
 - `mutate` —— 读-改-写：对**深拷贝**调 fn(ws) 就地改，再整体重赋值 —— 嵌套改动一定被 ORM 视为变化。
 - `get`    —— 便捷只读。
 
-`SCHEMA_VERSION` + `migrate`：写入时盖当前版本号，为将来的字段迁移留统一入口（当前 v1 无迁移）。
+`SCHEMA_VERSION` + `migrate`：写入时盖当前版本号。v1 → v2 的「剧情记忆拆表」已由
+alembic 迁移完成（combat/chase/usage/rag/recaps/turn_confirm 移出），migrate 只需盖版本号；
+将来若剧情记忆自身字段再变，在这里按 from-version 写迁移。
 """
 
-import copy
+from __future__ import annotations
 
+import copy
+import logging
+
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.models.session import GameSession
+from app.schemas.world_state import WorldStateSchema
 
-SCHEMA_VERSION = 1
+logger = logging.getLogger(__name__)
+
+SCHEMA_VERSION = 2
 
 
 def migrate(ws: dict) -> dict:
-    """把旧版 world_state 原地升到 SCHEMA_VERSION（当前 v1 仅盖版本号；将来在此按 from-version 迁移）。"""
+    """把旧版 world_state 原地升到 SCHEMA_VERSION（v1 → v2 的拆表已由 alembic 完成，这里仅盖版本号）。"""
     # v = ws.get("schema_version", 0)
-    # if v < 2: ...  # 将来的迁移写在这里
+    # if v < 2: ...  # 将来的剧情记忆字段迁移写在这里
     ws["schema_version"] = SCHEMA_VERSION
     return ws
+
+
+def validate(ws: dict) -> WorldStateSchema | None:
+    """校验 world_state 是否符合剧情记忆 schema（fail-open：非法只告警、不阻断写入）。
+
+    返回校验后的模型（可读）；失败返回 None。剧情容器是柔性的，写坏一个字段不该让整局崩掉。
+    """
+    try:
+        return WorldStateSchema.model_validate(ws)
+    except ValidationError as exc:
+        logger.warning("world_state 剧情记忆校验失败（不阻断写入）：%s", exc)
+        return None
 
 
 def read(session: GameSession) -> dict:
@@ -52,6 +73,7 @@ def set_key(db: Session, session: GameSession, key: str, value) -> None:
     else:
         ws[key] = value
     ws["schema_version"] = SCHEMA_VERSION
+    validate(ws)
     session.world_state = ws
     db.commit()
 
@@ -63,5 +85,6 @@ def mutate(db: Session, session: GameSession, fn) -> None:
     ws = copy.deepcopy(dict(session.world_state or {}))
     fn(ws)
     ws["schema_version"] = SCHEMA_VERSION
+    validate(ws)
     session.world_state = ws
     db.commit()

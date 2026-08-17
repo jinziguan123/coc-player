@@ -13,6 +13,7 @@ from app.ai import turn_planner
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.models.session_ledger import SessionLedger
 from app.services import (
     dice_runtime,
     inventory_service,
@@ -35,10 +36,13 @@ _exec_scene_change = turn_effects._exec_scene_change
 
 _META_CLUE_LOCATION_WORDS = ("位置", "下落", "提示", "传闻", "文字", "内容", "线索")
 
-# 这些词只表示讨论、建议或假设，不能作为「已经移动」的证据。
+# 这些词只表示讨论、建议、假设或未来的可能，不能作为「已经移动」的证据。
+# 「我们去图书馆看看吧」「之后我可能会去B」都落在这里：句中有「去」也只是意图。
 _NON_COMMITTAL_MOVE_MARKERS = (
     "要不要", "是否", "能不能", "可以吗", "去不去", "要去吗", "建议", "提议",
     "考虑", "打算", "想去", "想进入", "希望", "准备", "计划", "应该", "不如", "再决定", "如果",
+    "可能", "也许", "或许", "之后", "以后", "回头", "稍后", "待会", "待会儿", "过会儿",
+    "等会", "等会儿", "晚点", "晚些", "过一阵", "看看再说", "再说", "看看吧", "吧",
 )
 _MOVE_VERBS = (
     "进入", "走进", "前往", "去往", "前去", "赶往", "抵达", "到达", "来到",
@@ -546,8 +550,10 @@ def record_narrated_progress(
         seq = session_service.get_next_sequence_num(db, session_id) - 1
 
         ws = dict(game_session.world_state or {})
+        led = game_session.ledger
+        seen = dict(led.scene_events_seen if led else {})
         before = json.dumps(
-            [ws.get("scene_events_seen"), ws.get("clue_ledger")], sort_keys=True,
+            [seen, ws.get("clue_ledger")], sort_keys=True,
         )
 
         # 场景机制点：模组写明的一次性桥段，叙事对上 trigger 就算演过了。
@@ -560,11 +566,11 @@ def record_narrated_progress(
                 if not isinstance(event, dict):
                     continue
                 trigger = str(event.get("trigger") or "").strip()
-                if not trigger or world_memory.scene_event_seen(ws, sid, index):
+                if not trigger or world_memory.scene_event_seen(seen, sid, index):
                     continue
                 if _scene_event_narrated(trigger, narration):
-                    ws = world_memory.record_scene_event_seen(
-                        ws, sid, index, seq, note=trigger,
+                    seen = world_memory.record_scene_event_seen(
+                        seen, sid, index, seq, note=trigger,
                     )
 
         # 线索：只认玩家此刻所在场景（或无绑定场景）的，别把别处的线索凭一个同名词记掉。
@@ -581,9 +587,13 @@ def record_narrated_progress(
                 )
 
         after = json.dumps(
-            [ws.get("scene_events_seen"), ws.get("clue_ledger")], sort_keys=True,
+            [seen, ws.get("clue_ledger")], sort_keys=True,
         )
         if before != after:
+            if led is None:
+                led = SessionLedger(session_id=game_session.id)
+                db.add(led)
+            led.scene_events_seen = seen
             game_session.world_state = ws
             db.commit()
     except Exception:
@@ -802,7 +812,7 @@ async def _ensure_planned_sanity(
 
     模型仍负责识别本轮是否目睹恐怖及其强度；一旦结构化计划肯定裁定，SAN 检定就由后端确定性
     发出（真人挂待投请求，AI 角色自动结算）。若 KP 本轮已自行发起 SAN（任意恐怖源），本守卫幂等跳过；
-    同一角色对同一恐怖源的去重仍由 _exec_san_check（world_state.san_checked）保证。
+    同一角色对同一恐怖源的去重仍由 _exec_san_check（session_ledger.san_checked）保证。
     """
     asked = plan is not None and plan.sanity.trigger
     plan = plan or turn_planner.TurnPlan()
@@ -889,10 +899,10 @@ async def _ensure_planned_items(
 ) -> AsyncIterator[str]:
     """规划器裁定的物品增减确定性落库（获得入库、失去/消耗移除），补偿 KP 不记账——库存是权威状态。
 
-    幂等：按「本轮玩家行动锚序号 + 获/失 + 名字 + 角色」去重（存 world_state.item_delta_keys），
+    幂等：按「本轮玩家行动锚序号 + 获/失 + 名字 + 角色」去重（存 turn_state.item_delta_keys），
     重新生成不会重复增减。物品效果仍由 KP 叙述——这里只保证库存数目可靠。
 
-    **未决检定不预发收益**：本轮 requires_check=true 时，获得一律转入 world_state.pending_item_gains
+    **未决检定不预发收益**：本轮 requires_check=true 时，获得一律转入 turn_state.pending_item_gains
     暂存，等检定结算出来再由 `settle_pending_item_gains` 决定给还是不给。否则会出现「东西已经进包、
     才被要求投扒窃/撬锁」——掷输了那件东西算什么？失去/消耗不走这条：那多是尝试本身的代价
     （划掉最后一根火柴、绳子被割断），无论成败都已然发生。
@@ -919,7 +929,7 @@ async def _ensure_planned_items(
         (e.sequence_num or 0 for e in turn if e.event_type in ("action", "dialogue")),
         default=0,
     )
-    ws = dict(game_session.world_state or {})
+    ws = dict(game_session.turn_state or {})
     done = set(ws.get("item_delta_keys") or [])
     changed = False
 
@@ -981,17 +991,17 @@ async def _ensure_planned_items(
 
     if changed:
         ws["item_delta_keys"] = list(done)
-        game_session.world_state = ws
+        game_session.turn_state = ws
         db.commit()
 
 
 def _discard_pending_item_gains(db: Session, game_session: GameSession) -> bool:
     """作废暂存的待检定收益（检定失败 / 玩家干脆没投就又行动了）。返回是否真的清掉了东西。"""
-    ws = dict(game_session.world_state or {})
+    ws = dict(game_session.turn_state or {})
     if not ws.get("pending_item_gains"):
         return False
     ws["pending_item_gains"] = []
-    game_session.world_state = ws
+    game_session.turn_state = ws
     db.commit()
     return True
 
@@ -1004,7 +1014,7 @@ def settle_pending_item_gains(
     这是「先检定、后发货」的另一半——`_ensure_planned_items` 在有未决检定时只暂存不入库，
     真正决定给不给的是这里的骰子结果。玩家扒窃掷输了，那块表就不该在他包里。
     """
-    ws = dict(game_session.world_state or {})
+    ws = dict(game_session.turn_state or {})
     pending = list(ws.get("pending_item_gains") or [])
     if not pending:
         return []
@@ -1035,7 +1045,7 @@ def settle_pending_item_gains(
         ws["item_delta_keys"] = list(done)
     else:
         chunks.append(_make_chunk("inventory_update"))
-    game_session.world_state = ws
+    game_session.turn_state = ws
     db.commit()
     return chunks
 
@@ -1279,7 +1289,7 @@ async def _ensure_scene_entry_checks(
                     session_id, scene_id, kv["skill"],
                 )
                 continue
-            # 先记账再吐 chunk：_exec_dice_check 内部已改过 world_state（pending_checks），
+            # 先记账再吐 chunk：_exec_dice_check 内部已改过 turn_state（pending_checks），
             # 必须重新取一次再合并写回，否则会用旧快照把待投检定覆盖掉。
             db.refresh(game_session)
             ws = dict(game_session.world_state or {})
@@ -1288,8 +1298,12 @@ async def _ensure_scene_entry_checks(
             ws[_ENTRY_CHECK_STATE_KEY] = sorted(recorded)
             # 同一件事记两本账：上面那本是后端私有的逐角色幂等键（拦重复发骰），
             # 这本进 KP 上下文（拦 KP 照着场景 events 明文把同一桥段重演一遍）。
-            ws = world_memory.record_scene_event_seen(
-                ws, scene_id, index,
+            led = db.get(SessionLedger, game_session.id)
+            if led is None:
+                led = SessionLedger(session_id=game_session.id)
+                db.add(led)
+            led.scene_events_seen = world_memory.record_scene_event_seen(
+                led.scene_events_seen, scene_id, index,
                 session_service.get_next_sequence_num(db, session_id) - 1,
                 note=kv["source"],
             )

@@ -1,27 +1,68 @@
 from __future__ import annotations
 
-import re
 import secrets
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.character import Character
 from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
+from app.models.session_navigation import SessionNavigation
 from app.models.session_participant import SessionParticipant
-from app.services import world_memory
-
-# 「仅 KP 可见」的 visibility 哨兵：带此哨兵的事件（如幕后推演）只进 KP 上下文，
-# 对一切玩家侧出口（历史/重连分页、搜索、AI 队友上下文、NPC 上下文、广播）全部不可见。
-KP_ONLY_SENTINEL = "kp"
 
 
-def is_kp_only_event(ev: EventLog) -> bool:
-    """该事件是否「仅 KP 可见」（visibility 含 kp 哨兵）——玩家侧查询一律过滤。"""
-    return KP_ONLY_SENTINEL in (ev.visibility or [])
+# ── 拆出的职责簇：本模块保留同名 re-export，旧导入路径继续可用 ──────────────
+from app.services.event_store import (  # noqa: F401
+    KP_ONLY_SENTINEL,
+    SEARCHABLE_EVENT_TYPES,
+    SNIPPET_CHARS,
+    SNIPPET_LEAD,
+    add_event,
+    delete_pending_event,
+    get_latest_events,
+    get_next_sequence_num,
+    get_session_events,
+    is_kp_only_event,
+    search_events,
+    search_snippet,
+    set_event_group,
+    update_pending_event,
+)
+from app.services.navigation_service import (  # noqa: F401
+    STAY_META_KEY,
+    derive_scene_keywords,
+    find_scene_path,
+    get_char_location,
+    get_party_locations,
+    get_visited_scenes,
+    known_scene_ids,
+    list_known_locations,
+    list_visible_map_nodes,
+    passable_scene_ids,
+    scene_neighbors,
+    scene_unlock_keywords,
+    set_char_location,
+    stayed_char_ids,
+    travel_blocker,
+    update_scene,
+    visited_scene_ids,
+)
+from app.services.turn_state_service import (  # noqa: F401
+    add_pending_check,
+    append_pending_batch_result,
+    append_pending_group_check_result,
+    commit_turn,
+    find_pending_check,
+    find_pending_san_check,
+    get_pending_check,
+    human_character_ids,
+    pop_pending_check,
+    rollback_last_kp_output,
+    set_turn_confirm,
+    turn_confirm_state,
+)
 
 
 # 房间码字母表：去掉 I/O/0/1（手抄易混）。8 位 → 32^8 ≈ 1.1e12，约 40 bit。
@@ -56,15 +97,22 @@ def active_character_ids(
     if exclude_session_id:
         q = q.filter(GameSession.id != exclude_session_id)
     sessions = q.all()
-    ids = {s.player_character_id for s in sessions if s.player_character_id}
     session_ids = [s.id for s in sessions]
-    if session_ids:
-        parts = (
-            db.query(SessionParticipant)
-            .filter(SessionParticipant.session_id.in_(session_ids))
-            .all()
-        )
-        ids |= {p.character_id for p in parts}
+    parts = (
+        db.query(SessionParticipant)
+        .filter(SessionParticipant.session_id.in_(session_ids))
+        .all()
+    ) if session_ids else []
+    ids = {p.character_id for p in parts if p.character_id}
+    # ``player_character_id`` 只作为**没有席位记录**的旧会话回落。只要存在
+    # participant 行，就以席位为准——主角席换人后若遗留旧值，会在这里把
+    # 已经没人使用的旧角色继续算作「占用中」，表现为角色管理可见、大厅候选不可见。
+    sessions_with_parts = {p.session_id for p in parts}
+    ids |= {
+        s.player_character_id
+        for s in sessions
+        if s.id not in sessions_with_parts and s.player_character_id
+    }
     return ids
 
 
@@ -206,7 +254,6 @@ def create_session(
         identity_version=identity_version,
         room_code=_gen_room_code(db),
         current_scene_id=first_scene_id,
-        world_state={"visited_scenes": [first_scene_id] if first_scene_id else []},
     )
     for order, seat in enumerate(seats):
         claimed = bool(seat["character_id"])
@@ -247,6 +294,11 @@ def create_session(
             )
         )
     db.add(game_session)
+    if first_scene_id:
+        # 初始 visited_scenes 落在导航表：先 flush 让 game_session.id 落库
+        # （navigation 是共享主键，session_id 即主键），再补一行。
+        db.flush()
+        db.add(SessionNavigation(session_id=game_session.id, visited_scenes=[first_scene_id]))
     # 创建者的主角绑定到其 token
     if creator_token and primary_id and not (kp_mode == "human" and not legacy_human_kp):
         char = db.get(Character, primary_id)
@@ -417,6 +469,11 @@ def claim_seat(
             raise ValueError("同一个 token 在本房间只能占用一个席位") from exc
         raise
     db.refresh(session)
+    if seat.is_primary:
+        # 主角席换了角色，player_character_id 必须跟着换——它既用于旧会话回落，
+        # 也参与 active_character_ids 的占用计算。漏掉这一步会让旧角色被
+        # 「幽灵占用」：席位里明明没人用了，候选池里却永远看不到它。
+        _reseat_primary(db, session)
     return session
 
 
@@ -775,6 +832,10 @@ def kick_seat(
     seat.ready = False
     db.commit()
     db.refresh(session)
+    if seat.is_primary:
+        # 与 claim_seat 同源：主角席被清空/换人后，快捷字段必须同步，
+        # 否则被移出的角色会继续被 active_character_ids 当作「占用中」。
+        _reseat_primary(db, session)
     return session, name
 
 
@@ -959,204 +1020,6 @@ def is_human_controlled(db: Session, session_id: str, char_id: str | None) -> bo
     return bool(sess and sess.player_character_id == char_id)
 
 
-def add_pending_check(db: Session, session_id: str, check: dict) -> None:
-    """登记一个「待玩家投骰」的检定（world_state.pending_checks，按 check_id 存）。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return
-    ws = dict(session.world_state or {})
-    pending = dict(ws.get("pending_checks") or {})
-    pending[check["id"]] = check
-    ws["pending_checks"] = pending
-    session.world_state = ws
-    db.commit()
-
-
-def get_pending_check(
-    db: Session,
-    session_id: str,
-    check_id: str,
-) -> dict | None:
-    """按 id 读取待投检定，不移除状态。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return None
-    pending = (session.world_state or {}).get("pending_checks") or {}
-    check = pending.get(check_id)
-    return dict(check) if isinstance(check, dict) else None
-
-
-def find_pending_check(
-    db: Session, session_id: str, char_id: str | None, skill: str, difficulty: str,
-) -> dict | None:
-    """查是否已存在等价的待投检定（同 角色+技能+难度）。用于去重——分头行动下同一 plan 注入
-    每个分组，多组会各自吐出同一条 [DICE_CHECK]，合并处理会重复挂 pending / 弹重复投骰卡。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return None
-    pending = (session.world_state or {}).get("pending_checks") or {}
-    for c in pending.values():
-        if (
-            c.get("char_id") == char_id
-            and c.get("skill") == skill
-            and (c.get("difficulty") or "normal") == (difficulty or "normal")
-        ):
-            return c
-    return None
-
-
-def find_pending_san_check(
-    db: Session, session_id: str, char_id: str, source: str,
-) -> dict | None:
-    """查找同一角色、同一恐怖源尚未完成的 SAN 检定。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return None
-    pending = (session.world_state or {}).get("pending_checks") or {}
-    for check in pending.values():
-        if (
-            isinstance(check, dict)
-            and check.get("kind") == "san_check"
-            and check.get("char_id") == char_id
-            and (check.get("source") or "") == (source or "")
-        ):
-            return dict(check)
-    return None
-
-
-def append_pending_batch_result(
-    db: Session, session_id: str, batch_id: str, description: str,
-) -> int:
-    """把已完成结果追加到同批剩余待投项，返回仍待投的人数。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return 0
-    ws = dict(session.world_state or {})
-    pending = dict(ws.get("pending_checks") or {})
-    remaining = 0
-    for check_id, raw in list(pending.items()):
-        if not isinstance(raw, dict) or raw.get("san_batch_id") != batch_id:
-            continue
-        check = dict(raw)
-        results = list(check.get("san_results") or [])
-        results.append(description)
-        check["san_results"] = results
-        pending[check_id] = check
-        remaining += 1
-    if remaining:
-        ws["pending_checks"] = pending
-        session.world_state = ws
-        db.add(session)
-        db.commit()
-    return remaining
-
-
-def append_pending_group_check_result(
-    db: Session,
-    session_id: str,
-    batch_id: str,
-    description: str,
-    *,
-    succeeded: bool,
-    fumbled: bool,
-) -> int:
-    """把一名真人的公开群检结果追加到同批剩余待投项，并合并批次结果标志。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return 0
-    ws = dict(session.world_state or {})
-    pending = dict(ws.get("pending_checks") or {})
-    remaining = 0
-    for check_id, raw in list(pending.items()):
-        if not isinstance(raw, dict) or raw.get("check_batch_id") != batch_id:
-            continue
-        check = dict(raw)
-        results = list(check.get("check_results") or [])
-        results.append(description)
-        check["check_results"] = results
-        check["check_any_success"] = bool(check.get("check_any_success")) or succeeded
-        check["check_any_fumble"] = bool(check.get("check_any_fumble")) or fumbled
-        pending[check_id] = check
-        remaining += 1
-    if remaining:
-        ws["pending_checks"] = pending
-        session.world_state = ws
-        db.add(session)
-        db.commit()
-    return remaining
-
-
-def pop_pending_check(db: Session, session_id: str, check_id: str) -> dict | None:
-    """取出并移除一个待定检定；不存在返回 None。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return None
-    ws = dict(session.world_state or {})
-    pending = dict(ws.get("pending_checks") or {})
-    check = pending.pop(check_id, None)
-    if check is None:
-        return None
-    ws["pending_checks"] = pending
-    session.world_state = ws
-    db.commit()
-    return check
-
-
-def rollback_last_kp_output(db: Session, session_id: str) -> int:
-    """回滚「最新一次 KP 会话」的叙事产物，供玩家「重新生成」用。
-
-    删除范围 = 最后一条『玩家方（真人玩家 + AI 队友）行动/发言』之后的：
-      - KP 旁白（narration）
-      - NPC 台词（dialogue 且行动者不属于玩家方）
-      - 待玩家投骰的检定请求（system + metadata.check_request），并清掉对应 pending_checks
-    刻意**保留**：玩家/队友的行动与发言、已投出的骰子结果（dice，不重掷）、HP/场景等其他 system。
-
-    这样「重新生成」= 拿本轮玩家与队友的既有输入、以及已定的骰子，重新生成 KP 叙事，
-    而不会重跑队友回合、也不会重掷已定的检定。返回删除的事件条数。
-    """
-    session = db.get(GameSession, session_id)
-    if not session:
-        return 0
-    party_ids = {
-        p.character_id
-        for p in db.query(SessionParticipant)
-        .filter(SessionParticipant.session_id == session_id)
-        .all()
-    }
-    if session.player_character_id:
-        party_ids.add(session.player_character_id)
-
-    events = get_session_events(db, session_id, limit=0)
-    last_input = -1
-    for i, ev in enumerate(events):
-        if ev.event_type in ("action", "dialogue") and ev.actor_id in party_ids:
-            last_input = i
-
-    removed = 0
-    removed_check_ids: list[str] = []
-    for ev in events[last_input + 1:]:
-        meta = ev.metadata_ or {}
-        is_narration = ev.event_type == "narration"
-        is_npc_dialogue = ev.event_type == "dialogue" and ev.actor_id not in party_ids
-        is_check_request = ev.event_type == "system" and meta.get("check_request")
-        if not (is_narration or is_npc_dialogue or is_check_request):
-            continue
-        if is_check_request and meta.get("id"):
-            removed_check_ids.append(meta["id"])
-        db.delete(ev)
-        removed += 1
-
-    if removed_check_ids:
-        ws = dict(session.world_state or {})
-        pending = dict(ws.get("pending_checks") or {})
-        for cid in removed_check_ids:
-            pending.pop(cid, None)
-        ws["pending_checks"] = pending
-        session.world_state = ws
-
-    if removed:
-        db.commit()
-    return removed
 
 
 def get_ai_teammates(db: Session, session_id: str) -> list[Character]:
@@ -1267,287 +1130,10 @@ def update_session_style(
     return session
 
 
-def get_session_events(
-    db: Session, session_id: str, limit: int = 0, offset: int = 0
-) -> list[EventLog]:
-    """按 sequence_num 升序返回会话事件；默认 limit=0 即全量。
-
-    默认必须是「全量」而非截断：本函数只服务于生成/上下文构建路径，它们要的是完整对话史
-    （由 build_kp_context 的 token 预算 + 滚动摘要游标负责裁剪成实际喂给 LLM 的窗口）。
-    早先默认 limit=100 会因升序取到「最早的 100 条」——会话过百条后 KP 上下文里全是旧事件、
-    看不到最新玩家输入，导致跑团错乱。前端历史/重连分页走的是另一个 get_latest_events
-    （带 before_seq），不受此默认影响。
-    """
-    q = (
-        db.query(EventLog)
-        .filter(EventLog.session_id == session_id)
-        .order_by(EventLog.sequence_num.asc())
-        .offset(offset)
-    )
-    if limit > 0:
-        q = q.limit(limit)
-    return q.all()
 
 
-def get_latest_events(
-    db: Session, session_id: str, limit: int = 50, before_seq: int | None = None,
-) -> tuple[list[EventLog], bool]:
-    """前端历史/重连分页用的最新事件页（升序返回）。
-
-    「仅 KP 可见」事件（visibility 含 kp 哨兵，如幕后推演）在此过滤——本端点面向
-    所有玩家，幕后事件永远不下发前端。过滤在取页之后做（幕后事件稀疏），某页可能
-    略少于 limit，但 has_more/before_seq 分页语义不受影响。
-    """
-    q = db.query(EventLog).filter(EventLog.session_id == session_id)
-    if before_seq is not None:
-        q = q.filter(EventLog.sequence_num < before_seq)
-    q = q.order_by(EventLog.sequence_num.desc())
-    rows = q.limit(limit + 1).all()
-    has_more = len(rows) > limit
-    results = [e for e in rows[:limit] if not is_kp_only_event(e)]
-    results.reverse()
-    return results, has_more
 
 
-#: 参与检索的事件类型（系统提示、幕后推演等噪音不进）。
-SEARCHABLE_EVENT_TYPES = ("narration", "dialogue", "action", "dice", "ooc")
-
-#: 检索结果片段的长度上限，以及关键词左侧留多少上文。
-SNIPPET_CHARS = 160
-SNIPPET_LEAD = 40
-
-
-def search_snippet(content: str, query: str, width: int = SNIPPET_CHARS) -> str:
-    """截一段**以命中处为中心**的片段，两端截断处补省略号。
-
-    原先是无脑取正文前 140 字。一段旁白动辄两三百字，关键词落在后半截时切下来的
-    片段里根本看不到它——玩家看到的就是「这条明明不含关键词，怎么也被搜出来了」。
-    匹配是在全文上做的，展示也得对得上。
-    """
-    text = (content or "").strip()
-    q = (query or "").strip()
-    if len(text) <= width:
-        return text
-    idx = text.lower().find(q.lower()) if q else -1
-    if idx < 0:                                  # 查不到（大小写/空白差异）→ 退回取开头
-        return text[:width].rstrip() + "…"
-    start = max(0, idx - SNIPPET_LEAD)
-    end = min(len(text), start + width)
-    start = max(0, min(start, end - width))      # 命中在结尾附近时把窗口往左推满
-    return ("…" if start > 0 else "") + text[start:end].strip() + ("…" if end < len(text) else "")
-
-
-def search_events(
-    db: Session, session_id: str, query: str, limit: int = 20,
-    offset: int = 0, order: str = "desc",
-) -> tuple[list[EventLog], int]:
-    """在本局历史里模糊检索（content LIKE），返回 (本页事件, 命中总数)。
-
-    ``order``：``desc`` 由新到旧（默认，最近发生的先看），``asc`` 由旧到新。
-    命中总数供前端画分页——没有它，用户不知道自己在多大的结果集里翻。
-    """
-    q = (query or "").strip()
-    if not q:
-        return [], 0
-    like = f"%{q}%"
-    base = db.query(EventLog).filter(
-        EventLog.session_id == session_id,
-        EventLog.content.like(like),
-        EventLog.event_type.in_(SEARCHABLE_EVENT_TYPES),
-    )
-    total = base.count()
-    col = EventLog.sequence_num
-    rows = (
-        base.order_by(col.asc() if order == "asc" else col.desc())
-        .offset(max(0, offset))
-        .limit(max(1, limit))
-        .all()
-    )
-    # 双保险：幕后事件（event_type=system）本就被类型过滤挡住，这里再按 kp 哨兵
-    # 显式过滤一次，防未来搜索范围扩大后泄露「仅 KP 可见」内容。
-    return [e for e in rows if not is_kp_only_event(e)], total
-
-
-def human_character_ids(db: Session, session_id: str) -> set[str]:
-    """本会话所有真人席位的角色 id（回合确认制里需要逐个确认推进的主体）。"""
-    return {
-        p.character_id
-        for p in get_participants(db, session_id)
-        if p.role == "human" and p.character_id
-    }
-
-
-def set_turn_confirm(db: Session, session_id: str, char_id: str, confirmed: bool) -> None:
-    """记录/撤销某真人角色对『本回合推进』的确认（存 world_state.turn_confirm）。"""
-    session = db.get(GameSession, session_id)
-    if not session or not char_id:
-        return
-    ws = dict(session.world_state or {})
-    tc = dict(ws.get("turn_confirm") or {})
-    if confirmed:
-        tc[char_id] = True
-    else:
-        tc.pop(char_id, None)
-    ws["turn_confirm"] = tc
-    session.world_state = ws
-    db.commit()
-
-
-def turn_confirm_state(
-    db: Session, session_id: str, online_tokens: set[str] | None = None
-) -> dict:
-    """当前回合确认进度：{confirmed_ids, total, ready}。ready＝所有「需确认」真人都已确认。
-
-    掉线豁免：给定 online_tokens 时，有归属但不在线的真人自动豁免——否则任一玩家关掉
-    浏览器就会让整局永久卡死。无归属席位（纯本机会话）一律计入（无法判在线，按在场处理）。
-    不给 online_tokens（旧调用/测试）时退化为「所有真人都需确认」的原行为。
-    """
-    session = db.get(GameSession, session_id)
-    humans = [
-        p for p in get_participants(db, session_id)
-        if p.role == "human" and p.character_id
-    ]
-    if online_tokens is not None:
-        humans = [
-            p for p in humans
-            if (not p.owner_token) or (p.owner_token in online_tokens)
-        ]
-    required_ids = {p.character_id for p in humans}
-    tc = (session.world_state or {}).get("turn_confirm") if session else None
-    tc = tc or {}
-    confirmed = sorted(cid for cid in required_ids if tc.get(cid))
-    total = len(required_ids)
-    return {
-        "confirmed_ids": confirmed,
-        "total": total,
-        "ready": total > 0 and len(confirmed) >= total,
-    }
-
-
-def commit_turn(db: Session, session_id: str) -> None:
-    """推进：把本回合所有『暂存发言』(metadata.pending_turn) 转正（去标记），并清空确认状态。"""
-    session = db.get(GameSession, session_id)
-    if not session:
-        return
-    for ev in get_session_events(db, session_id, limit=0):
-        meta = ev.metadata_ or {}
-        if meta.get("pending_turn"):
-            m = dict(meta)
-            m.pop("pending_turn", None)
-            ev.metadata_ = m
-            flag_modified(ev, "metadata_")
-    ws = dict(session.world_state or {})
-    ws["turn_confirm"] = {}
-    session.world_state = ws
-    db.commit()
-
-
-def delete_pending_event(db: Session, session_id: str, event_id: str, actor_id: str) -> bool:
-    """删除一条『本回合暂存』发言：仅限本人、仅限 pending_turn（未推进）。返回是否删除。"""
-    ev = db.get(EventLog, event_id)
-    if not ev or ev.session_id != session_id:
-        return False
-    if not ev.actor_id or ev.actor_id != actor_id:
-        return False
-    if not (ev.metadata_ or {}).get("pending_turn"):
-        return False
-    db.delete(ev)
-    db.commit()
-    return True
-
-
-def update_pending_event(
-    db: Session, session_id: str, event_id: str, actor_id: str, content: str,
-) -> bool:
-    """改写一条『本回合暂存』发言的正文：仅限本人、仅限 pending_turn（未推进）。返回是否改写。"""
-    ev = db.get(EventLog, event_id)
-    if not ev or ev.session_id != session_id:
-        return False
-    if not ev.actor_id or ev.actor_id != actor_id:
-        return False
-    if not (ev.metadata_ or {}).get("pending_turn"):
-        return False
-    ev.content = content
-    db.add(ev)
-    db.commit()
-    return True
-
-
-def get_next_sequence_num(db: Session, session_id: str) -> int:
-    result = (
-        db.query(EventLog.sequence_num)
-        .filter(EventLog.session_id == session_id)
-        .order_by(EventLog.sequence_num.desc())
-        .first()
-    )
-    return (result[0] + 1) if result else 1
-
-
-def add_event(
-    db: Session,
-    session_id: str,
-    event_type: str,
-    content: str,
-    actor_id: str | None = None,
-    actor_name: str = "",
-    visibility: list[str] | None = None,
-    metadata: dict | None = None,
-    group: str | None = None,
-) -> EventLog:
-    meta = dict(metadata or {})
-    # 分头行动：同一回合里不同分组/场景的内容，用 group 标签分栏渲染（KP 经 [GROUP] 标注）。
-    if group:
-        meta["group"] = group
-    # 给事件打上「发生在哪个场景」的戳：NPC 上下文据此只看自己所在场景的事件，
-    # 避免一个 NPC 知道玩家在别处发生的事（信息隔离）。调用方未显式给 scene_id 时取当前场景。
-    if "scene_id" not in meta:
-        sess = db.get(GameSession, session_id)
-        if sess and sess.current_scene_id:
-            meta["scene_id"] = sess.current_scene_id
-
-    # sequence_num 由「读最大值 + 1」生成，多个请求并发时可能同时读到同一个值。
-    # 唯一约束负责兜底，遇到撞号只回滚本次 INSERT 并重新取最大值；其它完整性错误原样抛出。
-    for attempt in range(3):
-        event = EventLog(
-            session_id=session_id,
-            sequence_num=get_next_sequence_num(db, session_id),
-            event_type=event_type,
-            actor_id=actor_id,
-            actor_name=actor_name,
-            content=content,
-            visibility=visibility or [],
-            metadata_=meta,
-        )
-        db.add(event)
-        try:
-            db.commit()
-        except IntegrityError as exc:
-            db.rollback()
-            message = str(exc).lower()
-            is_sequence_conflict = (
-                "uq_event_logs_session_sequence" in message
-                or "event_logs.session_id, event_logs.sequence_num" in message
-            )
-            if not is_sequence_conflict or attempt == 2:
-                raise
-            continue
-        db.refresh(event)
-        return event
-
-    # 理论上第三次尝试会在 attempt == 2 时直接抛出；保留显式异常避免静态分析认为无返回。
-    raise RuntimeError("事件序号分配失败")
-
-
-def set_event_group(db: Session, event: EventLog, group: str) -> None:
-    """给已落库的事件补打分组标签（分头行动：把本回合各角色行动归入其所在场景列）。"""
-    meta = dict(event.metadata_ or {})
-    if meta.get("group") == group:
-        return
-    meta["group"] = group
-    event.metadata_ = meta
-    flag_modified(event, "metadata_")  # JSON 列原地改字典不会被脏检测，需显式标记
-    db.add(event)
-    db.commit()
 
 
 def can_manage_session(db: Session, session_id: str, token: str | None) -> bool:
@@ -1577,441 +1163,6 @@ def delete_session(db: Session, session_id: str) -> bool:
     db.delete(session)
     db.commit()
     return True
-
-
-def update_scene(db: Session, session_id: str, scene_id: str) -> None:
-    session = db.get(GameSession, session_id)
-    if not session:
-        return
-    session.current_scene_id = scene_id
-    ws = dict(session.world_state or {})
-    visited = ws.get("visited_scenes", [])
-    if scene_id not in visited:
-        visited.append(scene_id)
-    ws["visited_scenes"] = visited
-    session.world_state = ws
-    db.commit()
-
-
-# ── 按角色位置 / 已知地点（分头行动 + 大地图前往）──────────────────
-
-def get_party_locations(session: GameSession) -> dict:
-    """world_state.party_locations：{角色 id: 所在场景 id}。缺省时按需回落到当前场景。"""
-    return dict((session.world_state or {}).get("party_locations") or {})
-
-
-def get_char_location(session: GameSession, char_id: str | None) -> str | None:
-    """某角色当前所在场景；无显式记录则回落到会话当前场景（向后兼容）。"""
-    if not char_id:
-        return session.current_scene_id
-    return get_party_locations(session).get(char_id) or session.current_scene_id
-
-
-def set_char_location(db: Session, session_id: str, char_id: str, scene_id: str) -> None:
-    """把某角色移动到某场景（玩家经大地图前往 / AI 队友分头时的落点）。
-
-    主角移动时一并更新 current_scene_id（地图面板、NPC 上下文等仍以它为锚）。目的地记入已访问。
-    """
-    if not (char_id and scene_id):
-        return
-    session = db.get(GameSession, session_id)
-    if not session:
-        return
-    ws = dict(session.world_state or {})
-    locs = dict(ws.get("party_locations") or {})
-    locs[char_id] = scene_id
-    ws["party_locations"] = locs
-    visited = list(ws.get("visited_scenes") or [])
-    if scene_id not in visited:
-        visited.append(scene_id)
-    ws["visited_scenes"] = visited
-    session.world_state = ws
-    if char_id == session.player_character_id:
-        session.current_scene_id = scene_id
-    db.commit()
-
-
-#: 「本轮明确留守」的事件标记。位置默认跟随队伍，只有显式表过态的人自理。
-STAY_META_KEY = "stay"
-
-
-def stayed_char_ids(db: Session, session_id: str) -> set[str]:
-    """本回合明确说过「我留在这儿」的角色 id。
-
-    队伍位置的默认语义是**跟随**：没有位置记录的人被 `get_char_location` 回落到当前场景，
-    主角一走就跟着走。这对绝大多数回合是对的，但它让「你们仨去街区，我留下继续问诺特」
-    这个意图在系统里无处安放——莫妮卡人被判定在街区，KP 却还在演她留在事务所。
-
-    留守做成**本轮事件**而不是持久状态：它描述的是这一次移动跟不跟，不是一种长期属性；
-    队友下一轮想跟上，正常行动即可，不必再撤销一个标志位。
-    """
-    from app.services.turn_context import _current_turn_events
-
-    out: set[str] = set()
-    for ev in _current_turn_events(get_session_events(db, session_id)):
-        meta = ev.metadata_ or {}
-        if meta.get(STAY_META_KEY) and ev.actor_id:
-            out.add(str(ev.actor_id))
-    return out
-
-
-# 地点名常见的「设施类型」后缀：按长度从长到短，供从场景标题析出可被对话提及的关键词。
-_FACILITY_SUFFIXES = [
-    "疗养院", "图书馆", "档案馆", "博物馆", "派出所", "警察局", "礼拜堂", "老房子",
-    "报社", "医院", "教堂", "法院", "老宅", "宅邸", "公寓", "旅馆", "酒店",
-    "饭店", "学校", "大学", "中学", "小学", "墓地", "墓园", "工厂", "仓库", "教会",
-    "庄园", "别墅", "城堡", "监狱", "银行", "邮局", "车站", "码头", "农场", "矿场",
-    "洞穴", "地窖", "街区", "房子", "宅", "街",
-]
-
-
-# 「状态修饰」后缀：跟在设施类型之后表示地点当下状态（沉思礼拜堂+废墟）。它们**只用于剥离**
-# 得到核心地名，本身**不**作为解锁关键词（否则说个「废墟」就乱解锁）。
-_MODIFIER_SUFFIXES = ["废墟", "遗址", "旧址", "遗迹", "残址", "废址", "旧宅"]
-
-
-def derive_scene_keywords(title: str) -> set[str]:
-    """从场景标题**确定性地**派生解锁关键词：完整标题 + 核心地名（剥离废墟/遗址等状态词）+
-    设施类型后缀 + 专名前缀。玩家在对话/行动里提到其中任意一个即解锁该地点。
-
-    例：
-      「罗克斯伯里疗养院」→ {完整标题, "疗养院", "罗克斯伯里"}
-      「沉思礼拜堂废墟」  → {完整标题, "沉思礼拜堂", "礼拜堂", "沉思"}
-        （此前只得完整标题，故必须说全名才解锁——本函数补上核心名与专名）
-
-    这是**兜底/派生**逻辑：新模组解析时会另外生成并存储更丰富的 keywords（含地址/俗称），
-    运行时二者取并集（见 known_scene_ids）。
-    """
-    title = (title or "").strip()
-    if not title:
-        return set()
-    keywords = {title}
-    # 先剥掉结尾的状态修饰后缀（可叠多个）得到核心地名，核心名本身入库
-    core = title
-    changed = True
-    while changed:
-        changed = False
-        for suf in _MODIFIER_SUFFIXES:
-            if core.endswith(suf) and len(core) > len(suf):
-                core = core[: -len(suf)].strip("·的 ")
-                changed = True
-    if core != title and len(core) >= 2:
-        keywords.add(core)
-    # 对核心名跑设施后缀逻辑：加设施类型别名（礼拜堂）+ 最长后缀前的专名（沉思）
-    matched = [suf for suf in _FACILITY_SUFFIXES if core.endswith(suf) and len(core) > len(suf)]
-    keywords.update(matched)
-    if matched:
-        longest = max(matched, key=len)
-        prefix = core[: -len(longest)].strip("·的 ")
-        if len(prefix) >= 2:
-            keywords.add(prefix)
-    return {k for k in keywords if len(k) >= 2}
-
-
-def scene_unlock_keywords(scene: dict) -> set[str]:
-    """一个场景的全部解锁关键词 = 存储的 keywords（解析时生成，含地址/俗称）∪ 标题派生关键词。
-    存储缺失（老模组）时退化为纯派生——这样『沉思礼拜堂废墟』说「沉思礼拜堂」也能解锁。"""
-    stored = {
-        k.strip() for k in (scene.get("keywords") or [])
-        if isinstance(k, str) and len(k.strip()) >= 2
-    }
-    title = scene.get("title") or scene.get("name") or ""
-    return stored | derive_scene_keywords(title)
-
-
-_NUMBERED_CARRIAGE_RE = re.compile(r"(?<!\d)(\d+)\s*号车厢")
-_NEXT_CARRIAGE_RE = re.compile(r"下一(?:节|个)?车厢")
-
-
-def _carriage_number(scene: dict | None) -> int | None:
-    """从场景名或解锁词中读取阿拉伯数字车厢号。"""
-    if not scene:
-        return None
-    labels = [scene.get("title"), scene.get("name"), *(scene.get("keywords") or [])]
-    for label in labels:
-        if not isinstance(label, str):
-            continue
-        matched = _NUMBERED_CARRIAGE_RE.search(label)
-        if matched:
-            return int(matched.group(1))
-    return None
-
-
-def _relative_carriage_mentions(by_id: dict, event) -> set[str]:
-    """解析「下一节车厢」这种依赖叙事所在场景的相对称呼。
-
-    只在事件带 ``metadata.scene_id``、且目标确实与来源场景直连时解析，避免把旧叙事按
-    会话当前场景重新解释，也避免顺着编号提前揭露不可达地点。
-    """
-    content = getattr(event, "content", "") or ""
-    if not _NEXT_CARRIAGE_RE.search(content):
-        return set()
-    metadata = getattr(event, "metadata_", None) or {}
-    source_id = metadata.get("scene_id")
-    source = by_id.get(source_id)
-    source_number = _carriage_number(source)
-    if source_number is None:
-        return set()
-    connected = {str(sid) for sid in (source.get("connections") or []) if sid}
-    connected.update(
-        sid for sid, scene in by_id.items()
-        if source_id in {str(item) for item in (scene.get("connections") or []) if item}
-    )
-    return {
-        sid for sid in connected
-        if _carriage_number(by_id.get(sid)) == source_number + 1
-    }
-
-
-def known_scene_ids(module, session: GameSession, events: list | None = None) -> set:
-    """已知地点 = 已访问/当前所在 ∪ 玩家可见叙事中被提及过的场景。
-
-    未访问、且玩家可见内容从未提及的地点不在大地图上显示。KP-only 幕后事件绝不能
-    参与解锁；带场景元数据的「下一节车厢」等确定性相对称呼也会解析为真实场景。
-    """
-    by_id = {s.get("id"): s for s in (module.scenes or []) if s.get("id")}
-    known = set((session.world_state or {}).get("visited_scenes") or [])
-    if session.current_scene_id:
-        known.add(session.current_scene_id)
-    visible_events = [
-        event for event in (events or [])
-        if getattr(event, "event_type", None) in ("narration", "dialogue", "action", "system")
-        and KP_ONLY_SENTINEL not in (getattr(event, "visibility", None) or [])
-    ]
-    convo = "\n".join(
-        (getattr(event, "content", "") or "") for event in visible_events
-    )
-    if convo:
-        for sid, s in by_id.items():
-            if sid in known:
-                continue
-            if any(kw in convo for kw in scene_unlock_keywords(s)):
-                known.add(sid)
-    for event in visible_events:
-        known.update(_relative_carriage_mentions(by_id, event))
-    return {sid for sid in known if sid in by_id}
-
-
-def _scene_adjacency(module) -> dict[str, set[str]]:
-    """场景连通图（``connections`` 的无向闭包）：作者单向填写也按双向通行。"""
-    adj: dict[str, set[str]] = {}
-    ids = {s.get("id") for s in (module.scenes or []) if s.get("id")}
-    for s in (module.scenes or []):
-        sid = s.get("id")
-        if not sid:
-            continue
-        adj.setdefault(sid, set())
-        for c in s.get("connections") or []:
-            c = str(c or "").strip()
-            if c and c != sid and c in ids:
-                adj.setdefault(c, set())
-                adj[sid].add(c)
-                adj[c].add(sid)
-    return adj
-
-
-def scene_neighbors(module, scene_id: str | None) -> list[str]:
-    """当前场景可直达的相邻场景 id（升序）。无图/无该场景返回空列表。"""
-    if not scene_id:
-        return []
-    return sorted(_scene_adjacency(module).get(scene_id, ()))
-
-
-def find_scene_path(
-    module, start: str | None, dest: str, via_allowed: set[str] | None = None,
-) -> list[str] | None:
-    """沿场景连通图找 ``start → dest`` 的最短路径（BFS，路径含两端点）。
-
-    返回场景 id 列表；**确实不连通**返回 None（调用方据此拒绝切换）。
-    保守把关——以下情形一律视为可直达（返回平凡路径，行为与没有连通图时一致）：
-    - 模组任何场景都没填 connections（旧/手工模组，没建图，不能把它们走死）；
-    - start 缺失（无当前位置可依据）；
-    - start 或 dest 自身没有任何边（作者没为该地点建边，无拓扑可循）。
-
-    ``via_allowed`` 给定时，**途经**的场景必须落在这个集合里（终点不受此限——终点正是要
-    去的新地方）。玩家发起的移动一律带上它并传「已到访场景」：光看图上连通会放行「取道
-    一个从没去过的车厢抵达先头车厢」这种路线，而抵达叙述又明确「途经不停留、不触发事件」，
-    合起来就是**无视沿途的怪物与门锁凭空穿过去**。想去更远的地方，就得一段一段真的走过去。
-    """
-    dest = (dest or "").strip()
-    if not dest:
-        return None
-    if not start:
-        return [dest]
-    if start == dest:
-        return [start]
-    adj = _scene_adjacency(module)
-    if not any(adj.values()):
-        return [start, dest]
-    if not adj.get(start) or not adj.get(dest):
-        return [start, dest]
-    seen = {start}
-    queue: list[list[str]] = [[start]]
-    while queue:
-        path = queue.pop(0)
-        for nxt in sorted(adj.get(path[-1], ())):
-            if nxt in seen:
-                continue
-            if nxt == dest:
-                return path + [nxt]
-            seen.add(nxt)
-            # 只有允许途经的场景才继续往下扩；起点永远算数（人就站在那儿）。
-            if via_allowed is not None and nxt not in via_allowed:
-                continue
-            queue.append(path + [nxt])
-    return None
-
-
-def travel_blocker(
-    module, session: GameSession, start: str | None, dest: str,
-) -> tuple[str, str] | None:
-    """玩家为什么去不了 ``dest``：返回 (挡路的场景 id, 原因)；能去则 None。
-
-    只在 find_scene_path(..., via_allowed=可通行) 判定去不了时才有意义——用图上连通的
-    完整路径反查第一个过不去的途经点，好把「不连通」这种没头没脑的报错换成
-    「要去先头车厢，得先过 2 号车厢」。真的完全不连通时返回 None（那是另一种拒绝）。
-    """
-    full = find_scene_path(module, start, dest)
-    if not full:
-        return None
-    visited = visited_scene_ids(session)
-    blocked = world_memory.blocked_scenes(session.world_state or {})
-    for sid in full[1:-1]:
-        if sid in blocked:
-            return sid, blocked[sid] or "那边过不去"
-        if sid not in visited:
-            return sid, "那儿你们还没去过"
-    return None
-
-
-def passable_scene_ids(session: GameSession) -> set[str]:
-    """可作为**途经点**的场景：去过的，减去当前被 KP 判定过不去的。
-
-    终点不受此限——走进一个危险或封锁的地方是玩家的自由，被拦住的是「借道穿过去」。
-    """
-    return visited_scene_ids(session) - set(
-        world_memory.blocked_scenes(session.world_state or {})
-    )
-
-
-def visited_scene_ids(session: GameSession) -> set[str]:
-    """队伍真正到过的场景（含当前所在）——「能否途经」的唯一判据。
-
-    与 known_scene_ids 的区别是本文件里最容易混的一处：``known`` 含「叙述里被提到过」的
-    地点（它们要在大地图上看得见、可作为**终点**），``visited`` 只含真正去过的
-    （只有这些能当**途经点**）。玩家听说过驾驶室，不等于知道怎么绕过中间那节车厢。
-    """
-    out = set((session.world_state or {}).get("visited_scenes") or [])
-    if session.current_scene_id:
-        out.add(session.current_scene_id)
-    for sid in ((session.world_state or {}).get("party_locations") or {}).values():
-        if sid:
-            out.add(str(sid))
-    return out
-
-
-def list_known_locations(
-    module, session: GameSession, char_id: str | None = None, events: list | None = None,
-    char_names: dict[str, str] | None = None, reveal_all: bool = False,
-) -> list[dict]:
-    """供「大地图/调查板/沙盘」渲染：已知地点列表（当前所在、已访问、相互连接、队友分布）。
-
-    - ``kind == "chapter"`` 的场景是叙事章节而非地点，不上图（当前正身处其中时除外）。
-    - ``connections`` 只回展示集合内的邻居——玩家侧未知地点绝不经边泄露。
-    - ``char_names``（char_id → 名字）给定时，按 party_locations 归并各地点的在场成员。
-    - ``reveal_all=True``（真人 KP 上帝视角）：返回全部 location 场景并附 ``known`` 标记，
-      前端「玩家视角」开关据此纯客户端过滤；玩家侧永远走迷雾路径（known 恒 True）。
-    """
-    by_id = {s.get("id"): s for s in (module.scenes or []) if s.get("id")}
-    visited = set((session.world_state or {}).get("visited_scenes") or [])
-    cur = get_char_location(session, char_id)
-    # 层级门禁：挂在某个父级地点之下的场景，父级被**真正到过**之前一律不可见。
-    # 这既是防剧透（开局就不该知道村里有几间屋子），也让子沙盘有个明确的解锁时刻。
-    # 判据用 visited 而不是 known：听说过村庄不等于进过村、更不等于看得见村里的门牌。
-    # 队伍当前所在的场景永不隐藏（分头行动时有人已经在里面了）。
-    from app.services import hex_map
-
-    def _unlocked(sid: str) -> bool:
-        parent = hex_map.scene_parent(by_id.get(sid))
-        return not parent or parent in visited or sid == cur
-
-    known = {
-        sid for sid in known_scene_ids(module, session, events)
-        if (by_id[sid].get("kind") != "chapter" or sid == cur) and _unlocked(sid)
-    }
-    if reveal_all:
-        # KP 上帝视角看得见全部（含未解锁的子级），由 known 标记如实告诉他玩家看不看得见
-        shown = {sid for sid, s in by_id.items() if s.get("kind") != "chapter" or sid == cur}
-    else:
-        shown = known
-    # 队伍分布：各成员所在场景（party_locations 缺省回落主场景）
-    party_at: dict[str, list[str]] = {}
-    if char_names:
-        pl = (session.world_state or {}).get("party_locations") or {}
-        for cid, name in char_names.items():
-            sid = pl.get(cid) or session.current_scene_id
-            if sid:
-                party_at.setdefault(sid, []).append(name)
-    # 调查板红线：**已发现**的线索（clue_ledger）按其模组定义的 location 挂到地点上。
-    # 只含玩家已触碰的线索——未发现的绝不上板（不剧透）。
-    ledger = (session.world_state or {}).get("clue_ledger") or {}
-    clue_by_id = {c.get("id"): c for c in (getattr(module, "clues", None) or []) if c.get("id")}
-    clues_at: dict[str, list[dict]] = {}
-    for cid, entry in ledger.items():
-        cdef = clue_by_id.get(cid)
-        loc = (cdef or {}).get("location")
-        if cdef and loc:
-            clues_at.setdefault(loc, []).append({
-                "id": cid,
-                "name": cdef.get("name") or cid,
-                "status": (entry or {}).get("status") or "partial",
-            })
-    out = []
-    for sid in shown:
-        s = by_id[sid]
-        conns = [c for c in (s.get("connections") or []) if c in shown and c != sid]
-        out.append({
-            "id": sid,
-            "name": s.get("title") or s.get("name") or sid,
-            "current": sid == cur,
-            "visited": sid in visited,
-            "connections": conns,
-            "party": party_at.get(sid, []),
-            "clues": clues_at.get(sid, []),
-            "map": s.get("map"),   # 沙盘坐标与地貌（旧模组未回填时为 None）
-            "known": sid in known,  # KP 上帝视角下标记玩家是否已知；玩家侧恒 True
-            # 场景配图：前端拿它做「场景氛围底」的色调来源。之所以从这里给而不是只靠聊天流里
-            # 那条「抵达」插图消息——那条消息可能压根不在已加载的分页里（存量存档翻页只取最近
-            # 一段），而配图生成后是回写进 scene.image 的，这份数据一直都在。
-            # 本函数的 cur 取的是**查看者自己**的角色位置，分头行动时各人也就各看各的场景。
-            "image": s.get("image") or "",
-        })
-    out.sort(key=lambda x: (not x["current"], not x["visited"], x["id"]))
-    return out
-
-
-def list_visible_map_nodes(module, locations: list[dict], reveal_all: bool = False) -> list[dict]:
-    """返回沙盘需要绘制的统一节点；普通节点只作为地貌，不参与旅行。"""
-    nodes = list(getattr(module, "map_nodes", None) or [])
-    shown_ids = {str(item.get("id")) for item in locations if item.get("id")}
-    out = []
-    for node in nodes:
-        sid = str(node.get("scene_id") or "")
-        if sid:
-            if sid in shown_ids:
-                out.append(node)
-            elif not reveal_all:
-                # 未发现的场景保留其地貌格，但清掉 scene_id，让前端不要绘制剧情 token。
-                hidden = dict(node)
-                hidden["scene_id"] = None
-                out.append(hidden)
-            continue
-        if reveal_all:
-            out.append(node)
-            continue
-        # 普通地貌是地图底图的一部分，完整下发，未知场景不会造成视觉上的“挖空”。
-        out.append(node)
-    return out
 
 
 def set_flag(db: Session, session_id: str, flag: str, value: bool = True) -> None:

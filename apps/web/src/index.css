@@ -214,6 +214,185 @@ body {
   text-shadow: 0 0 18px rgba(212, 162, 78, 0.18);
 }
 
+/* ===== 页面头部：返回 + 标题 + 右侧操作 =====
+   此前四个页面各自拼 flex items-center gap-3 mb-6 + !mb-0 覆盖，基线全靠运气。 */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.page-head .page-title { margin-bottom: 0; }
+.page-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ===== 空状态：虚线棺框 + 纹章图标 + 一句提示 =====
+   此前各列表的空态是一句灰字漂在页面上，像没加载完。 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 2.6rem 1.5rem 2.4rem;
+  text-align: center;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-1) 55%, transparent);
+  color: var(--color-text-secondary);
+}
+.empty-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  margin-bottom: 0.35rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--color-accent) 10%, transparent),
+      transparent 70%),
+    var(--surface-2);
+  color: var(--color-text-accent);
+  font-size: 1.5rem;
+  opacity: 0.9;
+  box-shadow: inset 0 0 12px var(--card-inset);
+}
+.empty-state-title {
+  font-family: var(--font-title);
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--color-text-primary);
+}
+.empty-state-hint {
+  max-width: 26rem;
+  font-size: var(--text-xs);
+  line-height: 1.7;
+}
+/* 提示下方的菱形收纹饰（与 .home-rule 同一母题，缩短版） */
+.empty-state::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  margin-top: 0.5rem;
+  background: var(--color-border-strong);
+  transform: rotate(45deg);
+  opacity: 0.8;
+}
+
+/* ===== 拖放上传区：虚线引魂框 =====
+   此前内联 style 拼 border-2 border-dashed，dragover 态两处各写一套。 */
+.dropzone {
+  position: relative;
+  padding: 1.6rem 1.25rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+.dropzone:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 65%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 4%, var(--surface-sunken));
+}
+.dropzone--over {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 9%, var(--surface-sunken));
+  box-shadow:
+    inset 0 0 26px color-mix(in srgb, var(--color-accent) 14%, transparent),
+    0 0 16px color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+.dropzone:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+.dropzone-icon {
+  display: block;
+  margin: 0 auto 0.5rem;
+  font-size: 1.6rem;
+  color: var(--color-text-secondary);
+  transition: color 0.18s ease, transform 0.18s ease;
+}
+.dropzone:hover .dropzone-icon,
+.dropzone--over .dropzone-icon { color: var(--color-text-accent); }
+.dropzone--over .dropzone-icon { transform: translateY(-2px); }
+
+/* ===== 步骤条：菱形节点 + 引线（建卡等多步流程） =====
+   母题取自旧式问卷的章节标记：走完的步是铸定的印，当前步是燃着的烛。 */
+.step-track {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+  margin-bottom: 1rem;
+}
+.step-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.18rem 0.5rem 0.18rem 0.3rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.step-gem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-strong);
+  transform: rotate(45deg);
+  border-radius: 2px;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+.step-gem > span { transform: rotate(-45deg); line-height: 1; }
+/* 已完成：琥珀铸印 */
+.step-item--done .step-gem {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-text-accent);
+}
+.step-item--done { color: var(--color-text-primary); }
+/* 当前：燃起的一步——实心琥珀 + 微光 */
+.step-item--current {
+  color: var(--color-text-accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+.step-item--current .step-gem {
+  background: linear-gradient(160deg, var(--color-accent-hover), var(--color-accent));
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 700;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+/* 步间引线 */
+.step-join {
+  width: 0.85rem;
+  height: 1px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, var(--color-border-strong), var(--color-border));
+}
+.step-item--done + .step-join { background: var(--color-accent); opacity: 0.55; }
+
 /* ===== 共享排版原语 =====
    此前 chip / 统计块 / 分区标题在 CombatantCard、CharacterPanel、ModuleDetailPage
    各自用 text-[10px] px-1 rounded border 手搓一遍，padding 与配色都对不齐。 */
@@ -861,6 +1040,35 @@ body {
 .home-entry:hover {
   border-color: var(--color-border-strong);
 }
+/* 入口卡图标：与角色名录的 .char-sigil 同一枚「纹章框」，三个入口像一排铸印 */
+.home-entry-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  margin-bottom: 0.15rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--color-accent) 14%, transparent),
+      transparent 70%),
+    var(--surface-2);
+  color: var(--color-text-accent);
+  font-size: 1.35rem;
+  box-shadow: inset 0 0 10px var(--card-inset);
+  transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+.home-entry:hover .home-entry-icon {
+  border-color: var(--color-accent);
+  box-shadow:
+    inset 0 0 10px var(--card-inset),
+    0 0 12px color-mix(in srgb, var(--color-accent) 25%, transparent);
+  transform: translateY(-1px);
+}
+/* lucide 图标默认 24px 绝对尺寸，在纹章框里偏大；与 gi 的 1em 统一到同一视觉尺寸 */
+.home-entry-icon svg { width: 1.3rem; height: 1.3rem; }
 /* 主入口用琥珀描边点出「先点这个」，但不做成实心按钮——三张卡还是并列关系 */
 .home-entry--primary {
   border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
@@ -870,6 +1078,164 @@ body {
 }
 .home-entry--primary:hover {
   border-color: var(--color-accent);
+}
+/* 主卡四角 L 形角饰：与战斗 HUD 的 .combat-hud 角饰同源，标识「推荐起点」 */
+.home-entry--primary::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  pointer-events: none;
+  --entry-corner: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background:
+    linear-gradient(var(--entry-corner), var(--entry-corner)) left top / 10px 1px,
+    linear-gradient(var(--entry-corner), var(--entry-corner)) left top / 1px 10px,
+    linear-gradient(var(--entry-corner), var(--entry-corner)) right top / 10px 1px,
+    linear-gradient(var(--entry-corner), var(--entry-corner)) right top / 1px 10px,
+    linear-gradient(var(--entry-corner), var(--entry-corner)) left bottom / 10px 1px,
+    linear-gradient(var(--entry-corner), var(--entry-corner)) left bottom / 1px 10px,
+    linear-gradient(var(--entry-corner), var(--entry-corner)) right bottom / 10px 1px,
+    linear-gradient(var(--entry-corner), var(--entry-corner)) right bottom / 1px 10px;
+  background-repeat: no-repeat;
+  opacity: 0.85;
+}
+
+/* ——— 首页新手指引 ——— */
+/* 三段并排：宽屏一屏读完，窄屏再退回竖排。中列（规则表）给多一点宽度，
+   否则「骰出 / 结果 / 示例」三列会挤到换行。 */
+.home-intro-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 900px) {
+  .home-intro-grid { grid-template-columns: 0.95fr 1.15fr 0.95fr; }
+  /* 列间竖细线：三段是并列关系，用分隔线比留白更能说明「这是三栏」 */
+  .home-intro-grid > * + * {
+    padding-left: 0.9rem;
+    border-left: 1px solid var(--color-border);
+  }
+}
+
+/* 段首导语与段内小字：并排后每列只有 250–330px，字号压到 xs/2xs、行高收到 1.65
+   才能在窄窗口里也把三栏塞进一屏（再低中文就开始糊成一片了）。 */
+.home-intro-lede {
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+.home-intro-note {
+  font-size: var(--text-2xs);
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+.home-intro-role-name {
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* 要素条目（KP/调查员/骰子、HP/SAN）：比 .card 轻一档，成列出现时不喧宾夺主 */
+.home-intro-role {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--surface-2);
+}
+.home-intro-role > svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+/* HP/SAN：同样的图标 + 文字，但去掉卡片外框，只留一条起首线 */
+.home-intro-vital {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.12rem 0;
+}
+.home-intro-vital > svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+/* 成功等级表的托底：内凹底色，把表格从正文里托起来 */
+.home-intro-panel {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--surface-sunken);
+}
+.home-check-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-2xs);
+}
+.home-check-table th {
+  padding: 0 0.3rem 0.25rem;
+  text-align: left;
+  font-family: var(--font-title);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+.home-check-table td {
+  padding: 0.2rem 0.3rem;
+  vertical-align: baseline;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.home-check-table tbody tr:last-child td { border-bottom: 0; }
+/* 阈值列与示例列走等宽：六行数字左对齐成一列才好比大小 */
+.home-check-table td:first-child,
+.home-check-table td:last-child {
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+}
+.home-check-table td:nth-child(2) { font-weight: 600; }
+/* 示例列贴右，与表头一起靠边收口 */
+.home-check-table th:last-child,
+.home-check-table td:last-child { text-align: right; }
+
+/* 上手步骤：序号铸印 + 虚线分隔，读起来是一条线而不是四张卡 */
+.home-step {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.home-step:first-child { padding-top: 0; }
+.home-step + .home-step { border-top: 1px dashed var(--color-border); }
+.home-step-index {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-accent);
+}
+/* 步骤末尾的入口链接：跟在说明后面同一行，读完就能点进去 */
+.home-intro-link {
+  margin-left: 0.4rem;
+  white-space: nowrap;
+  color: var(--color-text-accent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  transition: color 0.15s, border-color 0.15s;
+}
+.home-intro-link:hover {
+  color: var(--color-accent-hover);
+  border-bottom-color: var(--color-accent);
 }
 
 .home-shortcut {
@@ -1319,6 +1685,13 @@ body {
     0 0 0 1px color-mix(in srgb, var(--color-accent) 10%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--color-accent) 18%, transparent);
   animation: modalPanelIn 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+/* Radix Dialog 与 .modal-panel 同一窗体质感（不含入场动画——Radix 走自有 data-state 动画） */
+.dialog-panel {
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 @keyframes modalPanelIn {
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
@@ -1835,6 +2208,65 @@ body {
   color: var(--color-text-accent);
 }
 
+/* 危险按钮：血酒红实心（删除/不可逆操作），与 chip--solid-danger 同一语义层 */
+.btn-danger {
+  padding: 0.375rem 1rem;
+  border: 1px solid var(--color-danger);
+  border-radius: 3px;
+  font-size: 0.875rem;
+  font-family: var(--font-title);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  background: var(--color-danger-deep);
+  color: var(--color-on-danger);
+  cursor: pointer;
+  transition: filter 0.2s ease, box-shadow 0.25s ease, transform 0.12s ease;
+}
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+.btn-danger:active:not(:disabled) { transform: translateY(1px); }
+.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 尺寸变体：收敛全站散落的 !px-2 !py-1 text-sm 覆盖。与主/次/危险按钮直接叠加 */
+.btn-sm { padding: 0.2rem 0.6rem; font-size: var(--text-xs); }
+.btn-xs { padding: 0.08rem 0.42rem; font-size: var(--text-2xs); }
+
+/* 键盘焦点环：此前按钮全靠 hover 反馈，Tab 导航时完全看不见焦点落点 */
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.btn-danger:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--color-bg-primary),
+    0 0 0 4px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+/* 可点 chip：列表行内的小动作（查看/删除/重建索引…）。
+    此前各调用点用 hover:!bg-[...] 内联硬顶，配色散落且没有焦点态。 */
+button.chip, .chip-btn { cursor: pointer; }
+.chip-btn {
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.chip-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text-accent); }
+.chip-btn--accent:hover:not(:disabled) {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.chip-btn--danger:hover:not(:disabled) {
+  background: var(--color-danger-deep);
+  border-color: var(--color-danger);
+  color: var(--color-on-danger);
+}
+.chip-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+.chip-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .badge {
   display: inline-block;
   font-size: 0.7rem;
@@ -1857,10 +2289,14 @@ body {
   border-right: 1px solid var(--color-border);
   background: var(--sidebar-bg);
   box-shadow: var(--sidebar-shadow);
+  /* 收展平滑过渡：此前宽度瞬变，导航项被硬切 */
+  transition: width 0.22s ease;
+  overflow: hidden;
 }
 
 .sidebar-logo {
-  padding: 1.25rem 1rem;
+  position: relative;
+  padding: 1.25rem 1rem 1rem;
   border-bottom: 1px solid var(--color-border);
   font-family: var(--font-display);   /* 纯拉丁「TRPG Player」，ZCOOL 无回落风险 */
   font-size: 1.25rem;
@@ -1868,11 +2304,36 @@ body {
   color: var(--color-text-accent);
   letter-spacing: 0.1em;
   text-shadow: 0 0 14px rgba(212, 162, 78, 0.25);
+  white-space: nowrap;
+}
+/* logo 下的菱形压纹：与 .home-rule / .empty-state 的收纹饰同一母题 */
+.sidebar-logo::after {
+  content: '';
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-border-strong), transparent);
+}
+.sidebar-logo::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 5px;
+  height: 5px;
+  background: var(--color-accent);
+  opacity: 0.75;
+  transform: translate(-50%, 50%) rotate(45deg);
+  z-index: 1;
 }
 
 .sidebar-nav {
   flex: 1;
   padding: 0.5rem;
+  overflow-y: auto;   /* .sidebar 加了 overflow:hidden 做收展过渡，导航自身要能滚 */
+  min-height: 0;
 }
 
 .sidebar-link {
@@ -1888,6 +2349,12 @@ body {
   text-decoration: none;
   color: var(--color-text-secondary);
   transition: all 0.15s;
+  white-space: nowrap;   /* 收展过渡期间文字不折行 */
+}
+.sidebar-link:focus-visible {
+  outline: none;
+  color: var(--color-text-accent);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
 }
 .sidebar-link:hover {
   color: var(--color-text-primary);
@@ -1963,6 +2430,73 @@ body {
   justify-content: center;
   padding: 0.4rem;
 }
+
+/* ===== 二级导航（设置页等页内分栏） =====
+   与主侧边栏同一套语言：静息灰字、hover 微亮、选中琥珀 + 左缘色带（.active-rail）。 */
+.subnav {
+  width: 10.5rem;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  padding: 1rem 0.5rem 0.5rem;
+  background: var(--color-bg-secondary);
+}
+.subnav-title {
+  padding: 0 0.75rem 0.75rem;
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--color-text-secondary);
+}
+.subnav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 2px;
+  border: none;
+  border-radius: 3px;
+  font-family: var(--font-title);
+  font-size: 0.875rem;
+  letter-spacing: 0.03em;
+  text-align: left;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.subnav-item:hover { color: var(--color-text-primary); background: rgba(212, 162, 78, 0.06); }
+.subnav-item svg { font-size: 1.05rem; opacity: 0.85; flex-shrink: 0; }
+.subnav-item:focus-visible {
+  outline: none;
+  color: var(--color-text-accent);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+.subnav-item.active {
+  color: var(--color-text-accent);
+  background: rgba(212, 162, 78, 0.1);
+  font-weight: 600;
+}
+/* 选中项左缘琥珀竖条（与 .sidebar-link.active 同一「当前在此」语言） */
+.subnav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+/* 羊皮纸主题下 hover/active 的琥珀透明度在浅底上偏脏，换深红计量 */
+:root[data-theme="parchment"] .subnav-item:hover { background: rgba(139, 37, 0, 0.06); }
+:root[data-theme="parchment"] .subnav-item.active { background: rgba(139, 37, 0, 0.09); }
+:root[data-theme="parchment"] .sidebar-link:hover { background: rgba(139, 37, 0, 0.06); }
+:root[data-theme="parchment"] .sidebar-link.active { background: rgba(139, 37, 0, 0.09); }
 
 /* 桌面端角色卡是并列栏，不需要遮罩；窄屏媒体查询里再打开（须先声明，否则会覆盖它） */
 .char-panel-scrim { display: none; }
@@ -2577,6 +3111,538 @@ select.input option {
   white-space: nowrap;
 }
 
+/* ===== 大厅选人舞台 =====
+   守望先锋式选人：居中大标题 + 卡牌阵列 + 逐张浮入；右侧是英雄登场档案。 */
+.seat-card--selecting .lobby-my-actions { display: none; }
+
+.hero-select {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  padding: 1.05rem 1.05rem 0.85rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(ellipse 90% 70% at 50% -8%,
+      color-mix(in srgb, var(--color-accent) 13%, transparent) 0%, transparent 62%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--color-bg-card) 94%, transparent),
+      var(--color-bg-secondary));
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.hero-select > * { position: relative; z-index: 1; }
+
+/* 顶部舞台光：纯装饰，让「选人」有角色登场感 */
+.hero-select-light {
+  position: absolute;
+  top: -4.5rem;
+  left: 50%;
+  width: min(46rem, 96%);
+  height: 13rem;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--color-accent) 24%, transparent),
+    transparent 72%);
+  animation: heroLightIn 0.9s ease-out both;
+}
+
+.hero-select-top { text-align: center; padding: 0.15rem 0 0.85rem; }
+.hero-select-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-transform: uppercase;
+  color: var(--color-text-accent);
+  opacity: 0.82;
+}
+.hero-select-title {
+  margin: 0.3rem 0 0.35rem;
+  font-family: var(--font-title);
+  font-size: clamp(1.45rem, 2.4vw, 1.9rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-text-primary);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+.hero-select-sub {
+  margin: 0 auto;
+  max-width: 36rem;
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+.hero-select-top-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
+
+/* 车卡建议默认收成一行，避免选人舞台被长文案压矮 */
+.hero-guidance {
+  margin: 0 0 0.7rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 78%, transparent);
+}
+.hero-guidance summary {
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-xs);
+  color: var(--color-text-accent);
+}
+.hero-guidance summary::-webkit-details-marker { display: none; }
+.hero-guidance summary::before {
+  content: '＋ ';
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+.hero-guidance[open] summary::before { content: '－ '; }
+.hero-guidance-body { padding: 0 0.6rem 0.6rem; }
+.hero-guidance-body .guidance-card { margin-bottom: 0; }
+
+.hero-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+}
+.hero-select-count {
+  margin-right: auto;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.hero-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 15rem;
+  max-width: 44%;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
+  transition: border-color 0.15s ease;
+}
+.hero-search:focus-within { border-color: var(--color-border-strong); }
+.hero-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+}
+.hero-search input::placeholder { color: var(--color-text-secondary); opacity: 0.75; }
+.hero-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-accent);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.hero-generate:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent-hover);
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+}
+.hero-generate:disabled { opacity: 0.45; cursor: default; }
+.hero-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input-bg);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.hero-create:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-accent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+.hero-create:disabled { opacity: 0.45; cursor: default; }
+
+/* 卡牌阵列：角色就是英雄。视觉区在上、信息区在下，和 OW 的英雄格一致 */
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.75rem, 1fr));
+  gap: 0.7rem;
+  padding: 0.05rem;
+}
+.hero-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--surface-2) 88%, transparent),
+    color-mix(in srgb, var(--color-bg-secondary) 94%, transparent));
+  box-shadow: 0 7px 20px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 color-mix(in srgb, var(--color-accent) 8%, transparent);
+  cursor: pointer;
+  animation: heroCardIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--hero-delay, 0ms);
+  transition: transform 0.18s ease, border-color 0.18s ease,
+    box-shadow 0.22s ease, background 0.22s ease;
+}
+.hero-card:hover:not(:disabled) {
+  transform: translateY(-3px);
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent),
+    0 0 26px color-mix(in srgb, var(--color-accent) 18%, transparent),
+    0 12px 26px rgba(0, 0, 0, 0.3);
+}
+.hero-card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.hero-card:disabled { opacity: 0.45; cursor: default; }
+.hero-card--on {
+  transform: translateY(-4px) scale(1.015);
+  border-color: var(--color-accent);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-accent) 13%, var(--surface-2)),
+    color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-secondary)));
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    0 0 32px color-mix(in srgb, var(--color-accent) 24%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.35);
+}
+.hero-card-frame {
+  position: absolute;
+  inset: 4px;
+  z-index: 1;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: calc(var(--radius-lg) - 3px);
+  opacity: 0.55;
+}
+.hero-card--on .hero-card-frame { opacity: 0.9; }
+
+.hero-card-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  border-bottom: 1px solid var(--color-border);
+  background:
+    radial-gradient(circle at 50% 40%,
+      color-mix(in srgb, var(--color-accent) 13%, transparent),
+      transparent 62%),
+    linear-gradient(160deg, var(--surface-2), var(--color-bg-tertiary));
+}
+.hero-card-aura {
+  position: absolute;
+  inset: 22% 26%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--color-accent) 20%, transparent),
+    transparent 70%);
+  filter: blur(7px);
+  opacity: 0.75;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+.hero-card:hover .hero-card-aura { transform: scale(1.14); opacity: 1; }
+.hero-card--on .hero-card-aura { transform: scale(1.2); opacity: 1; }
+.hero-card .char-portrait {
+  position: relative;
+  z-index: 1;
+  width: 4.25rem;
+  height: 4.25rem;
+  font-size: 1.9rem;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38),
+    0 0 0 1px var(--color-border-strong);
+}
+.hero-card--on .char-portrait {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38),
+    0 0 0 1px var(--color-accent),
+    0 0 20px color-mix(in srgb, var(--color-accent) 34%, transparent);
+}
+.hero-card-badge {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 2;
+  padding: 0.08rem 0.38rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg-primary) 72%, transparent);
+}
+.hero-card-picked {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.35rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.hero-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.55rem 0.65rem 0.65rem;
+}
+.hero-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.hero-card-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.hero-card-vitals { display: flex; gap: 0.6rem; }
+.hero-vital {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.22rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.hero-vital b { font-family: var(--font-mono); font-weight: 700; }
+.hero-vital--hp b { color: color-mix(in srgb, var(--color-danger) 82%, var(--color-text-primary)); }
+.hero-vital--san b { color: color-mix(in srgb, var(--color-success) 82%, var(--color-text-primary)); }
+.hero-card-skills {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  opacity: 0.88;
+}
+
+.hero-select-blank {
+  padding: 2.4rem 1rem;
+  text-align: center;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+.hero-select-blank-title {
+  margin-bottom: 0.35rem;
+  font-family: var(--font-title);
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+}
+.hero-select-blank p {
+  margin: 0 auto 0.8rem;
+  max-width: 30rem;
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.hero-select-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.hero-select-chosen {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.hero-select-chosen-label {
+  flex-shrink: 0;
+  padding: 0.06rem 0.42rem;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.12em;
+  color: var(--color-on-accent);
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+.hero-select-chosen b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-accent);
+}
+.hero-select-foot-muted { opacity: 0.85; }
+
+/* 右侧英雄档案：确认区像「角色登场卡」，完整面板在下方继续展开 */
+.hero-dossier-pick {
+  position: relative;
+  overflow: hidden;
+  padding: 1.1rem 1rem 1rem;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border);
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -5%,
+      color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 68%),
+    linear-gradient(180deg, var(--color-bg-card), var(--color-bg-secondary));
+}
+.hero-dossier-halo {
+  position: relative;
+  width: max-content;
+  margin: 0 auto 0.55rem;
+}
+.hero-dossier-halo::before {
+  content: '';
+  position: absolute;
+  inset: -13px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 72%);
+  filter: blur(5px);
+}
+.hero-dossier-portrait {
+  position: relative;
+  z-index: 1;
+  width: 6rem;
+  height: 6rem;
+  font-size: 2.6rem;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4),
+    0 0 0 1px var(--color-accent);
+}
+.hero-dossier-name {
+  font-family: var(--font-title);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-accent);
+  text-shadow: 0 0 22px color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+.hero-dossier-meta {
+  margin-top: 0.2rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.hero-dossier-vitals {
+  display: flex;
+  justify-content: center;
+  gap: 0.7rem;
+  margin: 0.45rem 0;
+}
+.hero-dossier-vitals .hero-vital { font-size: var(--text-xs); }
+.hero-dossier-skills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.3rem;
+}
+.hero-dossier-skills span {
+  padding: 0.12rem 0.45rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+.hero-dossier-note {
+  margin: 0.55rem 0 0;
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+.hero-dossier-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+.hero-dossier-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 12rem;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+  opacity: 0.82;
+}
+.hero-dossier-empty p {
+  margin: 0;
+  max-width: 15rem;
+  font-size: var(--text-xs);
+  line-height: 1.8;
+}
+
+@keyframes heroCardIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.965); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes heroLightIn {
+  from { opacity: 0; transform: translateX(-50%) scale(0.9); }
+  to { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
+@media (max-width: 1180px) {
+  .hero-grid { grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+}
+@media (max-width: 720px) {
+  .hero-select { padding: 0.8rem 0.7rem 0.7rem; }
+  .hero-select-bar { flex-wrap: wrap; }
+  .hero-search { width: 100%; max-width: none; order: 3; }
+  .hero-select-foot { flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+  .hero-card .char-portrait { width: 3.6rem; height: 3.6rem; }
+}
+
+
 /* ===== 大厅聊天：右侧悬浮聊天卡 =====
    浮层而非栏位：absolute 定位、右侧垂直居中，收起是一颗圆 token，展开是一张卡。
    它既不参与页面高度（聊再多也顶不长大厅），也不占掉主栏一条宽度。 */
@@ -2590,6 +3656,8 @@ select.input option {
 }
 /* 角色卡预览开着时整体左让一栏，别盖住人家 */
 .chat-float--shifted { right: calc(20rem + 1.25rem); }
+/* 选人舞台把聊天收成浮标时，浮标贴在右栏与主栏之间，不遮角色卡 */
+.chat-float--shifted.chat-token { right: 20rem; }
 
 /* 收起态：一颗圆 token */
 .chat-token {

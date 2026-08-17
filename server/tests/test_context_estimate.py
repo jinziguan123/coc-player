@@ -114,14 +114,13 @@ def test_resolve_context_budget_invalid_window_falls_back():
 
 
 def test_estimate_prefers_measured_usage(db_factory):
-    """world_state.turn_usage 存在时，占用真值用服务端实测 prompt_tokens，ratio 随之。"""
+    """session_stats.turn_usage 存在时，占用真值用服务端实测 prompt_tokens，ratio 随之。"""
     from app.ai.context import RESERVE_FOR_OUTPUT
+    from app.services import session_stats
     db = db_factory()
     sid = _seed(db)
-    s = db.get(GameSession, sid)
-    ws = dict(s.world_state)
-    ws["turn_usage"] = {"prompt_tokens": 12345, "completion_tokens": 600, "total_tokens": 12945, "at_seq": 6}
-    s.world_state = ws
+    stats = session_stats.get_or_create(db, sid)
+    stats.turn_usage = {"prompt_tokens": 12345, "completion_tokens": 600, "total_tokens": 12945, "at_seq": 6}
     db.commit()
     r = context_estimate.estimate_session_context(db, sid)
     assert r["source"] == "measured"
@@ -140,6 +139,7 @@ def test_estimate_falls_back_to_estimate_without_usage(db_factory):
 
 
 def test_record_turn_usage_persists_and_failopen(db_factory):
+    from app.models.session_stats import SessionStats
     from app.services import chat_service
     db = db_factory()
     sid = _seed(db)
@@ -149,9 +149,9 @@ def test_record_turn_usage_persists_and_failopen(db_factory):
     class _LLM:
         last_usage = {"prompt_tokens": 900, "completion_tokens": 100, "total_tokens": 1000}
     chat_service._record_turn_usage(db, s, _LLM(), events)
-    assert (db.get(GameSession, sid).world_state or {})["turn_usage"]["prompt_tokens"] == 900
+    assert db.get(SessionStats, sid).turn_usage["prompt_tokens"] == 900
 
     class _LLM2:
         last_usage = None   # 不支持 usage → 不覆盖、不报错
     chat_service._record_turn_usage(db, s, _LLM2(), events)
-    assert (db.get(GameSession, sid).world_state or {})["turn_usage"]["prompt_tokens"] == 900
+    assert db.get(SessionStats, sid).turn_usage["prompt_tokens"] == 900

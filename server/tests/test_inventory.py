@@ -196,7 +196,7 @@ def test_gain_gated_by_pending_check_is_not_granted_upfront(db_factory):
     db = db_factory(); sid, pc, _ = _seed(db)
     _stash_pickpocket(db, sid, pc)
     assert not inv.get_inventory(pc)
-    pending = (db.get(GameSession, sid).world_state or {}).get("pending_item_gains")
+    pending = (db.get(GameSession, sid).turn_state or {}).get("pending_item_gains")
     assert [p["name"] for p in pending] == ["怀表"]
 
 
@@ -210,7 +210,7 @@ def test_gated_gain_lands_on_success_and_is_dropped_on_failure(db_factory):
         settle_pending_item_gains(db, sid, gs, succeeded=succeeded)
         assert [it["name"] for it in inv.get_inventory(pc)] == expect
         # 结算后暂存必须清空：无论给没给，都不能留到下一次检定被顺手兑现
-        assert not (db.get(GameSession, sid).world_state or {}).get("pending_item_gains")
+        assert not (db.get(GameSession, sid).turn_state or {}).get("pending_item_gains")
 
 
 def test_unrolled_gain_expires_next_turn(db_factory):
@@ -223,7 +223,7 @@ def test_unrolled_gain_expires_next_turn(db_factory):
                               actor_id=pc.id, actor_name=pc.name)
     _run(cs._ensure_planned_items(db, sid, db.get(GameSession, sid), pc, [],
                                   TurnPlan(items_lost=[ItemDelta(name="并不存在的东西")])))
-    assert not (db.get(GameSession, sid).world_state or {}).get("pending_item_gains")
+    assert not (db.get(GameSession, sid).turn_state or {}).get("pending_item_gains")
     settle_pending_item_gains(db, sid, db.get(GameSession, sid), succeeded=True)
     assert not inv.get_inventory(pc)
 

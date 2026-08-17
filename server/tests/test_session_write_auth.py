@@ -141,7 +141,7 @@ def test_member_cannot_submit_another_players_pending_check(write_auth_env):
         )
     )
     session = db.get(GameSession, ids["session"])
-    session.world_state = {
+    session.turn_state = {
         "pending_checks": {
             "other-check": {
                 "id": "other-check",

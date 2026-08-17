@@ -402,6 +402,15 @@ async def _run_generation(
     if plan is not None:
         _augment_plan_with_backstage(plan, events)
 
+    # 位置意图硬闸：玩家只是提到/打算去别处、没有移动证据时，先清掉 plan 里的 scene_change，
+    # 并生成一段注入 KP 上下文的位置硬约束。必须在生成前执行——生成后再拦截只能保住地图，
+    # 保不住已经广播/落库的旁白。
+    location_guard = ""
+    if plan is not None and events:
+        location_guard = _location_intent_guard(
+            db, session_id, game_session, module, player_char, events, plan,
+        )
+
     # 分头行动：按各成员「真实所在场景」归并（玩家经大地图、队友经 travel 动作更新的确定性位置）。
     # 身处 ≥2 个场景即分头 → 逐场景生成叙事。不再靠 LLM 猜分组、也不因「打算去X」误判。
     scene_groups = _location_groups(game_session, module, player_char, teammates)
@@ -420,6 +429,7 @@ async def _run_generation(
             db, session_id, game_session, module, player_char, events,
             teammates, kp, llm, rules_enabled, matcher_npcs, scene_groups,
             plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
+            location_guard=location_guard,
         )
         return
 
@@ -446,6 +456,8 @@ async def _run_generation(
         messages.append(turn_planner.build_turn_plan_message(plan))
     if blind_message is not None:
         messages.append(blind_message)
+    if location_guard:
+        messages.append({"role": "system", "content": location_guard})
 
     # 玩家党名单（玩家 + AI 队友）：供台词归属守卫用——KP 绝不能用气泡替他们说话。
     party_names = {player_char.name} | {t.name for t in (teammates or [])}
@@ -483,7 +495,7 @@ async def _run_generation(
         await _validate_and_patch_narration(
             llm, plan, result, event_order, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
-            party_names=party_names,
+            party_names=party_names, location_context=location_guard,
         )
         _persist_narration(db, session_id, result, event_order)
         _reorder_turn_events(db, session_id, event_order, base_seq)
@@ -510,7 +522,7 @@ async def _run_generation(
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
-            party_names=party_names,
+            party_names=party_names, location_context=location_guard,
         )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
@@ -625,6 +637,7 @@ async def _run_split_generation(
     plan: turn_planner.TurnPlan | None = None,
     blind_message: dict | None = None,
     rule_excerpts: list[dict] | None = None,
+    location_guard: str = "",
 ) -> None:
     """分头行动：对每个分组各跑一次聚焦叙事，后端确定性地把产物归入该组。
 
@@ -674,6 +687,8 @@ async def _run_split_generation(
             messages.append(plan_message)
         if blind_message is not None:
             messages.append(blind_message)
+        if location_guard and player_char.name in (grp.get("members") or []):
+            messages.append({"role": "system", "content": location_guard})
         messages.append({
             "role": "user",
             "content": SPLIT_FOCUS_PROMPT.format(label=label, members=members),
@@ -694,6 +709,9 @@ async def _run_split_generation(
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
             # 取**全队**而非本组成员：别组的队友同样不能被代演
             party_names={player_char.name} | {t.name for t in (teammates or [])},
+            location_context=(
+                location_guard if player_char.name in (grp.get("members") or []) else ""
+            ),
         )
         _persist_narration(db, session_id, result)
         # 世界记忆钩子 c：本组 NPC 台词记入其互动史（听众＝该组成员，信息不跨组共享）
@@ -1054,6 +1072,93 @@ async def run_chat_generation(session_id: str) -> None:
         db.close()
 
 
+def _mentioned_scene_id(
+    game_session, module, events: list, player_text: str,
+) -> str:
+    """从玩家本轮文本中确定性地找出「被提到、已知且非当前」的场景 id。
+
+    这是位置守卫与「要不要去」卡片共用的检测口径：只认文本里出现过的场景关键词，
+    不判断玩家是否真的移动（移动证据由 ``_explicit_player_movement`` 另行判断）。
+    同一轮命中多个地点时只取最后一个——那通常是玩家话里的落点。
+    """
+    text = (player_text or "").strip()
+    if not text or not module:
+        return ""
+    here = game_session.current_scene_id
+    known = session_service.known_scene_ids(module, game_session, events)
+    hit = ""
+    for scene in (module.scenes or []):
+        sid = scene.get("id")
+        if not sid or sid == here or sid not in known:
+            continue
+        if any(kw in text for kw in session_service.scene_unlock_keywords(scene)):
+            hit = sid
+    return hit
+
+
+def _location_intent_guard(
+    db, session_id: str, game_session, module, player_char: Character,
+    events: list, plan: turn_planner.TurnPlan | None,
+) -> str:
+    """玩家只是提到/打算去 B、但没有确定性移动证据 → 清洗 plan 并生成位置硬约束。
+
+    这一道闸跑在 KP 生成之前。此前只有「生成后才补挂建议卡」和「生成后跳过位置迁移」
+    两道事后防线，拦不住模型已经把 B 的所见所闻写进旁白——错误旁白已经广播/落库。
+    现在检测到意图后：
+      1. 把 plan.scene_policy.scene_change 强制清空，消除计划对模型的误导；
+      2. 返回一段最高优先级的系统消息，要求 KP 只演当前地点、不提前描写目标地点。
+    如果玩家本轮确有显式移动（地图 travel 或「我走进图书馆」这类明确动作），
+    这里不拦——那是真的移动，该由 SCENE_CHANGE 正常切换。
+    """
+    target = _mentioned_scene_id(game_session, module, events, _turn_player_text(events, player_char))
+    return _location_intent_guard_for_target(
+        db, session_id, game_session, module, player_char, target, plan,
+    )
+
+
+def _turn_player_text(events: list, player_char: Character) -> str:
+    """本轮该玩家角色自己的 action/dialogue 文本（多条合并）。"""
+    parts: list[str] = []
+    for ev in _current_turn_events(events):
+        if (
+            ev.actor_id == player_char.id
+            and ev.event_type in ("action", "dialogue")
+            and (ev.content or "").strip()
+        ):
+            parts.append(ev.content.strip())
+    return " ".join(parts)
+
+
+def _location_intent_guard_for_target(
+    db, session_id: str, game_session, module, player_char: Character,
+    target: str, plan: turn_planner.TurnPlan | None,
+) -> str:
+    """按已检测到的目标场景生成位置硬约束；无目标/已移动/不可达则返回空串。"""
+    if not target:
+        return ""
+    if target == session_service.get_char_location(game_session, player_char.id):
+        return ""
+    if planned_effects._explicit_player_movement(
+        db, session_id, module, player_char, target,
+    ):
+        return ""
+    if plan is not None:
+        # 模型可能仍把「打算去 B」填成 scene_change；这里在把 plan 交给 KP 前强制收口。
+        plan.scene_policy.scene_change = None
+    here = session_service.get_char_location(game_session, player_char.id)
+    here_title = _scene_name(module, here) or here or "当前场景"
+    target_title = _scene_name(module, target) or target
+    return (
+        "\n\n【位置硬约束——最高优先级，违反即为严重错误】\n"
+        f"玩家本轮只是提到或打算去「{target_title}」，人并没有真的移动；"
+        f"系统确定的当前位置仍是「{here_title}」。\n"
+        "禁止把玩家写成已经到达目标地点：不得描写目标地点的环境、NPC、事件，"
+        "也不得写玩家在那里看见、听见、发现或做了任何事。\n"
+        "可以写当前地点对这句话的反应（NPC 接话、环境变化），或让 NPC 询问"
+        "「是否现在出发」；但真的切换场景只能由玩家确认前往，不能靠旁白替他搬过去。"
+    )
+
+
 def _spoken_travel_intent(
     db, session_id: str, game_session, module, player_text: str,
 ) -> list:
@@ -1070,16 +1175,8 @@ def _spoken_travel_intent(
     text = (player_text or "").strip()
     if not text or not module:
         return []
-    here = game_session.current_scene_id
     events = session_service.get_session_events(db, session_id)
-    known = session_service.known_scene_ids(module, game_session, events)
-    hit = ""
-    for scene in (module.scenes or []):
-        sid = scene.get("id")
-        if not sid or sid == here or sid not in known:
-            continue
-        if any(kw in text for kw in session_service.scene_unlock_keywords(scene)):
-            hit = sid
+    hit = _mentioned_scene_id(game_session, module, events, text)
     if not hit:
         return []
     chunks, _note = turn_effects.travel_suggest_event(
@@ -1112,6 +1209,11 @@ async def _run_kp_turn(
     # SAN 守卫基线：本次续写生成前的最大 seq，用于判断 KP 是否已自行掷过 SAN（幂等）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
     events = session_service.get_session_events(db, session_id)
+    # 检定申请/投骰续写等旁路同样可能踩「人在 A、旁白写 B」：这里没有 planner 清洗，
+    # 直接复用生成前位置硬闸（plan=None，只注入约束）。
+    location_guard = _location_intent_guard(
+        db, session_id, game_session, module, player_char, events, None,
+    )
     rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
     module_rag_enabled = getattr(module, "rag_status", "") == "ready"
     party_ids = {player_char.id} | {t.id for t in (party_others or [])}
@@ -1124,6 +1226,8 @@ async def _run_kp_turn(
         module_lookup_enabled=module_rag_enabled,
         recall_enabled=event_recall.is_enabled(game_session),
     )
+    if location_guard:
+        messages.append({"role": "system", "content": location_guard})
     messages.append({"role": "user", "content": user_prompt})
 
     kp = KPAgent(llm)
@@ -1136,6 +1240,17 @@ async def _run_kp_turn(
     except asyncio.CancelledError:
         _persist_narration(db, session_id, res)
         raise
+    if location_guard:
+        # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
+        validation = await turn_context.turn_validator.validate_turn_narration(
+            llm, turn_planner.TurnPlan(), res[0],
+            turn_inputs=_shown_turn_context(events, party_ids),
+            party_names={player_char.name} | {t.name for t in (party_others or [])},
+            location_context=location_guard,
+        )
+        if validation is not None and validation.violated:
+            logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
+            res[0] = validation.corrected_narration
     _persist_narration(db, session_id, res)
     # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
     _record_npc_say_memory(

@@ -7,9 +7,12 @@
 
 from __future__ import annotations
 
+import copy
+
 from sqlalchemy.orm import Session
 
 from app.models.character import Character
+from app.models.chase_state import ChaseState
 from app.models.session import GameSession
 from app.rules.coc import chase as engine
 from app.services import session_service
@@ -29,18 +32,23 @@ def _chunk(t: str, content: str = "", **extra) -> RoomEvent:
 
 
 def get_chase(session: GameSession) -> dict | None:
-    c = (session.world_state or {}).get("chase")
-    return c if c and c.get("active") else None
+    # 追逐态已拆到独立表（chase_states）。深拷贝：调用方（resolve_chase_round）会在返回的
+    # state 上原地改 gap/round，不能碰到 ORM 挂着的 JSON 值（与 get_combat 同一口径）。
+    cs = session.chase_state
+    c = cs.state if cs is not None else None
+    return copy.deepcopy(c) if c and c.get("active") else None
 
 
 def _save(db: Session, session_id: str, state: dict | None) -> None:
-    session = db.get(GameSession, session_id)
-    ws = dict(session.world_state or {})
+    # 唯一写入口：state=None → 删行（结束追逐）；否则 upsert 该会话的追逐态行。
+    cs = db.get(ChaseState, session_id)   # session_id 即主键，1:1
     if state is None:
-        ws.pop("chase", None)
+        if cs is not None:
+            db.delete(cs)
+    elif cs is None:
+        db.add(ChaseState(session_id=session_id, state=state))
     else:
-        ws["chase"] = state
-    session.world_state = ws
+        cs.state = state
     db.commit()
 
 
@@ -130,9 +138,11 @@ def _end_chase(db: Session, session_id: str, state: dict, outcome: str) -> list[
     summary = {"outcome": outcome, "rounds": state["round"],
                "casualties": [], "hp_after": {}}
     session = db.get(GameSession, session_id)
+    cs = db.get(ChaseState, session_id)
+    if cs is not None:
+        db.delete(cs)   # 追逐态已拆表：结束 = 删该会话的 chase_states 行，不再 world_state.pop("chase")
     ws = dict(session.world_state or {})
     ws["combat_result"] = summary   # 复用同一折回通道
-    ws.pop("chase", None)
     session.world_state = ws
     db.commit()
     label = {"escaped": "追逐结束：成功甩脱追兵。", "caught": "追逐结束：被追上了！"}.get(outcome, "追逐结束。")

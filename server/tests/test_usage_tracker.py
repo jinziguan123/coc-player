@@ -7,16 +7,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.ai import usage_tracker
-from app.models import Base, Character, GameSession, Module  # noqa: F401
+from app.models import Base, Character, GameSession, Module, SessionStats  # noqa: F401
 
 
 def test_accumulate_is_monotonic_pure():
-    ws = {}
-    ws = usage_tracker.accumulate(ws, {"prompt_tokens": 100, "completion_tokens": 20,
-                                       "total_tokens": 120, "calls": 2})
-    ws = usage_tracker.accumulate(ws, {"prompt_tokens": 50, "completion_tokens": 10,
+    su = usage_tracker.accumulate(None, {"prompt_tokens": 100, "completion_tokens": 20,
+                                         "total_tokens": 120, "calls": 2})
+    su = usage_tracker.accumulate(su, {"prompt_tokens": 50, "completion_tokens": 10,
                                        "total_tokens": 60, "calls": 1})
-    assert ws["session_usage"] == {
+    assert su == {
         "prompt_tokens": 150, "completion_tokens": 30, "reasoning_tokens": 0,
         "total_tokens": 180, "cache_read_tokens": 0, "cache_write_tokens": 0,
         "calls": 3,
@@ -24,9 +23,9 @@ def test_accumulate_is_monotonic_pure():
 
 
 def test_accumulate_does_not_mutate_input():
-    ws0 = {"other": 1}
-    ws1 = usage_tracker.accumulate(ws0, {"total_tokens": 5, "calls": 1})
-    assert "session_usage" not in ws0 and ws1["other"] == 1
+    su0 = {"total_tokens": 0, "calls": 0}
+    su1 = usage_tracker.accumulate(su0, {"total_tokens": 5, "calls": 1})
+    assert su0["total_tokens"] == 0 and su1["total_tokens"] == 5
 
 
 def test_add_snapshot_scoped_to_task():
@@ -84,7 +83,7 @@ def test_tracked_persists_session_usage_and_accumulates(db_session):
     asyncio.run(usage_tracker.tracked(sid, gen(100)))
     asyncio.run(usage_tracker.tracked(sid, gen(50)))
 
-    su = db_session().get(GameSession, sid).world_state["session_usage"]
+    su = db_session().get(SessionStats, sid).session_usage
     assert su["total_tokens"] == (101 + 51) and su["calls"] == 2
 
 
@@ -97,5 +96,5 @@ def test_tracked_records_usage_even_on_exception(db_session):
 
     with pytest.raises(RuntimeError):
         asyncio.run(usage_tracker.tracked(sid, boom()))
-    su = db_session().get(GameSession, sid).world_state["session_usage"]
+    su = db_session().get(SessionStats, sid).session_usage
     assert su["total_tokens"] == 35 and su["calls"] == 1   # 半截生成也计入

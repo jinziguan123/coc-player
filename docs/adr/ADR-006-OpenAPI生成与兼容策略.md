@@ -13,8 +13,9 @@
 2. 使用 `openapi-typescript` 生成 `apps/web/src/api/generated.ts`，生成命令为 `pnpm api:generate`。
 3. 保持后端当前 snake_case，不在生成阶段隐式转换字段命名。
 4. SSE `/live`、流式 chunk、动态 metadata 和未声明 `response_model` 的匿名响应暂时属于手写协议边界；后续通过补充 Pydantic response model 逐步收紧。
+6. SPA 前端回退路由 `/{full_path:path}` 属于部署实现而非 REST API，显式 `include_in_schema=False`，不进入 OpenAPI——否则契约会随被 gitignore 的 `apps/web/dist` 是否存在而漂移。
 5. CI 必须重新导出 OpenAPI 与 TypeScript 类型并执行 diff 门禁；破坏性 API 变更必须同步迁移、版本或兼容层。
-6. 删除未被业务代码引用且已漂移的 `packages/shared`，不再维护第二套手写共享类型。
+7. 删除未被业务代码引用且已漂移的 `packages/shared`，不再维护第二套手写共享类型。
 
 ## 后果
 

@@ -6,7 +6,7 @@ import { useModuleStore } from '../stores/moduleStore'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiUpCard, GiScrollUnfurled, GiReturnArrow, GiArchiveResearch } from 'react-icons/gi'
-import { Loader2 } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 import { staggerStyle } from '@/lib/stagger'
 
 const ALLOWED_EXTS = ['txt', 'md', 'pdf', 'docx', 'doc', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
@@ -132,14 +132,16 @@ export function ModulePage() {
   return (
     // 上传区是线性表单（窄栏更好用），列表是并列卡片（放宽让网格铺开）——分别限宽
     <div className="max-w-[100rem]">
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate(-1)} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
+      <div className="page-head">
+        <button onClick={() => navigate(-1)} className="btn-secondary btn-sm flex items-center gap-1">
           <GiReturnArrow /> 返回
         </button>
-        <h2 className="page-title !mb-0">模组管理</h2>
-        <button onClick={() => navigate('/modules/new')} className="ml-auto btn-primary flex items-center gap-1 text-sm">
-          <GiUpCard /> 新建模组
-        </button>
+        <h2 className="page-title">模组管理</h2>
+        <div className="page-head-actions">
+          <button onClick={() => navigate('/modules/new')} className="btn-primary btn-sm flex items-center gap-1">
+            <GiUpCard /> 新建模组
+          </button>
+        </div>
       </div>
 
       <div className="card mb-8 max-w-3xl">
@@ -152,11 +154,10 @@ export function ModulePage() {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           onClick={() => fileRef.current?.click()}
-          className="border-2 border-dashed rounded-md p-6 mb-3 text-center cursor-pointer transition-colors"
-          style={{
-            borderColor: dragOver ? 'var(--color-accent)' : 'var(--color-border)',
-            background: dragOver ? 'rgba(212, 162, 78, 0.07)' : 'rgba(255, 255, 255, 0.03)',
-          }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
+          role="button"
+          tabIndex={0}
+          className={`dropzone mb-3 ${dragOver ? 'dropzone--over' : ''}`}
         >
           <input
             ref={fileRef}
@@ -180,7 +181,7 @@ export function ModulePage() {
             </div>
           ) : (
             <div>
-              <GiUpCard className="mx-auto text-2xl mb-2" style={{ color: 'var(--color-text-secondary)' }} />
+              <GiUpCard className="dropzone-icon" aria-hidden="true" />
               <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                 拖拽文件到此处，或点击选择（可多选）
               </p>
@@ -200,15 +201,16 @@ export function ModulePage() {
                 style={{ background: 'var(--color-bg-tertiary)' }}
               >
                 <span className="truncate flex-1 mr-2">{f.name}</span>
-                <span className="text-xs mr-2 flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
+                <span className="text-xs mr-2 flex-shrink-0 font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                   {(f.size / 1024).toFixed(1)} KB
                 </span>
+                {/* 图标守则：删除走 lucide 矢量图标，不用 × 字符 */}
                 <button
                   onClick={(e) => { e.stopPropagation(); removeFile(i) }}
-                  className="text-xs px-1 rounded hover:bg-[var(--color-danger-deep)] hover:text-white transition-colors"
-                  style={{ color: 'var(--color-danger)' }}
+                  className="icon-btn icon-btn--danger !w-6 !h-6"
+                  title={`移除 ${f.name}`}
                 >
-                  ×
+                  <X size={12} />
                 </button>
               </div>
             ))}
@@ -257,7 +259,14 @@ export function ModulePage() {
       {loading ? (
         <p style={{ color: 'var(--color-text-secondary)' }}>加载中...</p>
       ) : modules.length === 0 ? (
-        <p style={{ color: 'var(--color-text-secondary)' }}>暂无模组，请上传</p>
+        <div className="empty-state">
+          <span className="empty-state-icon"><GiScrollUnfurled /></span>
+          <span className="empty-state-title">书架上还空着</span>
+          <span className="empty-state-hint">
+            上传一份剧本（txt / md / pdf / 图片），AI 会把它解析成场景、NPC 与线索；
+            也可以点右上角「新建模组」从零开始编排。
+          </span>
+        </div>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           {modules.map((m, i) => (
@@ -299,7 +308,7 @@ export function ModulePage() {
                   {m.rag_status !== 'indexing' && (
                     <button
                       onClick={() => rebuildRag(m.id)}
-                      className="chip chip--accent hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
+                      className="chip chip--accent chip-btn chip-btn--accent"
                       title="（重）建模组原文索引：让 KP 跑团时能检索并引用模组原文"
                     >
                       <GiArchiveResearch /> 重建索引
@@ -314,7 +323,7 @@ export function ModulePage() {
                     {(open) => (
                       <button
                         onClick={open}
-                        className="chip chip--accent hover:!bg-[var(--color-accent)] hover:!text-[var(--color-on-accent)] transition-colors"
+                        className="chip chip--accent chip-btn chip-btn--accent"
                       >
                         查看/编辑
                       </button>
@@ -329,7 +338,7 @@ export function ModulePage() {
                     {(open) => (
                       <button
                         onClick={open}
-                        className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                        className="chip chip--danger chip-btn chip-btn--danger"
                       >
                         删除
                       </button>

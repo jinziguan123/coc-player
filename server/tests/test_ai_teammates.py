@@ -438,7 +438,7 @@ def test_rollback_last_kp_output_keeps_inputs_and_dice(db_factory):
     assert sum(1 for e in evs if e.event_type == "dice") == 2
     # 待投骰请求对应的 pending_check 也被清掉
     sess = db.get(GameSession, session.id)
-    assert not (sess.world_state or {}).get("pending_checks")
+    assert not (sess.turn_state or {}).get("pending_checks")
 
 
 def test_old_events_summary_keeps_recent_not_opening():
@@ -792,7 +792,7 @@ def _seed_stay(db):
          {"character_id": mate.id, "role": "ai"}],
     )
     session.current_scene_id = "office"
-    session.world_state = {**(session.world_state or {}), "visited_scenes": ["office", "street"]}
+    session.navigation.visited_scenes = ["office", "street"]
     db.commit()
     return db.get(GameSession, session.id), module, hero, mate
 
@@ -811,7 +811,7 @@ def test_team_stay_pins_location_and_marks_event(db_factory, monkeypatch):
     )))
 
     session = db.get(GameSession, session.id)
-    assert (session.world_state.get("party_locations") or {}).get(mate.id) == "office"
+    assert (session.navigation.party_locations if session.navigation else {}).get(mate.id) == "office"
     ev = next(e for e in session_service.get_session_events(db, session.id)
               if e.actor_id == mate.id)
     assert (ev.metadata_ or {}).get(session_service.STAY_META_KEY) is True

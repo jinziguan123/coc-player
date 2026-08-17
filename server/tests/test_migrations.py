@@ -32,6 +32,13 @@ def test_run_migrations_builds_full_schema(tmp_path, monkeypatch):
     assert "module_chunks" in tables
     assert "modules" in tables
     assert "game_sessions" in tables
+    # 战斗/追逐/运行统计/战报/导航/台账拆表（20260814）：六张独立表在迁移链里
+    assert "combat_states" in tables
+    assert "chase_states" in tables
+    assert "session_stats" in tables
+    assert "session_recaps" in tables
+    assert "session_navigation" in tables
+    assert "session_ledger" in tables
 
     # Handouts 迁移（20260703）：modules 表带 handouts JSON 列
     con = sqlite3.connect(db_file)
@@ -118,6 +125,379 @@ def test_migration_backs_up_before_upgrading(tmp_path, monkeypatch):
     assert backups, "迁移前应生成备份"
     cur_after, head2 = database.migration_status()
     assert cur_after == head2  # 已升到最新
+
+
+def test_combat_state_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里 world_state.combat 在升级时搬进 combat_states，并从 world_state 移除（ADR-003 第 5 条）。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "combat-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    # 回退到拆表迁移之前（固定版本，而非相对步数），模拟「旧库：战斗态还在 world_state 里」
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "combat": {"active": True, "round": 3, "initiative": []},
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用本迁移：回填 + 移除 combat 键
+
+    con = sqlite3.connect(db_file)
+    try:
+        row = con.execute(
+            "SELECT state, version FROM combat_states WHERE session_id = 's1'"
+        ).fetchone()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert row is not None
+    assert json.loads(row[0]) == {"active": True, "round": 3, "initiative": []}
+    assert row[1] == 1
+    ws = json.loads(ws_raw[0])
+    assert "combat" not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_chase_state_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里 world_state.chase 在升级时搬进 chase_states，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "chase-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    # 回退到拆表迁移之前（固定版本），模拟「旧库：追逐态还在 world_state 里」
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "chase": {"active": True, "round": 2, "gap": 1},
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用 combat + chase 迁移：回填 + 移除
+
+    con = sqlite3.connect(db_file)
+    try:
+        row = con.execute(
+            "SELECT state, version FROM chase_states WHERE session_id = 's1'"
+        ).fetchone()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert row is not None
+    assert json.loads(row[0]) == {"active": True, "round": 2, "gap": 1}
+    assert row[1] == 1
+    ws = json.loads(ws_raw[0])
+    assert "chase" not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_session_stats_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里 usage/rag 三个键在升级时搬进 session_stats，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "stats-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "session_usage": {"total_tokens": 999, "calls": 7},
+                    "turn_usage": {"prompt_tokens": 100},
+                    "rag_stats": {"totals": {"calls": 3}},
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用 combat/chase/session_stats 迁移：回填 + 移除
+
+    con = sqlite3.connect(db_file)
+    try:
+        row = con.execute(
+            "SELECT session_usage, turn_usage, rag_stats, version "
+            "FROM session_stats WHERE session_id = 's1'"
+        ).fetchone()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert row is not None
+    assert json.loads(row[0]) == {"total_tokens": 999, "calls": 7}
+    assert json.loads(row[1]) == {"prompt_tokens": 100}
+    assert json.loads(row[2]) == {"totals": {"calls": 3}}
+    assert row[3] == 1
+    ws = json.loads(ws_raw[0])
+    for key in ("session_usage", "turn_usage", "rag_stats"):
+        assert key not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_session_recaps_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里 world_state.recaps 列表在升级时摊成 session_recaps 行，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "recaps-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "recaps": [
+                        {"title": "第一战", "up_to_seq": 5},
+                        {"title": "第二战", "up_to_seq": 9},
+                    ],
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移：回填 + 移除
+
+    con = sqlite3.connect(db_file)
+    try:
+        rows = con.execute(
+            "SELECT ordinal, entry FROM session_recaps "
+            "WHERE session_id = 's1' ORDER BY ordinal"
+        ).fetchall()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert [r[0] for r in rows] == [0, 1]
+    assert [json.loads(r[1])["title"] for r in rows] == ["第一战", "第二战"]
+    ws = json.loads(ws_raw[0])
+    assert "recaps" not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_turn_confirm_migration_moves_to_turn_state(tmp_path, monkeypatch):
+    """旧存档里 world_state.turn_confirm 在升级时搬进 turn_state 列，并从 world_state 移除。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "turn-confirm-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({"turn_confirm": {"c1": True}, "flags": {"door_open": True}}),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移
+
+    con = sqlite3.connect(db_file)
+    try:
+        ts_raw, ws_raw = con.execute(
+            "SELECT turn_state, world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert json.loads(ts_raw) == {"turn_confirm": {"c1": True}}
+    ws = json.loads(ws_raw)
+    assert "turn_confirm" not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_turn_ephemeral_migration_moves_to_turn_state(tmp_path, monkeypatch):
+    """旧存档里 pending_checks/pending_item_gains/item_delta_keys 升级时搬进 turn_state 列。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "turn-ephemeral-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "pending_checks": {"chk1": {"id": "chk1", "skill": "侦查"}},
+                    "pending_item_gains": [{"name": "怀表", "qty": 1}],
+                    "item_delta_keys": ["g|1|怀表|c1"],
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移
+
+    con = sqlite3.connect(db_file)
+    try:
+        ts_raw, ws_raw = con.execute(
+            "SELECT turn_state, world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    ts = json.loads(ts_raw)
+    assert ts["pending_checks"] == {"chk1": {"id": "chk1", "skill": "侦查"}}
+    assert ts["pending_item_gains"] == [{"name": "怀表", "qty": 1}]
+    assert ts["item_delta_keys"] == ["g|1|怀表|c1"]
+    ws = json.loads(ws_raw)
+    for key in ("pending_checks", "pending_item_gains", "item_delta_keys"):
+        assert key not in ws
+    assert ws["flags"] == {"door_open": True}
+
+
+def test_navigation_and_ledger_migration_backfills_old_saves(tmp_path, monkeypatch):
+    """旧存档里导航/台账键升级时搬进 session_navigation / session_ledger。"""
+    import json
+
+    from alembic import command
+
+    db_file = tmp_path / "nav-ledger-backfill.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    command.downgrade(database._alembic_config(), "f5c1d83b7e24")
+
+    con = sqlite3.connect(db_file)
+    try:
+        con.execute(
+            "INSERT INTO game_sessions (id, module_id, status, world_state) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                "s1",
+                "m1",
+                "active",
+                json.dumps({
+                    "party_locations": {"c1": "scene_a"},
+                    "visited_scenes": ["scene_a"],
+                    "san_checked": ["源|c1"],
+                    "scene_events_seen": {"scene_a:0": {"seq": 3}},
+                    "flags": {"door_open": True},
+                }),
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    database.run_migrations()  # 应用全部拆表迁移
+
+    con = sqlite3.connect(db_file)
+    try:
+        nav = con.execute(
+            "SELECT party_locations, visited_scenes FROM session_navigation "
+            "WHERE session_id = 's1'"
+        ).fetchone()
+        led = con.execute(
+            "SELECT san_checked, scene_events_seen FROM session_ledger "
+            "WHERE session_id = 's1'"
+        ).fetchone()
+        ws_raw = con.execute(
+            "SELECT world_state FROM game_sessions WHERE id = 's1'"
+        ).fetchone()
+    finally:
+        con.close()
+
+    assert nav is not None
+    assert json.loads(nav[0]) == {"c1": "scene_a"}
+    assert json.loads(nav[1]) == ["scene_a"]
+    assert led is not None
+    assert json.loads(led[0]) == ["源|c1"]
+    assert json.loads(led[1]) == {"scene_a:0": {"seq": 3}}
+    ws = json.loads(ws_raw[0])
+    for key in ("party_locations", "visited_scenes", "san_checked", "scene_events_seen"):
+        assert key not in ws
+    assert ws["flags"] == {"door_open": True}
 
 
 def test_downgrade_scenario_rejected(tmp_path, monkeypatch):

@@ -44,16 +44,11 @@ export function ConfirmDialog({
           <button onClick={() => setOpen(false)} className="btn-secondary" disabled={loading}>
             取消
           </button>
+          {/* 与全站危险按钮同一质感（.btn-danger：血酒红实心 + hover 辉光 + 焦点环） */}
           <button
             onClick={handleConfirm}
             disabled={loading}
-            className="text-sm px-4 py-1.5 rounded-[3px] font-semibold transition-colors cursor-pointer"
-            style={{
-              background: 'var(--color-danger-deep)',
-              color: 'var(--color-on-danger)',
-              border: '1px solid var(--color-danger-deep)',
-              opacity: loading ? 0.5 : 1,
-            }}
+            className="btn-danger"
           >
             {loading ? '处理中...' : confirmLabel}
           </button>

@@ -35,8 +35,29 @@ _REFERENCE_BEFORE_RE = re.compile(
 _SAY_PREFIX_RE = re.compile(
     r"([一-龥·]{2,6})(?:说道|说|问道|问|答道|回答|开口道|开口|低声道|低声|喊道|叫道|笑道|沉声道|轻声道|道|：|:)[：:，,]?\s*$"
 )
+# 无名角色说话前缀的兜底解析：不靠上面的贪婪正则（它会把「面包房老板娘玛莎笑了笑：」
+# 截成「娘玛莎笑了笑」）。逐个剥掉句尾说话动词后，从右往左试 2~6 字候选，
+# 用 is_plausible_npc_name 与「是否是独立称呼」筛选——护工/老板娘/小姑娘这类
+# 模组没写的路人必须归到自己名下，不能落进最近一个模组 NPC 的气泡。
+_GENERIC_SPEAK_VERBS = (
+    "低声道", "沉声道", "轻声道", "高声道", "冷声道", "低声说", "高声说", "轻声说",
+    "开口道", "回答道", "问道", "答道", "笑道", "喊道", "叫道", "笑了笑",
+    "说道", "回答", "开口", "说", "道", "问", "答",
+)
+#: 候选开头不能是这些量词/领属助词——「一个护工」应剥成「护工」而非「个护工」。
+_GENERIC_LEAD_REJECT = set("一个这那每某的之位名")
+#: 没有明确说话动词、只有冒号时，候选至少得带这些「人味」特征才认；
+#: 否则「墙上的四个门：」会被当成一个叫「四个门」的人。
+_GENERIC_HUMAN_HINTS = "人男女老小爷叔伯婆姨姑娘先生女士太太夫人小姐护士护工贩匠师员官长"
+#: 组合称呼的合法开头（身份词）：有明确说话动词时优先认「老板娘玛莎」而不是只剩「玛莎」。
+_GENERIC_ROLE_STARTS = (
+    "老板娘", "老板", "护士长", "小姑娘", "面包房", "报摊", "护工", "男人", "女人",
+    "陌生人", "店员", "摊主", "店主", "司机", "医生", "警察", "警员", "修女", "牧师",
+    "门房", "报童", "老太太", "老先生", "先生", "女士", "太太", "夫人", "小姐",
+)
 _SPEAK_VERB_ALT = (
-    r"(?:说道|说|问道|问|答道|答|开口道|开口|低声道|低声|喊道|叫道|笑道|沉声道|轻声道|道)?"
+    r"(?:低声道|沉声道|轻声道|高声道|冷声道|低声说|高声说|轻声说|说道|说|问道|问|答道|答|"
+    r"开口道|开口|喊道|叫道|笑道|笑了笑|道)?"
 )
 # 闭引号「后面」紧跟的说话动词：用于「台词在前、说话人后置」的写法（如『“……”她说』
 # 『“……”她回头对你说』）——这类现有「看引号前文」的判定抽不出说话人，会把台词漏成旁白。
@@ -60,6 +81,16 @@ def _strip_speaker_prefix(text: str, speaker: str) -> str:
     """抹掉旁白行尾的「<说话人名>[说道]：」前缀（按完整名/局部名删，长名也不残留半截）。"""
     names = [speaker] + [p for p in speaker.split("·") if len(p) >= 2]
     for nm in sorted(names, key=len, reverse=True):
+        # 先做「最大前缀」删除：泛称只拿到「老板娘玛莎」，正文写的却是
+        # 「面包房老板娘玛莎笑了笑：」——把说话动词前至多 12 个连续中文/
+        # 领属助词一并吞掉，避免旁白里残留「面包房」「一个」这类断尾巴。
+        # 吞到标点/换行为止，不会越过句界吃掉上一句。
+        new = re.sub(
+            r"[一-龥的之]{0,12}" + re.escape(nm) + _SPEAK_VERB_ALT + r"[：:，,]?\s*$",
+            "", text,
+        )
+        if new != text:
+            return new
         new = re.sub(re.escape(nm) + _SPEAK_VERB_ALT + r"[：:，,]?\s*$", "", text)
         if new != text:
             return new
@@ -210,29 +241,63 @@ async def filter_narration_stream(
                 return any(p in text for p in parts)
         return speaker in text
 
-    def _prefix_speaker(s: str) -> str | None:
-        """行尾「X说道：」「X：」→ 说话人（命中已知 NPC 局部名则归一；玩家方角色返回 None 抑制）。"""
-        m = _SAY_PREFIX_RE.search(s)
-        if not m:
-            return None
-        name = m.group(1)
+    def _known_canonical(name: str) -> str | None:
         for canonical, parts, is_player in npc_matchers:
             if name == canonical or name in parts or name in canonical:
                 return None if is_player else canonical
-        # 泛称（护工/老板…）：但排除代词起头与动词短语（如「他开口」「修女在回答」），它们不是名字，
-        # 交由「最近 NPC 主语」判定真正的说话人（玩家方角色会被那里排除→抑制）。
-        # 含「在」= 进行体动词短语（在说/在回答/在念），是动作描写而非说话前缀，一律排除。
-        if name[0] in "他她它我你咱其这那您" or any(v in name for v in "说道问答开口喊叫笑声在"):
+        return None
+
+    def _generic_prefix_speaker(s: str) -> str | None:
+        """无名角色说话前缀的右剥离式解析（见 _GENERIC_SPEAK_VERBS 注释）。"""
+        base = s.rstrip("：:，, \t")
+        verb_matched = False
+        # 从最长动词开始、可连续剥离：「低声说」要整个拿掉，不能只剥「说」留下「低声」。
+        for verb in sorted(_GENERIC_SPEAK_VERBS, key=len, reverse=True):
+            if base.endswith(verb):
+                base = base[: -len(verb)].rstrip("：:，, \t")
+                verb_matched = True
+                break
+        if not base:
             return None
-        # 仅当该泛称是「独立称呼」——紧贴小句边界（句首/标点/换行后）才认作说话人；
-        # 否则像「他指了指墙上的四个门：」这种以冒号收尾的叙述会把「墙上的四个门」误当名字。
-        start = m.start(1)
-        if start > 0 and s[start - 1] not in _SUBJECT_BOUNDARY:
-            return None
-        # 合理性校验：挡掉旁白碎片/结构指称被当泛称说话人（「第七节：」「但字距稍疏：」）
-        if not world_memory.is_plausible_npc_name(name):
-            return None
-        return name
+        # 第一轮：优先认「老板娘玛莎」「护士长」这类以明确身份词开头的组合称呼；
+        # 第二轮：退回最短的可用候选（玛莎/护工/男人）。
+        candidates: list[tuple[int, str]] = []
+        for length in range(2, 7):
+            start = len(base) - length
+            if start < 0:
+                continue
+            candidate = base[start:]
+            known = _known_canonical(candidate)
+            if known is not None:
+                return known
+            if not world_memory.is_plausible_npc_name(candidate):
+                continue
+            if candidate[0] in _GENERIC_LEAD_REJECT:
+                continue
+            prev = base[start - 1] if start > 0 else ""
+            if not verb_matched:
+                # 只有冒号、没有明确说话动词：要求候选要么是小句主语（有边界），
+                # 要么带明显「人味」称呼——否则「墙上的四个门：」会被当成说话人。
+                if prev not in _SUBJECT_BOUNDARY and not any(
+                    mark in candidate for mark in _GENERIC_HUMAN_HINTS
+                ):
+                    continue
+            candidates.append((start, candidate))
+        for _start, candidate in candidates:
+            if any(candidate.startswith(role) for role in _GENERIC_ROLE_STARTS):
+                return candidate
+        return candidates[0][1] if candidates else None
+
+    def _prefix_speaker(s: str) -> str | None:
+        """行尾「X说道：」「X：」→ 说话人（命中已知 NPC 局部名则归一；玩家方角色返回 None 抑制）。"""
+        m = _SAY_PREFIX_RE.search(s)
+        if m:
+            known = _known_canonical(m.group(1))
+            if known is not None:
+                return known
+            # 旧正则没认出的（长称呼/泛称/「笑了笑」）交给右剥离式兜底；
+            # 兜底会重新做代词、边界与合理性校验，因此这里不再提前 return None。
+        return _generic_prefix_speaker(s)
 
     def _recent_npc_subject(s: str) -> str | None:
         """最近作为「小句主语」出现的非玩家 NPC（名字紧跟在句首/句末标点后）→ 其后台词的说话人。

@@ -621,6 +621,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rules/{rule_system}/base-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Base Skills
+         * @description 这组属性下、未加任何点时的技能起始值（母语=EDU、闪避=DEX//2 已填好）。
+         *
+         *     建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避
+         *     是占位的 0，界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的
+         *     `max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 RuleEngine 里实现一次。
+         */
+        post: operations["base_skills_api_rules__rule_system__base_skills_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rules/{rule_system}/calc-skill-points": {
         parameters: {
             query?: never;
@@ -1714,7 +1738,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Recap
-         * @description 生成一份章节战报并存入 world_state.recaps；生成失败返回 502（不落库）。
+         * @description 生成一份章节战报并存入 session_recaps；生成失败返回 502（不落库）。
          */
         post: operations["generate_recap_api_sessions__session_id__recap_post"];
         delete?: never;
@@ -1732,7 +1756,7 @@ export interface paths {
         };
         /**
          * List Recaps
-         * @description 列出本局已生成的战报（world_state.recaps）。
+         * @description 列出本局已生成的战报（session_recaps 表）。
          */
         get: operations["list_recaps_api_sessions__session_id__recaps_get"];
         put?: never;
@@ -2326,23 +2350,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/{full_path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Spa */
-        get: operations["_spa__full_path__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2603,6 +2610,23 @@ export interface components {
             luck_rolls: number[];
             /** Notes */
             notes: components["schemas"]["AgeNote"][];
+        };
+        /** BaseSkillsRequest */
+        BaseSkillsRequest: {
+            /** Base Attributes */
+            base_attributes: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * BaseSkillsResponse
+         * @description 这组属性下、未加任何点时的技能起始值（含属性派生项）。
+         */
+        BaseSkillsResponse: {
+            /** Skills */
+            skills: {
+                [key: string]: number;
+            };
         };
         /** Body_import_from_excel_api_characters_import_excel_post */
         Body_import_from_excel_api_characters_import_excel_post: {
@@ -4782,6 +4806,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplyAgeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    base_skills_api_rules__rule_system__base_skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BaseSkillsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseSkillsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7830,37 +7889,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AIStatus"];
-                };
-            };
-        };
-    };
-    _spa__full_path__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                full_path: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

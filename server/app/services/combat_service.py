@@ -15,11 +15,12 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.models.character import Character
+from app.models.combat_state import CombatState
 from app.models.session import GameSession
 from app.rules.coc import combat as engine
 from app.rules.coc import positioning
 from app.rules.coc.weapons import WEAPON_CATEGORY_ORDER
-from app.services import session_service, world_memory, world_state
+from app.services import session_service, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
@@ -208,7 +209,10 @@ def _char_data(p: dict) -> dict:
 
 
 def get_combat(session: GameSession) -> dict | None:
-    c = (session.world_state or {}).get("combat")
+    # 战斗态已拆到独立表（combat_states），不再塞在 world_state.combat。
+    # 经 GameSession.combat_state 关系取（1:1，懒加载；调用方传入的都是挂在 db 会话上的 session）。
+    cs = session.combat_state
+    c = cs.state if cs is not None else None
     if not (c and c.get("active")):
         return None
     # 深拷贝：调用方在返回的 state 上原地改动（如挂 pending_roll）不会触及 ORM 挂着的 JSON 值——
@@ -217,8 +221,16 @@ def get_combat(session: GameSession) -> dict | None:
 
 
 def _save_combat(db: Session, session_id: str, state: dict | None) -> None:
-    session = db.get(GameSession, session_id)
-    world_state.set_key(db, session, "combat", state)   # state=None → 删除 combat 键（结束战斗）
+    # 唯一写入口：state=None → 删行（结束战斗）；否则 upsert 该会话的战斗态行。
+    cs = db.get(CombatState, session_id)   # session_id 即主键，1:1
+    if state is None:
+        if cs is not None:
+            db.delete(cs)
+    elif cs is None:
+        db.add(CombatState(session_id=session_id, state=state))
+    else:
+        cs.state = state
+    db.commit()
 
 
 def start_combat(db: Session, session_id: str, player_side: list[dict], enemies: list[dict],
@@ -1146,12 +1158,14 @@ def _combat_summary(state: dict, outcome: str) -> dict:
 
 
 def _end_combat(db: Session, session_id: str, state: dict, outcome: str) -> list[str]:
-    """结束战斗：产出结果摘要存 world_state.combat_result，清 combat 态。返回收尾 chunks。"""
+    """结束战斗：产出结果摘要存 world_state.combat_result，清 combat 态（删 combat_states 行）。返回收尾 chunks。"""
     summary = _combat_summary(state, outcome)
     session = db.get(GameSession, session_id)
+    cs = db.get(CombatState, session_id)
+    if cs is not None:
+        db.delete(cs)   # 战斗态已拆表：结束 = 删该会话的 combat_states 行，不再 world_state.pop("combat")
     ws = dict(session.world_state or {})
     ws["combat_result"] = summary
-    ws.pop("combat", None)
     # 打赢了就自动解除此处的封路：「靠 KP 记得 [UNBLOCK_PATH]」是这套机制最容易塌的一环——
     # 忘一次，那条路就永久断着，玩家再也走不过去且不知道为什么。打输/逃走不解除（东西还在）。
     if outcome == "players_win" and session.current_scene_id:

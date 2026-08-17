@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { AlertTriangle, Check, Copy, RefreshCw, UserPlus, X } from 'lucide-react'
+import { GiArtificialIntelligence, GiNetworkBars, GiPaintBrush, GiArchiveResearch } from 'react-icons/gi'
 import { toast } from 'sonner'
 import { api, localApi } from '../api/client'
 import { Switch } from '../components/ui/switch'
@@ -33,10 +34,10 @@ import { AISettingsPanel } from '@/features/settings/AISettingsPanel'
 /* ---------- 二级导航项 ---------- */
 
 const SETTINGS_TABS = [
-  { key: 'ai', label: 'AI 配置' },
-  { key: 'network', label: '联机' },
-  { key: 'appearance', label: '外观' },
-  { key: 'rag', label: 'RAG 统计' },
+  { key: 'ai', label: 'AI 配置', Icon: GiArtificialIntelligence },
+  { key: 'network', label: '联机', Icon: GiNetworkBars },
+  { key: 'appearance', label: '外观', Icon: GiPaintBrush },
+  { key: 'rag', label: 'RAG 统计', Icon: GiArchiveResearch },
   // 未来扩展：{ key: 'game', label: '游戏设置' },
 ] as const
 
@@ -52,57 +53,17 @@ export function SettingsPage() {
 
   return (
     <div style={{ display: 'flex', gap: 0, height: '100%', minHeight: 0 }}>
-      {/* 左侧二级导航 */}
-      <nav
-        style={{
-          width: '10rem',
-          flexShrink: 0,
-          borderRight: '1px solid var(--color-border)',
-          paddingTop: '1rem',
-          background: 'var(--color-bg-secondary)',
-        }}
-      >
-        <div
-          style={{
-            padding: '0 0.75rem 0.75rem',
-            fontFamily: 'var(--font-title)',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            color: 'var(--color-text-secondary)',
-            letterSpacing: '0.05em',
-            textTransform: 'uppercase',
-          }}
-        >
-          设置
-        </div>
-        {SETTINGS_TABS.map((tab) => (
+      {/* 左侧二级导航：与主侧边栏同一套语言（静息灰字 / 选中琥珀 + 左缘色带） */}
+      <nav className="subnav">
+        <div className="subnav-title">设置</div>
+        {SETTINGS_TABS.map(({ key, label, Icon }) => (
           <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: '0.5rem 0.75rem',
-              margin: '0 0 2px 0',
-              border: 'none',
-              borderRadius: '3px',
-              fontSize: '0.875rem',
-              fontFamily: 'var(--font-ui)',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-              background:
-                activeTab === tab.key
-                  ? 'rgba(212, 162, 78, 0.12)'
-                  : 'transparent',
-              color:
-                activeTab === tab.key
-                  ? 'var(--color-text-accent)'
-                  : 'var(--color-text-secondary)',
-              fontWeight: activeTab === tab.key ? 600 : 400,
-            }}
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`subnav-item ${activeTab === key ? 'active' : ''}`}
           >
-            {tab.label}
+            <Icon aria-hidden="true" />
+            {label}
           </button>
         ))}
       </nav>

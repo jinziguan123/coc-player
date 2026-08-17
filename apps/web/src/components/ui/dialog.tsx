@@ -33,7 +33,8 @@ const DialogContent = React.forwardRef<
       onClick={(e) => e.stopPropagation()}
       className={cn(
         'fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2',
-        'rounded-md border p-6 shadow-xl duration-200',
+        // dialog-panel：与 .modal-panel 同一窗体质感（琥珀顶缘高光 + 深层投影）
+        'rounded-md border p-6 dialog-panel duration-200',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',

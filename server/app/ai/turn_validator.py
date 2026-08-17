@@ -42,13 +42,18 @@ def count_antithesis(text: str) -> int:
     return len(_ANTITHESIS_RE.findall(text or ""))
 
 
-def _looks_suspicious(narration: str, plan: TurnPlan, turn_inputs: str = "") -> bool:
+def _looks_suspicious(
+    narration: str, plan: TurnPlan, turn_inputs: str = "", location_context: str = "",
+) -> bool:
     """零成本预筛：值不值得为这段旁白多花一次 LLM 校验调用。
 
     有硬性隐藏信息（safety.do_not_reveal）时，语义泄露的代价高，值得付这次调用成本；
     有本轮玩家输入时还需检查输入回显和越权代演；回复内部出现明显近重复时同样校验。
+    带位置硬约束时必然校验——旁白已经出现「人在 B、地图在 A」的分裂，必须改写落库版本。
     """
     if plan.safety.do_not_reveal:
+        return True
+    if location_context.strip():
         return True
     if _REPORT_STYLE_RE.search(narration):
         return True
@@ -64,6 +69,7 @@ def _looks_suspicious(narration: str, plan: TurnPlan, turn_inputs: str = "") -> 
 def build_validator_messages(
     plan: TurnPlan, narration: str, seen_context: str = "",
     turn_inputs: str = "", party_names: Iterable[str] | None = None,
+    location_context: str = "",
 ) -> list[dict]:
     do_not_reveal = json.dumps(plan.safety.do_not_reveal, ensure_ascii=False)
     seen_block = (
@@ -74,6 +80,10 @@ def build_validator_messages(
         "\n\n【本轮已在界面展示的玩家/队友消息】（只能承接，不得复述、润色或代演）：\n"
         + turn_inputs.strip() + "\n"
     ) if turn_inputs.strip() else ""
+    location_block = (
+        "\n\n【系统确定的当前位置硬约束】（旁白发生地点必须与此一致，违反必须改写）：\n"
+        + location_context.strip() + "\n"
+    ) if location_context.strip() else ""
     # 名单是「代演」这条的判据。不给的话校验器只能靠猜——线上真实误判过：一个一路
     # 跟着主角行动、台词很多的 NPC（香澄澪）被当成了队友，于是它把这个 NPC 的动作、
     # 姿势、内心统统当作「代演玩家」删掉，等于把 KP 该写的东西改没了。
@@ -100,7 +110,7 @@ def build_validator_messages(
                 "本轮必须对玩家保密的**隐藏真相**（其身份/本质/成因/幕后关联/后果，玩家须靠游戏"
                 "自行揭开）：\n"
                 f"{do_not_reveal}\n"
-                + party_block + seen_block + turn_block +
+                + party_block + seen_block + turn_block + location_block +
                 "\n判定标准——**只拦「点破真相」，不拦「亲历现象」**：\n"
                 "· 违规 = 旁白**命名、点破或解释**了上述隐藏真相：直接说出它是什么/是谁/为何发生/"
                 "将导致什么；或让角色的内心「已然明白/认出」了这层真相（等于把答案塞进玩家脑子）；"
@@ -108,17 +118,20 @@ def build_validator_messages(
                 "· **不违规** = 如实描写角色**正在亲眼目睹/亲耳所闻/亲身感受**的感官现象本身——"
                 "哪怕它正是某个隐藏真相的外在显现。恐怖的观感、反常的景象、说不清的怪异、扭曲的画面，"
                 "都是合法氛围；**绝不能因为它「指向」某个秘密就删掉**。玩家看得见的东西，就能写。\n\n"
-                "此外无论上面是否为空，以下五类也算违规：\n"
+                "此外无论上面是否为空，以下六类也算违规：\n"
                 "1. 用【标题】加项目符号列表的「汇报体」总结状态/进展/待触发条件，而非自然叙事；\n"
                 "2. 旁白里出现了 flag 名、线索/NPC 的内部 id、JSON 字段名等技术性标识；\n"
                 "3. 重复、转述或文学化重演【本轮已展示消息】中的玩家/队友台词或动作；\n"
                 "4. 为玩家/队友补写消息中没有声明的主动动作、姿势、表情、情绪、心理、判断、决定或台词。"
                 "环境对角色造成的客观现象、NPC 主动对角色作出的反应不算代演；\n"
-                "5. 同一条旁白内部出现两版相同或高度相似的句段，像写到一半重新起笔。\n\n"
+                "5. 同一条旁白内部出现两版相同或高度相似的句段，像写到一半重新起笔。\n"
+                "6. 位置越界：旁白把玩家/队伍写成已经到达、进入或在【系统确定的当前位置硬约束】"
+                "以外的场景中活动，或提前描写该场景的环境、NPC 与玩家所见所闻。玩家只是提到/"
+                "打算去某地不等于已经到达；只有系统位置真的切换后才可以叙述那里的见闻。\n\n"
                 f"待检查的旁白：\n{narration}\n\n"
                 '不违规时只返回 {"violated": false}，不要回填旁白；\n'
                 '违规时返回 {"violated": true, "reason": "简述违规之处", '
-                '"corrected_narration": "改写后的旁白——删掉泄密、输入回显、玩家代演和后写的重复版本；'
+                '"corrected_narration": "改写后的旁白——删掉泄密、输入回显、玩家代演、位置越界和后写的重复版本；'
                 '保留环境的新后果、NPC 反应/台词、角色可客观感知的现象与氛围，尽量少改动、不改文风"}\n'
                 "只输出 JSON。"
             ),
@@ -129,7 +142,7 @@ def build_validator_messages(
 async def validate_turn_narration(
     llm: Any, plan: TurnPlan | None, narration: str, seen_context: str = "",
     turn_inputs: str = "", on_start: Callable[[], None] | None = None,
-    party_names: Iterable[str] | None = None,
+    party_names: Iterable[str] | None = None, location_context: str = "",
 ) -> TurnValidation | None:
     """校验一段已生成的旁白是否违反本轮裁定计划的硬约束，违反则给出改写版本。
 
@@ -143,13 +156,14 @@ async def validate_turn_narration(
     """
     if plan is None or llm is None or not narration.strip():
         return None
-    if not _looks_suspicious(narration, plan, turn_inputs):
+    if not _looks_suspicious(narration, plan, turn_inputs, location_context):
         return None
     if on_start is not None:
         on_start()
 
     messages = build_validator_messages(
         plan, narration, seen_context, turn_inputs, party_names=party_names,
+        location_context=location_context,
     )
     try:
         # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限会把 JSON 截成半截

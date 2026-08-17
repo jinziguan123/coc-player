@@ -8,7 +8,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
+    from app.models.chase_state import ChaseState
+    from app.models.combat_state import CombatState
+    from app.models.session_ledger import SessionLedger
+    from app.models.session_navigation import SessionNavigation
     from app.models.session_participant import SessionParticipant
+    from app.models.session_recap import SessionRecap
+    from app.models.session_stats import SessionStats
 
 
 class GameSession(Base, UUIDMixin, TimestampMixin):
@@ -49,4 +55,28 @@ class GameSession(Base, UUIDMixin, TimestampMixin):
         "SessionParticipant",
         cascade="all, delete-orphan",
         order_by="SessionParticipant.seat_order",
+    )
+    # 战斗态 1:1（拆自 world_state.combat）：删会话时经 cascade 一并清理。
+    combat_state: Mapped["CombatState | None"] = relationship(
+        "CombatState", cascade="all, delete-orphan", uselist=False,
+    )
+    # 追逐态 1:1（拆自 world_state.chase）：同上。
+    chase_state: Mapped["ChaseState | None"] = relationship(
+        "ChaseState", cascade="all, delete-orphan", uselist=False,
+    )
+    # 运行统计 1:1（拆自 world_state.session_usage/turn_usage/rag_stats）：同上。
+    session_stats: Mapped["SessionStats | None"] = relationship(
+        "SessionStats", cascade="all, delete-orphan", uselist=False,
+    )
+    # 战报 1:N（拆自 world_state.recaps）：删会话时经 cascade 一并清理。
+    recaps: Mapped[list["SessionRecap"]] = relationship(
+        "SessionRecap", cascade="all, delete-orphan", order_by="SessionRecap.ordinal",
+    )
+    # 导航态 1:1（拆自 world_state.party_locations / visited_scenes）：同上。
+    navigation: Mapped["SessionNavigation | None"] = relationship(
+        "SessionNavigation", cascade="all, delete-orphan", uselist=False,
+    )
+    # 进度台账 1:1（拆自 world_state.san_checked / scene_events_seen）：同上。
+    ledger: Mapped["SessionLedger | None"] = relationship(
+        "SessionLedger", cascade="all, delete-orphan", uselist=False,
     )

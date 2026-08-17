@@ -51,6 +51,7 @@ from app.models import (  # noqa: F401 — 注册全部表
     Module,
     SessionParticipant,
 )
+from app.models.session_navigation import SessionNavigation
 
 
 @pytest.fixture
@@ -728,7 +729,7 @@ def _client_with_scenes(tmp_path, scenes=None, visited=None):
     db.add_all([module, hero]); db.flush()
     session = GameSession(
         module_id=module.id, player_character_id=hero.id, status="active",
-        current_scene_id="a", world_state={"visited_scenes": visited or ["a", "b"]},
+        current_scene_id="a", navigation=SessionNavigation(visited_scenes=visited or ["a", "b"]),
     )
     db.add(session); db.flush()
     db.add(SessionParticipant(
@@ -819,7 +820,7 @@ def test_human_kp_travel_commits_location_without_ai_generation(client):
     db = next(gen)
     try:
         session = db.get(GameSession, sid)
-        session.world_state = {"visited_scenes": ["a", "b"]}
+        session.navigation.visited_scenes = ["a", "b"]
         db.commit()
     finally:
         gen.close()
@@ -833,7 +834,7 @@ def test_human_kp_travel_commits_location_without_ai_generation(client):
     db = next(gen)
     try:
         session = db.get(GameSession, sid)
-        assert session.world_state["party_locations"][ids["hero"]] == "b"
+        assert session.navigation.party_locations[ids["hero"]] == "b"
     finally:
         gen.close()
 
@@ -877,7 +878,7 @@ def test_travel_connectivity_gate(tmp_path, monkeypatch):
         gen = app.dependency_overrides[get_db]()
         db = next(gen)
         sess = db.get(GameSession, sid)
-        sess.world_state = {**(sess.world_state or {}), "visited_scenes": ["a", "b", "c", "d"]}
+        sess.navigation.visited_scenes = ["a", "b", "c", "d"]
         db.commit()
         gen.close()
 

@@ -141,11 +141,11 @@ export function RulebookPage() {
 
   return (
     <div className="max-w-[100rem]">
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate(-1)} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
+      <div className="page-head">
+        <button onClick={() => navigate(-1)} className="btn-secondary btn-sm flex items-center gap-1">
           <GiReturnArrow /> 返回
         </button>
-        <h2 className="page-title !mb-0">规则书</h2>
+        <h2 className="page-title">规则书</h2>
       </div>
 
       <p className="text-sm mb-4 max-w-3xl" style={{ color: 'var(--color-text-secondary)' }}>
@@ -162,11 +162,10 @@ export function RulebookPage() {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           onClick={() => fileRef.current?.click()}
-          className="border-2 border-dashed rounded-md p-6 mb-3 text-center cursor-pointer transition-colors"
-          style={{
-            borderColor: dragOver ? 'var(--color-accent)' : 'var(--color-border)',
-            background: dragOver ? 'rgba(212, 162, 78, 0.07)' : 'rgba(255, 255, 255, 0.03)',
-          }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
+          role="button"
+          tabIndex={0}
+          className={`dropzone mb-3 ${dragOver ? 'dropzone--over' : ''}`}
         >
           <input
             ref={fileRef}
@@ -184,7 +183,7 @@ export function RulebookPage() {
             </div>
           ) : (
             <div>
-              <GiBookCover className="mx-auto text-2xl mb-2" style={{ color: 'var(--color-text-secondary)' }} />
+              <GiBookCover className="dropzone-icon" aria-hidden="true" />
               <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>拖拽 PDF 到此处，或点击选择</p>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)', opacity: 0.7 }}>
                 仅支持含文字层的 PDF（扫描件需先 OCR）
@@ -208,7 +207,14 @@ export function RulebookPage() {
       </div>
 
       {books.length === 0 ? (
-        <p style={{ color: 'var(--color-text-secondary)' }}>暂无规则书，请上传</p>
+        <div className="empty-state">
+          <span className="empty-state-icon"><GiBookCover /></span>
+          <span className="empty-state-title">尚无规则书</span>
+          <span className="empty-state-hint">
+            上传规则书 PDF（如《守秘人规则书》），系统在本地建立可检索索引；
+            跑团时守秘人遇到拿不准的精确规则，会按需查阅原文再裁定。
+          </span>
+        </div>
       ) : (
         <div className="grid gap-3 mb-8 lg:grid-cols-2 2xl:grid-cols-3">
           {books.map((b, i) => (
@@ -243,7 +249,7 @@ export function RulebookPage() {
                     {(open) => (
                       <button
                         onClick={open}
-                        className="chip chip--danger hover:!bg-[var(--color-danger-deep)] hover:!text-[var(--color-on-danger)] transition-colors"
+                        className="chip chip--danger chip-btn chip-btn--danger"
                       >
                         删除
                       </button>
@@ -288,13 +294,13 @@ export function RulebookPage() {
             <GiMagnifyingGlass /> 测试检索
           </h3>
           <div className="flex gap-2">
+            {/* 与全站输入框同一质感（.input）：此前这里手搓内联样式，聚焦态没有琥珀辉光 */}
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
               placeholder="输入规则关键词，如「孤注一掷」「理智丧失」"
-              className="flex-1 px-3 py-1.5 rounded text-sm"
-              style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
+              className="input flex-1"
             />
             <button onClick={runSearch} disabled={searching || !query.trim()} className="btn-secondary">
               {searching ? '检索中…' : '检索'}

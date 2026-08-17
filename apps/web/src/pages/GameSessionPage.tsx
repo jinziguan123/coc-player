@@ -639,6 +639,21 @@ export function GameSessionPage() {
     }, 400)
   }, [sessionId, setCurrentSession])
 
+  // 沙盘/已知地点刷新（节流）：新地点可能因为一条旁白/一句对话/一张系统卡刚刚解锁，
+  // 不必等整轮 done 才重拉 /locations；合并 400ms 内的连续日志事件，只发一次。
+  const locationsRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleLocationsRefresh = useCallback(() => {
+    if (!sessionId || locationsRefreshTimer.current) return
+    locationsRefreshTimer.current = setTimeout(() => {
+      locationsRefreshTimer.current = null
+      setRefreshTick((x) => x + 1)
+    }, 400)
+  }, [sessionId])
+
+  useEffect(() => () => {
+    if (locationsRefreshTimer.current) clearTimeout(locationsRefreshTimer.current)
+  }, [])
+
   // 处理一条房间实时事件（/live）。
   //
   // 结构对应 room_events.py 的三分类：`log` 类走「按 id 去重 → 收流 → 落消息」的公共
@@ -770,6 +785,11 @@ export function GameSessionPage() {
     }
     setThinking(false)  // 任何具体内容（对话/检定/系统）到达 → 不再是"思考中"
     endStream(); liveTypeRef.current = ''
+    // 旁白/对话/系统卡都可能解锁新地点（known_scene_ids 会扫这些事件正文），
+    // 节流重拉 locations，沙盘不必等 done 或手动刷新。
+    if (t === 'narration_full' || t === 'dialogue' || t === 'npc_dialogue' || t === 'action' || t === 'system') {
+      scheduleLocationsRefresh()
+    }
     const isPlayer = !!(myCharIdRef.current && chunk.actor_id === myCharIdRef.current)
     if (t === 'dialogue' || t === 'npc_dialogue') {
       addMessage({ id: chunk.id || '', type: 'dialogue', content: chunk.content || '', actor_name: chunk.actor_name, metadata: { ...(chunk.metadata || {}), is_player: isPlayer } })
@@ -792,7 +812,7 @@ export function GameSessionPage() {
       // 走到这里说明有 log 类型没被渲染——加了新事件就必须在上面补一支。
       assertAllLogHandled(t)
     }
-  }, [addMessage, endStream])
+  }, [addMessage, endStream, scheduleLocationsRefresh])
 
   const handleLiveChunk = useCallback((chunk: ChunkPayload) => {
     const t = chunk.type
@@ -1395,7 +1415,7 @@ export function GameSessionPage() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <button
             onClick={() => navigate('/game')}
-            className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm flex-shrink-0 whitespace-nowrap"
+            className="btn-secondary btn-sm flex items-center gap-1 flex-shrink-0 whitespace-nowrap"
           >
             <GiReturnArrow /> 返回列表
           </button>
@@ -1408,8 +1428,7 @@ export function GameSessionPage() {
           {currentSession.room_code && (
             <button
               onClick={() => { navigator.clipboard?.writeText(currentSession.room_code || ''); toast.success(`房间码 ${currentSession.room_code} 已复制`) }}
-              className="text-xs px-2 py-0.5 rounded border inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap"
-              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              className="chip chip-btn font-mono flex-shrink-0"
               title="点击复制房间码，分享给队友加入"
             >
               房间码 {currentSession.room_code} <Copy size={11} />
@@ -1419,14 +1438,14 @@ export function GameSessionPage() {
             <ContextUsageBadge sessionId={currentSession.id} refreshKey={messages.length} paused={streaming} />
             <button
               onClick={() => setShowSearch((v) => !v)}
-              className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+              className="btn-secondary btn-xs flex items-center gap-1"
               title="检索本局历史记录"
             >
               <Search size={12} /> 检索
             </button>
             <button
               onClick={() => setShowRecap(true)}
-              className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+              className="btn-secondary btn-xs flex items-center gap-1"
               title="战报 / 章节小结：把本局经历浓缩成结构化小结"
             >
               <GiScrollUnfurled size={13} /> 战报
@@ -1457,7 +1476,7 @@ export function GameSessionPage() {
                   {(open) => (
                     <button
                       onClick={open}
-                      className={`text-xs !px-2 !py-0.5 flex items-center gap-1 ${endingReached ? 'btn-primary' : 'btn-secondary'}`}
+                      className={`btn-xs flex items-center gap-1 ${endingReached ? 'btn-primary' : 'btn-secondary'}`}
                       title={endingReached
                         ? `已抵达结局：${endingReached.name || ''}。全体真人玩家一致同意即可结束本局`
                         : '结束本模组：需全体真人玩家一致同意'}
@@ -1990,7 +2009,7 @@ export function GameSessionPage() {
               // 待定检定提示：携带 check_request 元数据时，渲染成带「投骰」按钮的卡片
               const checkId = msg.metadata?.check_request ? String(msg.metadata?.id ?? '') : ''
               if (checkId) {
-                const pending = (currentSession?.world_state as Record<string, unknown> | undefined)?.pending_checks as Record<string, unknown> | undefined
+                const pending = (currentSession?.turn_state as Record<string, unknown> | undefined)?.pending_checks as Record<string, unknown> | undefined
                 // 权威（pending_checks）∪ 乐观（刚到、尚未 refetch）——消除「已投骰→投骰」闪烁
                 const stillPending = (!!pending && checkId in pending) || optimisticPending.has(checkId)
                 const mine = !msg.metadata?.char_id || msg.metadata?.char_id === myCharId

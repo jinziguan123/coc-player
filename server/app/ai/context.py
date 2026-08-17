@@ -37,7 +37,7 @@ from app.ai.prompts.team_system import (
     TEAM_MODE_TOGETHER,
     TEAM_SYSTEM_PROMPT,
 )
-from app.services import style_presets, world_memory
+from app.services import combat_service, style_presets, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def resolve_context_budget(context_window: int) -> int:
 # 约 50%。固定系数的好处是有安全垫，代价是**永远只用到窗口的约 40%**——而逐字记忆恰恰是
 # 对抗有损摘要的唯一资源，省在这里最不划算。
 #
-# 既然每回合都能拿到服务端真实 usage（world_state.turn_usage），就用「同轮估算 / 实测」的
+# 既然每回合都能拿到服务端真实 usage（session_stats.turn_usage），就用「同轮估算 / 实测」的
 # 比值把预算放大回去，而不是继续拍一个常数。校准做在**预算侧**而非 `_estimate_tokens` 里：
 # 后者是无状态纯函数、被到处调用，给它加全局状态会让各处估算随会话漂移，难以推理。
 CALIBRATION_KEY = "budget_scale"
@@ -322,7 +322,10 @@ def _party_distribution_section(
     这是 NPC 感知边界（隔墙有耳 bug）的结构性提醒——KP 每回合都看得见「谁和谁不在一处」，
     而不是从事件流里自行脑补。全员同处一地（或无位置记录）返回空串，不注入（行为不变）。
     """
-    locs = (session.world_state or {}).get("party_locations") or {}
+    nav = session.navigation
+    # 旧 fixture / 迁移前的存档可能出现 nav 存在但 party_locations 为 NULL，
+    # 与「缺省回落到 current_scene_id」同义，不能把 dict(None) 抛给调用方。
+    locs = dict((nav.party_locations if nav else {}) or {})
     fallback = session.current_scene_id
     by_scene: dict[str, list[str]] = {}
     for m in party:
@@ -520,7 +523,8 @@ def _visible_scenes(session: GameSession, scene_id: str | None, module: Module) 
 
     = 当前场景 + 最近 N 个去过的场景 + 任何还挂着未了结线索的场景。
     """
-    visited = list((session.world_state or {}).get("visited_scenes") or [])
+    nav = session.navigation
+    visited = list(nav.visited_scenes if nav else [])
     visible = set(visited[-VISITED_SCENE_WINDOW:])
     if scene_id:
         visible.add(scene_id)
@@ -895,7 +899,7 @@ def _format_combat_in_progress(session) -> str:
     参战方名字取战斗态里的那一份——建参战方时已经过身份遮蔽（玩家还没认出来的东西
     在战斗面板里就叫「不明存在」），这里直接沿用，不会从模组名把真名漏回来。
     """
-    combat = (getattr(session, "world_state", None) or {}).get("combat") or {}
+    combat = combat_service.get_combat(session) or {}
     if not combat.get("active"):
         return ""
     alive = [
@@ -1223,8 +1227,10 @@ def build_kp_context(
                                  SYS_TIER_VOLATILE, 5, "clue-ledger"))
             # 当前场景机制点进度：events 逐条标已发生/未发生。与台账同档 priority——
             # 丢了 KP 就会把「被手拖进屋」这类一次性桥段照着场景 JSON 重演一遍，玩家直接可感。
+            led = session.ledger
+            seen = led.scene_events_seen if led else {}
             scene_events_section = world_memory.format_scene_events_section(
-                ws_mem, current_scene,
+                seen, current_scene,
             )
             if scene_events_section:
                 segs.append(_Seg("\n\n" + scene_events_section,
