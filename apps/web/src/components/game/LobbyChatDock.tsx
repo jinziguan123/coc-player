@@ -15,6 +15,8 @@ interface Props {
   onTyping: () => void
   /** 右栏（角色卡预览）开着时往左让一个栏宽，别把人家盖住。 */
   shifted?: boolean
+  /** 选人舞台等专注模式：强制收成圆形浮标，不遮挡角色卡阵列。 */
+  compact?: boolean
 }
 
 const OPEN_KEY = 'trpg.lobbyChat.open'
@@ -33,7 +35,7 @@ const STICK_SLACK = 24
  * 悬浮聊天卡。高度写死在卡片上、日志内部滚动，所以它**完全不参与页面高度**，也不再
  * 占掉主栏一整条宽度——大厅真正要办的事（配座位、开局）拿回全部版面。
  */
-export function LobbyChatDock({ lines, typingName, canSpeak, onSend, onTyping, shifted }: Props) {
+export function LobbyChatDock({ lines, typingName, canSpeak, onSend, onTyping, shifted, compact }: Props) {
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== '0')
   const [draft, setDraft] = useState('')
   /** 收起期间新增的条数；展开即清零。 */
@@ -72,12 +74,12 @@ export function LobbyChatDock({ lines, typingName, canSpeak, onSend, onTyping, s
     onSend(text)
   }
 
-  if (!open) {
+  if (!open || compact) {
     return (
       <button
         onClick={() => setOpen(true)}
         className={`chat-float chat-token${shifted ? ' chat-float--shifted' : ''}`}
-        title="展开大厅聊天"
+        title={compact ? '选人期间聊天收起为浮标，避免遮挡角色卡' : '展开大厅聊天'}
         aria-label="展开大厅聊天"
       >
         <GiTalk size={20} aria-hidden="true" />

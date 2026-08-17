@@ -5,13 +5,21 @@ import { useSyncBackOnVisit } from '@/features/characters/useSyncBack'
 import { api, connectSSE, getServerUrl, localApi } from '../api/client'
 import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
+import { CharacterPortrait } from '../components/character/CharacterPortrait'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
 import { LobbyChatDock, type ChatLine } from '../components/game/LobbyChatDock'
 import { AiTeammateDialog } from '../components/game/AiTeammateDialog'
+import { QuickCharacterCreateDialog } from '../components/game/QuickCharacterCreateDialog'
+import {
+  CharacterSelectStage,
+  type CharacterPick,
+  type LobbyCharacter,
+} from '../components/game/CharacterSelectStage'
 import { CharacterGuidanceCard } from '../components/module/CharacterGuidanceCard'
 import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { GiReturnArrow } from 'react-icons/gi'
 import { parsePlayerRange } from '@/lib/module'
+import { ageOf, occupationOf, topSkills, vitalOf } from '@/lib/characterDigest'
 import {
   Select,
   SelectContent,
@@ -21,17 +29,7 @@ import {
 } from '@/components/ui/select'
 import { Copy, Sparkles, Check, Eye, ScanSearch, Trash2, UserPlus } from 'lucide-react'
 
-interface Character {
-  id: string
-  name: string
-  module_id?: string | null
-  rule_system?: string
-  base_attributes: Record<string, number>
-  skills: Record<string, number>
-  system_data: Record<string, unknown>
-  backstory: string
-  status: string
-}
+type Character = LobbyCharacter
 
 interface RoomData {
   id: string
@@ -42,33 +40,6 @@ interface RoomData {
   kp_mode?: 'ai' | 'human'
   identity_version?: number
   participants: SessionParticipant[]
-}
-
-/** 从 system_data 里取一眼能看懂的摘要字段——角色列表要长得像角色列表，不是一排名字。 */
-function occupationOf(c: Character): string {
-  const sd = c.system_data || {}
-  return String(sd.occupation || sd.profession || '').trim()
-}
-
-function ageOf(c: Character): string {
-  const age = (c.system_data || {}).age
-  return age ? `${age} 岁` : ''
-}
-
-/** 取 HP/SAN 当前值（形如 {current, max}）；缺失返回空串，不占位。 */
-function vitalOf(c: Character, key: 'hitPoints' | 'sanity'): string {
-  const v = (c.system_data || {})[key] as { current?: number; max?: number } | undefined
-  if (!v || v.current == null) return ''
-  return v.max != null ? `${v.current}/${v.max}` : String(v.current)
-}
-
-/** 技能里最高的几项——最能说明「这个人擅长什么」。 */
-function topSkills(c: Character, n = 3): string[] {
-  return Object.entries(c.skills || {})
-    .filter(([, v]) => typeof v === 'number' && v >= 50)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n)
-    .map(([k, v]) => `${k} ${v}`)
 }
 
 /** 大厅聊天最多留这么多条：房间挂一晚上，DOM 不能跟着无限涨。 */
@@ -103,8 +74,10 @@ export function RoomLobbyPage() {
   const [charFilter, setCharFilter] = useState('')
   const [chat, setChat] = useState<ChatLine[]>([])
   const [busy, setBusy] = useState(false)
-  /** 「生成 AI 队友」对话框是为哪一席打开的（null=没开）。 */
-  const [genSeat, setGenSeat] = useState<number | null>(null)
+  /** 「快速创建角色卡」对话框：复用角色页的编辑弹窗，从一张空白草稿开始。 */
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false)
+  const [quickDraft, setQuickDraft] = useState<Character | null>(null)
+  const [quickCreating, setQuickCreating] = useState(false)
   /** 同一个对话框，为「我自己这一席」打开：生成的是玩家调查员，确认后走认领。 */
   const [genSelf, setGenSelf] = useState(false)
   const [panelChar, setPanelChar] = useState<Character | null>(null)
@@ -115,7 +88,7 @@ export function RoomLobbyPage() {
    * 什么背景一概不知，等于盲选。现在点 chip 只是把它放到右栏看，确认之后才真的坐下。
    * ``source`` 决定确认走哪条路：本机角色要先同步一份副本给房主（见 importAndClaim）。
    */
-  const [preview, setPreview] = useState<{ char: Character; source: 'mine' | 'local' } | null>(null)
+  const [preview, setPreview] = useState<CharacterPick | null>(null)
   const [evaluation, setEvaluation] = useState<CharacterEvaluation | null>(null)
   const [evaluating, setEvaluating] = useState(false)
   const [typingName, setTypingName] = useState('')
@@ -131,7 +104,7 @@ export function RoomLobbyPage() {
 
   const mySeat = myPlayerSeat
   const needsCharacter = !!mySeat && mySeat.role === 'human' && !mySeat.character_id
-  // 已入座的人点「更换角色」后，重新展开下面那套角色选择区。开局后不再允许换：
+  // 已入座的人点「更换角色」后，重新回到选人舞台。开局后不再允许换：
   // 消息与战斗状态都绑着角色，后端也会拒绝。
   const [changingChar, setChangingChar] = useState(false)
   // 旧 human-KP 房间可能让同一 token 同时拥有 KP/玩家席，保留玩家操作区，避免升级后失去权限。
@@ -325,20 +298,6 @@ export function RoomLobbyPage() {
     } finally { setBusy(false) }
   }
 
-  /** 过目对话框里点「保留并入座」：这张卡已经落库，剩下的只是指派到发起的那个席位。 */
-  const adoptTeammate = async (seatOrder: number, charId: string, name: string) => {
-    if (!room) return
-    try {
-      setRoom(await api.post<RoomData>(
-        `/sessions/${room.id}/seats/${seatOrder}/character`, { character_id: charId },
-      ))
-      await refreshCharPools()
-      toast.success(`「${name}」已入座`)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '指派角色失败')
-    }
-  }
-
   const toggleReady = async () => {
     if (!room || !mySeat?.character_id) return
     try {
@@ -513,6 +472,75 @@ export function RoomLobbyPage() {
   const seats = room.participants.filter((p) => p.role !== 'kp').sort((a, b) => a.seat_order - b.seat_order)
   const kpSeats = room.participants.filter((p) => p.role === 'kp').sort((a, b) => a.seat_order - b.seat_order)
   const openKpSeat = kpSeats.find((p) => !p.claimed)
+  /** 真人玩家正在挑/换角色时，整页进入「选人舞台」而不是在席位卡底部塞一排小卡。 */
+  const selectingCharacter = !strictKpIdentity && (!mySeat || needsCharacter || changingChar)
+  const asideOpen = selectingCharacter || !!preview || !!panelChar
+
+  const confirmPreview = () => {
+    if (!preview) return
+    const { char, source } = preview
+    setPreview(null)
+    if (source === 'local') void importAndClaim(char)
+    else void claimWithChar(char.id)
+  }
+
+  /** 右侧档案抬头用的摘要——比完整面板先回答「TA 是谁、还能不能打」。 */
+  const previewDigest = preview
+    ? {
+        meta: [occupationOf(preview.char), ageOf(preview.char)].filter(Boolean).join(' · '),
+        hp: vitalOf(preview.char, 'hitPoints'),
+        san: vitalOf(preview.char, 'sanity'),
+        skills: topSkills(preview.char),
+      }
+    : null
+
+  /** 快速创建：草稿由页面在点击时创建（不在弹窗 effect 里发请求，StrictMode 会双跑）。 */
+  const openQuickCreate = async () => {
+    if (!room) return
+    setQuickDraft(null)
+    setQuickCreateOpen(true)
+    setQuickCreating(true)
+    try {
+      // 固定落在本机角色库；连主机时新卡作为「本机角色」参与候选，入座时再同步副本。
+      const created = await localApi.post<Character>('/characters', {
+        name: '新调查员',
+        module_id: getServerUrl() ? null : room.module_id,
+        rule_system: 'coc',
+        base_attributes: {},
+        skills: {},
+        system_data: {},
+        backstory: '',
+      })
+      setQuickDraft(created)
+    } catch (e) {
+      setQuickCreateOpen(false)
+      toast.error(e instanceof Error ? e.message : '创建角色草稿失败')
+    } finally {
+      setQuickCreating(false)
+    }
+  }
+
+  const closeQuickCreate = () => {
+    setQuickCreateOpen(false)
+    setQuickDraft(null)
+    setQuickCreating(false)
+  }
+
+  /** 快速创建的卡保存后：刷新候选池，并直接放进右侧预览等待入座。 */
+  const handleQuickCreated = async (characterId: string) => {
+    closeQuickCreate()
+    // 快速创建固定落在本机角色库：连主机时它是「本机角色」，确认入座再同步副本；
+    // 本机直连时它就是房主自己的卡，直接走 mine 池。
+    const remote = !!getServerUrl()
+    try {
+      const full = await (remote ? localApi : api).get<Character>(`/characters/${characterId}`)
+      await refreshCharPools()
+      setEvaluation(null)
+      setPreview({ char: full, source: remote ? 'local' : 'mine' })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '读取新建角色失败')
+    }
+  }
 
   return (
     // 整页锁在视口高度里：头部（返回/房间码）和底部（开始游戏）钉住，只有中段滚。
@@ -530,14 +558,38 @@ export function RoomLobbyPage() {
             {room.kp_mode === 'human' && <span className="badge ml-2 text-xs">真人 KP</span>}
           </span>
           {room.room_code && (
-            <button onClick={copyCode} className="ml-auto badge inline-flex items-center gap-1" title="点击复制房间码">
-              房间码 {room.room_code} <Copy size={11} />
+            <button onClick={copyCode} className="ml-auto badge shrink-0" title="点击复制房间码">
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                房间码 {room.room_code} <Copy size={11} />
+              </span>
             </button>
           )}
         </div>
 
-        {/* 可滚中段：模组简介 + 席位 + 选角色。pr-1 给滚动条留道，免得贴着卡片边 */}
+        {/* 可滚中段：选人舞台置顶，其次才是模组简介与席位管理。
+            真人玩家在挑角色时，第一眼看到的是「选人界面」，而不是埋在席位卡底部的表单。 */}
         <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+          {selectingCharacter && (
+            <CharacterSelectStage
+              mine={myChars}
+              local={localChars}
+              preview={preview}
+              busy={busy}
+              changingChar={changingChar}
+              currentCharName={mySeat?.character_name}
+              moduleTitle={room.module_title}
+              guidance={guidance}
+              allowKpClaim={!!openKpSeat}
+              onPick={(char, source) => {
+                setEvaluation(null)
+                setPreview({ char, source })
+              }}
+              onGenerate={() => setGenSelf(true)}
+              onQuickCreate={() => void openQuickCreate()}
+              onClaimKp={() => void claimKp()}
+              onCancelChange={() => setChangingChar(false)}
+            />
+          )}
           {moduleDesc && (
             <div className="card mb-3">
               <h3 className="card-title">模组简介</h3>
@@ -546,7 +598,7 @@ export function RoomLobbyPage() {
           )}
 
           {/* 席位 */}
-          <div className="card mb-3">
+          <div className={`card mb-3${selectingCharacter ? ' seat-card--selecting' : ''}`}>
             <h3 className="card-title">玩家席位（{seats.filter((s) => s.character_id).length}/{seats.length}）</h3>
             {kpSeats.length > 0 && (
               <div className="mb-2 space-y-1.5">
@@ -613,19 +665,6 @@ export function RoomLobbyPage() {
                         </SelectContent>
                       </Select>
                     ) : null}
-                    {/* 下拉里没有合适的？就地造一张。否则为了一张队友卡要跳去角色页、
-                        建完再回来——而这一步本来就发生在「配座位」的当口。 */}
-                    {p.role === 'ai' && amHost && (
-                      <button
-                        onClick={() => setGenSeat(p.seat_order)}
-                        disabled={busy}
-                        className="btn-secondary !px-1.5 !py-1 disabled:opacity-40"
-                        title="写一句提示词，让 AI 现场生成一张队友卡"
-                        aria-label="生成 AI 队友"
-                      >
-                        <Sparkles size={13} />
-                      </button>
-                    )}
                     {!(p.role === 'ai' && amHost) && (
                       <button
                         onClick={() => viewSeat(p.character_id)}
@@ -719,7 +758,7 @@ export function RoomLobbyPage() {
             )}
 
             {/* 我的操作区 */}
-            <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="lobby-my-actions mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {strictKpIdentity ? (
                 <div className="flex items-center gap-3">
                   <span className="text-sm" style={{ color: 'var(--color-text-accent)' }}>你已作为真人 KP 加入</span>
@@ -854,39 +893,55 @@ export function RoomLobbyPage() {
         </div>
       </div>
 
-      {/* 右栏常驻：挑角色时它是「这张卡长什么样」，挑完是「我坐下的是谁」。
-          从前它只在点眼睛图标时才出现，于是选角色那一步只能对着几个名字盲选。
-          w-80 而不是 w-64——技能表在 264px 下要换行到没法读。 */}
-      {(preview || panelChar) && (
-        <aside className="w-80 flex-shrink-0 border-l overflow-y-auto flex flex-col" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}>
+      {/* 右栏常驻：选人模式下它永远在场，像格斗/英雄游戏的选人详情栏——
+          未选时是提示，点选后是「角色登场 + 完整档案 + 确认入座」。 */}
+      {asideOpen && (
+        <aside className={`w-80 flex-shrink-0 border-l overflow-y-auto flex flex-col${selectingCharacter ? ' hero-dossier' : ''}`} style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}>
           <div className="flex items-center justify-between px-3 py-1.5 text-xs border-b" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-            <span>{preview ? '预览 · 尚未入座' : '角色卡'}</span>
-            <button
-              onClick={() => { setPreview(null); setPanelChar(null) }}
-              className="btn-secondary !px-2 !py-0.5"
-            >关闭</button>
+            <span>{selectingCharacter ? (preview ? '已选择 · 等待入座' : '选择你的调查员') : (preview ? '预览 · 尚未入座' : '角色卡')}</span>
+            {(preview || panelChar) && (
+              <button
+                onClick={() => { setPreview(null); setPanelChar(null) }}
+                className="btn-secondary !px-2 !py-0.5"
+              >{selectingCharacter ? '清空' : '关闭'}</button>
+            )}
           </div>
-          {/* 确认区钉在顶部：看完卡就在原地决定，不必滚回去找按钮 */}
+
+          {/* 确认区钉在顶部：看完卡就在原地决定，不必滚回去找按钮。
+              选人模式下做成英雄登场卡——大纹章、姓名、职业与 HP/SAN 一目了然。 */}
           {preview && (
-            <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
-              <div className="mb-1.5 text-sm font-semibold" style={{ color: 'var(--color-text-accent)' }}>
-                {preview.char.name}
+            <div className="hero-dossier-pick">
+              <div className="hero-dossier-halo" aria-hidden="true">
+                <CharacterPortrait
+                  name={preview.char.name}
+                  avatarUrl={preview.char.avatar_url}
+                  size="lg"
+                  className="hero-dossier-portrait"
+                />
               </div>
+              <div className="hero-dossier-name">{preview.char.name}</div>
+              {previewDigest?.meta && <div className="hero-dossier-meta">{previewDigest.meta}</div>}
+              {(previewDigest?.hp || previewDigest?.san) && (
+                <div className="hero-dossier-vitals">
+                  {previewDigest.hp && <span className="hero-vital hero-vital--hp">HP <b>{previewDigest.hp}</b></span>}
+                  {previewDigest.san && <span className="hero-vital hero-vital--san">SAN <b>{previewDigest.san}</b></span>}
+                </div>
+              )}
+              {previewDigest?.skills.length ? (
+                <div className="hero-dossier-skills">
+                  {previewDigest.skills.map((skill) => <span key={skill}>{skill}</span>)}
+                </div>
+              ) : null}
               {preview.source === 'local' && (
-                <p className="mb-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <p className="hero-dossier-note">
                   本机角色 · 入座时同步一份副本给房主，你自己这份不受影响
                 </p>
               )}
-              <div className="flex items-center gap-2">
+              <div className="hero-dossier-actions">
                 <button
-                  onClick={() => {
-                    const { char, source } = preview
-                    setPreview(null)
-                    if (source === 'local') void importAndClaim(char)
-                    else void claimWithChar(char.id)
-                  }}
+                  onClick={confirmPreview}
                   disabled={busy}
-                  className="btn-primary !px-3 !py-1 text-sm"
+                  className="btn-primary flex-1 !px-3 !py-1.5 text-sm"
                 >
                   {busy ? '处理中…' : '用这张卡入座'}
                 </button>
@@ -897,6 +952,14 @@ export function RoomLobbyPage() {
               </div>
             </div>
           )}
+
+          {selectingCharacter && !preview && !panelChar && (
+            <div className="hero-dossier-empty">
+              <ScanSearch size={22} aria-hidden="true" />
+              <p>在左侧舞台中点选一名调查员，这里会展开完整档案与入座确认。</p>
+            </div>
+          )}
+
           {evaluation && (
             <div className="mx-3 mt-3 rounded border p-2 text-xs" style={{ borderColor: evaluation.compatible ? 'var(--color-success)' : 'var(--color-danger)' }}>
               <div className="font-semibold mb-1" style={{ color: evaluation.compatible ? 'var(--color-success)' : 'var(--color-danger)' }}>
@@ -906,23 +969,28 @@ export function RoomLobbyPage() {
               {evaluation.suggestions.length > 0 && <div>建议：{evaluation.suggestions.join('；')}</div>}
             </div>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <CharacterPanel character={preview?.char ?? panelChar!} />
-          </div>
+
+          {(preview || panelChar) && (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <CharacterPanel character={preview?.char ?? panelChar!} />
+            </div>
+          )}
         </aside>
       )}
 
-      {/* 写提示词 → 生成 → 过目/编辑 → 决定去留。卡在「过目」这一步已经落库但**未入座**，
-          玩家弃用就连卡一起删掉；点「保留并入座」才走到指派。 */}
-      {genSeat !== null && room && (
-        <AiTeammateDialog
+      {/* 快速创建：先落空白草稿，再复用角色页的编辑弹窗；保存后直接进入右侧预览。 */}
+      {quickCreateOpen && room && (
+        <QuickCharacterCreateDialog
           open
-          moduleId={room.module_id}
-          guidance={guidance}
-          onClose={() => setGenSeat(null)}
-          onConfirm={(char) => adoptTeammate(genSeat, char.id, char.name)}
+          draft={quickDraft}
+          creating={quickCreating}
+          onClose={closeQuickCreate}
+          onCreated={(characterId) => void handleQuickCreated(characterId)}
         />
       )}
+
+      {/* 写提示词 → 生成 → 过目/编辑 → 决定去留。卡在「过目」这一步已经落库但**未入座**，
+          玩家弃用就连卡一起删掉；点「保留并入座」才走到认领。 */}
       {genSelf && room && (
         <AiTeammateDialog
           open
@@ -942,7 +1010,8 @@ export function RoomLobbyPage() {
         canSpeak={!!myChatSeat}
         onSend={(text) => void sendChat(text)}
         onTyping={notifyTyping}
-        shifted={!!(preview || panelChar)}
+        shifted={asideOpen}
+        compact={selectingCharacter}
       />
     </div>
   )

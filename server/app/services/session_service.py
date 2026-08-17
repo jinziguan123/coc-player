@@ -97,15 +97,22 @@ def active_character_ids(
     if exclude_session_id:
         q = q.filter(GameSession.id != exclude_session_id)
     sessions = q.all()
-    ids = {s.player_character_id for s in sessions if s.player_character_id}
     session_ids = [s.id for s in sessions]
-    if session_ids:
-        parts = (
-            db.query(SessionParticipant)
-            .filter(SessionParticipant.session_id.in_(session_ids))
-            .all()
-        )
-        ids |= {p.character_id for p in parts}
+    parts = (
+        db.query(SessionParticipant)
+        .filter(SessionParticipant.session_id.in_(session_ids))
+        .all()
+    ) if session_ids else []
+    ids = {p.character_id for p in parts if p.character_id}
+    # ``player_character_id`` 只作为**没有席位记录**的旧会话回落。只要存在
+    # participant 行，就以席位为准——主角席换人后若遗留旧值，会在这里把
+    # 已经没人使用的旧角色继续算作「占用中」，表现为角色管理可见、大厅候选不可见。
+    sessions_with_parts = {p.session_id for p in parts}
+    ids |= {
+        s.player_character_id
+        for s in sessions
+        if s.id not in sessions_with_parts and s.player_character_id
+    }
     return ids
 
 
@@ -462,6 +469,11 @@ def claim_seat(
             raise ValueError("同一个 token 在本房间只能占用一个席位") from exc
         raise
     db.refresh(session)
+    if seat.is_primary:
+        # 主角席换了角色，player_character_id 必须跟着换——它既用于旧会话回落，
+        # 也参与 active_character_ids 的占用计算。漏掉这一步会让旧角色被
+        # 「幽灵占用」：席位里明明没人用了，候选池里却永远看不到它。
+        _reseat_primary(db, session)
     return session
 
 
@@ -820,6 +832,10 @@ def kick_seat(
     seat.ready = False
     db.commit()
     db.refresh(session)
+    if seat.is_primary:
+        # 与 claim_seat 同源：主角席被清空/换人后，快捷字段必须同步，
+        # 否则被移出的角色会继续被 active_character_ids 当作「占用中」。
+        _reseat_primary(db, session)
     return session, name
 
 

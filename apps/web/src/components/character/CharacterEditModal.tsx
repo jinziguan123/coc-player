@@ -108,7 +108,7 @@ function NumInput({ value, onChange }: { value: number; onChange: (v: number) =>
 }
 
 export function CharacterEditModal({
-  character, open, onOpenChange, onSaved, onPatched,
+  character, open, onOpenChange, onSaved, onPatched, saveWith,
 }: {
   character: CharacterData
   open: boolean
@@ -116,6 +116,8 @@ export function CharacterEditModal({
   onSaved: (c: CharacterData) => void
   /** 角色在弹窗内被**就地**改动（目前只有头像）：同步给父组件，但不关闭弹窗。 */
   onPatched?: (c: CharacterData) => void
+  /** 默认 PUT 到当前 api；大厅快速创建的本机草稿需要覆盖为 localApi。 */
+  saveWith?: (characterId: string, payload: Record<string, unknown>) => Promise<CharacterData>
 }) {
   const sd = character.system_data || {}
   const spec = useSpecializations()
@@ -218,7 +220,9 @@ export function CharacterEditModal({
       backstory,
     }
     try {
-      const updated = await api.put<CharacterData>(`/characters/${character.id}`, payload)
+      const updated = saveWith
+        ? await saveWith(character.id, payload)
+        : await api.put<CharacterData>(`/characters/${character.id}`, payload)
       toast.success('角色卡已保存')
       onSaved(updated)
       onOpenChange(false)

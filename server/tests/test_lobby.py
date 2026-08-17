@@ -158,6 +158,9 @@ def test_human_kp_host_can_kick_primary_player(db_factory):
     assert primary.character_id is None
     assert primary.owner_token is None
     assert primary.claimed is False
+    db.refresh(session)
+    assert session.player_character_id is None
+    assert joiner.id not in session_service.active_character_ids(db)
 
 
 def test_host_seat_and_ai_seat_default_ready(db_factory):
@@ -213,6 +216,69 @@ def test_can_swap_own_character_before_start(db_factory):
     assert seat.character_id == other.id
     # 换了人就得重新确认准备，否则会带着「已准备」换成另一个角色
     assert seat.ready is False
+
+
+def test_swapping_primary_character_syncs_player_character_id(db_factory):
+    """房主在主角席换人后，快捷字段必须同步，否则旧角色会被幽灵占用。
+
+    幽灵占用的后果是：角色管理里能看到这张卡，大厅的「可用调查员卡」里却
+    永远没有它——因为 active_character_ids 同时读主角席和 player_character_id。
+    """
+    db = db_factory()
+    module, host, _joiner = _seed(db)
+    other = Character(name="备选角色", rule_system="coc", is_player=True)
+    db.add(other)
+    db.commit()
+
+    session = session_service.create_session(
+        db, module.id,
+        [
+            {"character_id": host.id, "role": "human", "is_primary": True},
+            {"character_id": None, "role": "human"},
+        ],
+        creator_token="host-tok",
+    )
+    sid = session.id
+    primary = next(
+        p for p in session_service.get_participants(db, sid) if p.is_primary
+    )
+    assert session.player_character_id == host.id
+
+    session_service.claim_seat(db, sid, primary.seat_order, other.id, "host-tok")
+
+    db.refresh(session)
+    assert session.player_character_id == other.id
+    assert host.id not in session_service.active_character_ids(db)
+    assert other.id in session_service.active_character_ids(db)
+
+
+def test_active_character_ids_ignores_stale_shortcut_when_seats_exist(db_factory):
+    """有席位记录的会话只按席位算占用，旧快捷字段的脏值不算数。
+
+    这层防护让历史库里已经写坏的数据也能自愈：不需要先修 player_character_id，
+    被幽灵占用的角色会立刻重新出现在大厅候选池里。
+    """
+    db = db_factory()
+    module, host, _joiner = _seed(db)
+    stale = Character(name="幽灵占用角色", rule_system="coc", is_player=True)
+    db.add(stale)
+    db.commit()
+
+    session = session_service.create_session(
+        db, module.id,
+        [
+            {"character_id": host.id, "role": "human", "is_primary": True},
+            {"character_id": None, "role": "human"},
+        ],
+        creator_token="host-tok",
+    )
+    # 模拟历史 bug 留下的脏值：主角席实际是 host，快捷字段却还指着 stale。
+    session.player_character_id = stale.id
+    db.commit()
+
+    occupied = session_service.active_character_ids(db)
+    assert host.id in occupied
+    assert stale.id not in occupied
 
 
 def test_cannot_swap_character_after_start(db_factory):

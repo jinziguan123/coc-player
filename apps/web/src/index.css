@@ -1099,6 +1099,145 @@ body {
   opacity: 0.85;
 }
 
+/* ——— 首页新手指引 ——— */
+/* 三段并排：宽屏一屏读完，窄屏再退回竖排。中列（规则表）给多一点宽度，
+   否则「骰出 / 结果 / 示例」三列会挤到换行。 */
+.home-intro-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 900px) {
+  .home-intro-grid { grid-template-columns: 0.95fr 1.15fr 0.95fr; }
+  /* 列间竖细线：三段是并列关系，用分隔线比留白更能说明「这是三栏」 */
+  .home-intro-grid > * + * {
+    padding-left: 0.9rem;
+    border-left: 1px solid var(--color-border);
+  }
+}
+
+/* 段首导语与段内小字：并排后每列只有 250–330px，字号压到 xs/2xs、行高收到 1.65
+   才能在窄窗口里也把三栏塞进一屏（再低中文就开始糊成一片了）。 */
+.home-intro-lede {
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+.home-intro-note {
+  font-size: var(--text-2xs);
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+.home-intro-role-name {
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* 要素条目（KP/调查员/骰子、HP/SAN）：比 .card 轻一档，成列出现时不喧宾夺主 */
+.home-intro-role {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--surface-2);
+}
+.home-intro-role > svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+/* HP/SAN：同样的图标 + 文字，但去掉卡片外框，只留一条起首线 */
+.home-intro-vital {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.12rem 0;
+}
+.home-intro-vital > svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+/* 成功等级表的托底：内凹底色，把表格从正文里托起来 */
+.home-intro-panel {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--surface-sunken);
+}
+.home-check-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-2xs);
+}
+.home-check-table th {
+  padding: 0 0.3rem 0.25rem;
+  text-align: left;
+  font-family: var(--font-title);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+.home-check-table td {
+  padding: 0.2rem 0.3rem;
+  vertical-align: baseline;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.home-check-table tbody tr:last-child td { border-bottom: 0; }
+/* 阈值列与示例列走等宽：六行数字左对齐成一列才好比大小 */
+.home-check-table td:first-child,
+.home-check-table td:last-child {
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+}
+.home-check-table td:nth-child(2) { font-weight: 600; }
+/* 示例列贴右，与表头一起靠边收口 */
+.home-check-table th:last-child,
+.home-check-table td:last-child { text-align: right; }
+
+/* 上手步骤：序号铸印 + 虚线分隔，读起来是一条线而不是四张卡 */
+.home-step {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.home-step:first-child { padding-top: 0; }
+.home-step + .home-step { border-top: 1px dashed var(--color-border); }
+.home-step-index {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-accent);
+}
+/* 步骤末尾的入口链接：跟在说明后面同一行，读完就能点进去 */
+.home-intro-link {
+  margin-left: 0.4rem;
+  white-space: nowrap;
+  color: var(--color-text-accent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  transition: color 0.15s, border-color 0.15s;
+}
+.home-intro-link:hover {
+  color: var(--color-accent-hover);
+  border-bottom-color: var(--color-accent);
+}
+
 .home-shortcut {
   display: inline-flex;
   align-items: center;
@@ -2972,6 +3111,538 @@ select.input option {
   white-space: nowrap;
 }
 
+/* ===== 大厅选人舞台 =====
+   守望先锋式选人：居中大标题 + 卡牌阵列 + 逐张浮入；右侧是英雄登场档案。 */
+.seat-card--selecting .lobby-my-actions { display: none; }
+
+.hero-select {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  padding: 1.05rem 1.05rem 0.85rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(ellipse 90% 70% at 50% -8%,
+      color-mix(in srgb, var(--color-accent) 13%, transparent) 0%, transparent 62%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--color-bg-card) 94%, transparent),
+      var(--color-bg-secondary));
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+.hero-select > * { position: relative; z-index: 1; }
+
+/* 顶部舞台光：纯装饰，让「选人」有角色登场感 */
+.hero-select-light {
+  position: absolute;
+  top: -4.5rem;
+  left: 50%;
+  width: min(46rem, 96%);
+  height: 13rem;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--color-accent) 24%, transparent),
+    transparent 72%);
+  animation: heroLightIn 0.9s ease-out both;
+}
+
+.hero-select-top { text-align: center; padding: 0.15rem 0 0.85rem; }
+.hero-select-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-transform: uppercase;
+  color: var(--color-text-accent);
+  opacity: 0.82;
+}
+.hero-select-title {
+  margin: 0.3rem 0 0.35rem;
+  font-family: var(--font-title);
+  font-size: clamp(1.45rem, 2.4vw, 1.9rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-text-primary);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+.hero-select-sub {
+  margin: 0 auto;
+  max-width: 36rem;
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+.hero-select-top-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
+
+/* 车卡建议默认收成一行，避免选人舞台被长文案压矮 */
+.hero-guidance {
+  margin: 0 0 0.7rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 78%, transparent);
+}
+.hero-guidance summary {
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-xs);
+  color: var(--color-text-accent);
+}
+.hero-guidance summary::-webkit-details-marker { display: none; }
+.hero-guidance summary::before {
+  content: '＋ ';
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+.hero-guidance[open] summary::before { content: '－ '; }
+.hero-guidance-body { padding: 0 0.6rem 0.6rem; }
+.hero-guidance-body .guidance-card { margin-bottom: 0; }
+
+.hero-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+}
+.hero-select-count {
+  margin-right: auto;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.hero-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 15rem;
+  max-width: 44%;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
+  transition: border-color 0.15s ease;
+}
+.hero-search:focus-within { border-color: var(--color-border-strong); }
+.hero-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+}
+.hero-search input::placeholder { color: var(--color-text-secondary); opacity: 0.75; }
+.hero-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-accent);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.hero-generate:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent-hover);
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+}
+.hero-generate:disabled { opacity: 0.45; cursor: default; }
+.hero-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-input-bg);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.hero-create:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-accent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+.hero-create:disabled { opacity: 0.45; cursor: default; }
+
+/* 卡牌阵列：角色就是英雄。视觉区在上、信息区在下，和 OW 的英雄格一致 */
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.75rem, 1fr));
+  gap: 0.7rem;
+  padding: 0.05rem;
+}
+.hero-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--surface-2) 88%, transparent),
+    color-mix(in srgb, var(--color-bg-secondary) 94%, transparent));
+  box-shadow: 0 7px 20px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 color-mix(in srgb, var(--color-accent) 8%, transparent);
+  cursor: pointer;
+  animation: heroCardIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--hero-delay, 0ms);
+  transition: transform 0.18s ease, border-color 0.18s ease,
+    box-shadow 0.22s ease, background 0.22s ease;
+}
+.hero-card:hover:not(:disabled) {
+  transform: translateY(-3px);
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent),
+    0 0 26px color-mix(in srgb, var(--color-accent) 18%, transparent),
+    0 12px 26px rgba(0, 0, 0, 0.3);
+}
+.hero-card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.hero-card:disabled { opacity: 0.45; cursor: default; }
+.hero-card--on {
+  transform: translateY(-4px) scale(1.015);
+  border-color: var(--color-accent);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-accent) 13%, var(--surface-2)),
+    color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-secondary)));
+  box-shadow:
+    0 0 0 1px var(--color-accent),
+    0 0 32px color-mix(in srgb, var(--color-accent) 24%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.35);
+}
+.hero-card-frame {
+  position: absolute;
+  inset: 4px;
+  z-index: 1;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: calc(var(--radius-lg) - 3px);
+  opacity: 0.55;
+}
+.hero-card--on .hero-card-frame { opacity: 0.9; }
+
+.hero-card-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  border-bottom: 1px solid var(--color-border);
+  background:
+    radial-gradient(circle at 50% 40%,
+      color-mix(in srgb, var(--color-accent) 13%, transparent),
+      transparent 62%),
+    linear-gradient(160deg, var(--surface-2), var(--color-bg-tertiary));
+}
+.hero-card-aura {
+  position: absolute;
+  inset: 22% 26%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--color-accent) 20%, transparent),
+    transparent 70%);
+  filter: blur(7px);
+  opacity: 0.75;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+.hero-card:hover .hero-card-aura { transform: scale(1.14); opacity: 1; }
+.hero-card--on .hero-card-aura { transform: scale(1.2); opacity: 1; }
+.hero-card .char-portrait {
+  position: relative;
+  z-index: 1;
+  width: 4.25rem;
+  height: 4.25rem;
+  font-size: 1.9rem;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38),
+    0 0 0 1px var(--color-border-strong);
+}
+.hero-card--on .char-portrait {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38),
+    0 0 0 1px var(--color-accent),
+    0 0 20px color-mix(in srgb, var(--color-accent) 34%, transparent);
+}
+.hero-card-badge {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 2;
+  padding: 0.08rem 0.38rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg-primary) 72%, transparent);
+}
+.hero-card-picked {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.35rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.hero-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.55rem 0.65rem 0.65rem;
+}
+.hero-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.hero-card-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.hero-card-vitals { display: flex; gap: 0.6rem; }
+.hero-vital {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.22rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.hero-vital b { font-family: var(--font-mono); font-weight: 700; }
+.hero-vital--hp b { color: color-mix(in srgb, var(--color-danger) 82%, var(--color-text-primary)); }
+.hero-vital--san b { color: color-mix(in srgb, var(--color-success) 82%, var(--color-text-primary)); }
+.hero-card-skills {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  opacity: 0.88;
+}
+
+.hero-select-blank {
+  padding: 2.4rem 1rem;
+  text-align: center;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+.hero-select-blank-title {
+  margin-bottom: 0.35rem;
+  font-family: var(--font-title);
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+}
+.hero-select-blank p {
+  margin: 0 auto 0.8rem;
+  max-width: 30rem;
+  font-size: var(--text-xs);
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.hero-select-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.hero-select-chosen {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.hero-select-chosen-label {
+  flex-shrink: 0;
+  padding: 0.06rem 0.42rem;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.12em;
+  color: var(--color-on-accent);
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+.hero-select-chosen b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-accent);
+}
+.hero-select-foot-muted { opacity: 0.85; }
+
+/* 右侧英雄档案：确认区像「角色登场卡」，完整面板在下方继续展开 */
+.hero-dossier-pick {
+  position: relative;
+  overflow: hidden;
+  padding: 1.1rem 1rem 1rem;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border);
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -5%,
+      color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 68%),
+    linear-gradient(180deg, var(--color-bg-card), var(--color-bg-secondary));
+}
+.hero-dossier-halo {
+  position: relative;
+  width: max-content;
+  margin: 0 auto 0.55rem;
+}
+.hero-dossier-halo::before {
+  content: '';
+  position: absolute;
+  inset: -13px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 72%);
+  filter: blur(5px);
+}
+.hero-dossier-portrait {
+  position: relative;
+  z-index: 1;
+  width: 6rem;
+  height: 6rem;
+  font-size: 2.6rem;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4),
+    0 0 0 1px var(--color-accent);
+}
+.hero-dossier-name {
+  font-family: var(--font-title);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-accent);
+  text-shadow: 0 0 22px color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+.hero-dossier-meta {
+  margin-top: 0.2rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.hero-dossier-vitals {
+  display: flex;
+  justify-content: center;
+  gap: 0.7rem;
+  margin: 0.45rem 0;
+}
+.hero-dossier-vitals .hero-vital { font-size: var(--text-xs); }
+.hero-dossier-skills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.3rem;
+}
+.hero-dossier-skills span {
+  padding: 0.12rem 0.45rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+}
+.hero-dossier-note {
+  margin: 0.55rem 0 0;
+  font-size: var(--text-2xs);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+.hero-dossier-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+.hero-dossier-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 12rem;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+  opacity: 0.82;
+}
+.hero-dossier-empty p {
+  margin: 0;
+  max-width: 15rem;
+  font-size: var(--text-xs);
+  line-height: 1.8;
+}
+
+@keyframes heroCardIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.965); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes heroLightIn {
+  from { opacity: 0; transform: translateX(-50%) scale(0.9); }
+  to { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
+@media (max-width: 1180px) {
+  .hero-grid { grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+}
+@media (max-width: 720px) {
+  .hero-select { padding: 0.8rem 0.7rem 0.7rem; }
+  .hero-select-bar { flex-wrap: wrap; }
+  .hero-search { width: 100%; max-width: none; order: 3; }
+  .hero-select-foot { flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+  .hero-card .char-portrait { width: 3.6rem; height: 3.6rem; }
+}
+
+
 /* ===== 大厅聊天：右侧悬浮聊天卡 =====
    浮层而非栏位：absolute 定位、右侧垂直居中，收起是一颗圆 token，展开是一张卡。
    它既不参与页面高度（聊再多也顶不长大厅），也不占掉主栏一条宽度。 */
@@ -2985,6 +3656,8 @@ select.input option {
 }
 /* 角色卡预览开着时整体左让一栏，别盖住人家 */
 .chat-float--shifted { right: calc(20rem + 1.25rem); }
+/* 选人舞台把聊天收成浮标时，浮标贴在右栏与主栏之间，不遮角色卡 */
+.chat-float--shifted.chat-token { right: 20rem; }
 
 /* 收起态：一颗圆 token */
 .chat-token {
