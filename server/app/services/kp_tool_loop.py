@@ -61,6 +61,7 @@ SET_FLAG_RE = command_protocol.SET_FLAG_RE
 CLEAR_FLAG_RE = command_protocol.CLEAR_FLAG_RE
 HANDOUT_RE = command_protocol.HANDOUT_RE
 MARK_SEEN_RE = command_protocol.MARK_SEEN_RE
+GROUP_RE = command_protocol.GROUP_RE
 MAX_RULE_LOOKUPS = command_protocol.MAX_RULE_LOOKUPS
 MAX_DICE_CONTINUATIONS = command_protocol.MAX_DICE_CONTINUATIONS
 _parse_tag_kv = command_protocol.parse_tag_kv
@@ -74,6 +75,7 @@ _scene_name = turn_context._scene_name
 _matcher_npcs = team_turn_service._matcher_npcs
 _stream_narration_filtered = team_turn_service._stream_narration_filtered
 _attach_npc_portrait = illustration_service._attach_npc_portrait
+_attach_npc_portraits = illustration_service._attach_npc_portraits
 _exec_npc_act = kp_actions._exec_npc_act
 _exec_start_chase = kp_actions._exec_start_chase
 _exec_start_combat = kp_actions._exec_start_combat
@@ -665,6 +667,61 @@ async def _run_kp_agent_loop(
         _merge_step_result(result, step)
 
 
+def _group_label_for_text(groups: list[dict] | None, text: str) -> str | None:
+    """在分头分组里找出「这段文字归属的组」：按成员名做包含匹配。"""
+    if not groups:
+        return None
+    for grp in groups:
+        for member in (grp.get("members") or []):
+            if member and (member in (text or "") or (text or "") in member):
+                return grp["label"]
+    return groups[0]["label"] if groups else None
+
+
+def _group_scope_resolver(
+    kp_text: str,
+    scene_groups: list[dict] | None,
+    player_char: Character,
+    teammates: list[Character] | None,
+    focus_group_label: str | None = None,
+):
+    """返回 ``pos -> 该处指令所属分组的角色列表``（非分头时恒为 None）。
+
+    分头行动逐组生成、合并成一段文本统一处理，指令本身不带出处。``_run_split_narrations``
+    在每组产物前留了 ``[GROUP: scene=<组名>]`` 标记，这里按指令在文本中的位置回溯到最近的
+    标记，从而知道这条 [SAN_CHECK]/[DICE_CHECK] 是哪一组的事——不这么定位，一组撞见的恐怖
+    会照着「主角在哪」结算到另一组头上。
+    """
+    if not scene_groups or len(scene_groups) < 2:
+        return lambda _pos: None
+
+    party = [player_char] + list(teammates or [])
+
+    def members_of(label: str | None) -> list[Character] | None:
+        grp = next((g for g in scene_groups if g.get("label") == label), None)
+        if grp is None:
+            return None
+        names = grp.get("members") or []
+        return [
+            c for c in party
+            if any(n and (c.name == n or n in c.name or c.name in n) for n in names)
+        ] or None
+
+    marks = [
+        (match.start(), (match.group(1) or "").split("=", 1)[-1].strip())
+        for match in GROUP_RE.finditer(kp_text or "")
+    ]
+
+    def resolve(pos: int) -> list[Character] | None:
+        label = next(
+            (mark_label for mark_pos, mark_label in reversed(marks) if mark_pos <= pos),
+            None,
+        )
+        return members_of(label) or members_of(focus_group_label)
+
+    return resolve
+
+
 async def _process_commands(
     db: Session,
     session_id: str,
@@ -677,6 +734,8 @@ async def _process_commands(
     allow_rule_lookup: bool = True,
     lookup_depth: int = 0,
     dice_depth: int = 0,
+    scene_groups: list[dict] | None = None,
+    focus_group_label: str | None = None,
 ) -> AsyncIterator[str]:
     # 全角括号归一为半角：模型有时用【】写指令，统一成 [] 好让下面各指令正则命中并处理（而非泄漏）。
     kp_text = (kp_text or "").replace("【", "[").replace("】", "]")
@@ -716,11 +775,16 @@ async def _process_commands(
     dice_descriptions: list[str] = []
     san_pending = False
     dice_pending = False
+    # 分头行动：按指令在合并文本里的位置回溯它出自哪一组，据此限定群体检定的候选域。
+    group_scope = _group_scope_resolver(
+        kp_text, scene_groups, player_char, teammates, focus_group_label,
+    )
 
     for match in SAN_CHECK_RE.finditer(kp_text):
         kv = _parse_tag_kv(match.group(1))
         san_chunks, san_descs, pending = await _exec_san_check(
             db, session_id, game_session, kv, player_char, teammates,
+            scope=group_scope(match.start()),
         )
         for chunk in san_chunks:
             yield chunk
@@ -745,6 +809,7 @@ async def _process_commands(
         kv = _parse_tag_kv(match.group(1))
         dice_chunks, dice_descs, pending = await _exec_dice_check(
             db, session_id, game_session, module, kv, player_char, teammates,
+            scope=group_scope(match.start()),
         )
         for chunk in dice_chunks:
             yield chunk
@@ -770,40 +835,94 @@ async def _process_commands(
             dice_results="\n".join(dice_descriptions)
         )
         events = session_service.get_session_events(db, session_id)
-        messages = build_kp_context(
-            game_session, module, player_char, events, teammates=teammates,
-        )
-        messages.append({"role": "user", "content": continuation_prompt})
 
-        kp = KPAgent(llm)
-        cont_result = ["", "", [], [], []]
-        try:
-            async for chunk in _stream_narration_filtered(
-                kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
-            ):
-                yield chunk
-        finally:
-            cont_narration = cont_result[0].rstrip()
-            if cont_narration:
-                session_service.add_event(
-                    db, session_id, "narration", cont_narration, actor_name="KP",
+        if scene_groups and len(scene_groups) >= 2:
+            # 分头行动：骰子续写同样要按组生成、按组打 GROUP 标签，不能退化成单场景
+            # 只演检定执行者那一列、丢掉其他组的后续剧情。
+            # 这里只续写**实际产生检定结果的组**——其余组的场景叙事已由本轮分头生成覆盖，
+            # 不需要再额外推一轮，避免其他场景被重复推进。
+            by_group: dict[str, list[str]] = {}
+            for desc in dice_descriptions:
+                label = _group_label_for_text(scene_groups, desc)
+                if label is None:
+                    label = focus_group_label or scene_groups[0]["label"]
+                by_group.setdefault(label, []).append(desc)
+            if focus_group_label and not by_group:
+                by_group[focus_group_label] = list(dice_descriptions)
+            cont_command_parts: list[str] = []
+            kp = KPAgent(llm)
+            for label, group_descs in by_group.items():
+                grp = next(g for g in scene_groups if g["label"] == label)
+                messages = build_kp_context(
+                    game_session, module, player_char, events, teammates=teammates,
+                    viewer_scene_id=grp.get("scene_id"),
+                    scene_groups=scene_groups,
                 )
-            for npc_name, dialogue_text in cont_result[2]:
-                ev = session_service.add_event(
-                    db, session_id, "dialogue", dialogue_text, actor_name=npc_name,
+                messages.append({
+                    "role": "user",
+                    "content": KP_DICE_CONTINUATION_PROMPT.format(
+                        dice_results="\n".join(group_descs)
+                    ),
+                })
+                cont_result = ["", "", [], [], []]
+                try:
+                    async for chunk in _stream_narration_filtered(
+                        kp, messages, cont_result,
+                        npcs=_matcher_npcs(module, teammates, game_session),
+                        group_label=label,
+                    ):
+                        yield chunk
+                finally:
+                    chat_event_writer.persist_narration(
+                        db, session_id, cont_result,
+                        attach_npc_portraits=_attach_npc_portraits,
+                    )
+                _record_npc_say_memory(
+                    db, session_id, game_session, module, cont_result[2], grp["members"],
                 )
-                _attach_npc_portrait(db, session_id, module, ev)
-        # 世界记忆钩子 c：续写里的 NPC 台词同样记入其互动史
-        _record_npc_say_memory(
-            db, session_id, game_session, module, cont_result[2],
-            [player_char.name] + [t.name for t in (teammates or [])],
-        )
+                # 同 _run_split_narrations：留组界标记，续写里追加的 [SAN_CHECK]
+                # （读懂禁忌知识那种）才不会顺着主角的位置结算到别组头上。
+                cont_command_parts.append(f"[GROUP: scene={label}]\n{cont_result[1]}")
+            cont_command_text = "\n".join(cont_command_parts)
+        else:
+            messages = build_kp_context(
+                game_session, module, player_char, events, teammates=teammates,
+            )
+            messages.append({"role": "user", "content": continuation_prompt})
+
+            kp = KPAgent(llm)
+            cont_result = ["", "", [], [], []]
+            try:
+                async for chunk in _stream_narration_filtered(
+                    kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
+                ):
+                    yield chunk
+            finally:
+                cont_narration = cont_result[0].rstrip()
+                if cont_narration:
+                    session_service.add_event(
+                        db, session_id, "narration", cont_narration, actor_name="KP",
+                    )
+                for npc_name, dialogue_text in cont_result[2]:
+                    ev = session_service.add_event(
+                        db, session_id, "dialogue", dialogue_text, actor_name=npc_name,
+                    )
+                    _attach_npc_portrait(db, session_id, module, ev)
+            # 世界记忆钩子 c：续写里的 NPC 台词同样记入其互动史
+            _record_npc_say_memory(
+                db, session_id, game_session, module, cont_result[2],
+                [player_char.name] + [t.name for t in (teammates or [])],
+            )
+            cont_command_text = cont_result[1]
+
         # 续写里 KP 可能再发指令（如读懂禁忌知识后追加 [SAN_CHECK]、或场景切换）——
         # 继续处理，但限深度防无限掷骰链。
         if dice_depth + 1 < MAX_DICE_CONTINUATIONS:
             async for chunk in _process_commands(
-                db, session_id, cont_result[1], module, player_char, game_session, llm,
+                db, session_id, cont_command_text, module, player_char, game_session, llm,
                 teammates=teammates, allow_rule_lookup=False, dice_depth=dice_depth + 1,
+                scene_groups=scene_groups,
+                focus_group_label=focus_group_label,
             ):
                 yield chunk
 

@@ -1001,6 +1001,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               />
               <BlindToggle checked={fields.visibility === 'blind'} onChange={(checked) => setField('visibility', checked ? 'blind' : '')} />
               <KpInput name="source" placeholder="目标/来源（可选）" fields={fields} onChange={setField} />
+              {/* 玩家在投骰按钮旁看到的「因：…」——只写他此刻已经知道的事，别用它剧透 */}
+              <KpInput name="reason" placeholder="因何而检（玩家可见）" fields={fields} onChange={setField} />
             </>}
             {action === 'opposed_check' && <>
               <div className="flex w-full flex-wrap items-center gap-2">
@@ -1052,8 +1054,9 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               <BlindToggle checked={fields.visibility === 'blind'} onChange={(checked) => setField('visibility', checked ? 'blind' : '')} />
             </>}
             {action === 'san_check' && <>
-              <KpInput name="chars" placeholder="目睹者，空=全队" fields={fields} onChange={setField} /><KpInput name="source" placeholder="恐怖源" fields={fields} onChange={setField} />
+              <KpInput name="chars" placeholder="目睹者，空=在场全体" fields={fields} onChange={setField} /><KpInput name="source" placeholder="恐怖源" fields={fields} onChange={setField} />
               <KpInput name="success_loss" placeholder="成功损失，如 0" fields={fields} onChange={setField} /><KpInput name="failure_loss" placeholder="失败损失，如 1d6" fields={fields} onChange={setField} />
+              <KpInput name="reason" placeholder="因何而检（玩家可见，空=用恐怖源）" fields={fields} onChange={setField} />
             </>}
             {action === 'scene_change' && <KpInput name="scene_id" placeholder="场景 ID 或名称" list="kp-scenes" fields={fields} onChange={setField} />}
             {(action === 'set_flag' || action === 'clear_flag') && <KpInput name="flag" placeholder="剧情标志" fields={fields} onChange={setField} />}

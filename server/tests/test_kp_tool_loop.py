@@ -667,7 +667,8 @@ def test_registry_covers_all_regex_commands():
     }
     assert "GROUP" not in tags
     required = {spec.name: spec.parameters["required"] for spec in kp_tools.REGISTRY}
-    assert required["dice_check"] == ["skill"]
+    # reason 必填：投骰卡上的「因何而检」是玩家投骰前唯一能看到的说明，不能靠 KP 自觉
+    assert required["dice_check"] == ["skill", "reason"]
     assert required["say"] == ["who", "text"]
     assert required["npc_act"] == ["npc_id", "trigger"]
     assert required["rule_lookup"] == ["query"]

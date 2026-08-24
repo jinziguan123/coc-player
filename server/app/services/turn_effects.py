@@ -144,10 +144,12 @@ def _tick_madness_recovery(
 async def _exec_san_check(
     db: Session, session_id: str, game_session: GameSession, kv: dict,
     player_char: Character, teammates: list[Character] | None,
+    scope: list[Character] | None = None,
 ) -> tuple[list[str], list[str], bool]:
     """执行一条理智检定：真人挂待投请求，AI 角色自动结算。
 
     返回 (chunks, 已结算结果描述, 是否存在待玩家投骰)。同一角色对同一恐怖源只检定一次。
+    ``scope`` 给定时（分头行动：这条指令出自哪一组）限定目睹者候选域，缺省为在场全体。
     """
     chunks: list[str] = []
     descs: list[str] = []
@@ -156,7 +158,12 @@ async def _exec_san_check(
     source = (kv.get("source") or "").strip()
     module = db.get(Module, game_session.module_id)
     source = _canonical_san_source(module, game_session.current_scene_id, source)
-    targets = _resolve_san_targets(kv.get("chars"), player_char, teammates)
+    # 玩家投骰前唯一能看到的解释就是这张卡：不给缘由，屏幕上就只剩一句「请你投个理智」。
+    # KP 没写 reason 时退回恐怖源文本（幂等键先还原成模组写的 trigger）。
+    reason = (kv.get("reason") or "").strip() or dice_runtime._san_source_label(module, source)
+    targets = _resolve_san_targets(
+        kv.get("chars"), player_char, teammates, game_session, scope,
+    )
 
     # 同一角色对同一恐怖源只检定一次：用 session_ledger.san_checked 记 "source|char_id"。
     led = game_session.ledger
@@ -205,6 +212,7 @@ async def _exec_san_check(
             "char_id": tchar.id,
             "actor_name": tchar.name,
             "source": source,
+            "reason": reason,
             "success_loss": success_loss,
             "failure_loss": failure_loss,
             "san_batch_id": batch_id,
@@ -529,11 +537,13 @@ async def _exec_hp_change(
 async def _exec_dice_check(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     kv: dict, player_char: Character, teammates: list[Character] | None,
+    scope: list[Character] | None = None,
 ) -> tuple[list[str], list[str], bool]:
     """执行一条技能检定。返回 (chunks, 回灌 KP 的结果描述, 是否挂成「待玩家投骰」)。
 
     真人控制、非暗投 → 不自动掷，挂 pending 并广播检定提示（pending=True，本轮就此收束）；
     NPC 暗骰 / AI 队友 / 暗投 → 系统自动掷，结果回灌。
+    ``scope`` 给定时（分头行动：这条指令出自哪一组）限定群检候选域，缺省为在场全体。
     """
     chunks: list[str] = []
     descs: list[str] = []
@@ -558,13 +568,16 @@ async def _exec_dice_check(
     bonus, penalty = _parse_bonus_penalty(kv)
     # 奖惩骰的理由：奖惩骰实打实地改了成败概率，玩家有权知道凭什么加。
     modifier_reason = (kv.get("modifier_reason") or "").strip()
+    # 「凭什么要我投这个骰」：只认 KP 明写的 reason。source 是**检定针对的对象**（「书桌暗格」），
+    # 玩家还没发现它时把它印在卡上就等于替 KP 剧透，不做兜底。
+    reason = (kv.get("reason") or "").strip()
 
     # 群检：char=在场/全体 或 chars=<名单> → 在场成员各自检定。公开骰遵守控制权：
     # AI 席立即自动投，真人席逐人挂待投；暗投仍全部自动结算，避免无人可见却卡住流程。
     group_ref = (kv.get("chars") or "").strip()
     if char_ref in _ALL_TOKENS or group_ref:
         targets = _resolve_dice_group_targets(
-            char_ref, group_ref, game_session, player_char, teammates,
+            char_ref, group_ref, game_session, player_char, teammates, scope,
         )
         human_targets = [
             c for c in targets
@@ -612,6 +625,7 @@ async def _exec_dice_check(
                 "char_id": c.id,
                 "actor_name": c.name,
                 "source": source,
+                "reason": reason,
                 "bonus": bonus,
                 "penalty": penalty,
                 "modifier_reason": modifier_reason,
@@ -656,7 +670,7 @@ async def _exec_dice_check(
         pending = {
             "id": check_id, "skill": skill_name, "difficulty": difficulty,
             "char_ref": char_ref, "char_id": char_id, "actor_name": shown_name,
-            "source": source, "bonus": bonus, "penalty": penalty,
+            "source": source, "reason": reason, "bonus": bonus, "penalty": penalty,
             "modifier_reason": modifier_reason,
         }
         # 治疗类检定：确定被治疗者（KP 显式 target 优先；缺失/误写成施救者自己 → 推断濒死/受伤队友），

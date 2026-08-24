@@ -621,7 +621,7 @@ def _tag_turn_events_by_group(db: Session, turn_events: list, groups: list[dict]
             session_service.set_event_group(db, e, label)
 
 
-async def _run_split_generation(
+async def _run_split_narrations(
     db: Session,
     session_id: str,
     game_session: GameSession,
@@ -638,22 +638,19 @@ async def _run_split_generation(
     blind_message: dict | None = None,
     rule_excerpts: list[dict] | None = None,
     location_guard: str = "",
-) -> None:
-    """分头行动：对每个分组各跑一次聚焦叙事，后端确定性地把产物归入该组。
+    group_prompts: dict[str, str] | None = None,
+    default_prompt: str | None = None,
+) -> str:
+    """分头行动：逐组生成聚焦叙事，后端确定性归组并落库。
 
-    每组单独生成 → 篇幅均衡、不会「只详写最后一个场景」；分组标签由后端注入 →
-    前端实时/重连都能稳定分栏，不靠模型自觉打 [GROUP]。
-    命令（检定/HP/旗标/场景）在所有分组叙事完成后，对合并文本统一处理一次。
-    ``plan`` 是本回合唯一的裁定计划（跨分组共用），每组都注入一份、也各自校验一次——
-    分头场景 NPC/线索并行推进，同样需要 clue_policy/safety 兜底，不能因为分头
-    就退化回纯提示词。
+    返回各组成员叙事合并后的指令文本（供统一 _process_commands 处理）。
+    ``group_prompts`` 可按组覆盖提示词（如检定裁定/骰子续写只喂给相关组）；
+    未覆盖的组使用 ``default_prompt``（缺省 SPLIT_FOCUS_PROMPT）继续推进本场景。
     """
     # 先把本回合各角色的行动/对话/掷骰也归入其所在场景列：这样每一列＝该场景里
     # 「玩家行动 + KP 叙事」自成一体（而非行动全挤在主线、叙事另起一列）。
     # 位置已由显式移动（玩家大地图 / 队友 travel 动作）确定性写入，此处不再据分组反推搬人。
     _tag_turn_events_by_group(db, _current_turn_events(events), groups)
-    # 生成前基线序号：供确定性 SAN 守卫判断本轮 KP 是否已自行掷过 SAN（幂等）。
-    pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
     plan_message = turn_planner.build_turn_plan_message(plan) if plan is not None else None
 
     # 模组原文 RAG：与单场景路径同一门槛（索引就绪才广告 [MODULE_LOOKUP]/注入摘录）
@@ -689,10 +686,12 @@ async def _run_split_generation(
             messages.append(blind_message)
         if location_guard and player_char.name in (grp.get("members") or []):
             messages.append({"role": "system", "content": location_guard})
-        messages.append({
-            "role": "user",
-            "content": SPLIT_FOCUS_PROMPT.format(label=label, members=members),
-        })
+        if group_prompts and label in group_prompts:
+            user_content = group_prompts[label]
+        else:
+            prompt = default_prompt or SPLIT_FOCUS_PROMPT
+            user_content = prompt.format(label=label, members=members)
+        messages.append({"role": "user", "content": user_content})
         result = ["", "", [], [], []]
         try:
             stream_kwargs = {"shown_dialogues": shown_dialogues} if shown_dialogues else {}
@@ -718,11 +717,51 @@ async def _run_split_generation(
         _record_npc_say_memory(
             db, session_id, game_session, module, result[2], grp["members"],
         )
-        combined.append(result[1])
+        # 留下组界标记：合并后的文本交给 _process_commands 统一处理，指令本身不带出处，
+        # 只有这个标记能让「谁该跟着检定」落回发出指令的那一组（见 _group_scope_resolver）。
+        combined.append(f"[GROUP: scene={label}]\n{result[1]}")
+    return "\n".join(combined)
+
+
+async def _run_split_generation(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module,
+    player_char: Character,
+    events: list,
+    teammates: list[Character] | None,
+    kp: KPAgent,
+    llm,
+    rules_enabled: bool,
+    matcher_npcs: list[dict],
+    groups: list[dict],
+    plan: turn_planner.TurnPlan | None = None,
+    blind_message: dict | None = None,
+    rule_excerpts: list[dict] | None = None,
+    location_guard: str = "",
+) -> None:
+    """分头行动：对每个分组各跑一次聚焦叙事，后端确定性地把产物归入该组。
+
+    每组单独生成 → 篇幅均衡、不会「只详写最后一个场景」；分组标签由后端注入 →
+    前端实时/重连都能稳定分栏，不靠模型自觉打 [GROUP]。
+    命令（检定/HP/旗标/场景）在所有分组叙事完成后，对合并文本统一处理一次。
+    ``plan`` 是本回合唯一的裁定计划（跨分组共用），每组都注入一份、也各自校验一次——
+    分头场景 NPC/线索并行推进，同样需要 clue_policy/safety 兜底，不能因为分头
+    就退化回纯提示词。
+    """
+    # 生成前基线序号：供确定性 SAN 守卫判断本轮 KP 是否已自行掷过 SAN（幂等）。
+    pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
+    combined = await _run_split_narrations(
+        db, session_id, game_session, module, player_char, events, teammates,
+        kp, llm, rules_enabled, matcher_npcs, groups,
+        plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
+        location_guard=location_guard,
+    )
 
     async for chunk in _process_commands(
-        db, session_id, "\n".join(combined), module, player_char, game_session, llm,
-        teammates=teammates,
+        db, session_id, combined, module, player_char, game_session, llm,
+        teammates=teammates, scene_groups=groups,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -975,6 +1014,8 @@ async def run_chat_generation(session_id: str) -> None:
                     actor=acting.name, skill=requested_skill, intent=player_text,
                 ),
                 requested_check=(acting, requested_skill),
+                focus_member=acting.name,
+                split_aware=True,
                 # 暂存式申请：这一轮里还有玩家的台词与行动，队友得像常规回合那样接话——
                 # 否则「说一句 + 顺手查一下」会让队友从申请一路哑到投骰结果之后（这条路和
                 # 投骰续写都不跑队友回合）。打字申请的老路径维持原样，不跑队友。
@@ -1186,12 +1227,37 @@ def _spoken_travel_intent(
     return chunks
 
 
+def _group_label_for_focus(
+    groups: list[dict],
+    focus_member: str | None,
+    user_prompt: str,
+    requested_check: tuple[Character, str] | None = None,
+) -> str:
+    """确定分头时本轮聚焦的组：显式 focus_member / requested_check 优先，再按提示词里的成员名兜底。"""
+    names: list[str] = []
+    if focus_member:
+        names.append(focus_member)
+    if requested_check is not None:
+        names.append(requested_check[0].name)
+    for grp in groups:
+        for member in (grp.get("members") or []):
+            if any(name and (name == member or name in member or member in name) for name in names if name):
+                return grp["label"]
+    for grp in groups:
+        for member in (grp.get("members") or []):
+            if member and member in (user_prompt or ""):
+                return grp["label"]
+    return groups[0]["label"] if groups else ""
+
+
 async def _run_kp_turn(
     db, session_id, game_session, module, player_char, party_others, user_prompt: str,
     then_team_turn: list[Character] | None = None,
     sanity_guard: bool = False,
     mishap_guard: bool = False,
     requested_check: tuple[Character, str] | None = None,
+    focus_member: str | None = None,
+    split_aware: bool = False,
 ) -> None:
     """跑一轮 KP：注入 user_prompt → 流式叙事 → 处理指令（待定检定/掷骰/场景等）→ done。
 
@@ -1206,6 +1272,7 @@ async def _run_kp_turn(
     （此时上下文已含刚揭示的恐怖）→ 确定性补发 SAN；KP 已自发掷过 SAN 则幂等跳过、不重复扣。
     """
     llm = get_llm()
+    kp = KPAgent(llm)
     # SAN 守卫基线：本次续写生成前的最大 seq，用于判断 KP 是否已自行掷过 SAN（幂等）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
     events = session_service.get_session_events(db, session_id)
@@ -1215,52 +1282,73 @@ async def _run_kp_turn(
         db, session_id, game_session, module, player_char, events, None,
     )
     rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
-    module_rag_enabled = getattr(module, "rag_status", "") == "ready"
-    party_ids = {player_char.id} | {t.id for t in (party_others or [])}
-    messages = build_kp_context(
-        game_session, module, player_char, events,
-        teammates=party_others, rules_lookup_enabled=rules_enabled,
-        module_excerpts=_module_excerpts_for_context(
-            db, module, game_session, events, party_ids,
-        ),
-        module_lookup_enabled=module_rag_enabled,
-        recall_enabled=event_recall.is_enabled(game_session),
-    )
-    if location_guard:
-        messages.append({"role": "system", "content": location_guard})
-    messages.append({"role": "user", "content": user_prompt})
 
-    kp = KPAgent(llm)
-    res = ["", "", [], [], []]
-    try:
-        async for chunk in _stream_narration_filtered(
-            kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
-        ):
-            room_hub.broadcast(session_id, chunk)
-    except asyncio.CancelledError:
-        _persist_narration(db, session_id, res)
-        raise
-    if location_guard:
-        # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
-        validation = await turn_context.turn_validator.validate_turn_narration(
-            llm, turn_planner.TurnPlan(), res[0],
-            turn_inputs=_shown_turn_context(events, party_ids),
-            party_names={player_char.name} | {t.name for t in (party_others or [])},
-            location_context=location_guard,
+    # 分头行动：检定申请、投骰续写、前往等旁路同样要按组生成并打分组标签，
+    # 不能只演触发者那一组、丢掉其他场景的后续剧情。
+    scene_groups = _location_groups(game_session, module, player_char, party_others)
+    split_mode = split_aware and len(scene_groups) >= 2
+    focus_label: str | None = None
+    if split_mode:
+        focus_label = _group_label_for_focus(
+            scene_groups, focus_member, user_prompt, requested_check,
         )
-        if validation is not None and validation.violated:
-            logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
-            res[0] = validation.corrected_narration
-    _persist_narration(db, session_id, res)
-    # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
-    _record_npc_say_memory(
-        db, session_id, game_session, module, res[2],
-        [player_char.name] + [t.name for t in (party_others or [])],
-    )
+        group_prompts = {focus_label: user_prompt} if focus_label else None
+        commands_text = await _run_split_narrations(
+            db, session_id, game_session, module, player_char, events, party_others,
+            kp, llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
+            scene_groups, location_guard=location_guard,
+            group_prompts=group_prompts,
+            default_prompt=SPLIT_FOCUS_PROMPT,
+        )
+    else:
+        module_rag_enabled = getattr(module, "rag_status", "") == "ready"
+        party_ids = {player_char.id} | {t.id for t in (party_others or [])}
+        messages = build_kp_context(
+            game_session, module, player_char, events,
+            teammates=party_others, rules_lookup_enabled=rules_enabled,
+            module_excerpts=_module_excerpts_for_context(
+                db, module, game_session, events, party_ids,
+            ),
+            module_lookup_enabled=module_rag_enabled,
+            recall_enabled=event_recall.is_enabled(game_session),
+        )
+        if location_guard:
+            messages.append({"role": "system", "content": location_guard})
+        messages.append({"role": "user", "content": user_prompt})
+
+        res = ["", "", [], [], []]
+        try:
+            async for chunk in _stream_narration_filtered(
+                kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
+            ):
+                room_hub.broadcast(session_id, chunk)
+        except asyncio.CancelledError:
+            _persist_narration(db, session_id, res)
+            raise
+        if location_guard:
+            # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
+            validation = await turn_context.turn_validator.validate_turn_narration(
+                llm, turn_planner.TurnPlan(), res[0],
+                turn_inputs=_shown_turn_context(events, party_ids),
+                party_names={player_char.name} | {t.name for t in (party_others or [])},
+                location_context=location_guard,
+            )
+            if validation is not None and validation.violated:
+                logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
+                res[0] = validation.corrected_narration
+        _persist_narration(db, session_id, res)
+        # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
+        _record_npc_say_memory(
+            db, session_id, game_session, module, res[2],
+            [player_char.name] + [t.name for t in (party_others or [])],
+        )
+        commands_text = res[1]
 
     async for chunk in _process_commands(
-        db, session_id, res[1], module, player_char, game_session, llm,
+        db, session_id, commands_text, module, player_char, game_session, llm,
         teammates=party_others,
+        scene_groups=scene_groups if split_mode else None,
+        focus_group_label=focus_label,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -1321,6 +1409,8 @@ async def _run_kp_turn(
             async for chunk in _process_commands(
                 db, session_id, cmd, module, player_char, game_session, llm,
                 teammates=party_others, allow_rule_lookup=False,
+                scene_groups=scene_groups if split_mode else None,
+                focus_group_label=focus_label,
             ):
                 room_hub.broadcast(session_id, chunk)
 
@@ -1362,6 +1452,8 @@ async def run_check_request_generation(
                 intent=intent.strip() or "（未说明，需你结合当前情境自行判断意图）",
             ),
             requested_check=(actor, skill),
+            focus_member=actor.name,
+            split_aware=True,
         )
     except asyncio.CancelledError:
         logger.info("检定申请生成被取消: session=%s", session_id)
@@ -1502,6 +1594,8 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
                 player_char,
                 party_others,
                 KP_DICE_CONTINUATION_PROMPT.format(dice_results=desc),
+                focus_member=target_char.name,
+                split_aware=True,
             )
             return
 
@@ -1636,6 +1730,8 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
             KP_DICE_CONTINUATION_PROMPT.format(dice_results=desc),
             sanity_guard=succeeded,
             mishap_guard=fumbled,
+            focus_member=disp_name,
+            split_aware=True,
         )
         logger.info(
             "耗时|投骰后 KP 续写 %.1fs（%s）session=%s",
@@ -1906,6 +2002,7 @@ async def run_travel_generation(
         await _run_kp_turn(
             db, session_id, game_session, module, player_char, party_others, prompt,
             then_team_turn=ai_teammates,
+            focus_member=actor.name,
         )
     except asyncio.CancelledError:
         logger.info("前往生成被取消: session=%s", session_id)

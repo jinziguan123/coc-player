@@ -103,13 +103,21 @@ def _guard_turn_events(
 
 
 def _turn_evidence_text(
-    db: Session, session_id: str, pre_gen_seq: int,
+    db: Session, session_id: str, pre_gen_seq: int, group_label: str | None = None,
 ) -> str:
-    """取本轮行动/对话与生成后新增叙事，避免拿旧回合的恐怖内容重复触发。"""
+    """取本轮行动/对话与生成后新增叙事，避免拿旧回合的恐怖内容重复触发。
+
+    ``group_label`` 给定时（分头行动）剔除**明确属于别组**的事件：另一处场景发生的恐怖
+    不是这一组的目睹证据，混在一起看会让守卫拿隔壁的怪物给这边的人补 SAN。
+    单场景回合的事件没有分组标签，一律保留，行为不变。
+    """
     events = _guard_turn_events(db, session_id, pre_gen_seq)
     texts = []
     for event in events:
         seq = int(event.sequence_num or 0)
+        group = (event.metadata_ or {}).get("group")
+        if group_label and group and group != group_label:
+            continue
         if event.event_type in ("action", "dialogue") or seq > pre_gen_seq:
             content = (event.content or "").strip()
             if content:
@@ -259,8 +267,12 @@ def _sanity_has_evidence(
     pre_gen_seq: int,
 ) -> bool:
     """SAN 只能由本轮恐怖叙事或当前场景明文机制触发。"""
-    evidence_text = _turn_evidence_text(db, session_id, pre_gen_seq)
     scene_id = session_service.get_char_location(game_session, player_char.id)
+    # 守卫是主角这一组的视角：证据也只认这一组的（分头时别组的叙事另有其组标签）。
+    evidence_text = _turn_evidence_text(
+        db, session_id, pre_gen_seq,
+        group_label=turn_context._scene_name(module, scene_id) if module and scene_id else None,
+    )
     entered = bool(scene_id and _explicit_player_movement(
         db, session_id, module, player_char, scene_id, pre_gen_seq=pre_gen_seq,
     ))

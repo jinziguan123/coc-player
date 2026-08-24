@@ -37,6 +37,7 @@ import {
   CheckResultCard, hasCheckReadout, diceAccent,
   type CheckResultMeta,
 } from '../components/game/CheckResultCard'
+import { CheckRequestCard } from '../components/game/CheckRequestCard'
 import { OnboardingCoach, hasSeenCoach } from '../components/game/OnboardingCoach'
 import { buildCheckCaption } from '../components/game/diceNotation'
 import { normalizeOpposedData } from '../components/game/opposedDice'
@@ -2013,24 +2014,18 @@ export function GameSessionPage() {
                 // 权威（pending_checks）∪ 乐观（刚到、尚未 refetch）——消除「已投骰→投骰」闪烁
                 const stillPending = (!!pending && checkId in pending) || optimisticPending.has(checkId)
                 const mine = !msg.metadata?.char_id || msg.metadata?.char_id === myCharId
-                // 待我投骰时呼吸态提示可点；已投/非我则静止。新到达的提示卡再叠一次入场淡入。
-                const pendingAnim = stillPending && mine ? 'dice-pending' : ''
                 return (
-                  <div key={msg.id} className={`chat-msg py-1 flex justify-center ${isFresh(msg) ? 'anim-enter' : ''}`}>
-                    <div className={`rounded-md px-3 py-2 text-sm flex items-center gap-3 ${pendingAnim}`}
-                      style={{ background: 'var(--color-bg-tertiary)', borderLeft: '3px solid var(--color-accent)', maxWidth: '100%' }}>
-                      <GiRollingDices style={{ color: 'var(--color-accent)', fontSize: '1.1rem', flexShrink: 0 }} />
-                      <span className="whitespace-pre-wrap">{msg.content}</span>
-                      {stillPending && mine && (
-                        <button onClick={() => submitRoll(checkId)} disabled={streaming}
-                          className="btn-primary text-xs !px-2.5 !py-1 flex items-center gap-1 flex-shrink-0"
-                          style={streaming ? { opacity: 0.5 } : undefined}>
-                          <GiRollingDices size={13} /> 投骰
-                        </button>
-                      )}
-                      {!stillPending && <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-text-secondary)', opacity: 0.6 }}>已投骰</span>}
-                    </div>
-                  </div>
+                  <CheckRequestCard
+                    key={msg.id}
+                    content={msg.content}
+                    // 因何而检：KP 给的一句话缘由，跟检定要求同框——否则玩家只看到「请你投个骰」。
+                    reason={String(msg.metadata?.reason ?? '').trim()}
+                    actionable={mine}
+                    pending={stillPending}
+                    onRoll={() => submitRoll(checkId)}
+                    disabled={streaming}
+                    animClass={isFresh(msg) ? 'anim-enter' : ''}
+                  />
                 )
               }
               return (

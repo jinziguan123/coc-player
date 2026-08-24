@@ -108,6 +108,17 @@ REGISTRY: tuple[ToolSpec, ...] = (
                 "type": "string",
                 "description": "检定针对的具体对象/目标（如「书桌暗格」「管家的说辞」），便于结果归属",
             },
+            "reason": {
+                "type": "string",
+                "description": (
+                    "**必填**：一句话告诉玩家为什么要投这个骰（如「屋里那阵抓挠声太轻，"
+                    "得静下心才分辨得出方向」「你想从他躲闪的语气里判断真伪」）。"
+                    "系统会把它写在投骰按钮旁边——玩家只看到「请投个骰」而不知为何，"
+                    "就成了纯粹的机器指令。"
+                    "**只用玩家此刻已经知道的信息表述**：绝不能写出他还没发现的暗格、尸体、"
+                    "线索内容或检定成功后才该揭晓的东西（那等于用检定提示提前剧透）。"
+                ),
+            },
             "target": {
                 "type": "string",
                 "description": (
@@ -138,7 +149,7 @@ REGISTRY: tuple[ToolSpec, ...] = (
                     "玩家有权知道凭什么。只写理由本身，不要写「奖励骰」「+1」这些字样。"
                 ),
             },
-        }, ["skill"]),
+        }, ["skill", "reason"]),
         kind="check",
     ),
     ToolSpec(
@@ -171,6 +182,13 @@ REGISTRY: tuple[ToolSpec, ...] = (
             "failure_loss": {"type": "string", "description": "失败时的 SAN 损失（骰式或数字，如 1d6），缺省 1d6"},
             "chars": {"type": "string", "description": "目睹者名单（多人用 / 分隔），缺省在场全体"},
             "source": {"type": "string", "description": "恐怖源标识（如「墓室腐尸」），用于同源去重"},
+            "reason": {
+                "type": "string",
+                "description": (
+                    "**必填**：一句话告诉玩家因何而检（如「床底那截露出来的手指」）。"
+                    "系统会把它写在投骰按钮旁边；缺省时退回 source 文本。"
+                ),
+            },
         }, []),
         kind="check",
     ),

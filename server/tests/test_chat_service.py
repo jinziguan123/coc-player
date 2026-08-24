@@ -1345,6 +1345,176 @@ def test_split_generation_injects_turn_plan_into_each_group(db_factory, monkeypa
         assert "管家的秘密" in text
 
 
+def test_split_narrations_supports_per_group_prompts_and_persists_groups(db_factory, monkeypatch):
+    """分头检定/续写旁路：逐组生成时，只有相关组收到检定/续写提示词，其他组收到通用聚焦提示词；
+    落库产物全部带 group 标签，前端才能按场景分栏。"""
+    db = db_factory()
+    module = Module(
+        title="M", rule_system="coc", npcs=[],
+        scenes=[{"id": "scene_office", "name": "事务所"}, {"id": "scene_lib", "name": "图书馆"}],
+    )
+    pc = Character(name="莫妮卡", rule_system="coc")
+    mate = Character(name="亨利", rule_system="coc")
+    db.add_all([module, pc, mate])
+    db.flush()
+    session = GameSession(
+        module_id=module.id, player_character_id=pc.id, status="active",
+        current_scene_id="scene_office", world_state={},
+    )
+    db.add(session)
+    db.commit()
+    session_service.set_char_location(db, session.id, mate.id, "scene_lib")
+    session = db.get(GameSession, session.id)
+    session_service.add_event(db, session.id, "action", "（申请「心理学」检定）", actor_name="莫妮卡")
+    events = session_service.get_session_events(db, session.id)
+    groups = chat_service._location_groups(session, module, pc, [mate])
+    assert len(groups) == 2
+
+    captured = []
+
+    async def fake_stream(kp, messages, result, npcs=None, group_label=None, **kwargs):
+        captured.append((group_label, messages[-1]["content"]))
+        result[0] = f"{group_label} 的叙事"
+        result[1] = result[0]
+        result[4].append((0, group_label))
+        yield chat_service._make_chunk("narration", result[0], actor_name="KP")
+
+    monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    focus_label = groups[0]["label"]
+    custom_prompt = "玩家「莫妮卡」申请用「心理学」检定，请裁定"
+    combined = asyncio.run(chat_service._run_split_narrations(
+        db, session.id, session, module, pc, events, [mate],
+        kp=object(), llm=None, rules_enabled=False, matcher_npcs=[], groups=groups,
+        group_prompts={focus_label: custom_prompt},
+        default_prompt="DEFAULT_{label}_{members}",
+    ))
+
+    assert len(captured) == 2
+    by_label = dict(captured)
+    assert by_label[focus_label] == custom_prompt
+    other_label = next(label for label in by_label if label != focus_label)
+    assert by_label[other_label].startswith("DEFAULT_")
+    assert set(by_label) == {g["label"] for g in groups}
+
+    evs = session_service.get_session_events(db_factory(), session.id)
+    narr_groups = {(e.metadata_ or {}).get("group") for e in evs if e.event_type == "narration"}
+    assert narr_groups == {g["label"] for g in groups}
+    # 每组产物前带组界标记：合并文本交给 _process_commands 后，指令仍能回溯到发出它的那一组。
+    assert combined == "\n".join(
+        f"[GROUP: scene={g['label']}]\n{g['label']} 的叙事" for g in groups
+    )
+
+
+def test_run_kp_turn_split_check_request_generates_each_group(db_factory, monkeypatch):
+    """检定申请旁路在分头时也要走逐组生成：触发者那一组收到检定裁定提示词，其他组继续推进本场景。"""
+    _patch_runtime(monkeypatch, db_factory)
+    db = db_factory()
+    module = Module(
+        title="M", rule_system="coc", npcs=[],
+        scenes=[{"id": "scene_office", "name": "事务所"}, {"id": "scene_lib", "name": "图书馆"}],
+    )
+    pc = Character(name="莫妮卡", rule_system="coc", is_player=True)
+    mate = Character(name="亨利", rule_system="coc", is_player=True)
+    db.add_all([module, pc, mate])
+    db.flush()
+    session = GameSession(
+        module_id=module.id, player_character_id=pc.id, status="active",
+        current_scene_id="scene_office", world_state={},
+    )
+    db.add(session)
+    db.commit()
+    session_service.set_char_location(db, session.id, mate.id, "scene_lib")
+    session_service.add_event(db, session.id, "action", "（申请「心理学」检定）", actor_name="莫妮卡")
+    session = db.get(GameSession, session.id)
+    groups = chat_service._location_groups(session, module, pc, [mate])
+    assert len(groups) == 2
+
+    captured = []
+
+    async def fake_stream(kp, messages, result, npcs=None, group_label=None, **kwargs):
+        captured.append(group_label)
+        result[0] = f"{group_label} 的叙事"
+        result[1] = result[0]
+        result[4].append((0, group_label))
+        yield chat_service._make_chunk("narration", result[0], actor_name="KP")
+
+    async def fake_process(*args, **kwargs):
+        if False:
+            yield None
+
+    monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+    monkeypatch.setattr(chat_service, "_process_commands", fake_process)
+
+    asyncio.run(chat_service._run_kp_turn(
+        db, session.id, session, module, pc, [mate],
+        "玩家「莫妮卡」申请用「心理学」检定，请裁定",
+        requested_check=(pc, "心理学"),
+        focus_member=pc.name,
+        split_aware=True,
+    ))
+
+    assert set(captured) == {g["label"] for g in groups}
+    evs = session_service.get_session_events(db_factory(), session.id)
+    narr_groups = {(e.metadata_ or {}).get("group") for e in evs if e.event_type == "narration"}
+    assert narr_groups == {g["label"] for g in groups}
+
+
+def test_process_commands_split_dice_continuation_tags_affected_group(db_factory, monkeypatch):
+    """分头行动中的自动骰（如心理学暗投）续写按实际产出结果的组生成并落 group 标签；
+    其他组已有本轮分头叙事，不需要再被重复推一轮。"""
+    db = db_factory()
+    module = Module(
+        title="M", rule_system="coc", npcs=[],
+        scenes=[{"id": "scene_office", "name": "事务所"}, {"id": "scene_lib", "name": "图书馆"}],
+    )
+    pc = Character(name="莫妮卡", rule_system="coc", is_player=True)
+    mate = Character(name="亨利", rule_system="coc", is_player=True)
+    db.add_all([module, pc, mate])
+    db.flush()
+    session = GameSession(
+        module_id=module.id, player_character_id=pc.id, status="active",
+        current_scene_id="scene_office", world_state={},
+    )
+    db.add(session)
+    db.commit()
+    session_service.set_char_location(db, session.id, mate.id, "scene_lib")
+    session = db.get(GameSession, session.id)
+    groups = chat_service._location_groups(session, module, pc, [mate])
+    assert len(groups) == 2
+
+    captured = []
+
+    async def fake_stream(kp, messages, result, npcs=None, group_label=None, **kwargs):
+        captured.append(group_label)
+        result[0] = f"{group_label} 续写"
+        result[1] = ""
+        result[4].append((0, group_label))
+        yield chat_service._make_chunk("narration", result[0], actor_name="KP")
+
+    async def fake_exec_dice_check(*args, **kwargs):
+        return (
+            [],
+            ["【暗投·亨利·心理学（normal），结果仅你（KP）可见】：达成 普通成功；他观察到了对方的犹豫"],
+            False,
+        )
+
+    monkeypatch.setattr(chat_service.kp_tool_loop, "_stream_narration_filtered", fake_stream)
+    monkeypatch.setattr(chat_service.kp_tool_loop, "_exec_dice_check", fake_exec_dice_check)
+
+    asyncio.run(_collect(chat_service._process_commands(
+        db, session.id, "[DICE_CHECK: skill=心理学, char=亨利, visibility=blind]",
+        module, pc, session, llm=None, teammates=[mate],
+        scene_groups=groups,
+        focus_group_label=groups[1]["label"],
+    )))
+
+    assert captured == [groups[1]["label"]]
+    evs = session_service.get_session_events(db_factory(), session.id)
+    narr_groups = {(e.metadata_ or {}).get("group") for e in evs if e.event_type == "narration"}
+    assert narr_groups == {groups[1]["label"]}
+
+
 def test_psychology_check_is_always_blind(db_factory, monkeypatch):
     """心理学检定一律强制暗投：不挂「待玩家投骰」、不广播达成等级，结果只回灌 KP。
     其他技能（如侦查）不受影响，仍照常明骰。"""

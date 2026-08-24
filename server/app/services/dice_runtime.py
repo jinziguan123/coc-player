@@ -86,6 +86,30 @@ def _canonical_san_source(
         return _san_mechanism_source_key(str(scene_id), matches[0])
     return source
 
+
+def _san_source_label(module: Module | None, source: str) -> str:
+    """把 SAN 幂等键还原成人话（模组机制的 trigger）；自由文本来源原样返回。
+
+    ``scene:<id>:san:<n>`` 是给去重用的机器键，直接摆到玩家面前就是一行乱码——
+    投骰卡上的「因何而检」得是句能读的话。
+    """
+    source = (source or "").strip()
+    match = re.fullmatch(r"scene:(.+):san:(\d+)", source)
+    if not match:
+        return source
+    if module is None:
+        return ""
+    scene_id, index = match.group(1), int(match.group(2))
+    scene = next(
+        (item for item in module.scenes or [] if str(item.get("id") or "") == scene_id),
+        None,
+    )
+    events = (scene or {}).get("events") or []
+    if 0 <= index < len(events) and isinstance(events[index], dict):
+        return str(events[index].get("trigger") or "").strip()
+    return ""
+
+
 def _check_prompt_text(
     actor_name: str, skill: str, difficulty: str,
     bonus: int = 0, penalty: int = 0, modifier_reason: str = "",
@@ -325,28 +349,6 @@ def _scene_requires_group_check(
     return any(word in text for word in _GROUP_CHECK_WORDS)
 
 
-def _resolve_san_targets(
-    chars_ref: str | None,
-    player_char: Character,
-    teammates: list[Character] | None,
-) -> list[Character]:
-    """把 SAN_CHECK 的 chars= 解析成目睹者角色列表（玩家方角色一视同仁，无主角特权）。
-
-    空或「在场/全体/all」→ 全队；否则按名单（逗号/顿号分隔）匹配，匹配不到兜底全队。
-    """
-    party = [player_char] + list(teammates or [])
-    ref = (chars_ref or "").strip()
-    if not ref or ref.lower() in _ALL_TOKENS or ref in _ALL_TOKENS:
-        return party
-    names = [n.strip() for n in re.split(r"[,，、/]", ref) if n.strip()]
-    out: list[Character] = []
-    for n in names:
-        for c in party:
-            if c.name and (c.name == n or n in c.name or c.name in n) and c not in out:
-                out.append(c)
-    return out or party
-
-
 def _present_party(
     game_session: GameSession,
     player_char: Character,
@@ -369,25 +371,74 @@ def _present_party(
     return present or party
 
 
+def _candidate_pool(
+    game_session: GameSession | None,
+    player_char: Character,
+    teammates: list[Character] | None,
+    scope: list[Character] | None,
+) -> list[Character]:
+    """一条群体指令的候选域：显式 ``scope`` > 在场全体 > 全队。
+
+    ``scope`` 由调用方按「这条指令出自分头行动的哪一组」给出——同一轮里两组各自的
+    [SAN_CHECK]/[DICE_CHECK] 会被合并成一段文本统一处理，只看主角位置无法区分它们。
+    """
+    if scope:
+        return list(scope)
+    if game_session is not None:
+        return _present_party(game_session, player_char, teammates)
+    return [player_char] + list(teammates or [])
+
+
+def _match_named(candidates: list[Character], ref: str) -> list[Character]:
+    """在候选域里按名单（逗号/顿号/斜杠分隔）匹配角色，保持名单顺序、去重。"""
+    names = [n.strip() for n in re.split(r"[,，、/]", ref) if n.strip()]
+    out: list[Character] = []
+    for n in names:
+        for c in candidates:
+            if c.name and (c.name == n or n in c.name or c.name in n) and c not in out:
+                out.append(c)
+    return out
+
+
+def _resolve_san_targets(
+    chars_ref: str | None,
+    player_char: Character,
+    teammates: list[Character] | None,
+    game_session: GameSession | None = None,
+    scope: list[Character] | None = None,
+) -> list[Character]:
+    """把 SAN_CHECK 的 chars= 解析成目睹者角色列表（玩家方角色一视同仁，无主角特权）。
+
+    候选域＝本条指令所属分组（``scope``）或在场全体；空或「在场/全体/all」→ 候选域全体，
+    否则在候选域内按名单匹配，匹配不到兜底候选域全体。
+
+    **目睹是 SAN 的唯一依据**：分头行动时另一处场景的人根本看不见这里的恐怖，候选域必须
+    先按位置收窄——否则一组撞见腐尸，另一头疗养院里的队友也跟着掉 SAN。
+    """
+    candidates = _candidate_pool(game_session, player_char, teammates, scope)
+    ref = (chars_ref or "").strip()
+    if not ref or ref.lower() in _ALL_TOKENS or ref in _ALL_TOKENS:
+        return candidates
+    return _match_named(candidates, ref) or candidates
+
+
 def _resolve_dice_group_targets(
     char_ref: str,
     group_ref: str,
     game_session: GameSession,
     player_char: Character,
     teammates: list[Character] | None,
+    scope: list[Character] | None = None,
 ) -> list[Character]:
-    """群检目标：char=在场/全体 或 chars=在场 → 在场全体；chars=名单 → 具名成员。"""
+    """群检目标：char=在场/全体 或 chars=在场 → 候选域全体；chars=名单 → 域内具名成员。
+
+    候选域同 ``_resolve_san_targets``：分头时是发出该指令的那一组，否则是在场全体。
+    """
+    candidates = _candidate_pool(game_session, player_char, teammates, scope)
     ref = (group_ref or char_ref or "").strip()
     if not ref or ref in _ALL_TOKENS or ref.lower() in _ALL_TOKENS:
-        return _present_party(game_session, player_char, teammates)
-    party = [player_char] + list(teammates or [])
-    names = [n.strip() for n in re.split(r"[,，、/]", ref) if n.strip()]
-    out: list[Character] = []
-    for n in names:
-        for c in party:
-            if c.name and (c.name == n or n in c.name or c.name in n) and c not in out:
-                out.append(c)
-    return out or _present_party(game_session, player_char, teammates)
+        return candidates
+    return _match_named(candidates, ref) or candidates
 
 
 async def _resolve_opposed(
