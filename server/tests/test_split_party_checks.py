@@ -90,7 +90,11 @@ def _san_requests(db, session_id):
 
 
 def test_san_check_default_targets_only_the_present_party(db_factory):
-    """缺省 chars 时只对与主角同场景的人发起——另一处的队友没看见，凭什么掉 SAN。"""
+    """候选域先按位置收窄：另一处场景的队友连屋子都不在，不可能目睹。
+
+    候选域之内再按「谁真的看见了」收，见 test_san_witnesses.py；这里没有本轮上下文
+    （pre_gen_seq 缺省），故落到整个候选域。
+    """
     db = db_factory()
     session, _module, chars = _seed(db)
     hero, mate_house, *asylum = chars

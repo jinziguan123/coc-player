@@ -83,23 +83,8 @@ def _scene_terms(module: Module | None, scene_id: str | None) -> set[str]:
     return {term for term in terms if term}
 
 
-def _guard_turn_events(
-    db: Session, session_id: str, pre_gen_seq: int | None = None,
-) -> list:
-    """取生成前一段玩家回合及其后果。
-
-    生成结束后最新的 KP narration 会让 ``_current_turn_events`` 只看到尾部系统事件；
-    守卫仍需看到 narration 之前的玩家移动/行动，因此按生成前序号定位上一段旁白。
-    """
-    all_events = session_service.get_session_events(db, session_id)
-    if pre_gen_seq is None:
-        return _current_turn_events(all_events)
-    previous_narr_seq = max(
-        (int(event.sequence_num or 0) for event in all_events
-         if event.event_type == "narration" and int(event.sequence_num or 0) <= pre_gen_seq),
-        default=-1,
-    )
-    return [event for event in all_events if int(event.sequence_num or 0) > previous_narr_seq]
+#: 取生成前一段玩家回合及其后果；实现在 turn_context（SAN 目睹者判定也要用它）。
+_guard_turn_events = turn_context.guard_turn_events
 
 
 def _turn_evidence_text(
@@ -855,6 +840,7 @@ async def _ensure_planned_sanity(
     }
     chunks, _descs, _pending = await _exec_san_check(
         db, session_id, game_session, kv, player_char, teammates,
+        pre_gen_seq=pre_gen_seq,
     )
     for chunk in chunks:
         yield chunk

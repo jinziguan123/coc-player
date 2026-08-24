@@ -56,13 +56,15 @@ def build_promote_messages(name: str, material: str, module_title: str) -> list[
                 f"模组：《{module_title}》。要转正的角色名：{name}。\n"
                 "字段要求：\n"
                 "- name：沿用上面的角色名，原样输出。\n"
+                "- gender：male 或 female，据言行里的称呼（他/她、先生/太太、职务）判断；"
+                "确实看不出就留空字符串，**不要按名字的语感猜**。这一项决定日后他的立绘画成谁。\n"
                 "- description：外貌与身份的客观速写（一两句，扣既有言行，不拔高其重要性）。\n"
                 "- personality：性格与说话风格（一句）。\n"
                 "- background：与其身份相称的**日常**背景（一两句）。**不得**赋予他任何案情内幕、"
                 "隐藏真相或线索级信息——他仍是配角，剧情秘密只属模组。\n"
                 "只依据给定言行，绝不臆造他掌握的情报或秘密。\n\n"
                 f"【{name} 的既有言行】\n{material}\n\n"
-                '现在输出 JSON：{"name":"","description":"","personality":"","background":""}'
+                '现在输出 JSON：{"name":"","gender":"","description":"","personality":"","background":""}'
             ),
         },
     ]
@@ -87,9 +89,12 @@ async def generate_npc_card(
     data = _extract_json_object(raw)
     if not isinstance(data, dict):
         return None
+    gender = str(data.get("gender") or "").strip().lower()
     return {
         # name 强制用传入值，避免模型改名导致与 improvised_npcs 的 key 对不上
         "name": name,
+        # 立绘素材要靠它才画得对人（见 module_image_service.npc_portrait_material）
+        "gender": gender if gender in ("male", "female") else "",
         "description": str(data.get("description") or "").strip(),
         "personality": str(data.get("personality") or "").strip(),
         "background": str(data.get("background") or "").strip(),

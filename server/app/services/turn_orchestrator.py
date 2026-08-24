@@ -533,7 +533,7 @@ async def _run_generation(
 
         async for chunk in _process_commands(
             db, session_id, result[1], module, player_char, game_session, llm,
-            teammates=teammates,
+            teammates=teammates, pre_gen_seq=pre_gen_seq,
         ):
             room_hub.broadcast(session_id, chunk)
 
@@ -761,7 +761,7 @@ async def _run_split_generation(
 
     async for chunk in _process_commands(
         db, session_id, combined, module, player_char, game_session, llm,
-        teammates=teammates, scene_groups=groups,
+        teammates=teammates, scene_groups=groups, pre_gen_seq=pre_gen_seq,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -1349,6 +1349,7 @@ async def _run_kp_turn(
         teammates=party_others,
         scene_groups=scene_groups if split_mode else None,
         focus_group_label=focus_label,
+        pre_gen_seq=pre_gen_seq,
     ):
         room_hub.broadcast(session_id, chunk)
 
@@ -1411,6 +1412,7 @@ async def _run_kp_turn(
                 teammates=party_others, allow_rule_lookup=False,
                 scene_groups=scene_groups if split_mode else None,
                 focus_group_label=focus_label,
+                pre_gen_seq=pre_gen_seq,
             ):
                 room_hub.broadcast(session_id, chunk)
 

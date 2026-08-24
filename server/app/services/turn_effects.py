@@ -145,11 +145,13 @@ async def _exec_san_check(
     db: Session, session_id: str, game_session: GameSession, kv: dict,
     player_char: Character, teammates: list[Character] | None,
     scope: list[Character] | None = None,
+    pre_gen_seq: int | None = None,
 ) -> tuple[list[str], list[str], bool]:
     """执行一条理智检定：真人挂待投请求，AI 角色自动结算。
 
     返回 (chunks, 已结算结果描述, 是否存在待玩家投骰)。同一角色对同一恐怖源只检定一次。
-    ``scope`` 给定时（分头行动：这条指令出自哪一组）限定目睹者候选域，缺省为在场全体。
+    ``scope`` 给定时（分头行动：这条指令出自哪一组）限定目睹者候选域；``pre_gen_seq``
+    给定时，KP 没写 chars 就退回「本轮真正行动过的人」而非在场全体（在场≠目睹）。
     """
     chunks: list[str] = []
     descs: list[str] = []
@@ -163,6 +165,9 @@ async def _exec_san_check(
     reason = (kv.get("reason") or "").strip() or dice_runtime._san_source_label(module, source)
     targets = _resolve_san_targets(
         kv.get("chars"), player_char, teammates, game_session, scope,
+        default_targets=turn_context.turn_actor_chars(
+            db, session_id, [player_char] + list(teammates or []), pre_gen_seq,
+        ),
     )
 
     # 同一角色对同一恐怖源只检定一次：用 session_ledger.san_checked 记 "source|char_id"。

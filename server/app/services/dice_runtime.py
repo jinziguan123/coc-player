@@ -406,20 +406,29 @@ def _resolve_san_targets(
     teammates: list[Character] | None,
     game_session: GameSession | None = None,
     scope: list[Character] | None = None,
+    default_targets: list[Character] | None = None,
 ) -> list[Character]:
     """把 SAN_CHECK 的 chars= 解析成目睹者角色列表（玩家方角色一视同仁，无主角特权）。
 
-    候选域＝本条指令所属分组（``scope``）或在场全体；空或「在场/全体/all」→ 候选域全体，
-    否则在候选域内按名单匹配，匹配不到兜底候选域全体。
+    候选域＝本条指令所属分组（``scope``）或在场全体。在候选域里再按 chars 收：
 
-    **目睹是 SAN 的唯一依据**：分头行动时另一处场景的人根本看不见这里的恐怖，候选域必须
-    先按位置收窄——否则一组撞见腐尸，另一头疗养院里的队友也跟着掉 SAN。
+    - 具名名单 → 域内匹配到的那几个（匹配不到才兜底整个域）
+    - 「在场/全体/all」→ 整个域：KP 显式声明这东西所有人都看见了
+    - 空 → ``default_targets``（本轮真正行动过的人）∩ 候选域
+
+    **目睹才检定，在场不等于目睹**。同一间屋里，甲掀开床单看见尸体，乙背对着在翻抽屉——
+    乙没看见，凭什么掉 SAN？要等甲喊他过来看（他也做出行动）才轮到他。所以缺省不是
+    「在场全体」而是「本轮参与进来的人」；真要全员目睹，KP 得自己写 chars=在场。
+    分头行动更是如此：另一处场景的人连屋子都不在，先由候选域挡掉。
     """
     candidates = _candidate_pool(game_session, player_char, teammates, scope)
     ref = (chars_ref or "").strip()
-    if not ref or ref.lower() in _ALL_TOKENS or ref in _ALL_TOKENS:
-        return candidates
-    return _match_named(candidates, ref) or candidates
+    if ref and ref.lower() not in _ALL_TOKENS and ref not in _ALL_TOKENS:
+        return _match_named(candidates, ref) or candidates
+    if ref:
+        return candidates                    # 显式「在场/全体」：整个候选域
+    involved = [c for c in (default_targets or []) if c in candidates]
+    return involved or candidates
 
 
 def _resolve_dice_group_targets(

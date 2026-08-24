@@ -276,6 +276,7 @@ _NPC_PORTRAIT_PROMPT_SYS = (
     "该人物的半身肖像（character portrait, bust shot，按给定年代取服饰）。据外貌/身份/性格"
     "描绘气质与神态。画风词不用写，系统会统一追加。不要出现真实人名，"
     "不要引号，只输出提示词本身。"
+    + module_image_service.PORTRAIT_IDENTITY_RULE
     + module_image_service.SAFETY_PROMPT_RULE
 )
 
@@ -587,11 +588,7 @@ def _attach_npc_portrait(db: Session, session_id: str, module: Module, ev) -> No
                 db, game_session,
                 key=f"npc-portrait:{module.id}:{npc.get('id') or name}",
                 title=f"{npc.get('name') or name} 立绘",
-                prompt=(
-                    f"NPC：{npc.get('name') or name}\n年代：{_module_era(module)}\n"
-                    f"外貌与身份：{str(npc.get('description') or '')[:400]}\n"
-                    f"性格：{str(npc.get('personality') or '')[:200]}"
-                ),
+                prompt=module_image_service.npc_portrait_material(npc, _module_era(module)),
                 image_kind="npc",
                 image_item_id=str(npc.get("id") or ""),
                 image_field="portrait",
@@ -627,11 +624,7 @@ def _attach_npc_portrait(db: Session, session_id: str, module: Module, ev) -> No
         _PORTRAIT_INFLIGHT.add(key)
         _spawn_illustration(
             session_id, ev.id, _NPC_PORTRAIT_PROMPT_SYS,
-            (
-                f"NPC：{npc.get('name') or name}\n年代：{_module_era(module)}\n"
-                f"外貌与身份：{str(npc.get('description') or '')[:400]}\n"
-                f"性格：{str(npc.get('personality') or '')[:200]}"
-            ),
+            module_image_service.npc_portrait_material(npc, _module_era(module)),
             cache_write=(
                 _module_list_cache_writer(module.id, "npcs", str(npc.get("id")), "portrait")
                 if npc.get("id") else None

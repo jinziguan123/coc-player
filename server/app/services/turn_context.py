@@ -67,6 +67,54 @@ def _current_turn_events(events: list) -> list:
     return events[last_narr + 1:]
 
 
+def guard_turn_events(
+    db: Session, session_id: str, pre_gen_seq: int | None = None,
+) -> list:
+    """取生成前一段玩家回合及其后果。
+
+    生成结束后最新的 KP narration 会让 ``_current_turn_events`` 只看到尾部系统事件；
+    守卫仍需看到 narration 之前的玩家移动/行动，因此按生成前序号定位上一段旁白。
+    """
+    all_events = session_service.get_session_events(db, session_id)
+    if pre_gen_seq is None:
+        return _current_turn_events(all_events)
+    previous_narr_seq = max(
+        (int(event.sequence_num or 0) for event in all_events
+         if event.event_type == "narration" and int(event.sequence_num or 0) <= pre_gen_seq),
+        default=-1,
+    )
+    return [event for event in all_events if int(event.sequence_num or 0) > previous_narr_seq]
+
+
+def turn_actor_chars(
+    db: Session,
+    session_id: str,
+    party: list[Character],
+    pre_gen_seq: int | None,
+) -> list[Character]:
+    """本轮真正行动/开口过的玩家方角色——「谁参与进了这件事」的确定性依据。
+
+    只认生成前那段玩家输入（含本轮 AI 队友的行动）；KP 叙事之后的 action/dialogue
+    是 NPC 与系统的产物，不代表玩家角色做了什么。
+
+    用作 SAN 的缺省目睹者：全场没动过的旁观者不该跟着掉 SAN；而他一旦被招呼过来、
+    做出自己的行动，本轮就有他的事件，自然进入名单。
+    """
+    if pre_gen_seq is None:
+        return []
+    by_id = {char.id: char for char in party if char.id}
+    involved: list[Character] = []
+    for event in guard_turn_events(db, session_id, pre_gen_seq):
+        if event.event_type not in ("action", "dialogue"):
+            continue
+        if int(event.sequence_num or 0) > pre_gen_seq:
+            continue
+        char = by_id.get(getattr(event, "actor_id", None))
+        if char is not None and char not in involved:
+            involved.append(char)
+    return involved
+
+
 def _current_party_turn_events(events: list, party_char_ids: set[str]) -> list:
     """上一段 KP 旁白后、已经展示在界面上的玩家方行动与发言。"""
     return [

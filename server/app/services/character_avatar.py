@@ -28,6 +28,7 @@ _AVATAR_PROMPT_SYS = (
     "提示词：该人物的半身肖像（character portrait, bust shot，按给定年代取服饰）。"
     "据外貌/职业/性格/信念描绘气质与神态，让人一眼看出这是谁。"
     "画风词不用写，系统会统一追加。不要出现真实人名，不要引号，只输出提示词本身。"
+    + module_image_service.PORTRAIT_IDENTITY_RULE
     + module_image_service.SAFETY_PROMPT_RULE
 )
 
@@ -48,6 +49,11 @@ def _prompt_user(char: Character, module: Module | None) -> str:
         f"年代：{era}",
         f"姓名：{char.name}",
     ]
+    # 性别是卡上写死的事实，却一直没往下递——模型只能按名字猜，「加布里埃尔」这类
+    # 译名在中文里看不出性别，猜错就画错人（NPC 立绘同款问题）。
+    gender = str(sd.get("gender") or "").strip()
+    if gender:
+        parts.append(f"性别：{gender}")
     occupation = str(sd.get("occupation") or "").strip()
     if occupation:
         parts.append(f"职业：{occupation}")

@@ -140,10 +140,25 @@ SCENE_PROMPT_SYS = (
     + SAFETY_PROMPT_RULE
 )
 
+#: 人物肖像的身份底线：性别/年龄是**给定事实**，不是让模型按名字揣摩的东西。
+#:
+#: 「加布里埃尔·马卡里奥」在模组里写着 gender=female、description 写着「维托里奥的妻子」，
+#: 出图却是个男人——因为素材里压根没把 gender 递进来，模型只剩名字可猜，而外文译名的性别
+#: 在中文里本就看不出来。素材补齐之后仍要这一条：提示词模型见到「Gabriel」这种名字，
+#: 依然会顺着自己的先验去写 man。
+PORTRAIT_IDENTITY_RULE = (
+    "身份硬约束：给定的性别、年龄、身份关系（谁的妻子/父亲/女儿）是**事实**，"
+    "提示词里的人物必须与之一致——性别务必写成 woman/man/girl/boy 等明确词并放在靠前位置，"
+    "年龄照给定的段位写（young/middle-aged/elderly）。"
+    "**绝不能按名字的语感去猜性别**：译名在中文里看不出性别，猜错就是画错人。"
+    "只有素材里确实没给性别时，才从身份关系与描述推断；两者都没有就写中性描述，不要臆断。"
+)
+
 NPC_PROMPT_SYS = (
     "你是文生图提示词工程师。把给定的 TRPG NPC 转成一行**英文** Stable Diffusion 提示词："
     "该人物的半身肖像（character portrait, bust shot，按给定年代取服饰）。据外貌/身份/性格"
     "描绘气质与神态。画风词不用写，系统会统一追加。不要出现真实人名，不要引号，只输出提示词本身。"
+    + PORTRAIT_IDENTITY_RULE
     + SAFETY_PROMPT_RULE
 )
 
@@ -197,6 +212,41 @@ def image_url_available(url: str | None) -> bool:
     return bool(_IMAGE_NAME_RE.fullmatch(name)) and (image_store.IMAGES_DIR / name).is_file()
 
 
+_GENDER_LABEL = {
+    "female": "女", "f": "女", "woman": "女", "女性": "女", "女": "女",
+    "male": "男", "m": "男", "man": "男", "男性": "男", "男": "男",
+}
+
+
+def npc_portrait_material(npc: dict, era: str) -> str:
+    """NPC 立绘的素材段：把角色卡里**画得出来的那部分**摆给写提示词的模型。
+
+    立绘、模组图库重生成、真人 KP 的配图建议三条路共用这一份——否则同一个 NPC
+    从不同入口出的图会是不同的人。
+
+    性别、年龄、身份背景一定要在里面：模型只拿到名字时就只能猜，而外文译名的性别
+    在中文里看不出来（见 ``PORTRAIT_IDENTITY_RULE``）。
+    """
+    parts = [f"NPC：{npc.get('name') or npc.get('id') or ''}", f"年代：{era}"]
+    gender = _GENDER_LABEL.get(str(npc.get("gender") or "").strip().lower())
+    if gender:
+        parts.append(f"性别：{gender}")
+    age = str(npc.get("age") or "").strip()
+    if age:
+        parts.append(f"年龄：{age}")
+    if npc.get("looks_human") is False:
+        parts.append("形貌：非人类，不要画成普通人")
+    parts.append(f"外貌与身份：{str(npc.get('description') or '')[:400]}")
+    personality = str(npc.get("personality") or "").strip()
+    if personality:
+        parts.append(f"性格：{personality[:200]}")
+    # 身份关系常常是性别的唯一线索（「维托里奥的妻子」），gender 缺失的旧模组全靠它。
+    background = str(npc.get("background") or "").strip()
+    if background:
+        parts.append(f"背景：{background[:200]}")
+    return "\n".join(parts)
+
+
 def _prompt_user(kind: str, item: dict, module: Module, field: str) -> str:
     era = str((module.world_setting or {}).get("era") or "1920s")
     if kind == "scene":
@@ -213,11 +263,7 @@ def _prompt_user(kind: str, item: dict, module: Module, field: str) -> str:
                 f"形貌与能力：{str(item.get('description') or '')[:400]}\n"
                 f"武器/攻击方式：{str(item.get('weapon') or '')[:200]}"
             )
-        return (
-            f"NPC：{item.get('name') or item.get('id') or ''}\n年代：{era}\n"
-            f"外貌与身份：{str(item.get('description') or '')[:400]}\n"
-            f"性格：{str(item.get('personality') or '')[:200]}"
-        )
+        return npc_portrait_material(item, era)
     return (
         f"线索：{item.get('name') or item.get('id') or ''}\n年代：{era}\n"
         f"内容：{str(item.get('description') or '')[:600]}"

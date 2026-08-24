@@ -736,6 +736,7 @@ async def _process_commands(
     dice_depth: int = 0,
     scene_groups: list[dict] | None = None,
     focus_group_label: str | None = None,
+    pre_gen_seq: int | None = None,
 ) -> AsyncIterator[str]:
     # 全角括号归一为半角：模型有时用【】写指令，统一成 [] 好让下面各指令正则命中并处理（而非泄漏）。
     kp_text = (kp_text or "").replace("【", "[").replace("】", "]")
@@ -784,7 +785,7 @@ async def _process_commands(
         kv = _parse_tag_kv(match.group(1))
         san_chunks, san_descs, pending = await _exec_san_check(
             db, session_id, game_session, kv, player_char, teammates,
-            scope=group_scope(match.start()),
+            scope=group_scope(match.start()), pre_gen_seq=pre_gen_seq,
         )
         for chunk in san_chunks:
             yield chunk
@@ -923,6 +924,7 @@ async def _process_commands(
                 teammates=teammates, allow_rule_lookup=False, dice_depth=dice_depth + 1,
                 scene_groups=scene_groups,
                 focus_group_label=focus_group_label,
+                pre_gen_seq=pre_gen_seq,
             ):
                 yield chunk
 

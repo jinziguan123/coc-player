@@ -180,7 +180,16 @@ REGISTRY: tuple[ToolSpec, ...] = (
         parameters=_params({
             "success_loss": {"type": "string", "description": "成功时的 SAN 损失（骰式或数字，如 0、1d3）"},
             "failure_loss": {"type": "string", "description": "失败时的 SAN 损失（骰式或数字，如 1d6），缺省 1d6"},
-            "chars": {"type": "string", "description": "目睹者名单（多人用 / 分隔），缺省在场全体"},
+            "chars": {
+                "type": "string",
+                "description": (
+                    "**必填：真正看见了这东西的人**（多人用 / 分隔）。"
+                    "**在场不等于目睹**——同一间屋里，甲掀开床单看见尸体、乙背对着在翻抽屉，"
+                    "就只写甲；等乙也凑过来看（他自己做出这个动作）时你再对乙发一次。"
+                    "只有这东西**所有人都躲不开**（怪物破门而入、天光下的尸堆）才写「在场」＝在场全体。"
+                    "队伍分头时，另一处场景的人绝不写进来。"
+                ),
+            },
             "source": {"type": "string", "description": "恐怖源标识（如「墓室腐尸」），用于同源去重"},
             "reason": {
                 "type": "string",
@@ -189,7 +198,7 @@ REGISTRY: tuple[ToolSpec, ...] = (
                     "系统会把它写在投骰按钮旁边；缺省时退回 source 文本。"
                 ),
             },
-        }, []),
+        }, ["chars"]),
         kind="check",
     ),
     ToolSpec(
