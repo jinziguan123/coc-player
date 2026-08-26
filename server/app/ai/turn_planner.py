@@ -470,12 +470,36 @@ def _filter_visible_items(items: list[dict] | None, visible_scene_ids: set[str])
     return result
 
 
+def _vitals(character: Character) -> dict[str, Any]:
+    """当前 HP / SAN 读数——「这个人还剩多少」是裁定绕不开的处境背景。
+
+    此前规划器只看得到 ``status``（active / major_wound / …）这个粗档，读不出「只剩 2 点血」
+    「SAN 掉到 15」。于是它既写不出「你快撑不住了」这种该有的预警，也无从判断角色此刻的
+    行动能力是不是真的受了影响——只能一律按满状态裁定。
+    """
+    system_data = character.system_data or {}
+    hp = system_data.get("hitPoints") or {}     # 建卡时的键名，别写成 hp
+    sanity = system_data.get("sanity") or {}
+    out: dict[str, Any] = {}
+    if hp.get("current") is not None:
+        out["hp"] = hp.get("current")
+        out["hp_max"] = hp.get("max")
+    if sanity.get("current") is not None:
+        out["san"] = sanity.get("current")
+        out["san_max"] = sanity.get("max")
+    madness = system_data.get("madness") or {}
+    if madness.get("label"):
+        out["madness"] = f"{madness.get('label')}（还有 {madness.get('turns_left', '?')} 回合）"
+    return out
+
+
 def _compact_player(character: Character) -> dict[str, Any]:
     return {
         "id": character.id,
         "name": character.name,
         "rule_system": character.rule_system,
         "status": character.status,
+        "vitals": _vitals(character),
         "skills": character.skills or {},
         "base_attributes": character.base_attributes or {},
         # 随身物品是**权威库存**：没有它，规划器无从判断玩家「我掏出灯塔备用钥匙」是真有还是
@@ -677,6 +701,15 @@ def build_turn_plan_messages(
                 "失败不给或给误导），不要干等玩家自己想起来申请。"
                 "但主动裁定仅限被动/本能类（感知/抗性/灵光/SAN）；心理学、话术、图书馆使用等"
                 "**主动运用型技能**只能因应玩家自己的宣言裁定，玩家没说要用就不发——那是替玩家行动。\n"
+                "player.vitals / teammates[].vitals 是各人此刻的 HP、SAN 与疯狂发作读数。"
+                "**它不是放水的理由——绝不能因为血少就凭空降低难度**（暗中改概率一旦被玩家察觉，"
+                "整个骰子系统就不可信了；要让他有退路，正当做法是给出路而非改数字）。它的用处只有三条："
+                "① 危险要摆到明面：快撑不住时 narration_brief 应写出角色自己感受得到的征兆"
+                "（视野发黑、手抖、耳鸣），不能等人死了才让玩家知道情况有多糟；"
+                "② 状态确实会削弱行动能力：重伤、濒死、临时疯狂发作中的角色做需要稳、准、专注的事"
+                "（攀爬、射击、锁匠、话术）该给 penalty=1，这是如实反映处境，不是惩罚玩家；"
+                "③ 濒死或 SAN 濒临见底时，direction.nudge 应给一条**明确的脱身出路**"
+                "（哪扇门能退、谁能拉他一把、什么东西能顶一下），而不是继续加压。\n"
                 "【检定裁定准则——决定难度 / 奖惩骰 / 是否免检的核心，按顺序问自己】\n"
                 "(1) 结果是否**既不确定、两种走向又都有戏**？若在当前虚构态势下某个结果已成定局，就别掷骰：\n"
                 "  · 玩家的处置让成功没有悬念（极贴切的现实话术 / 恰当的道具或环境优势达成目的）→ "

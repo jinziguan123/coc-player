@@ -134,3 +134,38 @@ def test_improvement_can_be_switched_off():
     engine = CoCRuleEngine()
     assert engine.improvement_check(50) is not None
     assert engine.improvement_check(50, {"improvement": False}) is None
+
+
+# ── 规划器看得见玩家状态 ──────────────────────────────────────────────────
+
+
+def test_planner_sees_vitals():
+    """此前规划器只有 status 这个粗档，读不出「只剩 2 点血、SAN 掉到 15」。"""
+    from app.ai.turn_planner import _compact_player
+
+    char = Character(
+        name="陈守一", rule_system="coc", is_player=True,
+        base_attributes={}, skills={},
+        system_data={
+            "hitPoints": {"current": 2, "max": 13},
+            "sanity": {"current": 15, "max": 99},
+            "madness": {"label": "偏执", "turns_left": 3},
+        },
+    )
+    vitals = _compact_player(char)["vitals"]
+    assert vitals["hp"] == 2 and vitals["hp_max"] == 13
+    assert vitals["san"] == 15 and vitals["san_max"] == 99
+    assert "偏执" in vitals["madness"]
+
+
+def test_vitals_omits_absent_readings():
+    """没记 HP 的旧卡不该冒出一个 hp=None，让规划器以为血量是 0。"""
+    from app.ai.turn_planner import _compact_player
+
+    char = Character(
+        name="旧卡", rule_system="coc", is_player=True,
+        base_attributes={}, skills={}, system_data={"sanity": {"current": 50, "max": 99}},
+    )
+    vitals = _compact_player(char)["vitals"]
+    assert "hp" not in vitals
+    assert vitals["san"] == 50
