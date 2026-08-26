@@ -36,9 +36,15 @@ class VillageRulesRead(BaseModel):
     rule_system: str
     options: dict
     effective: dict
+    #: 桌面约定原文（参数表达不了的规矩）；只影响叙述与裁定倾向，不改骰子结算
+    table_notes: str = ""
 
 
 class VillageRulesUpdate(BaseModel):
-    """改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。"""
+    """改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。
+
+    ``table_notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。
+    """
 
     options: dict = {}
+    table_notes: str | None = None

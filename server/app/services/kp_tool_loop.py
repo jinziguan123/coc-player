@@ -35,6 +35,7 @@ from app.services import (
     module_rag_service,
     narration_protocol,
     npc_identity,
+    rule_options_service,
     rulebook_service,
     session_service,
     team_turn_service,
@@ -858,6 +859,7 @@ async def _process_commands(
                     game_session, module, player_char, events, teammates=teammates,
                     viewer_scene_id=grp.get("scene_id"),
                     scene_groups=scene_groups,
+                    rule_options_block=rule_options_service.context_block(db, game_session),
                 )
                 messages.append({
                     "role": "user",
@@ -888,6 +890,7 @@ async def _process_commands(
         else:
             messages = build_kp_context(
                 game_session, module, player_char, events, teammates=teammates,
+                rule_options_block=rule_options_service.context_block(db, game_session),
             )
             messages.append({"role": "user", "content": continuation_prompt})
 

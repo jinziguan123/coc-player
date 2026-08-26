@@ -76,6 +76,53 @@ class CocRuleOptions:
 
 DEFAULT_OPTIONS = CocRuleOptions()
 
+
+def describe(options: CocRuleOptions) -> list[str]:
+    """把**改动过的**那几项译成人话，供注入 KP 与规划器。
+
+    只列差异：没改的项照规则原文，模型本来就知道，写出来白费 token。
+
+    为什么要告诉 KP——机制由引擎执行，本不需要它知道；但它要**说话**。大失败阈值改了
+    之后，玩家问「我掷 97 怎么不算大失败」，KP 会照原文答「技能低于 50 就是大失败」，
+    跟屏幕上的判定对不上；幸运消费开着而它不知道，就会写出「已成定局」，紧接着系统
+    弹出「花幸运扭转」。
+    """
+    lines: list[str] = []
+    if options.critical_max != DEFAULT_OPTIONS.critical_max:
+        lines.append(f"大成功：掷出 {options.critical_max} 及以下都算大成功（原文只有 01）")
+    if options.fumble_rule == "hundred_only":
+        lines.append("大失败：只有掷出 100 才算（技能低于 50 时的 96-99 不再是大失败）")
+    elif options.fumble_rule == "ninety_six_plus":
+        lines.append("大失败：96 及以上一律算，不看技能高低")
+    if options.dice_pool_cap != DEFAULT_OPTIONS.dice_pool_cap:
+        lines.append(
+            f"奖励骰/惩罚骰单次最多 {options.dice_pool_cap} 个"
+            + ("（即本局不使用奖惩骰）" if options.dice_pool_cap == 0 else "")
+        )
+    if options.luck_spend:
+        detail = "玩家检定失败后可花幸运点抵掉差值买下成功"
+        if options.luck_spend_max:
+            detail += f"，单次最多 {options.luck_spend_max} 点"
+        if not options.luck_spend_in_combat:
+            detail += "，战斗中不可用"
+        lines.append(
+            f"幸运消费：已开启——{detail}。"
+            "所以别把一次失败写成『已成定局、再无转圜』，玩家可能正要花幸运翻盘"
+        )
+    if options.major_wound_divisor != DEFAULT_OPTIONS.major_wound_divisor:
+        lines.append(
+            f"重伤线：单次伤害达到最大 HP 的 1/{options.major_wound_divisor} 即为重伤"
+            "（原文是半血），描述伤势轻重时按这个来"
+        )
+    if options.insanity_rule == "flat":
+        lines.append(
+            f"临时疯狂：单次理智损失达到 {options.insanity_flat_threshold} 点即触发"
+            "（原文是当前 SAN 的五分之一）"
+        )
+    if not options.improvement:
+        lines.append("本局不做技能成长检定，收场时不要提『这次经历让你的技能有所长进』")
+    return lines
+
 #: 数值字段的合法区间（闭区间），越界一律钳进来而不是报错——房主填错一个数字，
 #: 不该让整局掷不了骰。
 _INT_BOUNDS = {

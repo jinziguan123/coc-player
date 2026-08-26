@@ -99,10 +99,25 @@ def test_village_rules_are_shared_across_sessions(db_factory):
 
 def test_village_rules_are_normalized_on_save(db_factory):
     db = db_factory()
-    saved = rule_options_service.save_village_options(
+    saved, notes = rule_options_service.save_village_options(
         db, "coc", {"critical_max": 999, "乱写": 1},
     )
     assert saved == {"critical_max": 20}
+    assert notes == ""
+
+
+def test_table_notes_round_trip_and_are_capped(db_factory):
+    """桌面约定：自由文本，但每回合都进上下文，不能放任写成一篇文章。"""
+    db = db_factory()
+    rule_options_service.save_village_options(db, "coc", {}, "本局重调查轻战斗。")
+    assert rule_options_service.table_notes(db, "coc") == "本局重调查轻战斗。"
+
+    # notes=None 表示本次不动它（只改参数时不必把整段文字回传一遍）
+    rule_options_service.save_village_options(db, "coc", {"luck_spend": True})
+    assert rule_options_service.table_notes(db, "coc") == "本局重调查轻战斗。"
+
+    _saved, notes = rule_options_service.save_village_options(db, "coc", {}, "长" * 2000)
+    assert len(notes) == rule_options_service.TABLE_NOTES_MAX
 
 
 # ── 阈值真的改变了判定 ────────────────────────────────────────────────────
@@ -202,3 +217,52 @@ def test_vitals_omits_absent_readings():
     vitals = _compact_player(char)["vitals"]
     assert "hp" not in vitals
     assert vitals["san"] == 50
+
+
+# ── 告诉 KP 本局按什么规则跑 ──────────────────────────────────────────────
+
+
+def _session_with(db, options: dict, notes: str = ""):
+    module = Module(title="M", rule_system="coc", npcs=[], scenes=[])
+    db.add(module); db.flush()
+    session = GameSession(module_id=module.id, status="active", world_state={})
+    db.add(session); db.commit()
+    rule_options_service.save_village_options(db, "coc", options, notes)
+    return db.get(GameSession, session.id)
+
+
+def test_context_block_is_empty_when_nothing_changed(db_factory):
+    """全照规则原文时一个 token 也不多花。"""
+    db = db_factory()
+    assert rule_options_service.context_block(db, _session_with(db, {})) == ""
+
+
+def test_context_block_only_lists_differences(db_factory):
+    """机制由引擎执行，模型不必知道；但它要说话——大失败阈值改了却照原文解释就穿帮了。"""
+    db = db_factory()
+    block = rule_options_service.context_block(
+        db, _session_with(db, {"fumble_rule": "hundred_only"}),
+    )
+    assert "只有掷出 100" in block
+    assert "重伤" not in block      # 没改的项不写进去
+
+
+def test_context_block_warns_about_luck_spend(db_factory):
+    """幸运消费开着而 KP 不知道，就会写「已成定局」，紧接着系统弹出「花幸运扭转」。"""
+    db = db_factory()
+    block = rule_options_service.context_block(
+        db, _session_with(db, {"luck_spend": True, "luck_spend_max": 20}),
+    )
+    assert "幸运消费" in block and "20 点" in block
+    assert "已成定局" in block
+
+
+def test_table_notes_are_injected_with_their_limits(db_factory):
+    """桌面约定进上下文时必须带着界限：只管怎么演，不改结算、不松动叙事纪律。"""
+    db = db_factory()
+    block = rule_options_service.context_block(
+        db, _session_with(db, {}, "本局重调查轻战斗，NPC 死亡不可逆。"),
+    )
+    assert "本局重调查轻战斗" in block
+    assert "不改任何骰子结算" in block
+    assert "不得" in block and "纪律" in block

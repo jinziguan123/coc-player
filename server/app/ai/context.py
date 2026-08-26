@@ -953,6 +953,7 @@ def build_kp_context(
     context_budget: int | None = None,
     recall_enabled: bool = False,
     scene_groups: list[dict] | None = None,
+    rule_options_block: str = "",
 ) -> list[dict]:
     # 本函数保持纯粹（不触数据库）：module_excerpts 是调用方（turn_orchestrator）检索好的
     # 模组原文片段（[{"text", ...}]），未建索引/检索失败时传 None → 行为与无此特性时完全一致。
@@ -1087,6 +1088,12 @@ def build_kp_context(
     if style_prompt:
         segs.append(_Seg(NARRATIVE_STYLE_SECTION.format(style=style_prompt),
                          SYS_TIER_STATIC, 0, "narrative-style"))
+
+    # 村规与桌面约定（调用方经 rule_options_service.context_block 备好）：本局内不变 →
+    # 静态段。同样紧跟手册，理由同文风——段内那句「不得松动叙事纪律」要指得着手册。
+    # 全默认且没写约定时调用方给的是空串，一个 token 也不多花。
+    if rule_options_block:
+        segs.append(_Seg(rule_options_block, SYS_TIER_STATIC, 0, "village-rules"))
 
     # 「建议前往」能力：本子有多个 location 场景（真有地方可去）才广告——只有一处的本子
     # 广告了也只会诱导 KP 发无效指令。与「有规则书才广告 [RULE_LOOKUP]」同一取舍。

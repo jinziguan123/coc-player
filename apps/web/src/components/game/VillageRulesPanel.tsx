@@ -84,18 +84,26 @@ function NumberBox({ label, value, onChange, min, max }: {
   )
 }
 
+const NOTES_MAX = 800
+
 export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
   const [rules, setRules] = useState<VillageRules | null>(null)
+  const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const data = await api.get<{ options: Partial<VillageRules>; effective: VillageRules }>(
-          `/rulebooks/village-rules/${ruleSystem}`,
-        )
-        if (alive) setRules(data.effective)
+        const data = await api.get<{
+          options: Partial<VillageRules>
+          effective: VillageRules
+          table_notes: string
+        }>(`/rulebooks/village-rules/${ruleSystem}`)
+        if (alive) {
+          setRules(data.effective)
+          setNotes(data.table_notes || '')
+        }
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : '读取村规失败')
       }
@@ -111,7 +119,9 @@ export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
     setSaving(true)
     try {
       // 整份提交，后端负责白名单化、钳区间、只存与规则原文的差异
-      await api.put(`/rulebooks/village-rules/${ruleSystem}`, { options: rules })
+      await api.put(`/rulebooks/village-rules/${ruleSystem}`, {
+        options: rules, table_notes: notes,
+      })
       toast.success('村规已更新，下一次掷骰起生效')
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '保存失败')
@@ -140,9 +150,9 @@ export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
             onChange={(v) => patch({ critical_max: v })} />
         </Row>
 
-        <Row label="大失败判定" hint={FUMBLE_LABELS[rules.fumble_rule]}>
+        <Row label="大失败阈值" hint={FUMBLE_LABELS[rules.fumble_rule]}>
           <select
-            aria-label="大失败判定"
+            aria-label="大失败阈值"
             value={rules.fumble_rule}
             onChange={(e) => patch({ fumble_rule: e.target.value })}
             className="input text-sm max-w-[9.5rem]"
@@ -211,6 +221,33 @@ export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
           <Switch label="技能成长" checked={rules.improvement}
             onChange={(v) => patch({ improvement: v })} />
         </Row>
+      </div>
+
+      {/* 桌面约定：参数表达不了的规矩走自由文本。**必须把界限写在界面上**——它进的是
+          KP 的提示词，只改叙述与裁定倾向，不改任何一次骰子结算。不说清楚，玩家会在这里
+          写「大失败只认 100」然后以为生效了。 */}
+      <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+        <label htmlFor="table-notes" className="text-sm">桌面约定</label>
+        <p className="mt-1 mb-1.5 leading-snug" style={{
+          fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)',
+        }}>
+          参数管不到的规矩，写给守秘人看（「重调查轻战斗」「NPC 死亡不可逆」「别用现代词汇」）。
+          <b>只影响怎么演，不改骰子结算</b>——要改判定请用上面的参数。
+        </p>
+        <textarea
+          id="table-notes"
+          value={notes}
+          maxLength={NOTES_MAX}
+          rows={4}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="例：本局重调查轻战斗，能谈就别打；NPC 死了就是死了，不要复活。"
+          className="input w-full text-sm resize-y"
+        />
+        <div className="text-right" style={{
+          fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)',
+        }}>
+          {notes.length}/{NOTES_MAX}
+        </div>
       </div>
 
       <div className="flex justify-end mt-3">

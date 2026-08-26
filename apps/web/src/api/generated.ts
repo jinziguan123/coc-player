@@ -3749,10 +3749,17 @@ export interface components {
             };
             /** Rule System */
             rule_system: string;
+            /**
+             * Table Notes
+             * @default
+             */
+            table_notes: string;
         };
         /**
          * VillageRulesUpdate
          * @description 改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。
+         *
+         *     ``table_notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。
          */
         VillageRulesUpdate: {
             /**
@@ -3762,6 +3769,8 @@ export interface components {
             options: {
                 [key: string]: unknown;
             };
+            /** Table Notes */
+            table_notes?: string | null;
         };
     };
     responses: never;

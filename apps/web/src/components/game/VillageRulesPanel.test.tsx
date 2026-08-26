@@ -30,13 +30,15 @@ const RAW = {
 beforeEach(() => {
   get.mockReset()
   put.mockReset()
-  get.mockResolvedValue({ options: {}, effective: RAW })
-  put.mockResolvedValue({ rule_system: 'coc', options: {}, effective: RAW })
+  get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '' })
+  put.mockResolvedValue({ rule_system: 'coc', options: {}, effective: RAW, table_notes: '' })
 })
 
 describe('村规面板', () => {
   it('按规则系统读取，回显后端算好的生效值', async () => {
-    get.mockResolvedValue({ options: { critical_max: 5 }, effective: { ...RAW, critical_max: 5 } })
+    get.mockResolvedValue({
+      options: { critical_max: 5 }, effective: { ...RAW, critical_max: 5 }, table_notes: '',
+    })
     render(<VillageRulesPanel ruleSystem="coc" />)
 
     await waitFor(() => expect(screen.getByDisplayValue('5')).toBeInTheDocument())
@@ -61,7 +63,25 @@ describe('村规面板', () => {
 
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/rulebooks/village-rules/coc',
-      { options: RAW },
+      { options: RAW, table_notes: '' },
+    ))
+  })
+
+  it('桌面约定回显、可编辑，并把界限写在界面上', async () => {
+    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '本局重调查轻战斗。' })
+    render(<VillageRulesPanel ruleSystem="coc" />)
+
+    const box = await screen.findByLabelText('桌面约定')
+    expect(box).toHaveValue('本局重调查轻战斗。')
+    // 界限必须写在界面上：不说清楚，玩家会在这里写「大失败只认 100」然后以为生效了
+    expect(screen.getByText(/只影响怎么演，不改骰子结算/)).toBeInTheDocument()
+
+    await userEvent.clear(box)
+    await userEvent.type(box, 'NPC 死亡不可逆')
+    await userEvent.click(screen.getByRole('button', { name: '保存村规' }))
+    await waitFor(() => expect(put).toHaveBeenCalledWith(
+      '/rulebooks/village-rules/coc',
+      { options: RAW, table_notes: 'NPC 死亡不可逆' },
     ))
   })
 

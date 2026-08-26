@@ -97,6 +97,7 @@ def read_village_rules(rule_system: str, db: Session = Depends(get_db)):
         rule_system=rule_system,
         options=rule_options_service.village_options(db, rule_system),
         effective=rule_options_service.village_view(db, rule_system),
+        table_notes=rule_options_service.table_notes(db, rule_system),
     )
 
 
@@ -115,9 +116,12 @@ def update_village_rules(
     限本机：村规和规则书管理同属「这台机器上的桌面配置」，不该由联机进来的客人改动。
     改动对**所有**用这套规则的房间即时生效（含进行中的局）。
     """
-    saved = rule_options_service.save_village_options(db, rule_system, data.options)
+    saved, notes = rule_options_service.save_village_options(
+        db, rule_system, data.options, data.table_notes,
+    )
     return VillageRulesRead(
         rule_system=rule_system,
         options=saved,
         effective=rule_options_service.village_view(db, rule_system),
+        table_notes=notes,
     )

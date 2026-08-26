@@ -49,3 +49,6 @@ class RuleSystemOptions(Base, TimestampMixin):
 
     rule_system: Mapped[str] = mapped_column(primary_key=True)
     options: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    #: 桌面约定：参数表达不了的那些规矩，自由文本。**只影响叙述与裁定倾向，不改骰子结算**
+    #: ——它是喂给 KP 的一段话，不是引擎能执行的东西（能执行的都在 options 里）。
+    table_notes: Mapped[str] = mapped_column(Text, default="", server_default="")

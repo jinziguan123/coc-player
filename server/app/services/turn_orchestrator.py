@@ -389,6 +389,7 @@ async def _run_generation(
             game_session, module, player_char, events, teammates=teammates,
             rules_lookup_enabled=rules_enabled,
             rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
+            rule_options_block=rule_options_service.context_block(db, game_session),
         )
         plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
         planned_effects.enforce_plan_item_locations(
@@ -449,6 +450,7 @@ async def _run_generation(
         # 走到这里就是「系统判定全队在一起」（≥2 组已在上面分流）。把这个结论明写给 KP，
         # 否则它只看得到一个全局当前场景，会拿历史里的「我们分头吧」当已经分头了。
         scene_groups=scene_groups,
+        rule_options_block=rule_options_service.context_block(db, game_session),
     )
     # 战斗结果摘要已注入本轮上下文 → 清除，避免下一轮重复注入（读一次）。
     if (game_session.world_state or {}).get("combat_result"):
@@ -683,6 +685,7 @@ async def _run_split_narrations(
             # 全部分组都给，配合 viewer_scene_id 指明本轮聚焦哪一组：KP 得知道别组的人
             # 此刻不在场，才不会把他们写进这一列。
             scene_groups=groups,
+            rule_options_block=rule_options_service.context_block(db, game_session),
         )
         if plan_message is not None:
             messages.append(plan_message)
@@ -981,6 +984,7 @@ async def run_chat_generation(session_id: str) -> None:
                 game_session, module, player_char, pre_events,
                 teammates=party_others, rules_lookup_enabled=rules_enabled,
                 rule_excerpts=_rule_excerpts_for_planner(db, module, pre_events, game_session),
+                rule_options_block=rule_options_service.context_block(db, game_session),
             )
             plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
             planned_effects.enforce_plan_item_locations(
@@ -1062,6 +1066,7 @@ async def run_chat_generation(session_id: str) -> None:
                 teammates=party_others,
                 rules_lookup_enabled=post_rules_enabled,
                 rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
+                rule_options_block=rule_options_service.context_block(db, game_session),
             )
             post_plan = await turn_planner.run_turn_planner(fast_llm, post_plan_messages)
             # 有 AI 队友的局，planner 一个回合要跑**两次**（队友行动会改变裁定前提）。
@@ -1315,6 +1320,7 @@ async def _run_kp_turn(
             ),
             module_lookup_enabled=module_rag_enabled,
             recall_enabled=event_recall.is_enabled(game_session),
+            rule_options_block=rule_options_service.context_block(db, game_session),
         )
         if location_guard:
             messages.append({"role": "system", "content": location_guard})
@@ -1382,6 +1388,7 @@ async def _run_kp_turn(
             game_session, module, player_char, post_events, teammates=party_others,
             rules_lookup_enabled=rules_enabled,
             rule_excerpts=_rule_excerpts_for_planner(db, module, post_events, game_session),
+            rule_options_block=rule_options_service.context_block(db, game_session),
         )
         plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
         planned_effects.enforce_plan_item_locations(

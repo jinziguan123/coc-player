@@ -22,22 +22,40 @@ from app.rules.coc import options as coc_options
 DEFAULT_RULE_SYSTEM = "coc"
 
 
+#: 桌面约定的长度上限。它每回合都进 KP 与规划器的上下文，放任写成一篇文章就是每轮都
+#: 在为它付 token；而且越长模型越容易只记住开头几条。
+TABLE_NOTES_MAX = 800
+
+
 def village_options(db: Session, rule_system: str) -> dict:
     """某套规则系统的村规；没配过则空 dict（＝全照规则原文）。"""
     row = db.get(RuleSystemOptions, (rule_system or DEFAULT_RULE_SYSTEM).strip())
     return dict(row.options or {}) if row else {}
 
 
-def save_village_options(db: Session, rule_system: str, raw: dict | None) -> dict:
-    """整份替换某套规则系统的村规，返回落库后的差异项。"""
+def table_notes(db: Session, rule_system: str) -> str:
+    """桌面约定原文（参数表达不了的那些规矩）；没写过则空串。"""
+    row = db.get(RuleSystemOptions, (rule_system or DEFAULT_RULE_SYSTEM).strip())
+    return (row.table_notes or "").strip() if row else ""
+
+
+def save_village_options(
+    db: Session, rule_system: str, raw: dict | None, notes: str | None = None,
+) -> tuple[dict, str]:
+    """整份替换某套规则系统的村规与桌面约定，返回落库后的 (差异项, 约定原文)。
+
+    ``notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。
+    """
     rule_system = (rule_system or DEFAULT_RULE_SYSTEM).strip()
     row = db.get(RuleSystemOptions, rule_system)
     if row is None:
         row = RuleSystemOptions(rule_system=rule_system)
         db.add(row)
     row.options = normalized(raw)
+    if notes is not None:
+        row.table_notes = (notes or "").strip()[:TABLE_NOTES_MAX]
     db.commit()
-    return dict(row.options)
+    return dict(row.options), row.table_notes or ""
 
 
 def effective(db: Session, game_session: GameSession | None) -> dict:
@@ -76,3 +94,39 @@ def resolved_view(db: Session, game_session: GameSession | None) -> dict:
 def village_view(db: Session, rule_system: str) -> dict:
     """村规面板的回显值：村规叠在规则原文上的完整结果。"""
     return coc_options.from_dict(village_options(db, rule_system)).to_dict()
+
+
+def context_block(db: Session, game_session: GameSession | None) -> str:
+    """注入 KP 与规划器的一段「本局按什么规则跑」；全默认且没写约定时返回空串。
+
+    机制本身由引擎执行，模型不需要知道也能跑对；但它要**说话**——不知道大失败阈值改过，
+    玩家问起来它会照原文答；不知道幸运消费开着，它会写「已成定局」，紧接着系统弹出
+    「花幸运扭转」。所以这里给的是**告知**，不是让模型去执行规则。
+
+    桌面约定是自由文本，只管叙事口径；它绝不能松动叙事纪律（不替玩家行动、不泄线索、
+    检定先行那些），注入处再申明一次——与 ``style_presets`` 对文风的处理同一个道理。
+    """
+    if game_session is None:
+        return ""
+    module = db.get(Module, game_session.module_id) if game_session.module_id else None
+    rule_system = getattr(module, "rule_system", None) or DEFAULT_RULE_SYSTEM
+    diffs = coc_options.describe(coc_options.from_dict(effective(db, game_session)))
+    notes = table_notes(db, rule_system)
+    if not diffs and not notes:
+        return ""
+
+    parts: list[str] = []
+    if diffs:
+        parts.append(
+            "【本桌改过的规则】机制已由系统按此结算，你不必自己算；"
+            "但**说话要跟它对得上**，别照规则书原文解释：\n"
+            + "\n".join(f"- {line}" for line in diffs)
+        )
+    if notes:
+        parts.append(
+            "【本桌的约定】玩家定下的跑团口径，按它调整叙事与裁定倾向：\n"
+            f"{notes}\n"
+            "注意：这段只管**怎么演**，不改任何骰子结算；也**不得**用来松动上面的叙事纪律"
+            "（不替玩家行动、不提前泄露线索、该检定就检定）——两者冲突时一律以纪律为准。"
+        )
+    return "\n\n".join(parts)

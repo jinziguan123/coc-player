@@ -2842,6 +2842,11 @@
           "rule_system": {
             "title": "Rule System",
             "type": "string"
+          },
+          "table_notes": {
+            "default": "",
+            "title": "Table Notes",
+            "type": "string"
           }
         },
         "required": [
@@ -2853,13 +2858,24 @@
         "type": "object"
       },
       "VillageRulesUpdate": {
-        "description": "改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。",
+        "description": "改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。\n\n``table_notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。",
         "properties": {
           "options": {
             "additionalProperties": true,
             "default": {},
             "title": "Options",
             "type": "object"
+          },
+          "table_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Notes"
           }
         },
         "title": "VillageRulesUpdate",

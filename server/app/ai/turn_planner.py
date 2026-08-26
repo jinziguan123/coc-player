@@ -537,6 +537,7 @@ def build_turn_plan_messages(
     teammates: list[Character] | None = None,
     rules_lookup_enabled: bool = False,
     rule_excerpts: list[dict] | None = None,
+    rule_options_block: str = "",
 ) -> list[dict]:
     """构建 KP 回合规划器消息。
 
@@ -793,6 +794,7 @@ def build_turn_plan_messages(
                 + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
                 + director_block
                 + _rule_block(rule_excerpts)
+                + (f"\n\n{rule_options_block}" if rule_options_block else "")
             ),
         },
     ]
