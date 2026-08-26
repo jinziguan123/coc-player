@@ -136,7 +136,7 @@ TIER_LABEL_CN = {
 
 
 def is_fumble(d100: int, skill_value: int, options: CocRuleOptions | None = None) -> bool:
-    """这一骰算不算大失败——阈值由家规定（默认 RAW）。"""
+    """这一骰算不算大失败——阈值由村规定（默认 RAW）。"""
     rule = (options or DEFAULT_OPTIONS).fumble_rule
     if rule == "hundred_only":
         return d100 == 100
@@ -211,11 +211,11 @@ def resolve_skill_check(
     奖励/惩罚骰（bonus/penalty，缺省 0，均为 0 时行为与旧版完全一致）：净奖惩>0 多掷十位
     取最有利、<0 取最不利，明细透传到 CheckResult 的 tens/tens_kept/units/bonus/penalty。
 
-    ``options`` 是本局家规（大成功/大失败阈值、奖惩骰上限）；缺省即 RAW。
+    ``options`` 是本局村规（大成功/大失败阈值、奖惩骰上限）；缺省即 RAW。
     """
     opts = options or DEFAULT_OPTIONS
     skill_value = resolve_skill_value(character_data, skill_name)
-    # 奖惩骰上限也是家规：净奖惩先各自钳到上限内，再抵消。
+    # 奖惩骰上限也是村规：净奖惩先各自钳到上限内，再抵消。
     bonus = max(0, min(bonus, opts.dice_pool_cap))
     penalty = max(0, min(penalty, opts.dice_pool_cap))
 
@@ -266,7 +266,7 @@ def san_check(
     Args:
         success_loss: 成功时的 SAN 损失，如 "0" 或 "1d3"
         failure_loss: 失败时的 SAN 损失，如 "1d6" 或 "1d10"
-        options: 本局家规（判定阈值、临时疯狂口径）；缺省即 RAW
+        options: 本局村规（判定阈值、临时疯狂口径）；缺省即 RAW
     """
     from app.rules.dice import roll
 
@@ -310,7 +310,7 @@ def san_check(
 
 
 def _went_insane(loss: int, current_san: int, options: CocRuleOptions) -> bool:
-    """这次损失够不够触发临时疯狂——口径由家规定。"""
+    """这次损失够不够触发临时疯狂——口径由村规定。"""
     if options.insanity_rule == "flat":
         return loss >= options.insanity_flat_threshold
     return loss >= current_san // 5

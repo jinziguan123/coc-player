@@ -25,12 +25,10 @@ from app.schemas.session import (
     SeatAssignRequest,
     SessionCreate,
     SessionRead,
-    SessionRuleOptionsRead,
-    SessionRuleOptionsUpdate,
     SessionStatusUpdate,
     SessionStyleUpdate,
 )
-from app.services import rule_options_service, session_service
+from app.services import session_service
 from app.services.event_protocol import make_chunk as _make_chunk
 from app.services import rate_limit, room_sync
 from app.services.rate_limit import limiter
@@ -589,55 +587,6 @@ def update_style(
     if not session:
         raise HTTPException(404, "会话不存在")
     return session
-
-
-@router.get("/{session_id}/rule-options", response_model=SessionRuleOptionsRead)
-def read_rule_options(
-    session_id: str,
-    db: Session = Depends(get_db),
-):
-    """读本局家规：显式改过的差异项 + 合并模组默认后的完整生效值。
-
-    不限房主：家规改的是所有人的成败概率，玩家有权知道自己这局在什么规则下掷骰。
-    """
-    session = session_service.get_session(db, session_id)
-    if not session:
-        raise HTTPException(404, "会话不存在")
-    return SessionRuleOptionsRead(
-        options=dict(session.rule_options or {}),
-        effective=rule_options_service.resolved_view(db, session),
-    )
-
-
-@router.put("/{session_id}/rule-options", response_model=SessionRuleOptionsRead)
-def update_rule_options(
-    session_id: str,
-    data: SessionRuleOptionsUpdate,
-    db: Session = Depends(get_db),
-    token: str | None = Depends(player_token),
-):
-    """改本局家规（房主专属）。整份替换：提交什么就是什么，``{}`` = 全改回默认。
-
-    按房主授权，理由同文风：家规直接改变每个人的成败概率，不该让任一玩家单方面改掉。
-    """
-    require_session_manager(
-        db, session_id, token, detail="只有房主可以变更本局的家规",
-    )
-    session = session_service.update_session_rule_options(
-        db, session_id, data.rule_options,
-    )
-    if not session:
-        raise HTTPException(404, "会话不存在")
-    room_hub.broadcast(
-        session_id,
-        _make_chunk("rule_options", metadata={
-            "effective": rule_options_service.resolved_view(db, session),
-        }),
-    )
-    return SessionRuleOptionsRead(
-        options=dict(session.rule_options or {}),
-        effective=rule_options_service.resolved_view(db, session),
-    )
 
 
 @router.post("/{session_id}/end-vote")

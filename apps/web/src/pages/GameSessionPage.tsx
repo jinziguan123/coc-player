@@ -38,7 +38,6 @@ import {
   type CheckResultMeta,
 } from '../components/game/CheckResultCard'
 import { CheckRequestCard } from '../components/game/CheckRequestCard'
-import { HouseRulesModal } from '../components/game/HouseRulesModal'
 import { LuckOfferCard } from '../components/game/LuckOfferCard'
 import { OnboardingCoach, hasSeenCoach } from '../components/game/OnboardingCoach'
 import { buildCheckCaption } from '../components/game/diceNotation'
@@ -278,7 +277,6 @@ export function GameSessionPage() {
 
   const [showImprov, setShowImprov] = useState(false)         // 临场角色收编（房主专用）
   const [showStyle, setShowStyle] = useState(false)           // 本局文风/画风（房主专用）
-  const [showRules, setShowRules] = useState(false)           // 本局家规（房主可改，玩家可读）
   // 幸运询价已被拍板过一次 → 卡片收起按钮，防重复提交（后端也已把待决状态消费掉）
   const [luckDecided, setLuckDecided] = useState(false)
   const [locations, setLocations] = useState<KnownLocation[]>([])
@@ -779,8 +777,6 @@ export function GameSessionPage() {
     //   lobby   —— 席位/准备态变化，游戏页的队伍条由 seat/presence 驱动
     //   started —— 开局广播，大厅页据此跳转；本页已经在局内
     if (t === 'lobby' || t === 'started') return
-    // 家规变更（房主改了本局规则）：拉一次会话，让规则面板与后续判定读到新值。
-    if (t === 'rule_options') { void refetchSession(); return }
     // 走到这里说明有 stream/sync 类型没被处理——加了新事件就必须在上面补一支。
     assertAllNonLogHandled(t)
   }, [refetchSession, resyncHistory, addMessage, removeMessage, updateMessage, patchMessageMetadata, endStream, startStreamMessage, appendToStream, isKp])
@@ -1514,7 +1510,7 @@ export function GameSessionPage() {
             {myCharId && currentSession.status === 'ended' && (
               <button
                 onClick={() => setShowGrowth(true)}
-                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                className="btn-secondary btn-xs flex items-center gap-1"
                 title="成长结算：本局成功用过的技能做成长检定（模组结束后可用）"
               >
                 <GiUpgrade size={13} /> 成长
@@ -1522,7 +1518,7 @@ export function GameSessionPage() {
             )}
             <button
               onClick={() => { setConfirmTravel(null); setShowBigMap((v) => !v) }}
-              className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+              className="btn-secondary btn-xs flex items-center gap-1"
               title="大地图：前往已知地点"
             >
               <GiTreasureMap size={13} /> {showBigMap ? '收起大地图' : '大地图'}
@@ -1530,23 +1526,16 @@ export function GameSessionPage() {
             {isHost && (
               <button
                 onClick={() => setShowImprov(true)}
-                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                className="btn-secondary btn-xs flex items-center gap-1"
                 title="临场角色：把 KP 临时添加的出彩龙套收编为正式配角（房主）"
               >
                 <GiCharacter size={13} /> 临场角色
               </button>
             )}
-            <button
-              onClick={() => setShowRules(true)}
-              className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
-              title={isHost ? '本局家规：大成功/大失败阈值、幸运消费、重伤与疯狂口径（房主）' : '本局家规：看看自己在什么规则下掷骰'}
-            >
-              <GiScrollUnfurled size={13} /> 家规
-            </button>
             {isHost && (
               <button
                 onClick={() => setShowStyle(true)}
-                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                className="btn-secondary btn-xs flex items-center gap-1"
                 title="本局的文风与画风：几档预设或自己写一段，留空则跟随模组（房主）"
               >
                 <GiQuillInk size={13} /> 风格
@@ -1555,7 +1544,7 @@ export function GameSessionPage() {
             {!isKp && (
               <button
                 onClick={() => setShowCoach('reference')}
-                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                className="btn-secondary btn-xs flex items-center gap-1"
                 title="操作速查：怎么读骰子、暗投是什么、怎么申请检定"
               >
                 <HelpCircle size={13} />
@@ -1564,7 +1553,7 @@ export function GameSessionPage() {
             {!immersiveOn && !(showPanel && panelChar) && (
               <button
                 onClick={() => setShowPanel(true)}
-                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                className="btn-secondary btn-xs flex items-center gap-1"
                 title="展开角色卡"
               >
                 <PanelRightOpen size={13} />
@@ -1573,7 +1562,7 @@ export function GameSessionPage() {
             {immersiveOn && (
               <button
                 onClick={toggleChatCollapsed}
-                className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+                className="btn-secondary btn-xs flex items-center gap-1"
                 title="收起聊天侧栏（战场更大；有新消息时侧条会显示未读徽标）"
               >
                 <PanelRightClose size={13} />
@@ -1586,13 +1575,6 @@ export function GameSessionPage() {
           <GrowthModal sessionId={currentSession.id} characterId={myCharId} onClose={() => setShowGrowth(false)} />
         )}
         {showImprov && <ImprovisedNpcModal sessionId={currentSession.id} onClose={() => setShowImprov(false)} />}
-        {showRules && (
-          <HouseRulesModal
-            sessionId={currentSession.id}
-            canEdit={isHost}
-            onClose={() => setShowRules(false)}
-          />
-        )}
         {showStyle && (
           <SessionStyleModal
             sessionId={currentSession.id}
@@ -1691,6 +1673,11 @@ export function GameSessionPage() {
               ) : (
                 <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-secondary)', opacity: 0.7 }}>
                   只显示你已知晓的地点；前往后由 KP 叙述抵达见闻。
+                  {/* 格子上那几个数字角标此前没有任何说明——玩家看到一个红色的「1」，
+                      根本猜不到是线索数。图例比 hover 提示可靠：Konva 画布上没有 title。 */}
+                  <br />
+                  格子上：<span style={{ color: 'var(--color-dice-fumble)' }}>红色数字</span>＝该地已知线索数，
+                  圆形头像＝在那儿的角色，下方<span style={{ color: 'var(--color-dice-gold)' }}>金色数字</span>＝可下钻的子地点数。
                 </p>
               )}
             </div>

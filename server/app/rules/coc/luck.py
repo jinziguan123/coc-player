@@ -10,7 +10,7 @@
 - 推动骰（pushed roll）之后不可再花幸运；
 - 买来的成功**不计成长勾**——走运没教会你任何事。
 
-余下几项（单次上限、战斗中是否可用）原文没管，是常见家规，交给 ``CocRuleOptions``。
+余下几项（单次上限、战斗中是否可用）原文没管，是常见村规，交给 ``CocRuleOptions``。
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def apply_rescue(
 ) -> CheckResult:
     """花掉 ``points`` 点幸运后的检定结果：骰值降下去，再走同一套判据重判。
 
-    原件不改（``CheckResult`` 逐字段复制出一份新的）——与家规「读时覆盖」同一个道理，
+    原件不改（``CheckResult`` 逐字段复制出一份新的）——与村规「读时覆盖」同一个道理，
     掷出来的原始骰值是既成事实，得留着给玩家看「我本来掷了多少、花了几点买回来」。
     """
     opts = options or DEFAULT_OPTIONS

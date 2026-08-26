@@ -74,7 +74,7 @@ def settle_growth(db: Session, session_id: str, character_id: str) -> dict | Non
         current = skills.get(s, item["value"])
         res = engine.improvement_check(current, rule_options)
         if res is None:
-            continue  # 该规则系统不支持成长，或本局家规关掉了成长
+            continue  # 该规则系统不支持成长，或本局村规关掉了成长
         if res.get("improved") and res.get("new_value", current) > current:
             skills[s] = res["new_value"]
         results.append({"skill": s, **res})

@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { HouseRulesModal } from './HouseRulesModal'
+import { VillageRulesPanel } from './VillageRulesPanel'
 
 const get = vi.fn()
 const put = vi.fn()
@@ -31,23 +31,20 @@ beforeEach(() => {
   get.mockReset()
   put.mockReset()
   get.mockResolvedValue({ options: {}, effective: RAW })
-  put.mockResolvedValue({ options: {}, effective: RAW })
+  put.mockResolvedValue({ rule_system: 'coc', options: {}, effective: RAW })
 })
 
-describe('本局家规面板', () => {
-  it('回显后端算好的生效值，不在前端复刻一份默认表', async () => {
-    get.mockResolvedValue({
-      options: { critical_max: 5 },
-      effective: { ...RAW, critical_max: 5 },
-    })
-    render(<HouseRulesModal sessionId="s1" canEdit onClose={() => {}} />)
+describe('村规面板', () => {
+  it('按规则系统读取，回显后端算好的生效值', async () => {
+    get.mockResolvedValue({ options: { critical_max: 5 }, effective: { ...RAW, critical_max: 5 } })
+    render(<VillageRulesPanel ruleSystem="coc" />)
 
     await waitFor(() => expect(screen.getByDisplayValue('5')).toBeInTheDocument())
-    expect(get).toHaveBeenCalledWith('/sessions/s1/rule-options')
+    expect(get).toHaveBeenCalledWith('/rulebooks/village-rules/coc')
   })
 
   it('幸运消费关着时不显示它的细则，开了才展开', async () => {
-    render(<HouseRulesModal sessionId="s1" canEdit onClose={() => {}} />)
+    render(<VillageRulesPanel ruleSystem="coc" />)
     await waitFor(() => expect(screen.getByText('幸运消费')).toBeInTheDocument())
     expect(screen.queryByText('单次上限')).not.toBeInTheDocument()
 
@@ -57,25 +54,22 @@ describe('本局家规面板', () => {
   })
 
   it('保存时整份提交，由后端负责钳区间与只存差异', async () => {
-    const onClose = vi.fn()
-    render(<HouseRulesModal sessionId="s1" canEdit onClose={onClose} />)
+    render(<VillageRulesPanel ruleSystem="coc" />)
     await waitFor(() => expect(screen.getByText('大成功阈值')).toBeInTheDocument())
 
-    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存村规' }))
 
     await waitFor(() => expect(put).toHaveBeenCalledWith(
-      '/sessions/s1/rule-options',
-      { rule_options: RAW },
+      '/rulebooks/village-rules/coc',
+      { options: RAW },
     ))
-    expect(onClose).toHaveBeenCalled()
   })
 
-  it('非房主只读：看得见规则，改不了也存不了', async () => {
-    render(<HouseRulesModal sessionId="s1" canEdit={false} onClose={() => {}} />)
-    await waitFor(() => expect(screen.getByText('大成功阈值')).toBeInTheDocument())
+  it('换一套规则系统会重新拉它自己的村规', async () => {
+    const { rerender } = render(<VillageRulesPanel ruleSystem="coc" />)
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/rulebooks/village-rules/coc'))
 
-    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
-    expect(screen.getByText(/供你了解自己在什么规则下掷骰/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument()
+    rerender(<VillageRulesPanel ruleSystem="dnd5e" />)
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/rulebooks/village-rules/dnd5e'))
   })
 })

@@ -95,7 +95,7 @@ class CoCRuleEngine(RuleEngine):
     def improvement_check(self, current_value: int, options: dict | None = None) -> dict | None:
         """CoC 成长检定：d100 > 当前技能值（或 > 95）即成长，+1d10（上限 99）。
 
-        家规关掉成长时返回 None（与「该规则系统不支持成长」同一个出口）。
+        村规关掉成长时返回 None（与「该规则系统不支持成长」同一个出口）。
         """
         if not coc_options.from_dict(options).improvement:
             return None

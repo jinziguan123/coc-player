@@ -1,15 +1,15 @@
-"""CoC 家规参数：把引擎里写死的裁定阈值抽成一层可覆盖的配置。
+"""CoC 村规参数：把引擎里写死的裁定阈值抽成一层可覆盖的配置。
 
 **读时覆盖，绝不写回**。引擎每次结算现读这份配置，不把它烙进角色卡、事件或任何
-已落库的数据——关掉家规就立刻回到 RAW，不留残迹。这一条抄自 Foundry 的 Active
+已落库的数据——关掉村规就立刻回到 RAW，不留残迹。这一条抄自 Foundry 的 Active
 Effects：它把改动应用在角色数据的副本上而非原件上，所以效果一撤销，原值自然回来。
-反过来做（开家规时把新阈值写进存档）迟早会遇到「关不掉的家规」。
+反过来做（开村规时把新阈值写进存档）迟早会遇到「关不掉的村规」。
 
 **缺省即 RAW**：所有字段的默认值 = 现行硬编码行为，逐字相同。存量存档的
 ``rule_options`` 是空 dict，走 :data:`DEFAULT_OPTIONS`，行为与本特性上线前完全一致，
 不需要数据迁移。
 
-取值一律经 :func:`from_dict` 白名单化并钳到合法区间：家规配置是房主从界面填进来的
+取值一律经 :func:`from_dict` 白名单化并钳到合法区间：村规配置是房主从界面填进来的
 外部输入，非法值不该有机会流到掷骰逻辑里去（"大成功阈值 = 100" 会让每一骰都是大成功）。
 """
 
@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, fields, replace
 
 #: 大失败判定规则。
 #: - ``raw``：CoC 7e 原文——掷出 100 必大失败，技能值 < 50 时 96 起即大失败；
-#: - ``hundred_only``：只有 100 才是大失败（最常见的一条家规，嫌新手角色太容易翻车）；
+#: - ``hundred_only``：只有 100 才是大失败（最常见的一条村规，嫌新手角色太容易翻车）；
 #: - ``ninety_six_plus``：96 起一律大失败，不看技能值高低。
 FUMBLE_RULES = ("raw", "hundred_only", "ninety_six_plus")
 
@@ -31,10 +31,10 @@ INSANITY_RULES = ("fifth_of_san", "flat")
 
 @dataclass(frozen=True)
 class CocRuleOptions:
-    """一局（或一个模组）生效的家规。字段默认值 = RAW，改一项只影响那一项。"""
+    """一局（或一个模组）生效的村规。字段默认值 = RAW，改一项只影响那一项。"""
 
     # ── 判定 ──────────────────────────────────────────────────────────
-    #: 骰值 ≤ 此值 = 大成功。RAW 只有 01；放宽到 5 是常见家规。
+    #: 骰值 ≤ 此值 = 大成功。RAW 只有 01；放宽到 5 是常见村规。
     critical_max: int = 1
     fumble_rule: str = "raw"
     #: 单次检定最多叠几个奖励/惩罚骰。
@@ -45,7 +45,7 @@ class CocRuleOptions:
     luck_spend: bool = False
     #: 单次检定最多花几点幸运（0 = 不限，照原文）。
     luck_spend_max: int = 0
-    #: 战斗轮内是否允许花幸运（原文允许；「战斗中禁用」是常见家规）。
+    #: 战斗轮内是否允许花幸运（原文允许；「战斗中禁用」是常见村规）。
     luck_spend_in_combat: bool = True
     #: 花幸运买来的成功是否不计成长勾（原文：不计——走运没教会你任何事）。
     luck_spend_blocks_improvement: bool = True
@@ -121,10 +121,10 @@ def from_dict(raw: dict | None) -> CocRuleOptions:
 
 
 def merge(*layers: dict | None) -> dict:
-    """按「后者覆盖前者」合并家规层（模组默认 → 会话）。
+    """按「后者覆盖前者」合并村规层（模组默认 → 会话）。
 
     与 ``style_presets`` 同一套层级约定：会话留空则继承模组、模组也留空则 RAW。
-    这里不做 Foundry 那种 mode/priority——家规是标量参数，不存在「多来源叠加同一个值」，
+    这里不做 Foundry 那种 mode/priority——村规是标量参数，不存在「多来源叠加同一个值」，
     引进优先级只会让「我改的这一项到底生效没有」变得不可解释。
     """
     merged: dict = {}

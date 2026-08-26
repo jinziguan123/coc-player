@@ -343,7 +343,7 @@ def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: st
     护甲（CoC7e）：物理伤害先扣目标护甲值再入血，重伤阈值也按扣减后的净伤判。
     ignore_armor=True 用于火焰/持续燃烧等能量伤害（护甲挡不住）。
 
-    ``session_id`` 用来取本局家规（重伤阈值）；战斗态 dict 里不带会话身份，只能由调用方给。
+    ``session_id`` 用来取本局村规（重伤阈值）；战斗态 dict 里不带会话身份，只能由调用方给。
     """
     absorbed = 0
     armor = 0 if ignore_armor else int(target.get("armor") or 0)

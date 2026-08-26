@@ -1136,9 +1136,9 @@ def update_session_style(
 def update_session_rule_options(
     db: Session, session_id: str, raw: dict | None,
 ) -> GameSession | None:
-    """整份替换本局家规。提交值先白名单化并钳进合法区间，只落与 RAW 的差异项。
+    """整份替换本局村规。提交值先白名单化并钳进合法区间，只落与 RAW 的差异项。
 
-    与文风不同，这里**必须**校验：文风是喂给模型的自由文本，家规却直接进掷骰逻辑，
+    与文风不同，这里**必须**校验：文风是喂给模型的自由文本，村规却直接进掷骰逻辑，
     一个越界的阈值能让每一骰都是大成功。
     """
     from app.services import rule_options_service

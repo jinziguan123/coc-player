@@ -150,7 +150,7 @@ def test_declining_keeps_the_failure(db_factory, monkeypatch):
 
 
 def test_rule_off_never_pauses(db_factory, monkeypatch):
-    """家规没开幸运消费 → 一如既往地一路走到底，不多问一句。"""
+    """村规没开幸运消费 → 一如既往地一路走到底，不多问一句。"""
     calls = _patch_runtime(monkeypatch, db_factory)
     db = db_factory()
     session_id, char = _seed(db, luck_spend=False)

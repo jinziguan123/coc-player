@@ -88,7 +88,9 @@ export function ContextUsageBadge({
 
   return (
     <span
-      className="text-xs px-2 py-0.5 rounded border inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap cursor-default"
+      // 尺寸走 btn-xs：它排在顶栏那排按钮里，自己写一套 padding/字号就会高矮不齐。
+      // 但不套 btn-secondary——这是个读数不是按钮，不该有 hover 反馈。
+      className="btn-xs rounded border inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap cursor-default"
       style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
       title={cumTitle}
     >

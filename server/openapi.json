@@ -2314,7 +2314,6 @@
               "chase_state",
               "chase_end",
               "map_update",
-              "rule_options",
               "luck_offer"
             ],
             "title": "Type",
@@ -2671,40 +2670,6 @@
         "title": "SessionRead",
         "type": "object"
       },
-      "SessionRuleOptionsRead": {
-        "description": "家规的两种视图：``options`` 是本局显式改过的差异项，``effective`` 是合并模组\n默认后的完整生效值（面板拿它回显，才不必在前端复刻一份默认值表）。",
-        "properties": {
-          "effective": {
-            "additionalProperties": true,
-            "title": "Effective",
-            "type": "object"
-          },
-          "options": {
-            "additionalProperties": true,
-            "title": "Options",
-            "type": "object"
-          }
-        },
-        "required": [
-          "options",
-          "effective"
-        ],
-        "title": "SessionRuleOptionsRead",
-        "type": "object"
-      },
-      "SessionRuleOptionsUpdate": {
-        "description": "改本局家规。只提交想改的项；服务端会白名单化、钳进合法区间、只存与 RAW 的差异。\n\n``{}`` = 全部改回 RAW（或模组默认）。取值语义见 rules.coc.options。",
-        "properties": {
-          "rule_options": {
-            "additionalProperties": true,
-            "default": {},
-            "title": "Rule Options",
-            "type": "object"
-          }
-        },
-        "title": "SessionRuleOptionsUpdate",
-        "type": "object"
-      },
       "SessionStatusUpdate": {
         "properties": {
           "status": {
@@ -2859,6 +2824,45 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VillageRulesRead": {
+        "description": "村规的两种视图：``options`` 是显式改过的差异项，``effective`` 是叠在规则原文上的\n完整结果（面板拿它回显，才不必在前端复刻一份默认值表）。",
+        "properties": {
+          "effective": {
+            "additionalProperties": true,
+            "title": "Effective",
+            "type": "object"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "rule_system": {
+            "title": "Rule System",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_system",
+          "options",
+          "effective"
+        ],
+        "title": "VillageRulesRead",
+        "type": "object"
+      },
+      "VillageRulesUpdate": {
+        "description": "改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。",
+        "properties": {
+          "options": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Options",
+            "type": "object"
+          }
+        },
+        "title": "VillageRulesUpdate",
         "type": "object"
       }
     },
@@ -4406,6 +4410,100 @@
           }
         },
         "summary": "Upload Rulebook",
+        "tags": [
+          "rulebooks"
+        ]
+      }
+    },
+    "/api/rulebooks/village-rules/{rule_system}": {
+      "get": {
+        "description": "读某套规则系统的村规——这一桌长期沿用的规矩。\n\n不限本机：玩家有权知道自己在什么规则下掷骰。",
+        "operationId": "read_village_rules_api_rulebooks_village_rules__rule_system__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VillageRulesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Village Rules",
+        "tags": [
+          "rulebooks"
+        ]
+      },
+      "put": {
+        "description": "改某套规则系统的村规。整份替换；服务端白名单化、钳区间、只存与规则原文的差异。\n\n限本机：村规和规则书管理同属「这台机器上的桌面配置」，不该由联机进来的客人改动。\n改动对**所有**用这套规则的房间即时生效（含进行中的局）。",
+        "operationId": "update_village_rules_api_rulebooks_village_rules__rule_system__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VillageRulesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VillageRulesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Village Rules",
         "tags": [
           "rulebooks"
         ]
@@ -7881,105 +7979,6 @@
         "summary": "Roll",
         "tags": [
           "chat"
-        ]
-      }
-    },
-    "/api/sessions/{session_id}/rule-options": {
-      "get": {
-        "description": "读本局家规：显式改过的差异项 + 合并模组默认后的完整生效值。\n\n不限房主：家规改的是所有人的成败概率，玩家有权知道自己这局在什么规则下掷骰。",
-        "operationId": "read_rule_options_api_sessions__session_id__rule_options_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "title": "Session Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionRuleOptionsRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Read Rule Options",
-        "tags": [
-          "sessions"
-        ]
-      },
-      "put": {
-        "description": "改本局家规（房主专属）。整份替换：提交什么就是什么，``{}`` = 全改回默认。\n\n按房主授权，理由同文风：家规直接改变每个人的成败概率，不该让任一玩家单方面改掉。",
-        "operationId": "update_rule_options_api_sessions__session_id__rule_options_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "title": "Session Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SessionRuleOptionsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionRuleOptionsRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Update Rule Options",
-        "tags": [
-          "sessions"
         ]
       }
     },

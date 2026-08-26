@@ -60,7 +60,7 @@ class RuleEngine(ABC):
         self, character_data: dict, skill_name: str, difficulty: str = "normal",
         bonus: int = 0, penalty: int = 0, options: dict | None = None,
     ) -> CheckResult:
-        """``options`` 是本局家规（见各规则系统的 options 模块）；None = 该系统的 RAW。"""
+        """``options`` 是本局村规（见各规则系统的 options 模块）；None = 该系统的 RAW。"""
         ...
 
     # 伤害/重伤/濒死/死亡结算见 app.rules.coc.combat.resolve_wound（不走 engine，避免规则漂移）。
@@ -72,5 +72,5 @@ class RuleEngine(ABC):
         """技能成长检定（战后结算）。默认规则系统不支持成长，返回 None；
         支持的引擎（如 CoC）覆盖此方法，返回
         ``{"roll", "improved", "gain", "old_value", "new_value"}``。
-        家规关掉成长时同样返回 None。"""
+        村规关掉成长时同样返回 None。"""
         return None

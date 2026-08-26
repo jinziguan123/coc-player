@@ -187,7 +187,7 @@ def test_luck_bought_success_earns_no_improvement_tick(db_factory):
     eligible = {item["skill"] for item in growth_service.eligible_skills(db, session.id, char.id)}
     assert eligible == {"聆听"}
 
-    # 家规把这条关掉 → 买来的成功照样给成长机会
+    # 村规把这条关掉 → 买来的成功照样给成长机会
     session.rule_options = {"luck_spend": True, "luck_spend_blocks_improvement": False}
     db.commit()
     relaxed = {item["skill"] for item in growth_service.eligible_skills(db, session.id, char.id)}

@@ -4,7 +4,8 @@ import { toast } from 'sonner'
 import { api, getApiBase, getPlayerToken, localApi } from '../api/client'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { GiBookCover, GiUpCard, GiReturnArrow, GiMagnifyingGlass } from 'react-icons/gi'
+import { GiBookCover, GiUpCard, GiReturnArrow, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
+import { VillageRulesPanel } from '@/components/game/VillageRulesPanel'
 import { staggerStyle } from '@/lib/stagger'
 
 interface Rulebook {
@@ -204,6 +205,16 @@ export function RulebookPage() {
             {uploading ? '上传中…' : '上传并索引'}
           </button>
         </div>
+      </div>
+
+      {/* 村规：这一桌沿用的规则改动。跟着上面那个规则系统选择器走——改的是「这套规则怎么跑」，
+          和「装了哪几本规则书」同属一件事，所以放在同一页，而不是每开一局在房间里重填。 */}
+      <div className="card mb-8">
+        <div className="flex items-center gap-2 mb-1" style={{ color: 'var(--color-text-accent)' }}>
+          <GiScrollUnfurled />
+          <span className="font-semibold">村规 · {ruleSystem.toUpperCase()}</span>
+        </div>
+        <VillageRulesPanel ruleSystem={ruleSystem} />
       </div>
 
       {books.length === 0 ? (

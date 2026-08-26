@@ -6,8 +6,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_local_client
 from app.database import get_db
 from app.models.rulebook import Rulebook
-from app.schemas.rulebook import RuleSearchResponse, RulebookRead
-from app.services import rulebook_service
+from app.schemas.rulebook import (
+    RuleSearchResponse,
+    RulebookRead,
+    VillageRulesRead,
+    VillageRulesUpdate,
+)
+from app.services import rule_options_service, rulebook_service
 
 router = APIRouter(prefix="/api/rulebooks", tags=["rulebooks"])
 logger = logging.getLogger(__name__)
@@ -80,3 +85,39 @@ def delete_rulebook(rulebook_id: str, db: Session = Depends(get_db)):
     if not rulebook_service.delete_rulebook(db, rulebook_id):
         raise HTTPException(404, "规则书不存在")
     return {"ok": True}
+
+
+@router.get("/village-rules/{rule_system}", response_model=VillageRulesRead)
+def read_village_rules(rule_system: str, db: Session = Depends(get_db)):
+    """读某套规则系统的村规——这一桌长期沿用的规矩。
+
+    不限本机：玩家有权知道自己在什么规则下掷骰。
+    """
+    return VillageRulesRead(
+        rule_system=rule_system,
+        options=rule_options_service.village_options(db, rule_system),
+        effective=rule_options_service.village_view(db, rule_system),
+    )
+
+
+@router.put(
+    "/village-rules/{rule_system}",
+    dependencies=[Depends(require_local_client)],
+    response_model=VillageRulesRead,
+)
+def update_village_rules(
+    rule_system: str,
+    data: VillageRulesUpdate,
+    db: Session = Depends(get_db),
+):
+    """改某套规则系统的村规。整份替换；服务端白名单化、钳区间、只存与规则原文的差异。
+
+    限本机：村规和规则书管理同属「这台机器上的桌面配置」，不该由联机进来的客人改动。
+    改动对**所有**用这套规则的房间即时生效（含进行中的局）。
+    """
+    saved = rule_options_service.save_village_options(db, rule_system, data.options)
+    return VillageRulesRead(
+        rule_system=rule_system,
+        options=saved,
+        effective=rule_options_service.village_view(db, rule_system),
+    )

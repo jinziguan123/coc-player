@@ -1,4 +1,4 @@
-"""家规参数（L1）：读时覆盖、两层合并、越界钳制，以及各阈值确实改变了判定。"""
+"""村规参数（L1）：读时覆盖、两层合并、越界钳制，以及各阈值确实改变了判定。"""
 
 import pytest
 from sqlalchemy import create_engine
@@ -55,11 +55,12 @@ def test_only_diffs_are_persisted():
     assert rule_options_service.normalized({"critical_max": 5}) == {"critical_max": 5}
 
 
-def test_session_overrides_module_default(db_factory):
+def test_layers_stack_module_then_village_then_session(db_factory):
+    """层级：模组默认 → 村规 → 本局覆盖。村规盖得过本子的建议——这桌怎么玩说了算。"""
     db = db_factory()
     module = Module(
         title="M", rule_system="coc", npcs=[], scenes=[],
-        default_rule_options={"critical_max": 5, "dice_pool_cap": 1},
+        default_rule_options={"critical_max": 5, "dice_pool_cap": 1, "improvement": False},
     )
     db.add(module); db.flush()
     session = GameSession(
@@ -67,9 +68,41 @@ def test_session_overrides_module_default(db_factory):
         rule_options={"dice_pool_cap": 3},
     )
     db.add(session); db.commit()
+    rule_options_service.save_village_options(
+        db, "coc", {"critical_max": 3, "dice_pool_cap": 2},
+    )
 
     merged = rule_options_service.effective(db, db.get(GameSession, session.id))
-    assert merged == {"critical_max": 5, "dice_pool_cap": 3}   # 会话盖模组，未提的继承
+    assert merged == {
+        "critical_max": 3,        # 村规盖掉了模组的 5
+        "dice_pool_cap": 3,       # 本局覆盖盖掉了村规的 2
+        "improvement": False,     # 村规没提，继续用模组的
+    }
+
+
+def test_village_rules_are_shared_across_sessions(db_factory):
+    """村规按规则系统存一份——不是一局一设，所以两个房间读到的是同一套。"""
+    db = db_factory()
+    module = Module(title="M", rule_system="coc", npcs=[], scenes=[])
+    db.add(module); db.flush()
+    a = GameSession(module_id=module.id, status="active", world_state={})
+    b = GameSession(module_id=module.id, status="active", world_state={})
+    db.add_all([a, b]); db.commit()
+
+    rule_options_service.save_village_options(db, "coc", {"luck_spend": True})
+
+    assert rule_options_service.effective(db, db.get(GameSession, a.id))["luck_spend"] is True
+    assert rule_options_service.effective(db, db.get(GameSession, b.id))["luck_spend"] is True
+    # 另一套规则系统互不相干
+    assert rule_options_service.village_options(db, "dnd") == {}
+
+
+def test_village_rules_are_normalized_on_save(db_factory):
+    db = db_factory()
+    saved = rule_options_service.save_village_options(
+        db, "coc", {"critical_max": 999, "乱写": 1},
+    )
+    assert saved == {"critical_max": 20}
 
 
 # ── 阈值真的改变了判定 ────────────────────────────────────────────────────
@@ -79,11 +112,11 @@ def test_fumble_rule_changes_verdict():
     # 技能 30、掷 96：RAW 判大失败（技能 < 50）
     assert is_fumble(96, 30) is True
     assert achieved_tier(96, 30) == "fumble"
-    # 家规「只有 100 才大失败」→ 同一骰变成普通失败
+    # 村规「只有 100 才大失败」→ 同一骰变成普通失败
     lenient = coc_options.from_dict({"fumble_rule": "hundred_only"})
     assert is_fumble(96, 30, lenient) is False
     assert achieved_tier(96, 30, lenient) == "fail"
-    # 家规「96 起一律大失败」→ 高技能也翻车
+    # 村规「96 起一律大失败」→ 高技能也翻车
     strict = coc_options.from_dict({"fumble_rule": "ninety_six_plus"})
     assert is_fumble(96, 80, strict) is True
 
@@ -123,7 +156,7 @@ def test_major_wound_divisor_changes_threshold():
     defender = {"skills": {}, "base_attributes": {"CON": 50}}
     # 满血 12、受 5 点：RAW 半血阈值 6 → 不算重伤
     assert resolve_wound(12, 12, 5, defender)["status"] == "ok"
-    # 家规改成 1/3 → 阈值 4，同一击算重伤（走体质检定，可能昏迷或重伤）
+    # 村规改成 1/3 → 阈值 4，同一击算重伤（走体质检定，可能昏迷或重伤）
     thirds = coc_options.from_dict({"major_wound_divisor": 3})
     assert resolve_wound(12, 12, 5, defender, options=thirds)["status"] in (
         "major_wound", "unconscious",

@@ -85,23 +85,6 @@ class SessionStyleUpdate(BaseModel):
     image_style: str | None = None
 
 
-class SessionRuleOptionsUpdate(BaseModel):
-    """改本局家规。只提交想改的项；服务端会白名单化、钳进合法区间、只存与 RAW 的差异。
-
-    ``{}`` = 全部改回 RAW（或模组默认）。取值语义见 rules.coc.options。
-    """
-
-    rule_options: dict = {}
-
-
-class SessionRuleOptionsRead(BaseModel):
-    """家规的两种视图：``options`` 是本局显式改过的差异项，``effective`` 是合并模组
-    默认后的完整生效值（面板拿它回显，才不必在前端复刻一份默认值表）。"""
-
-    options: dict
-    effective: dict
-
-
 class ClaimSeatRequest(BaseModel):
     seat_order: int
     # KP 席不绑定角色；human 玩家席仍必须提供角色。

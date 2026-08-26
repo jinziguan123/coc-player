@@ -4,7 +4,7 @@ from app.models.chase_state import ChaseState
 from app.models.combat_state import CombatState
 from app.models.event_log import EventLog
 from app.models.module import Module, ModuleChunk
-from app.models.rulebook import RuleChunk, Rulebook
+from app.models.rulebook import RuleChunk, Rulebook, RuleSystemOptions
 from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
 from app.models.session_navigation import SessionNavigation
@@ -22,6 +22,7 @@ __all__ = [
     "ModuleChunk",
     "Rulebook",
     "RuleChunk",
+    "RuleSystemOptions",
     "GameSession",
     "SessionLedger",
     "SessionNavigation",

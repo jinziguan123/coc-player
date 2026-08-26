@@ -75,7 +75,6 @@ RoomEventType = Literal[
     "chase_state",
     "chase_end",
     "map_update",
-    "rule_options",
     "luck_offer",
 ]
 
@@ -118,7 +117,6 @@ CATEGORY: dict[str, Category] = {
     "chase_state": "sync",
     "chase_end": "sync",
     "map_update": "sync",
-    "rule_options": "sync",
     "luck_offer": "log",
 }
 

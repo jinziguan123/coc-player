@@ -1671,7 +1671,7 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         session_service.pop_pending_check(db, session_id, check_id)
         game_session = db.get(GameSession, session_id)
 
-        # 幸运消费（家规开启时）：这一骰差几点够得着？够得着就**停在这里**问玩家买不买。
+        # 幸运消费（村规开启时）：这一骰差几点够得着？够得着就**停在这里**问玩家买不买。
         # 必须停：后面的物品发货、线索记账、KP 续写都以成败为输入，一旦跑起来就回不了头了。
         offer = coc_luck.rescue_offer(
             result, difficulty, char_data,

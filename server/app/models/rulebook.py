@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Index, Integer, LargeBinary, Text
+from sqlalchemy import JSON, ForeignKey, Index, Integer, LargeBinary, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -36,3 +36,16 @@ class RuleChunk(Base, UUIDMixin):
 
 
 Index("ix_rule_chunks_book_ord", RuleChunk.rulebook_id, RuleChunk.ordinal)
+
+
+class RuleSystemOptions(Base, TimestampMixin):
+    """一套规则系统的**村规**（这一桌长期沿用的改动），按 rule_system 存一行。
+
+    村规是桌上的规矩，不是一局一设的东西——所以它挂在规则系统上、在规则书页面配置，
+    而不是每开一局在房间里重填一遍。只存与规则原文不同的项，``{}`` = 全照原文。
+    """
+
+    __tablename__ = "rule_system_options"
+
+    rule_system: Mapped[str] = mapped_column(primary_key=True)
+    options: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
