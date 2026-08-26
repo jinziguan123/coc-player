@@ -12,7 +12,7 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.registry import get_engine
-from app.services import session_service
+from app.services import rule_options_service, session_service
 
 # 达成等级/结果里代表「成功」的取值——只要成功用过一次即获得该技能的成长机会。
 _SUCCESS_TIERS = {"critical", "extreme", "hard", "regular"}
@@ -59,15 +59,16 @@ def settle_growth(db: Session, session_id: str, character_id: str) -> dict | Non
     if module is None:
         return None
     engine = get_engine(module.rule_system)
+    rule_options = rule_options_service.effective(db, session)
 
     skills = dict(char.skills or {})
     results: list[dict] = []
     for item in eligible_skills(db, session_id, character_id):
         s = item["skill"]
         current = skills.get(s, item["value"])
-        res = engine.improvement_check(current)
+        res = engine.improvement_check(current, rule_options)
         if res is None:
-            continue  # 该规则系统不支持成长
+            continue  # 该规则系统不支持成长，或本局家规关掉了成长
         if res.get("improved") and res.get("new_value", current) > current:
             skills[s] = res["new_value"]
         results.append({"skill": s, **res})

@@ -5,6 +5,7 @@ import re
 
 from app.rules.base import CheckResult
 from app.rules.coc.character import COC_DEFAULT_SKILLS
+from app.rules.coc.options import DEFAULT_OPTIONS, CocRuleOptions
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile
 
 
@@ -134,9 +135,22 @@ TIER_LABEL_CN = {
 }
 
 
-def achieved_tier(d100: int, skill_value: int) -> str:
+def is_fumble(d100: int, skill_value: int, options: CocRuleOptions | None = None) -> bool:
+    """这一骰算不算大失败——阈值由家规定（默认 RAW）。"""
+    rule = (options or DEFAULT_OPTIONS).fumble_rule
+    if rule == "hundred_only":
+        return d100 == 100
+    if rule == "ninety_six_plus":
+        return d100 >= 96
+    return d100 == 100 or (d100 >= 96 and skill_value < 50)
+
+
+def achieved_tier(
+    d100: int, skill_value: int, options: CocRuleOptions | None = None,
+) -> str:
     """仅按骰值 vs 技能值判定达成的成功等级（与「要求难度」无关）。"""
-    if d100 == 1:
+    opts = options or DEFAULT_OPTIONS
+    if d100 <= opts.critical_max:
         return "critical"
     if d100 <= skill_value // 5:
         return "extreme"
@@ -144,9 +158,39 @@ def achieved_tier(d100: int, skill_value: int) -> str:
         return "hard"
     if d100 <= skill_value:
         return "regular"
-    if d100 == 100 or (d100 >= 96 and skill_value < 50):
+    if is_fumble(d100, skill_value, opts):
         return "fumble"
     return "fail"
+
+
+def judge(
+    d100: int, skill_value: int, difficulty: str, target: int,
+    options: CocRuleOptions | None = None,
+) -> tuple[str, str]:
+    """给定骰值判成败：返回 (outcome, 描述)。**只判不掷**。
+
+    掷骰与判定分开，是为了让幸运消费能拿降低后的骰值重走同一套判据——买来的成功和
+    掷出来的成功必须由同一段代码认定，否则迟早会出现「花了幸运却仍显示失败」这种账对不上的事。
+    """
+    opts = options or DEFAULT_OPTIONS
+    if d100 <= opts.critical_max:
+        return "critical_success", f"大成功！掷出了 {d100:02d}"
+    if d100 <= skill_value // 5:
+        return (
+            "hard_success" if difficulty != "extreme" else "success",
+            f"极难成功 ({d100} ≤ {skill_value // 5})",
+        )
+    if d100 <= skill_value // 2:
+        if difficulty == "extreme":
+            return "failure", f"失败 ({d100} > {skill_value // 5})"
+        if difficulty == "hard":
+            return "success", f"困难成功 ({d100} ≤ {skill_value // 2})"
+        return "hard_success", f"困难成功 ({d100} ≤ {skill_value // 2})"
+    if d100 <= target:
+        return "success", f"成功 ({d100} ≤ {target})"
+    if is_fumble(d100, skill_value, opts):
+        return "fumble", f"大失败！掷出了 {d100}"
+    return "failure", f"失败 ({d100} > {target})"
 
 
 def resolve_skill_check(
@@ -155,6 +199,7 @@ def resolve_skill_check(
     difficulty: str = "normal",
     bonus: int = 0,
     penalty: int = 0,
+    options: CocRuleOptions | None = None,
 ) -> CheckResult:
     """CoC 技能检定
 
@@ -165,8 +210,14 @@ def resolve_skill_check(
 
     奖励/惩罚骰（bonus/penalty，缺省 0，均为 0 时行为与旧版完全一致）：净奖惩>0 多掷十位
     取最有利、<0 取最不利，明细透传到 CheckResult 的 tens/tens_kept/units/bonus/penalty。
+
+    ``options`` 是本局家规（大成功/大失败阈值、奖惩骰上限）；缺省即 RAW。
     """
+    opts = options or DEFAULT_OPTIONS
     skill_value = resolve_skill_value(character_data, skill_name)
+    # 奖惩骰上限也是家规：净奖惩先各自钳到上限内，再抵消。
+    bonus = max(0, min(bonus, opts.dice_pool_cap))
+    penalty = max(0, min(penalty, opts.dice_pool_cap))
 
     if difficulty == "hard":
         target = skill_value // 2
@@ -184,36 +235,8 @@ def resolve_skill_check(
     tens_kept = min(tens) if net > 0 else (max(tens) if net < 0 else base_tens)
     d100 = compose_d100(tens_kept, units)
 
-    if d100 == 1:
-        outcome = "critical_success"
-        desc = "大成功！掷出了 01"
-    elif d100 <= skill_value // 5:
-        outcome = "hard_success" if difficulty != "extreme" else "success"
-        desc = f"极难成功 ({d100} ≤ {skill_value // 5})"
-    elif d100 <= skill_value // 2:
-        if difficulty == "extreme":
-            outcome = "failure"
-            desc = f"失败 ({d100} > {skill_value // 5})"
-        elif difficulty == "hard":
-            outcome = "success"
-            desc = f"困难成功 ({d100} ≤ {skill_value // 2})"
-        else:
-            outcome = "hard_success"
-            desc = f"困难成功 ({d100} ≤ {skill_value // 2})"
-    elif d100 <= target:
-        outcome = "success"
-        desc = f"成功 ({d100} ≤ {target})"
-    elif d100 >= 96 and skill_value < 50:
-        outcome = "fumble"
-        desc = f"大失败！掷出了 {d100}"
-    elif d100 == 100:
-        outcome = "fumble"
-        desc = "大失败！掷出了 100"
-    else:
-        outcome = "failure"
-        desc = f"失败 ({d100} > {target})"
-
-    tier = achieved_tier(d100, skill_value)
+    outcome, desc = judge(d100, skill_value, difficulty, target, opts)
+    tier = achieved_tier(d100, skill_value, opts)
     meets = outcome in ("critical_success", "hard_success", "success")
     return CheckResult(
         skill_name=skill_name,
@@ -232,15 +255,22 @@ def resolve_skill_check(
     )
 
 
-def san_check(character_data: dict, success_loss: str, failure_loss: str) -> dict:
+def san_check(
+    character_data: dict,
+    success_loss: str,
+    failure_loss: str,
+    options: CocRuleOptions | None = None,
+) -> dict:
     """理智检定
 
     Args:
         success_loss: 成功时的 SAN 损失，如 "0" 或 "1d3"
         failure_loss: 失败时的 SAN 损失，如 "1d6" 或 "1d10"
+        options: 本局家规（判定阈值、临时疯狂口径）；缺省即 RAW
     """
     from app.rules.dice import roll
 
+    opts = options or DEFAULT_OPTIONS
     system_data = character_data.get("system_data", {})
     san = system_data.get("sanity", {})
     current_san = san.get("current", 0)
@@ -248,6 +278,7 @@ def san_check(character_data: dict, success_loss: str, failure_loss: str) -> dic
     check = resolve_skill_check(
         {"skills": {"SAN": current_san}, "base_attributes": {}},
         "SAN",
+        options=opts,
     )
 
     if check.outcome in ("critical_success", "hard_success", "success"):
@@ -274,5 +305,12 @@ def san_check(character_data: dict, success_loss: str, failure_loss: str) -> dic
         "loss_roll": loss_roll,   # DiceRollResult（损失骰池，供前端动画）；固定损失 "0" 时为 None
         "old_san": current_san,
         "new_san": new_san,
-        "went_insane": loss >= current_san // 5,
+        "went_insane": _went_insane(loss, current_san, opts),
     }
+
+
+def _went_insane(loss: int, current_san: int, options: CocRuleOptions) -> bool:
+    """这次损失够不够触发临时疯狂——口径由家规定。"""
+    if options.insanity_rule == "flat":
+        return loss >= options.insanity_flat_threshold
+    return loss >= current_san // 5

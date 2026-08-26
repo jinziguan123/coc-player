@@ -48,6 +48,12 @@ class RollRequest(BaseModel):
     check_id: str
 
 
+class LuckDecisionRequest(BaseModel):
+    """对「要不要花幸运扭转这一骰」拍板。spend=False 即认了这次失败。"""
+
+    spend: bool = False
+
+
 class AdvanceRequest(BaseModel):
     """玩家点『推进本回合』确认——所有真人都确认后才整批交 KP。"""
 

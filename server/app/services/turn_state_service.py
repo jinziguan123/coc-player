@@ -17,7 +17,9 @@ from app.services.event_store import get_session_events
 
 #: turn_state 顶层里不属于「回合确认」的常驻键。旧迁移曾把确认项直接铺在顶层，
 #: 读取时据此把它们与 pending_checks 等区分开。
-_EPHEMERAL_TURN_STATE_KEYS = frozenset({"pending_checks", "pending_item_gains", "item_delta_keys"})
+_EPHEMERAL_TURN_STATE_KEYS = frozenset({
+    "pending_checks", "pending_item_gains", "item_delta_keys", "pending_luck",
+})
 
 
 def _human_participants(db: Session, session_id: str) -> list[SessionParticipant]:
@@ -54,6 +56,32 @@ def _write_confirm_map(ts: dict, confirm: dict) -> dict:
         if key != "turn_confirm" and key not in _EPHEMERAL_TURN_STATE_KEYS:
             ts.pop(key, None)
     return ts
+
+
+def set_pending_luck(db: Session, session_id: str, offer: dict | None) -> None:
+    """挂起 / 清除「等玩家决定花不花幸运」。
+
+    同一时刻至多一份：这个断点会把整条结算链停住，允许并存两份就等于允许两条链各自往下跑。
+    """
+    session = db.get(GameSession, session_id)
+    if not session:
+        return
+    ts = dict(session.turn_state or {})
+    if offer is None:
+        ts.pop("pending_luck", None)
+    else:
+        ts["pending_luck"] = offer
+    session.turn_state = ts
+    db.commit()
+
+
+def get_pending_luck(db: Session, session_id: str) -> dict | None:
+    """读取待决的幸运消费；没有则 None。"""
+    session = db.get(GameSession, session_id)
+    if not session:
+        return None
+    pending = (session.turn_state or {}).get("pending_luck")
+    return dict(pending) if isinstance(pending, dict) else None
 
 
 def add_pending_check(db: Session, session_id: str, check: dict) -> None:

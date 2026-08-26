@@ -1647,6 +1647,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/luck-decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Luck
+         * @description 对「要不要花幸运扭转这一骰」拍板，随后系统把结算链走完（fire-and-forget）。
+         *
+         *     只有这一骰的主人能拍板：花的是他自己的幸运值，成败也记在他头上。
+         */
+        post: operations["decide_luck_api_sessions__session_id__luck_decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/ooc": {
         parameters: {
             query?: never;
@@ -1825,6 +1847,34 @@ export interface paths {
          * @description 玩家点『投骰』：对一个待定检定掷骰，结果交 KP 据达成等级续写（fire-and-forget）。
          */
         post: operations["roll_api_sessions__session_id__roll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/rule-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Rule Options
+         * @description 读本局家规：显式改过的差异项 + 合并模组默认后的完整生效值。
+         *
+         *     不限房主：家规改的是所有人的成败概率，玩家有权知道自己这局在什么规则下掷骰。
+         */
+        get: operations["read_rule_options_api_sessions__session_id__rule_options_get"];
+        /**
+         * Update Rule Options
+         * @description 改本局家规（房主专属）。整份替换：提交什么就是什么，``{}`` = 全改回默认。
+         *
+         *     按房主授权，理由同文风：家规直接改变每个人的成败概率，不该让任一玩家单方面改掉。
+         */
+        put: operations["update_rule_options_api_sessions__session_id__rule_options_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3154,6 +3204,17 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /**
+         * LuckDecisionRequest
+         * @description 对「要不要花幸运扭转这一骰」拍板。spend=False 即认了这次失败。
+         */
+        LuckDecisionRequest: {
+            /**
+             * Spend
+             * @default false
+             */
+            spend: boolean;
+        };
         /** ModuleImageRegenerateRequest */
         ModuleImageRegenerateRequest: {
             /** Field */
@@ -3457,7 +3518,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "generating" | "done" | "ready" | "typing" | "presence" | "housekeeping" | "narration" | "dialogue" | "action" | "dice" | "narration_full" | "npc_dialogue" | "system" | "ooc" | "check_request" | "lobby" | "seat" | "started" | "status" | "end_vote" | "turn_state" | "character_update" | "inventory_update" | "kp_turn_ready" | "kp_roll_ready" | "kp_action" | "kp_request" | "event_update" | "event_delete" | "event_patch" | "combat_start" | "combat_state" | "combat_reaction_prompt" | "combat_end" | "chase_start" | "chase_state" | "chase_end" | "map_update";
+            type: "generating" | "done" | "ready" | "typing" | "presence" | "housekeeping" | "narration" | "dialogue" | "action" | "dice" | "narration_full" | "npc_dialogue" | "system" | "ooc" | "check_request" | "lobby" | "seat" | "started" | "status" | "end_vote" | "turn_state" | "character_update" | "inventory_update" | "kp_turn_ready" | "kp_roll_ready" | "kp_action" | "kp_request" | "event_update" | "event_delete" | "event_patch" | "combat_start" | "combat_state" | "combat_reaction_prompt" | "combat_end" | "chase_start" | "chase_state" | "chase_end" | "map_update" | "rule_options" | "luck_offer";
         };
         /** RuleHit */
         RuleHit: {
@@ -3599,6 +3660,36 @@ export interface components {
             updated_at: string;
             /** World State */
             world_state: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * SessionRuleOptionsRead
+         * @description 家规的两种视图：``options`` 是本局显式改过的差异项，``effective`` 是合并模组
+         *     默认后的完整生效值（面板拿它回显，才不必在前端复刻一份默认值表）。
+         */
+        SessionRuleOptionsRead: {
+            /** Effective */
+            effective: {
+                [key: string]: unknown;
+            };
+            /** Options */
+            options: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * SessionRuleOptionsUpdate
+         * @description 改本局家规。只提交想改的项；服务端会白名单化、钳进合法区间、只存与 RAW 的差异。
+         *
+         *     ``{}`` = 全部改回 RAW（或模组默认）。取值语义见 rules.coc.options。
+         */
+        SessionRuleOptionsUpdate: {
+            /**
+             * Rule Options
+             * @default {}
+             */
+            rule_options: {
                 [key: string]: unknown;
             };
         };
@@ -6671,6 +6762,41 @@ export interface operations {
             };
         };
     };
+    decide_luck_api_sessions__session_id__luck_decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LuckDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     post_ooc_api_sessions__session_id__ooc_post: {
         parameters: {
             query?: never;
@@ -6951,6 +7077,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_rule_options_api_sessions__session_id__rule_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionRuleOptionsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_rule_options_api_sessions__session_id__rule_options_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionRuleOptionsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionRuleOptionsRead"];
                 };
             };
             /** @description Validation Error */

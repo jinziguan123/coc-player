@@ -18,6 +18,7 @@ from app.schemas.event import (
     ChatRequest,
     CheckRequest,
     EventEditRequest,
+    LuckDecisionRequest,
     RollRequest,
     TravelRequest,
 )
@@ -34,6 +35,7 @@ from app.services.turn_context import commit_pending_travel
 from app.services.turn_orchestrator import (
     run_chat_generation,
     run_check_request_generation,
+    run_luck_decision,
     run_regenerate_generation,
     run_roll_generation,
     run_travel_generation,
@@ -277,6 +279,35 @@ async def roll(
     generation_manager.start(
         session_id,
         run_roll_generation(session_id, data.check_id.strip()),
+    )
+    return {"ok": True}
+
+
+@router.post("/{session_id}/luck-decision")
+async def decide_luck(
+    session_id: str,
+    data: LuckDecisionRequest,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """对「要不要花幸运扭转这一骰」拍板，随后系统把结算链走完（fire-and-forget）。
+
+    只有这一骰的主人能拍板：花的是他自己的幸运值，成败也记在他头上。
+    """
+    actor = require_session_token_actor(db, session_id, token)
+    game_session = db.get(GameSession, session_id)
+    if game_session.status != "active":
+        raise HTTPException(400, "会话未处于活跃状态")
+    pending = session_service.get_pending_luck(db, session_id)
+    if not pending:
+        raise HTTPException(404, "没有待决的幸运消费")
+    if pending.get("char_id") not in (None, actor.id):
+        raise HTTPException(403, "只有这次检定的角色本人能决定是否消费幸运")
+
+    room_hub.broadcast(session_id, _make_chunk("generating"))
+    generation_manager.start(
+        session_id,
+        run_luck_decision(session_id, bool(data.spend)),
     )
     return {"ok": True}
 

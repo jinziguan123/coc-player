@@ -18,9 +18,10 @@ from app.models.character import Character
 from app.models.combat_state import CombatState
 from app.models.session import GameSession
 from app.rules.coc import combat as engine
+from app.rules.coc import options as coc_options
 from app.rules.coc import positioning
 from app.rules.coc.weapons import WEAPON_CATEGORY_ORDER
-from app.services import session_service, world_memory
+from app.services import rule_options_service, session_service, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
@@ -335,12 +336,14 @@ def _find(state: dict, pid: str) -> dict | None:
 
 
 def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: str,
-                 ignore_armor: bool = False) -> list[str]:
+                 ignore_armor: bool = False, session_id: str = "") -> list[str]:
     """对参战方结算伤害：更新战斗态 HP/状态；玩家/队友同步角色卡 HP + 重伤体质检定判昏迷。
     返回可读结算行（供叙述/日志）。
 
     护甲（CoC7e）：物理伤害先扣目标护甲值再入血，重伤阈值也按扣减后的净伤判。
     ignore_armor=True 用于火焰/持续燃烧等能量伤害（护甲挡不住）。
+
+    ``session_id`` 用来取本局家规（重伤阈值）；战斗态 dict 里不带会话身份，只能由调用方给。
     """
     absorbed = 0
     armor = 0 if ignore_armor else int(target.get("armor") or 0)
@@ -350,6 +353,9 @@ def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: st
     r = engine.resolve_wound(
         target.get("hp", 0), target.get("max_hp") or 1, amount, _char_data(target),
         already_wounded=(target.get("status") == "major_wound"),
+        options=coc_options.from_dict(
+            rule_options_service.effective_by_id(db, session_id) if session_id else None,
+        ),
     )
     target["hp"] = r["new_hp"]
     target["status"] = r["status"]
@@ -637,7 +643,7 @@ async def _begin_player_burst(
         if res["hit"] and res["damage"]:
             rec["damage"] = res["damage"]["total"]
             rec["flags"] = list(res["damage"].get("flags") or [])
-            for line in apply_damage(db, state, target, res["damage"]["total"],
+            for line in apply_damage(db, state, target, res["damage"]["total"], session_id=session_id,
                                      reason=f"{actor['name']} 连射（{weapon}）"):
                 out.append(_combat_line(db, session_id, line))
         shot_results.append(rec)
@@ -681,7 +687,8 @@ async def resolve_combat_roll(
 
     hit_beat = ""
     if victim and engine.is_active(victim):
-        for line in apply_damage(db, state, victim, dmg["total"], reason=pr["reason"]):
+        for line in apply_damage(db, state, victim, dmg["total"], reason=pr["reason"],
+                                 session_id=session_id):
             out.append(_combat_line(db, session_id, line))
         hit_beat = (f"{actor['name'] if actor else '攻击者'} 用 {weapon} 命中 {victim['name']}，"
                     f"造成 {dmg['total']} 点伤害")
@@ -778,7 +785,8 @@ async def _resolve_aoe_roll(
     for vid in pr.get("victim_ids") or []:
         victim = _find(state, vid)
         if victim and engine.is_active(victim):
-            for line in apply_damage(db, state, victim, dmg["total"], reason=pr["reason"]):
+            for line in apply_damage(db, state, victim, dmg["total"], reason=pr["reason"],
+                                     session_id=session_id):
                 out.append(_combat_line(db, session_id, line))
             if pr.get("burning"):
                 conds = victim.setdefault("conditions", [])
@@ -862,7 +870,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
             out.append(_combat_state_chunk(state))   # 带 pending_roll → 前端弹「投掷反击伤害」
             return out
         if res["hit"] and res["damage"]:   # damage_to == 'defender'：守方被攻方命中 → NPC 伤害自动结算
-            for line in apply_damage(db, state, defender, res["damage"]["total"],
+            for line in apply_damage(db, state, defender, res["damage"]["total"], session_id=session_id,
                                      reason=f"{attacker['name']} 的 {pr['weapon']}"):
                 out.append(_combat_line(db, session_id, line))
         beats.append(f"{defender['name']} 对 {attacker['name']} 的攻击选择{verb}："
@@ -1018,7 +1026,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
     dmg_lines: list[str] = []
     if res["hit"] and res["damage"]:
         victim = target if res["damage_to"] == "defender" else actor
-        dmg_lines = apply_damage(db, state, victim, res["damage"]["total"],
+        dmg_lines = apply_damage(db, state, victim, res["damage"]["total"], session_id=session_id,
                                  reason=f"{actor['name']} 的 {weapon}")
         for line in dmg_lines:
             chunks.append(_combat_line(db, session_id, line))
@@ -1049,7 +1057,8 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
         # 燃烧 tick：着火者回合开始先烧一次（1D6），可能致其濒死/死亡 → 须在 is_active 判断前。
         if "burning" in (actor.get("conditions") or []) and engine.is_active(actor):
             burn = engine.roll_weapon_damage({"dam": "1D6"}, "0")["total"]
-            for line in apply_damage(db, state, actor, burn, reason="持续燃烧", ignore_armor=True):
+            for line in apply_damage(db, state, actor, burn, reason="持续燃烧",
+                                     ignore_armor=True, session_id=session_id):
                 chunks.append(_combat_line(db, session_id, line))
             _save_combat(db, session_id, state)
         # 濒死者回合开始先跑体质 tick（须在 is_active 跳过之前，否则永远不掷）

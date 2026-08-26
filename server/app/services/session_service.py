@@ -25,6 +25,7 @@ from app.services.event_store import (  # noqa: F401
     get_next_sequence_num,
     get_session_events,
     is_kp_only_event,
+    patch_event_metadata,
     search_events,
     search_snippet,
     set_event_group,
@@ -57,9 +58,11 @@ from app.services.turn_state_service import (  # noqa: F401
     find_pending_check,
     find_pending_san_check,
     get_pending_check,
+    get_pending_luck,
     human_character_ids,
     pop_pending_check,
     rollback_last_kp_output,
+    set_pending_luck,
     set_turn_confirm,
     turn_confirm_state,
 )
@@ -1125,6 +1128,25 @@ def update_session_style(
         session.narrative_style = narrative_style.strip()
     if image_style is not None:
         session.image_style = image_style.strip()
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def update_session_rule_options(
+    db: Session, session_id: str, raw: dict | None,
+) -> GameSession | None:
+    """整份替换本局家规。提交值先白名单化并钳进合法区间，只落与 RAW 的差异项。
+
+    与文风不同，这里**必须**校验：文风是喂给模型的自由文本，家规却直接进掷骰逻辑，
+    一个越界的阈值能让每一骰都是大成功。
+    """
+    from app.services import rule_options_service
+
+    session = db.get(GameSession, session_id)
+    if not session:
+        return None
+    session.rule_options = rule_options_service.normalized(raw)
     db.commit()
     db.refresh(session)
     return session

@@ -21,6 +21,7 @@ from app.services import (
     human_kp_service,
     illustration_service,
     npc_identity,
+    rule_options_service,
     session_service,
     turn_context,
     world_memory,
@@ -273,7 +274,11 @@ def _settle_san_target(
         "skills": tchar.skills,
         "system_data": tchar.system_data,
     }
-    result = san_check(char_data, success_loss, failure_loss)
+    from app.rules.coc import options as coc_options
+    result = san_check(
+        char_data, success_loss, failure_loss,
+        options=coc_options.from_dict(rule_options_service.effective(db, game_session)),
+    )
     check = result["check"]
     _update_character_stat(db, tchar, "sanity.current", result["new_san"])
 
@@ -514,7 +519,10 @@ async def _exec_hp_change(
                 "skills": char.skills,
                 "system_data": char.system_data,
             }
-            result = engine.resolve_check(cdata, "体质", "normal")
+            result = engine.resolve_check(
+                cdata, "体质", "normal",
+                options=rule_options_service.effective_by_id(db, session_id),
+            )
             con_content = (
                 f"{char.name}｜重伤体质检定（判定是否昏迷）：{result.description}"
             )
@@ -728,7 +736,10 @@ async def _auto_roll_check(
     chunks: list[str] = []
     descs: list[str] = []
     engine = get_engine(module.rule_system)
-    result = engine.resolve_check(char_data, skill_name, difficulty, bonus=bonus, penalty=penalty)
+    result = engine.resolve_check(
+        char_data, skill_name, difficulty, bonus=bonus, penalty=penalty,
+        options=rule_options_service.effective(db, game_session),
+    )
     tier_cn = TIER_LABEL.get(result.tier, result.tier)
 
     if blind:

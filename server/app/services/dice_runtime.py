@@ -11,7 +11,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.coc.checks import display_skill_name
 from app.rules.registry import get_engine
-from app.services import npc_identity, session_service
+from app.services import npc_identity, rule_options_service, session_service
 from app.services.event_protocol import event_to_chunk, make_chunk
 
 _make_chunk = make_chunk
@@ -484,11 +484,12 @@ async def _resolve_opposed(
 
     a_bonus, a_penalty = _parse_bonus_penalty(kv, "a_")
     b_bonus, b_penalty = _parse_bonus_penalty(kv, "b_")
+    rule_options = rule_options_service.effective_by_id(db, session_id)
     a_res = engine.resolve_check(
-        a_data, a_skill, "normal", bonus=a_bonus, penalty=a_penalty,
+        a_data, a_skill, "normal", bonus=a_bonus, penalty=a_penalty, options=rule_options,
     )
     b_res = engine.resolve_check(
-        b_data, b_skill, "normal", bonus=b_bonus, penalty=b_penalty,
+        b_data, b_skill, "normal", bonus=b_bonus, penalty=b_penalty, options=rule_options,
     )
 
     ar, br = _OUTCOME_RANK.get(a_res.outcome, 1), _OUTCOME_RANK.get(b_res.outcome, 1)

@@ -38,6 +38,8 @@ import {
   type CheckResultMeta,
 } from '../components/game/CheckResultCard'
 import { CheckRequestCard } from '../components/game/CheckRequestCard'
+import { HouseRulesModal } from '../components/game/HouseRulesModal'
+import { LuckOfferCard } from '../components/game/LuckOfferCard'
 import { OnboardingCoach, hasSeenCoach } from '../components/game/OnboardingCoach'
 import { buildCheckCaption } from '../components/game/diceNotation'
 import { normalizeOpposedData } from '../components/game/opposedDice'
@@ -276,6 +278,9 @@ export function GameSessionPage() {
 
   const [showImprov, setShowImprov] = useState(false)         // 临场角色收编（房主专用）
   const [showStyle, setShowStyle] = useState(false)           // 本局文风/画风（房主专用）
+  const [showRules, setShowRules] = useState(false)           // 本局家规（房主可改，玩家可读）
+  // 幸运询价已被拍板过一次 → 卡片收起按钮，防重复提交（后端也已把待决状态消费掉）
+  const [luckDecided, setLuckDecided] = useState(false)
   const [locations, setLocations] = useState<KnownLocation[]>([])
   const [mapNodes, setMapNodes] = useState<MapNodePayload[]>([])
   const [mapBackdrop, setMapBackdrop] = useState('')     // 沙盘氛围底图（模组里生成的那张俯视图）
@@ -774,6 +779,8 @@ export function GameSessionPage() {
     //   lobby   —— 席位/准备态变化，游戏页的队伍条由 seat/presence 驱动
     //   started —— 开局广播，大厅页据此跳转；本页已经在局内
     if (t === 'lobby' || t === 'started') return
+    // 家规变更（房主改了本局规则）：拉一次会话，让规则面板与后续判定读到新值。
+    if (t === 'rule_options') { void refetchSession(); return }
     // 走到这里说明有 stream/sync 类型没被处理——加了新事件就必须在上面补一支。
     assertAllNonLogHandled(t)
   }, [refetchSession, resyncHistory, addMessage, removeMessage, updateMessage, patchMessageMetadata, endStream, startStreamMessage, appendToStream, isKp])
@@ -809,6 +816,10 @@ export function GameSessionPage() {
       // 先本地认它待投，避免卡片先闪「已投骰」再翻成按钮。
       const cid = String((chunk.metadata as Record<string, unknown> | undefined)?.id ?? '')
       if (cid) setOptimisticPending((s) => new Set(s).add(cid))
+    } else if (t === 'luck_offer') {
+      // 幸运询价：这一骰差几点够得着，问它的主人买不买。整条结算链停在这里等回答。
+      addMessage({ id: chunk.id || '', type: 'system', content: chunk.content || '', actor_name: chunk.actor_name, metadata: chunk.metadata })
+      setLuckDecided(false)
     } else {
       // 走到这里说明有 log 类型没被渲染——加了新事件就必须在上面补一支。
       assertAllLogHandled(t)
@@ -1325,6 +1336,18 @@ export function GameSessionPage() {
     })
   }
 
+  // 幸运消费拍板：买或不买，之后系统都会把这一骰的结算链走完（同 submitRoll，fire-and-forget）。
+  const decideLuck = (spend: boolean) => {
+    if (!currentSession) return
+    setLuckDecided(true)
+    setStreaming(true)
+    api.post(`/sessions/${currentSession.id}/luck-decision`, { spend }).catch((e: unknown) => {
+      setLuckDecided(false)
+      setStreaming(false)
+      toast.error(e instanceof Error ? e.message : '提交失败')
+    })
+  }
+
   const sendMessage = async () => {
     if (!input.trim() || !currentSession || streaming) return
     const text = input.trim()
@@ -1513,6 +1536,13 @@ export function GameSessionPage() {
                 <GiCharacter size={13} /> 临场角色
               </button>
             )}
+            <button
+              onClick={() => setShowRules(true)}
+              className="text-xs btn-secondary !px-2 !py-0.5 flex items-center gap-1"
+              title={isHost ? '本局家规：大成功/大失败阈值、幸运消费、重伤与疯狂口径（房主）' : '本局家规：看看自己在什么规则下掷骰'}
+            >
+              <GiScrollUnfurled size={13} /> 家规
+            </button>
             {isHost && (
               <button
                 onClick={() => setShowStyle(true)}
@@ -1556,6 +1586,13 @@ export function GameSessionPage() {
           <GrowthModal sessionId={currentSession.id} characterId={myCharId} onClose={() => setShowGrowth(false)} />
         )}
         {showImprov && <ImprovisedNpcModal sessionId={currentSession.id} onClose={() => setShowImprov(false)} />}
+        {showRules && (
+          <HouseRulesModal
+            sessionId={currentSession.id}
+            canEdit={isHost}
+            onClose={() => setShowRules(false)}
+          />
+        )}
         {showStyle && (
           <SessionStyleModal
             sessionId={currentSession.id}
@@ -2005,6 +2042,22 @@ export function GameSessionPage() {
                       {msg.content && <div className="text-sm whitespace-pre-wrap" style={{ color: 'var(--color-text-primary)' }}>{msg.content}</div>}
                     </div>
                   </div>
+                )
+              }
+              // 幸运询价：差一点点的那一骰，问它的主人要不要花幸运买回来
+              if (msg.metadata?.cost && msg.metadata?.dice_event_id) {
+                const luckCharId = String(msg.metadata?.char_id ?? '')
+                return (
+                  <LuckOfferCard
+                    key={msg.id}
+                    actor={String(msg.metadata?.actor ?? '')}
+                    skill={String(msg.metadata?.skill ?? '')}
+                    cost={Number(msg.metadata?.cost ?? 0)}
+                    available={Number(msg.metadata?.available ?? 0)}
+                    mine={!luckCharId || luckCharId === myCharId}
+                    busy={luckDecided || streaming}
+                    onDecide={decideLuck}
+                  />
                 )
               }
               // 待定检定提示：携带 check_request 元数据时，渲染成带「投骰」按钮的卡片

@@ -50,6 +50,9 @@ class GameSession(Base, UUIDMixin, TimestampMixin):
     # ""=继承模组的默认值；模组也没设时，文风不注入、画风回落到默认那一档。
     narrative_style: Mapped[str] = mapped_column(default="", server_default="")
     image_style: Mapped[str] = mapped_column(default="", server_default="")
+    # 本局家规（只存与 RAW 不同的项，取值与语义见 rules.coc.options）。
+    # {} = 全用模组默认；模组也没设则一律 RAW。引擎**读时覆盖**，不写回任何存档。
+    rule_options: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
     participants: Mapped[list["SessionParticipant"]] = relationship(
         "SessionParticipant",

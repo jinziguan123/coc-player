@@ -18,7 +18,14 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.registry import get_engine
-from app.services import dice_runtime, narration_protocol, session_service, turn_context, world_memory
+from app.services import (
+    dice_runtime,
+    narration_protocol,
+    rule_options_service,
+    session_service,
+    turn_context,
+    world_memory,
+)
 from app.services.event_protocol import make_chunk
 
 _make_chunk = make_chunk
@@ -321,7 +328,10 @@ async def _run_team_turn(
                 "skills": teammate.skills,
                 "system_data": teammate.system_data,
             }
-            result = engine.resolve_check(cdata, skill, "normal")
+            result = engine.resolve_check(
+                cdata, skill, "normal",
+                options=rule_options_service.effective_by_id(db, session_id),
+            )
             if any(s in skill for s in ALWAYS_BLIND_SKILLS):
                 tier_cn = TIER_LABEL.get(result.tier, result.tier)
                 dice_content = f"{teammate.name} 进行了一次暗骰·{skill}（结果仅 KP 可见）"

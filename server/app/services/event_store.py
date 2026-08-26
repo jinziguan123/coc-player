@@ -217,6 +217,24 @@ def add_event(
     raise RuntimeError("事件序号分配失败")
 
 
+def patch_event_metadata(db: Session, event_id: str, patch: dict) -> EventLog | None:
+    """就地订正一条已落库事件的 metadata（浅合并）。
+
+    用于结果**事后被规则改写**的场合（花幸运把失败买成成功）：历史里那张卡必须跟着改，
+    否则重连的人看到的还是「失败」，而后续叙事却是按成功写的。
+    """
+    ev = db.get(EventLog, event_id)
+    if ev is None:
+        return None
+    meta = dict(ev.metadata_ or {})
+    meta.update(patch)
+    ev.metadata_ = meta
+    flag_modified(ev, "metadata_")  # JSON 列原地改字典不会被脏检测，需显式标记
+    db.add(ev)
+    db.commit()
+    return ev
+
+
 def set_event_group(db: Session, event: EventLog, group: str) -> None:
     """给已落库的事件补打分组标签（分头行动：把本回合各角色行动归入其所在场景列）。"""
     meta = dict(event.metadata_ or {})

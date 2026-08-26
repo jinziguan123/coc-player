@@ -43,6 +43,11 @@ class Module(Base, UUIDMixin, TimestampMixin):
     # 这是**默认值**：开局会继承到会话上，玩家仍可一局一局地改。""=不指定。
     default_narrative_style: Mapped[str] = mapped_column(default="", server_default="")
     default_image_style: Mapped[str] = mapped_column(default="", server_default="")
+    # 本模组推荐的家规（同上，是**默认值**，开局继承到会话，房主仍可一局一局地改）。
+    # {} = 不指定，全用 RAW。取值与语义见 rules.coc.options。
+    default_rule_options: Mapped[dict] = mapped_column(
+        JSON, default=dict, server_default="{}",
+    )
 
 
 class ModuleChunk(Base, UUIDMixin):

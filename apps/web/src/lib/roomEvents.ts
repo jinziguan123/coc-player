@@ -31,7 +31,7 @@ export type StreamEventType =
 
 export type LogEventType =
   | 'dialogue' | 'action' | 'dice' | 'narration_full' | 'npc_dialogue'
-  | 'system' | 'ooc' | 'check_request'
+  | 'system' | 'ooc' | 'check_request' | 'luck_offer'
 
 export type SyncEventType =
   | 'lobby' | 'seat' | 'started' | 'status' | 'end_vote' | 'turn_state'
@@ -40,7 +40,7 @@ export type SyncEventType =
   | 'event_update' | 'event_delete' | 'event_patch'
   | 'combat_start' | 'combat_state' | 'combat_reaction_prompt' | 'combat_end'
   | 'chase_start' | 'chase_state' | 'chase_end'
-  | 'map_update'
+  | 'map_update' | 'rule_options'
 
 export type NonLogEventType = StreamEventType | SyncEventType
 
@@ -73,6 +73,7 @@ export const CATEGORY: Record<RoomEventType, EventCategory> = {
   system: 'log',
   ooc: 'log',
   check_request: 'log',
+  luck_offer: 'log',
   // 状态失效通知
   lobby: 'sync',
   seat: 'sync',
@@ -97,6 +98,7 @@ export const CATEGORY: Record<RoomEventType, EventCategory> = {
   chase_state: 'sync',
   chase_end: 'sync',
   map_update: 'sync',
+  rule_options: 'sync',
 }
 
 export function categoryOf(type: string): EventCategory | undefined {

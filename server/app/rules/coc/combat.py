@@ -14,6 +14,7 @@ import random
 import re
 
 from app.rules.coc.checks import resolve_skill_check
+from app.rules.coc.options import DEFAULT_OPTIONS, CocRuleOptions
 from app.rules.coc.weapons import COC_WEAPONS
 
 # 成功等级排序（与 dice_runtime 的对抗检定一致，保证两条路径语义相同）
@@ -378,6 +379,7 @@ def resolve_attack(
 
 def resolve_wound(
     hp: int, max_hp: int, damage: int, defender_data: dict, already_wounded: bool = False,
+    options: CocRuleOptions | None = None,
 ) -> dict:
     """结算一次伤害的 HP 与状态迁移（纯规则，不碰 DB）。返回 {new_hp, status, lines}。
 
@@ -387,10 +389,11 @@ def resolve_wound(
       **只受轻伤**归零 → 昏迷（unconscious，伤势稳定、不致死，会随时间恢复）。
     - 未归零的重伤（单击 ≥ 半血）→ 立刻过体质检定，失败则昏迷、成功则重伤（major_wound）。
     """
+    opts = options or DEFAULT_OPTIONS
     max_hp = max(1, max_hp)   # 归一非正 max_hp，避免半血阈值判定被负值扭曲
     new_hp = max(0, hp - damage)
     lines = [f"受到 {damage} 点伤害（HP {hp}→{new_hp}）"]
-    major = damage >= max_hp // 2
+    major = damage >= max_hp // opts.major_wound_divisor
     if damage > max_hp:                                   # ① 单击超过满血 → 必死
         return {"new_hp": 0, "status": "dead", "lines": lines + ["单次伤害超过最大生命值，当场毙命！"]}
     if new_hp <= 0:                                       # ② 归零：分轻/重伤

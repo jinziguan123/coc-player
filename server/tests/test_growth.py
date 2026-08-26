@@ -110,7 +110,9 @@ def test_settle_growth_applies_gain(db_factory, monkeypatch):
     # 强制侦查成长 +5
     monkeypatch.setattr(
         get_engine("coc"), "improvement_check",
-        lambda v: {"roll": 99, "improved": True, "gain": 5, "old_value": v, "new_value": v + 5},
+        lambda v, options=None: {
+            "roll": 99, "improved": True, "gain": 5, "old_value": v, "new_value": v + 5,
+        },
     )
     out = growth_service.settle_growth(db, sid, cid)
     assert out["results"] == [

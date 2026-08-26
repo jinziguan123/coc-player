@@ -21,6 +21,8 @@ from app.ai.prompts.kp_system import (
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.rules.coc import luck as coc_luck
+from app.rules.coc import options as coc_options
 from app.rules.coc.checks import display_skill_name
 from app.rules.registry import get_engine
 from app.services import (
@@ -40,6 +42,8 @@ from app.services import (
     narration_protocol,
     npc_identity,
     planned_effects,
+    combat_service,
+    rule_options_service,
     rulebook_service,
     session_service,
     team_turn_service,
@@ -1606,7 +1610,7 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         source = check.get("source", "")
         bonus = int(check.get("bonus") or 0)
         penalty = int(check.get("penalty") or 0)
-        char_data, disp_name, _is_npc, _cid = _resolve_check_actor(
+        char_data, disp_name, _is_npc, char_id = _resolve_check_actor(
             check.get("char_ref", ""), skill, player_char, party_others, module,
         )
         # 检定卡是玩家可见面：玩家还没认出来的 NPC 用对外称呼。
@@ -1629,7 +1633,10 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
                 "reason": f"临时疯狂{f'·{label}' if label else ''}影响了这项技能",
             })
         engine = get_engine(module.rule_system)
-        result = engine.resolve_check(char_data, skill, difficulty, bonus=bonus, penalty=penalty)
+        result = engine.resolve_check(
+            char_data, skill, difficulty, bonus=bonus, penalty=penalty,
+            options=rule_options_service.effective(db, game_session),
+        )
         tier_cn = TIER_LABEL.get(result.tier, result.tier)
 
         dice_content = (
@@ -1664,94 +1671,314 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         session_service.pop_pending_check(db, session_id, check_id)
         game_session = db.get(GameSession, session_id)
 
-        # 治疗类检定成功 → 引擎确定性回血（不靠 KP 自觉发 HP_CHANGE）。广播结算，并把结果并进
-        # 回灌 KP 的描述，让 KP 据「已回 N 点」续写而非自己臆断/漏结算。
-        heal_note = ""
-        heal_target_id = check.get("heal_target_id")
-        if heal_target_id:
-            target_char = db.get(Character, heal_target_id)
-            for chunk in _apply_heal_on_success(db, session_id, target_char, skill, result.outcome):
-                room_hub.broadcast(session_id, chunk)
-                heal_note = "；系统已按规则确定性结算回血"
-
-        desc = (
-            f"{disp_name} {skill}（{difficulty}），达成 {tier_cn}"
-            + (f"（针对：{source}）" if source else "")
-            + f"：{result.description}{heal_note}"
+        # 幸运消费（家规开启时）：这一骰差几点够得着？够得着就**停在这里**问玩家买不买。
+        # 必须停：后面的物品发货、线索记账、KP 续写都以成败为输入，一旦跑起来就回不了头了。
+        offer = coc_luck.rescue_offer(
+            result, difficulty, char_data,
+            coc_options.from_dict(rule_options_service.effective(db, game_session)),
+            in_combat=bool(combat_service.get_combat(game_session)),
         )
-        succeeded = result.outcome not in ("failure", "fumble")
-        fumbled = result.outcome == "fumble"
-        batch_id = str(check.get("check_batch_id") or "")
-        if batch_id:
-            remaining = session_service.append_pending_group_check_result(
-                db,
-                session_id,
-                batch_id,
-                desc,
-                succeeded=succeeded,
-                fumbled=fumbled,
-            )
-            if remaining:
-                room_hub.broadcast(session_id, _make_chunk("done"))
-                return
-            batch_results = [str(item) for item in (check.get("check_results") or [])]
-            batch_results.append(desc)
-            desc = "\n".join(batch_results)
-            succeeded = bool(check.get("check_any_success")) or succeeded
-            fumbled = bool(check.get("check_any_fumble")) or fumbled
-        # 「先检定、后发货」的落地：本轮被这次检定门控的收获此前只暂存未入库，
-        # 到这里骰子落地才决定给不给（扒窃掷输了，那块表不该在他包里）。
-        for chunk in planned_effects.settle_pending_item_gains(
-            db, session_id, game_session, succeeded,
-        ):
-            room_hub.broadcast(session_id, chunk)
-        # 同理「先检定、后记账」：这次检定门控的线索，骰子落地才决定进不进台账。
-        planned_effects.settle_pending_clue_reveals(
-            db, session_id, game_session, succeeded,
-            module=module, on_first_clue=_maybe_clue_illustration,
-        )
-        if game_session.kp_mode == "human":
-            # 真人 KP 模式下掷骰只完成确定性结算，不自动生成后续叙事；KP 可据结果手动发布。
-            room_hub.broadcast(
-                session_id,
-                _make_chunk(
-                    "kp_roll_ready",
-                    "群体检定已结算，等待真人 KP 处理后果" if batch_id
-                    else "检定已结算，等待真人 KP 处理后果",
-                    metadata={"description": desc},
-                ),
-            )
+        if offer and char_id:
+            session_service.set_pending_luck(db, session_id, {
+                "check": check,
+                "check_id": check_id,
+                "char_id": char_id,
+                "dice_event_id": ev.id,
+                "skill": skill,
+                "difficulty": difficulty,
+                "disp_name": disp_name,
+                "shown_name": shown_name,
+                "result": _check_result_payload(result),
+                "offer": offer,
+            })
+            room_hub.broadcast(session_id, _make_chunk(
+                "luck_offer",
+                f"{shown_name} 的这次检定差 {offer['cost']} 点——可花 {offer['cost']} 点幸运扭转",
+                metadata={
+                    "char_id": char_id, "actor": shown_name, "skill": skill,
+                    "dice_event_id": ev.id, **offer,
+                },
+            ))
             room_hub.broadcast(session_id, _make_chunk("done"))
             return
-        # 恐怖多在**检定成功**时才被揭示（看清那具尸体…）；仅成功时才在叙事后补跑 planner
-        # 判理智（失败不多花这次调用）。失败若也揭示了恐怖，仍可由 KP 自发 [SAN_CHECK] 兜底。
-        # 大失败则可能有**身体反噬**（踢燃烧瓶被烧等）→ 开 mishap 守卫，叙事后据 planner 确定性扣血。
-        t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
-        await _run_kp_turn(
+
+        await _settle_rolled_check(
             db, session_id, game_session, module, player_char, party_others,
-            KP_DICE_CONTINUATION_PROMPT.format(dice_results=desc),
-            sanity_guard=succeeded,
-            mishap_guard=fumbled,
-            focus_member=disp_name,
-            split_aware=True,
+            check=check, result=result, skill=skill, difficulty=difficulty,
+            source=source, disp_name=disp_name, t_roll=t_roll,
         )
-        logger.info(
-            "耗时|投骰后 KP 续写 %.1fs（%s）session=%s",
-            time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
-        )
-        logger.info(
-            "耗时|投骰合计 %.1fs（%s）session=%s",
-            time.monotonic() - t_roll, usage_tracker.fmt(usage_tracker.snapshot()), session_id,
-        )
-        usage_tracker.warn_if_reasoning_dominates(usage_tracker.snapshot())
     except asyncio.CancelledError:
         logger.info("投骰生成被取消: session=%s", session_id)
+        room_hub.broadcast(session_id, _make_chunk("done"))
     except Exception:
         logger.exception("投骰生成失败: session=%s", session_id)
-        room_hub.broadcast(session_id, _make_chunk("system", "生成出错，请重试"))
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
+
+
+async def run_luck_decision(session_id: str, spend: bool) -> None:
+    """玩家对「要不要花幸运」拍板后，接着把结算链走完。
+
+    ``spend=True`` 才扣点改判；``False`` 是「认了这次失败」。无论哪种，之后都汇回
+    ``_settle_rolled_check`` 那一条链——买来的成功和掷出来的成功，后续待遇必须一模一样。
+    """
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        pending = session_service.get_pending_luck(db, session_id)
+        if not pending:
+            room_hub.broadcast(session_id, _make_chunk("done"))
+            return
+        session_service.set_pending_luck(db, session_id, None)  # 先消费，避免重复提交
+        game_session = db.get(GameSession, session_id)
+        module = db.get(Module, game_session.module_id)
+        player_char = db.get(Character, game_session.player_character_id)
+        party_others = session_service.get_party_members(
+            db, session_id, exclude_id=game_session.player_character_id,
+        )
+        check = dict(pending.get("check") or {})
+        result = _check_result_from_payload(dict(pending.get("result") or {}))
+        offer = dict(pending.get("offer") or {})
+        skill = str(pending.get("skill") or "")
+        difficulty = str(pending.get("difficulty") or "normal")
+        spent = 0
+
+        if spend:
+            char = db.get(Character, str(pending.get("char_id") or ""))
+            options = coc_options.from_dict(
+                rule_options_service.effective(db, game_session),
+            )
+            char_data = {
+                "base_attributes": char.base_attributes if char else {},
+                "skills": char.skills if char else {},
+                "system_data": char.system_data if char else {},
+            }
+            cost = int(offer.get("cost") or 0)
+            # 重新校验而不是照单全收：这份 offer 是上一步存下来的，中间幸运值可能已被
+            # 别处扣掉（同一轮的另一次消费、KP 手动改卡）。
+            if char is not None and cost > 0 and coc_luck.available_luck(char_data) >= cost:
+                deduction = coc_luck.deduct(char_data, cost)
+                if deduction["path"].startswith("system_data."):
+                    turn_effects._update_character_stat(
+                        db, char, deduction["path"].split(".", 1)[1], deduction["new"],
+                    )
+                else:
+                    _set_attr_luck(db, char, deduction["new"])
+                result = coc_luck.apply_rescue(result, difficulty, cost, options)
+                spent = cost
+                _broadcast_luck_applied(
+                    db, session_id, pending, result, cost, deduction,
+                )
+
+        if spent == 0:
+            room_hub.broadcast(session_id, _make_chunk(
+                "system", f"{pending.get('shown_name') or ''} 没有动用幸运，接受了这次结果。".strip(),
+            ))
+
+        await _settle_rolled_check(
+            db, session_id, game_session, module, player_char, party_others,
+            check=check, result=result, skill=skill, difficulty=difficulty,
+            source=str(check.get("source") or ""),
+            disp_name=str(pending.get("disp_name") or ""),
+            t_roll=time.monotonic(), luck_spent=spent,
+        )
+    except asyncio.CancelledError:
+        logger.info("幸运消费后续生成被取消: session=%s", session_id)
+        room_hub.broadcast(session_id, _make_chunk("done"))
+    except Exception:
+        logger.exception("幸运消费结算失败: session=%s", session_id)
+        room_hub.broadcast(session_id, _make_chunk("system", "结算出错，请重试"))
+        room_hub.broadcast(session_id, _make_chunk("done"))
+    finally:
+        db.close()
+
+
+def _set_attr_luck(db, char: Character, value: int) -> None:
+    """幸运存在 base_attributes.LUCK 的那一路（AI 生成 / Excel 导入的卡）。"""
+    attrs = dict(char.base_attributes or {})
+    attrs["LUCK"] = value
+    char.base_attributes = attrs
+    db.add(char)
+    db.commit()
+
+
+def _broadcast_luck_applied(
+    db, session_id: str, pending: dict, result, cost: int, deduction: dict,
+) -> None:
+    """把「花了几点、原本掷了多少、现在算什么」摆到台面上，并订正那张结果卡。
+
+    改判必须回到原来那张 dice 事件上：玩家（和重连的人）看的是历史记录，留着一张
+    写着「失败」的卡、旁边另起一条「其实成功了」，账就对不上了。
+    """
+    tier_cn = TIER_LABEL.get(result.tier, result.tier)
+    shown_name = str(pending.get("shown_name") or "")
+    skill = str(pending.get("skill") or "")
+    original = dict(pending.get("result") or {})
+    event_id = str(pending.get("dice_event_id") or "")
+    content = (
+        f"{shown_name}｜{skill} 检定：花 {cost} 点幸运（{deduction['old']}→{deduction['new']}），"
+        f"{original.get('roll')} → {result.roll}，改判 {tier_cn}"
+    )
+    ev = session_service.add_event(
+        db, session_id, "dice", content, actor_name="系统",
+        metadata={
+            "luck_spend": True, "actor": shown_name, "skill": skill,
+            "cost": cost, "luck_before": deduction["old"], "luck_after": deduction["new"],
+            "roll_before": original.get("roll"), "roll": result.roll,
+            "outcome": result.outcome, "tier": result.tier,
+            "target": result.target, "skill_value": result.skill_value,
+            "patched_event_id": event_id,
+        },
+    )
+    room_hub.broadcast(session_id, _make_chunk(
+        "dice", content, metadata=ev.metadata_, event_id=ev.id,
+    ))
+    if event_id:
+        patch = {
+            "outcome": result.outcome, "tier": result.tier,
+            "roll": result.roll, "luck_spent": cost,
+        }
+        room_hub.broadcast(session_id, _make_chunk(
+            "event_patch", metadata={"event_id": event_id, "patch": patch},
+        ))
+        session_service.patch_event_metadata(db, event_id, patch)
+    room_hub.broadcast(session_id, _make_chunk("character_update", metadata={
+        "char_id": str(pending.get("char_id") or ""),
+    }))
+
+
+def _check_result_payload(result) -> dict:
+    """把 CheckResult 摊平成可落 JSON 的字段——待玩家决定花不花幸运期间要存着它。"""
+    return {
+        "skill_name": result.skill_name, "skill_value": result.skill_value,
+        "roll": result.roll, "target": result.target, "outcome": result.outcome,
+        "description": result.description, "tier": result.tier,
+        "meets_difficulty": result.meets_difficulty,
+        "tens": list(result.tens), "tens_kept": result.tens_kept,
+        "units": result.units, "bonus": result.bonus, "penalty": result.penalty,
+    }
+
+
+def _check_result_from_payload(payload: dict):
+    """``_check_result_payload`` 的逆操作。"""
+    from app.rules.base import CheckResult
+
+    return CheckResult(**{
+        key: payload.get(key)
+        for key in (
+            "skill_name", "skill_value", "roll", "target", "outcome", "description",
+            "tier", "meets_difficulty", "tens", "tens_kept", "units", "bonus", "penalty",
+        )
+        if payload.get(key) is not None
+    })
+
+
+async def _settle_rolled_check(
+    db,
+    session_id: str,
+    game_session: GameSession,
+    module: Module,
+    player_char: Character,
+    party_others: list[Character] | None,
+    *,
+    check: dict,
+    result,
+    skill: str,
+    difficulty: str,
+    source: str,
+    disp_name: str,
+    t_roll: float,
+    luck_spent: int = 0,
+) -> None:
+    """骰子落定之后的整条结算链：治疗 → 批次归并 → 物品/线索发货 → KP 续写。
+
+    从 ``run_roll_generation`` 里抽出来，是因为幸运消费要在中间插一个「等玩家拍板」的
+    断点——买不买都得接着走同一条链，两份拷贝迟早会漂移。
+    """
+    tier_cn = TIER_LABEL.get(result.tier, result.tier)
+
+    # 治疗类检定成功 → 引擎确定性回血（不靠 KP 自觉发 HP_CHANGE）。广播结算，并把结果并进
+    # 回灌 KP 的描述，让 KP 据「已回 N 点」续写而非自己臆断/漏结算。
+    heal_note = ""
+    heal_target_id = check.get("heal_target_id")
+    if heal_target_id:
+        target_char = db.get(Character, heal_target_id)
+        for chunk in _apply_heal_on_success(db, session_id, target_char, skill, result.outcome):
+            room_hub.broadcast(session_id, chunk)
+            heal_note = "；系统已按规则确定性结算回血"
+
+    desc = (
+        f"{disp_name} {skill}（{difficulty}），达成 {tier_cn}"
+        + (f"（针对：{source}）" if source else "")
+        + f"：{result.description}{heal_note}"
+    )
+    succeeded = result.outcome not in ("failure", "fumble")
+    fumbled = result.outcome == "fumble"
+    batch_id = str(check.get("check_batch_id") or "")
+    if batch_id:
+        remaining = session_service.append_pending_group_check_result(
+            db,
+            session_id,
+            batch_id,
+            desc,
+            succeeded=succeeded,
+            fumbled=fumbled,
+        )
+        if remaining:
+            room_hub.broadcast(session_id, _make_chunk("done"))
+            return
+        batch_results = [str(item) for item in (check.get("check_results") or [])]
+        batch_results.append(desc)
+        desc = "\n".join(batch_results)
+        succeeded = bool(check.get("check_any_success")) or succeeded
+        fumbled = bool(check.get("check_any_fumble")) or fumbled
+    # 「先检定、后发货」的落地：本轮被这次检定门控的收获此前只暂存未入库，
+    # 到这里骰子落地才决定给不给（扒窃掷输了，那块表不该在他包里）。
+    for chunk in planned_effects.settle_pending_item_gains(
+        db, session_id, game_session, succeeded,
+    ):
+        room_hub.broadcast(session_id, chunk)
+    # 同理「先检定、后记账」：这次检定门控的线索，骰子落地才决定进不进台账。
+    planned_effects.settle_pending_clue_reveals(
+        db, session_id, game_session, succeeded,
+        module=module, on_first_clue=_maybe_clue_illustration,
+    )
+    if game_session.kp_mode == "human":
+        # 真人 KP 模式下掷骰只完成确定性结算，不自动生成后续叙事；KP 可据结果手动发布。
+        room_hub.broadcast(
+            session_id,
+            _make_chunk(
+                "kp_roll_ready",
+                "群体检定已结算，等待真人 KP 处理后果" if batch_id
+                else "检定已结算，等待真人 KP 处理后果",
+                metadata={"description": desc},
+            ),
+        )
+        room_hub.broadcast(session_id, _make_chunk("done"))
+        return
+    # 恐怖多在**检定成功**时才被揭示（看清那具尸体…）；仅成功时才在叙事后补跑 planner
+    # 判理智（失败不多花这次调用）。失败若也揭示了恐怖，仍可由 KP 自发 [SAN_CHECK] 兜底。
+    # 大失败则可能有**身体反噬**（踢燃烧瓶被烧等）→ 开 mishap 守卫，叙事后据 planner 确定性扣血。
+    t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
+    await _run_kp_turn(
+        db, session_id, game_session, module, player_char, party_others,
+        KP_DICE_CONTINUATION_PROMPT.format(dice_results=desc),
+        sanity_guard=succeeded,
+        mishap_guard=fumbled,
+        focus_member=disp_name,
+        split_aware=True,
+    )
+    logger.info(
+        "耗时|投骰后 KP 续写 %.1fs（%s）session=%s",
+        time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
+    )
+    logger.info(
+        "耗时|投骰合计 %.1fs（%s）session=%s",
+        time.monotonic() - t_roll, usage_tracker.fmt(usage_tracker.snapshot()), session_id,
+    )
+    usage_tracker.warn_if_reasoning_dominates(usage_tracker.snapshot())
 
 
 def _persist_module_intro(db: Session, session_id: str, module: Module) -> str | None:

@@ -9,6 +9,7 @@ from app.rules.coc.character import (
     compute_derived,
     roll_attributes,
 )
+from app.rules.coc import options as coc_options
 from app.rules.coc.checks import resolve_skill_check, san_check  # noqa: F401
 
 
@@ -84,14 +85,20 @@ class CoCRuleEngine(RuleEngine):
 
     def resolve_check(
         self, character_data: dict, skill_name: str, difficulty: str = "normal",
-        bonus: int = 0, penalty: int = 0,
+        bonus: int = 0, penalty: int = 0, options: dict | None = None,
     ) -> CheckResult:
         return resolve_skill_check(
             character_data, skill_name, difficulty, bonus=bonus, penalty=penalty,
+            options=coc_options.from_dict(options),
         )
 
-    def improvement_check(self, current_value: int) -> dict:
-        """CoC 成长检定：d100 > 当前技能值（或 > 95）即成长，+1d10（上限 99）。"""
+    def improvement_check(self, current_value: int, options: dict | None = None) -> dict | None:
+        """CoC 成长检定：d100 > 当前技能值（或 > 95）即成长，+1d10（上限 99）。
+
+        家规关掉成长时返回 None（与「该规则系统不支持成长」同一个出口）。
+        """
+        if not coc_options.from_dict(options).improvement:
+            return None
         r = roll_percentile()
         improved = r > current_value or r > 95
         gain = roll("1d10").total if improved else 0
