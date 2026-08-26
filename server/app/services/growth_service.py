@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.rules.coc import options as coc_options
 from app.rules.registry import get_engine
 from app.services import rule_options_service, session_service
 
@@ -30,6 +31,7 @@ def eligible_skills(db: Session, session_id: str, character_id: str) -> list[dic
         return []
     skills = char.skills or {}
     events = session_service.get_session_events(db, session_id, limit=0)
+    options = coc_options.from_dict(rule_options_service.effective_by_id(db, session_id))
     used: set[str] = set()
     for e in events:
         if getattr(e, "event_type", None) != "dice":
@@ -39,6 +41,10 @@ def eligible_skills(db: Session, session_id: str, character_id: str) -> list[dic
         if not skill or skill not in skills:
             continue
         if md.get("actor") and md.get("actor") != char.name:
+            continue
+        # 花幸运买回来的成功不算数（照规则书：走运没教会你任何事）。判据是那次结算
+        # 回填到骰子事件上的 luck_spent——事件的 outcome 已被改写成成功，只看成败会漏。
+        if options.luck_spend_blocks_improvement and md.get("luck_spent"):
             continue
         if _is_success(md):
             used.add(skill)

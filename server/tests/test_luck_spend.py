@@ -152,3 +152,43 @@ def test_pending_luck_is_single_slot(db_factory):
     assert session_service.get_pending_luck(db, session.id) == {"cost": 3}
     session_service.set_pending_luck(db, session.id, None)
     assert session_service.get_pending_luck(db, session.id) is None
+
+
+def test_luck_bought_success_earns_no_improvement_tick(db_factory):
+    """照规则书：花幸运买来的成功不给成长勾——走运没教会你任何事。
+
+    判据不能只看成败：那次结算已经把骰子事件的 outcome 改写成成功了。
+    """
+    from app.services import growth_service
+
+    db = db_factory()
+    module = Module(title="M", rule_system="coc", npcs=[], scenes=[])
+    char = Character(
+        name="陈守一", rule_system="coc", is_player=True,
+        base_attributes={}, skills={"侦查": 60, "聆听": 55}, system_data={"luck": 40},
+    )
+    db.add_all([module, char]); db.flush()
+    session = GameSession(
+        module_id=module.id, player_character_id=char.id, status="active",
+        world_state={}, rule_options={"luck_spend": True},
+    )
+    db.add(session); db.commit()
+
+    # 一次自己掷出来的成功，一次花幸运买来的成功
+    session_service.add_event(
+        db, session.id, "dice", "聆听成功", actor_name="系统",
+        metadata={"skill": "聆听", "actor": char.name, "outcome": "success"},
+    )
+    session_service.add_event(
+        db, session.id, "dice", "侦查成功", actor_name="系统",
+        metadata={"skill": "侦查", "actor": char.name, "outcome": "success", "luck_spent": 5},
+    )
+
+    eligible = {item["skill"] for item in growth_service.eligible_skills(db, session.id, char.id)}
+    assert eligible == {"聆听"}
+
+    # 家规把这条关掉 → 买来的成功照样给成长机会
+    session.rule_options = {"luck_spend": True, "luck_spend_blocks_improvement": False}
+    db.commit()
+    relaxed = {item["skill"] for item in growth_service.eligible_skills(db, session.id, char.id)}
+    assert relaxed == {"聆听", "侦查"}
