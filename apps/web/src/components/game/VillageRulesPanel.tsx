@@ -9,6 +9,9 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { Switch } from '@/components/ui/switch'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 
 export interface VillageRules {
   critical_max: number
@@ -86,7 +89,12 @@ function NumberBox({ label, value, onChange, min, max }: {
 
 const NOTES_MAX = 800
 
-export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
+export function VillageRulesPanel({ ruleSystem, twoColumn }: {
+  ruleSystem: string
+  /** 宽容器里把参数排成两列：单列十一行要滚半屏，两列一屏就看完了，
+   *  而且判定类与伤害/状态类天然分开，比一长串更有条理。 */
+  twoColumn?: boolean
+}) {
   const [rules, setRules] = useState<VillageRules | null>(null)
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
@@ -144,83 +152,89 @@ export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
         这一桌长期沿用的规则改动，对所有用这套规则的房间生效（含进行中的局）；不改的项照规则书原文来。
       </div>
 
-      <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-        <Row label="大成功阈值" hint="骰值 ≤ 此值算大成功（规则书是 1）">
-          <NumberBox label="大成功阈值" value={rules.critical_max} min={1} max={20}
-            onChange={(v) => patch({ critical_max: v })} />
-        </Row>
-
-        <Row label="大失败阈值" hint={FUMBLE_LABELS[rules.fumble_rule]}>
-          <select
-            aria-label="大失败阈值"
-            value={rules.fumble_rule}
-            onChange={(e) => patch({ fumble_rule: e.target.value })}
-            className="input text-sm max-w-[9.5rem]"
-          >
-            <option value="raw">照规则书</option>
-            <option value="hundred_only">只认 100</option>
-            <option value="ninety_six_plus">96 起</option>
-          </select>
-        </Row>
-
-        <Row label="奖惩骰上限" hint="单次检定最多叠几个奖励或惩罚骰">
-          <NumberBox label="奖惩骰上限" value={rules.dice_pool_cap} min={0} max={3}
-            onChange={(v) => patch({ dice_pool_cap: v })} />
-        </Row>
-
-        <Row
-          label="幸运消费"
-          hint="规则书的可选规则：检定失败后可花幸运点抵掉差值买成功。开启后失败时会问玩家买不买。"
-        >
-          <Switch label="幸运消费" checked={rules.luck_spend}
-            onChange={(v) => patch({ luck_spend: v })} />
-        </Row>
-
-        {rules.luck_spend && (
-          <>
-            <Row indent label="单次上限" hint="一次检定最多花几点，0 = 不限">
-              <NumberBox label="幸运单次上限" value={rules.luck_spend_max} min={0} max={999}
-                onChange={(v) => patch({ luck_spend_max: v })} />
-            </Row>
-            <Row indent label="战斗中可用" hint="常见做法是战斗中禁用，避免拿幸运硬扛伤害判定">
-              <Switch label="战斗中可用" checked={rules.luck_spend_in_combat}
-                onChange={(v) => patch({ luck_spend_in_combat: v })} />
-            </Row>
-            <Row indent label="买来的成功不计成长" hint="照规则书：走运没教会你任何事">
-              <Switch label="买来的成功不计成长" checked={rules.luck_spend_blocks_improvement}
-                onChange={(v) => patch({ luck_spend_blocks_improvement: v })} />
-            </Row>
-          </>
-        )}
-
-        <Row label="重伤阈值" hint={`单击伤害 ≥ 最大 HP ÷ ${rules.major_wound_divisor} 判重伤（规则书是 2，即半血）`}>
-          <NumberBox label="重伤阈值" value={rules.major_wound_divisor} min={1} max={10}
-            onChange={(v) => patch({ major_wound_divisor: v })} />
-        </Row>
-
-        <Row label="临时疯狂口径" hint={INSANITY_LABELS[rules.insanity_rule]}>
-          <select
-            aria-label="临时疯狂口径"
-            value={rules.insanity_rule}
-            onChange={(e) => patch({ insanity_rule: e.target.value })}
-            className="input text-sm max-w-[9.5rem]"
-          >
-            <option value="fifth_of_san">SAN 的 1/5</option>
-            <option value="flat">固定点数</option>
-          </select>
-        </Row>
-
-        {rules.insanity_rule === 'flat' && (
-          <Row indent label="固定点数" hint="规则书原文是 5">
-            <NumberBox label="临时疯狂固定点数" value={rules.insanity_flat_threshold} min={1} max={99}
-              onChange={(v) => patch({ insanity_flat_threshold: v })} />
+      <div className={twoColumn ? 'grid gap-x-6 md:grid-cols-2' : ''}>
+        {/* 左组：一次检定怎么判 */}
+        <div className="divide-y self-start" style={{ borderColor: 'var(--color-border)' }}>
+          <Row label="大成功阈值" hint="骰值 ≤ 此值算大成功（规则书是 1）">
+            <NumberBox label="大成功阈值" value={rules.critical_max} min={1} max={20}
+              onChange={(v) => patch({ critical_max: v })} />
           </Row>
-        )}
 
-        <Row label="技能成长" hint="关掉则模组结束时不做成长检定（短模组常这么跑）">
-          <Switch label="技能成长" checked={rules.improvement}
-            onChange={(v) => patch({ improvement: v })} />
-        </Row>
+          <Row label="大失败阈值" hint={FUMBLE_LABELS[rules.fumble_rule]}>
+            <Select value={rules.fumble_rule} onValueChange={(v) => patch({ fumble_rule: v })}>
+              <SelectTrigger className="w-[8.5rem] text-sm" aria-label="大失败阈值">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="raw">照规则书</SelectItem>
+                <SelectItem value="hundred_only">只认 100</SelectItem>
+                <SelectItem value="ninety_six_plus">96 起</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+
+          <Row label="奖惩骰上限" hint="单次检定最多叠几个奖励或惩罚骰">
+            <NumberBox label="奖惩骰上限" value={rules.dice_pool_cap} min={0} max={3}
+              onChange={(v) => patch({ dice_pool_cap: v })} />
+          </Row>
+
+          <Row
+            label="幸运消费"
+            hint="规则书的可选规则：检定失败后可花幸运点抵掉差值买成功。开启后失败时会问玩家买不买。"
+          >
+            <Switch label="幸运消费" checked={rules.luck_spend}
+              onChange={(v) => patch({ luck_spend: v })} />
+          </Row>
+
+          {rules.luck_spend && (
+            <>
+              <Row indent label="单次上限" hint="一次检定最多花几点，0 = 不限">
+                <NumberBox label="幸运单次上限" value={rules.luck_spend_max} min={0} max={999}
+                  onChange={(v) => patch({ luck_spend_max: v })} />
+              </Row>
+              <Row indent label="战斗中可用" hint="常见做法是战斗中禁用，避免拿幸运硬扛伤害判定">
+                <Switch label="战斗中可用" checked={rules.luck_spend_in_combat}
+                  onChange={(v) => patch({ luck_spend_in_combat: v })} />
+              </Row>
+              <Row indent label="买来的成功不计成长" hint="照规则书：走运没教会你任何事">
+                <Switch label="买来的成功不计成长" checked={rules.luck_spend_blocks_improvement}
+                  onChange={(v) => patch({ luck_spend_blocks_improvement: v })} />
+              </Row>
+            </>
+          )}
+        </div>
+
+        {/* 右组：挨打与掉 SAN 之后怎么算 */}
+        <div className="divide-y self-start" style={{ borderColor: 'var(--color-border)' }}>
+          <Row label="重伤阈值" hint={`单击伤害 ≥ 最大 HP ÷ ${rules.major_wound_divisor} 判重伤（规则书是 2，即半血）`}>
+            <NumberBox label="重伤阈值" value={rules.major_wound_divisor} min={1} max={10}
+              onChange={(v) => patch({ major_wound_divisor: v })} />
+          </Row>
+
+          <Row label="临时疯狂口径" hint={INSANITY_LABELS[rules.insanity_rule]}>
+            <Select value={rules.insanity_rule} onValueChange={(v) => patch({ insanity_rule: v })}>
+              <SelectTrigger className="w-[8.5rem] text-sm" aria-label="临时疯狂口径">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fifth_of_san">SAN 的 1/5</SelectItem>
+                <SelectItem value="flat">固定点数</SelectItem>
+              </SelectContent>
+            </Select>
+          </Row>
+
+          {rules.insanity_rule === 'flat' && (
+            <Row indent label="固定点数" hint="规则书原文是 5">
+              <NumberBox label="临时疯狂固定点数" value={rules.insanity_flat_threshold} min={1} max={99}
+                onChange={(v) => patch({ insanity_flat_threshold: v })} />
+            </Row>
+          )}
+
+          <Row label="技能成长" hint="关掉则模组结束时不做成长检定（短模组常这么跑）">
+            <Switch label="技能成长" checked={rules.improvement}
+              onChange={(v) => patch({ improvement: v })} />
+          </Row>
+        </div>
       </div>
 
       {/* 桌面约定：参数表达不了的规矩走自由文本。**必须把界限写在界面上**——它进的是
