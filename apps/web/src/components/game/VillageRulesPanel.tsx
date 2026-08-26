@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
+import { Switch } from '@/components/ui/switch'
 
 export interface VillageRules {
   critical_max: number
@@ -34,40 +35,32 @@ const INSANITY_LABELS: Record<string, string> = {
   flat: '单次损失达到固定点数',
 }
 
-function Row({ label, hint, children }: {
+/** 一条规则：标题与控件同行（控件一律靠右，右边缘天然对齐），说明另起一行占满宽度。
+ *
+ *  说明不能跟标题挤在左半边——那样它只剩一半宽度，一句话要折三行，整列看着像被压扁的表格。
+ *  ``indent`` 用于从属项（幸运消费展开的那几条），靠缩进表明它们依附于上一条。 */
+function Row({ label, hint, indent, children }: {
   label: string
   hint?: string
+  indent?: boolean
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2">
-      <div className="min-w-0">
-        <div className="text-sm">{label}</div>
-        {hint && (
-          <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {hint}
-          </div>
-        )}
+    <div className={`py-2 ${indent ? 'pl-3' : ''}`} style={
+      indent ? { borderLeft: '2px solid var(--color-border)' } : undefined
+    }>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm leading-tight">{label}</span>
+        <span className="flex-shrink-0">{children}</span>
       </div>
-      <div className="flex-shrink-0">{children}</div>
+      {hint && (
+        <p className="mt-1 leading-snug" style={{
+          fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)',
+        }}>
+          {hint}
+        </p>
+      )}
     </div>
-  )
-}
-
-function Toggle({ label, checked, onChange }: {
-  /** 无障碍名：光一个裸 checkbox，读屏软件念不出它管的是哪条规则 */
-  label: string
-  checked: boolean
-  onChange: (v: boolean) => void
-}) {
-  return (
-    <input
-      type="checkbox"
-      aria-label={label}
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-      className="h-4 w-4 cursor-pointer"
-    />
   )
 }
 
@@ -86,7 +79,7 @@ function NumberBox({ label, value, onChange, min, max }: {
       min={min}
       max={max}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="input w-20 text-sm"
+      className="input w-16 text-sm text-right"
     />
   )
 }
@@ -152,7 +145,7 @@ export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
             aria-label="大失败判定"
             value={rules.fumble_rule}
             onChange={(e) => patch({ fumble_rule: e.target.value })}
-            className="input text-sm"
+            className="input text-sm max-w-[9.5rem]"
           >
             <option value="raw">照规则书</option>
             <option value="hundred_only">只认 100</option>
@@ -169,22 +162,22 @@ export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
           label="幸运消费"
           hint="规则书的可选规则：检定失败后可花幸运点抵掉差值买成功。开启后失败时会问玩家买不买。"
         >
-          <Toggle label="幸运消费" checked={rules.luck_spend}
+          <Switch label="幸运消费" checked={rules.luck_spend}
             onChange={(v) => patch({ luck_spend: v })} />
         </Row>
 
         {rules.luck_spend && (
           <>
-            <Row label="单次上限" hint="一次检定最多花几点，0 = 不限">
+            <Row indent label="单次上限" hint="一次检定最多花几点，0 = 不限">
               <NumberBox label="幸运单次上限" value={rules.luck_spend_max} min={0} max={999}
                 onChange={(v) => patch({ luck_spend_max: v })} />
             </Row>
-            <Row label="战斗中可用" hint="常见做法是战斗中禁用，避免拿幸运硬扛伤害判定">
-              <Toggle label="战斗中可用" checked={rules.luck_spend_in_combat}
+            <Row indent label="战斗中可用" hint="常见做法是战斗中禁用，避免拿幸运硬扛伤害判定">
+              <Switch label="战斗中可用" checked={rules.luck_spend_in_combat}
                 onChange={(v) => patch({ luck_spend_in_combat: v })} />
             </Row>
-            <Row label="买来的成功不计成长" hint="照规则书：走运没教会你任何事">
-              <Toggle label="买来的成功不计成长" checked={rules.luck_spend_blocks_improvement}
+            <Row indent label="买来的成功不计成长" hint="照规则书：走运没教会你任何事">
+              <Switch label="买来的成功不计成长" checked={rules.luck_spend_blocks_improvement}
                 onChange={(v) => patch({ luck_spend_blocks_improvement: v })} />
             </Row>
           </>
@@ -200,22 +193,22 @@ export function VillageRulesPanel({ ruleSystem }: { ruleSystem: string }) {
             aria-label="临时疯狂口径"
             value={rules.insanity_rule}
             onChange={(e) => patch({ insanity_rule: e.target.value })}
-            className="input text-sm"
+            className="input text-sm max-w-[9.5rem]"
           >
-            <option value="fifth_of_san">按 SAN 的五分之一</option>
-            <option value="flat">按固定点数</option>
+            <option value="fifth_of_san">SAN 的 1/5</option>
+            <option value="flat">固定点数</option>
           </select>
         </Row>
 
         {rules.insanity_rule === 'flat' && (
-          <Row label="固定点数" hint="规则书原文是 5">
+          <Row indent label="固定点数" hint="规则书原文是 5">
             <NumberBox label="临时疯狂固定点数" value={rules.insanity_flat_threshold} min={1} max={99}
               onChange={(v) => patch({ insanity_flat_threshold: v })} />
           </Row>
         )}
 
         <Row label="技能成长" hint="关掉则模组结束时不做成长检定（短模组常这么跑）">
-          <Toggle label="技能成长" checked={rules.improvement}
+          <Switch label="技能成长" checked={rules.improvement}
             onChange={(v) => patch({ improvement: v })} />
         </Row>
       </div>

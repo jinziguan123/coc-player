@@ -48,7 +48,7 @@ describe('村规面板', () => {
     await waitFor(() => expect(screen.getByText('幸运消费')).toBeInTheDocument())
     expect(screen.queryByText('单次上限')).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('checkbox', { name: '幸运消费' }))
+    await userEvent.click(screen.getByRole('switch', { name: '幸运消费' }))
     await waitFor(() => expect(screen.getByText('单次上限')).toBeInTheDocument())
     expect(screen.getByText('战斗中可用')).toBeInTheDocument()
   })

@@ -149,192 +149,199 @@ export function RulebookPage() {
         <h2 className="page-title">规则书</h2>
       </div>
 
-      <p className="text-sm mb-4 max-w-3xl" style={{ color: 'var(--color-text-secondary)' }}>
+      <p className="text-sm mb-5 max-w-3xl" style={{ color: 'var(--color-text-secondary)' }}>
         上传规则书 PDF（如《守秘人规则书》），系统会在本地建立可检索索引。游戏中守秘人遇到拿不准的精确规则时，会按需查阅规则书原文再裁定。
       </p>
 
-      <div className="card mb-8 max-w-3xl">
-        <h3 className="card-title flex items-center gap-2">
-          <GiUpCard /> 上传规则书
-        </h3>
+      {/* 两栏：左边是「装了哪几本书」（卡片网格，要宽），右边是「这套规则怎么跑」（表单，要窄）。
+          此前一栏到底，村规表单被拉到一千多像素宽，每行只剩一个标题和一个贴在最右的控件，
+          中间六百像素空白；三种卡片又是 768 / 1018 / 503 三种宽度，左右边缘全不对齐。 */}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_21rem]">
+        <div className="min-w-0 space-y-6">
+          <div className="card">
+            <h3 className="card-title flex items-center gap-2">
+              <GiUpCard /> 上传规则书
+            </h3>
 
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          onClick={() => fileRef.current?.click()}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
-          role="button"
-          tabIndex={0}
-          className={`dropzone mb-3 ${dragOver ? 'dropzone--over' : ''}`}
-        >
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf"
-            className="hidden"
-            onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = '' }}
-          />
-          {file ? (
-            <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--color-text-accent)' }}>{file.name}</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {(file.size / 1024 / 1024).toFixed(1)} MB · 点击可重选
-              </p>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              onClick={() => fileRef.current?.click()}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
+              role="button"
+              tabIndex={0}
+              className={`dropzone mb-3 ${dragOver ? 'dropzone--over' : ''}`}
+            >
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf"
+                className="hidden"
+                onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = '' }}
+              />
+              {file ? (
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text-accent)' }}>{file.name}</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    {(file.size / 1024 / 1024).toFixed(1)} MB · 点击可重选
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <GiBookCover className="dropzone-icon" aria-hidden="true" />
+                  <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>拖拽 PDF 到此处，或点击选择</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)', opacity: 0.7 }}>
+                    仅支持含文字层的 PDF（扫描件需先 OCR）
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 items-center">
+              <Select value={ruleSystem} onValueChange={setRuleSystem}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="coc">CoC</SelectItem>
+                  <SelectItem value="dnd">DnD</SelectItem>
+                </SelectContent>
+              </Select>
+              <button onClick={handleUpload} disabled={uploading || !file} className="btn-primary">
+                {uploading ? '上传中…' : '上传并索引'}
+              </button>
+            </div>
+          </div>
+
+          {books.length === 0 ? (
+            <div className="empty-state">
+              <span className="empty-state-icon"><GiBookCover /></span>
+              <span className="empty-state-title">尚无规则书</span>
+              <span className="empty-state-hint">
+                上传规则书 PDF（如《守秘人规则书》），系统在本地建立可检索索引；
+                跑团时守秘人遇到拿不准的精确规则，会按需查阅原文再裁定。
+              </span>
             </div>
           ) : (
-            <div>
-              <GiBookCover className="dropzone-icon" aria-hidden="true" />
-              <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>拖拽 PDF 到此处，或点击选择</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)', opacity: 0.7 }}>
-                仅支持含文字层的 PDF（扫描件需先 OCR）
-              </p>
+            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+              {books.map((b, i) => (
+                <div
+                  key={b.id}
+                  style={staggerStyle(i)}
+                  className="card entity-card list-enter !p-0 flex flex-col overflow-hidden"
+                >
+                  <div
+                    className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}
+                  >
+                    <span className="char-sigil" aria-hidden="true"><GiBookCover /></span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]" title={b.title}>
+                        {b.title}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="chip chip--accent">{b.rule_system.toUpperCase()}</span>
+                        <span className="chip" style={statusChipStyle(b.status)}>
+                          {STATUS_LABEL[b.status] || b.status}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="entity-card-actions flex flex-shrink-0 items-center gap-1">
+                      <ConfirmDialog
+                        title="删除规则书"
+                        description={`确定要删除「${b.title}」及其索引吗？此操作不可恢复。`}
+                        confirmLabel="删除"
+                        onConfirm={() => deleteBook(b.id)}
+                      >
+                        {(open) => (
+                          <button
+                            onClick={open}
+                            className="chip chip--danger chip-btn chip-btn--danger"
+                          >
+                            删除
+                          </button>
+                        )}
+                      </ConfirmDialog>
+                    </div>
+                  </div>
+                  <div className="flex flex-1 flex-col px-3 py-2">
+                    {/* 页数/片段数是次要信息，此前用两块 stat-tile 撑掉了半张卡的高度——
+                        读者真正要认的是书名和它能不能检索。降级成一行 meta 文字。 */}
+                    <div
+                      className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+                      style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
+                    >
+                      <span>{b.page_count} 页</span>
+                      <span aria-hidden="true">·</span>
+                      <span>{b.chunk_count} 个片段</span>
+                      {b.embed_model && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="truncate" title={b.embed_model}>{b.embed_model}</span>
+                        </>
+                      )}
+                    </div>
+                    {b.status === 'failed' && b.error && (
+                      <p className="mt-1.5" style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-danger)' }}>
+                        错误：{b.error}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-        </div>
 
-        <div className="flex gap-3 items-center">
-          <Select value={ruleSystem} onValueChange={setRuleSystem}>
-            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="coc">CoC</SelectItem>
-              <SelectItem value="dnd">DnD</SelectItem>
-            </SelectContent>
-          </Select>
-          <button onClick={handleUpload} disabled={uploading || !file} className="btn-primary">
-            {uploading ? '上传中…' : '上传并索引'}
-          </button>
-        </div>
-      </div>
-
-      {/* 村规：这一桌沿用的规则改动。跟着上面那个规则系统选择器走——改的是「这套规则怎么跑」，
-          和「装了哪几本规则书」同属一件事，所以放在同一页，而不是每开一局在房间里重填。 */}
-      <div className="card mb-8">
-        <div className="flex items-center gap-2 mb-1" style={{ color: 'var(--color-text-accent)' }}>
-          <GiScrollUnfurled />
-          <span className="font-semibold">村规 · {ruleSystem.toUpperCase()}</span>
-        </div>
-        <VillageRulesPanel ruleSystem={ruleSystem} />
-      </div>
-
-      {books.length === 0 ? (
-        <div className="empty-state">
-          <span className="empty-state-icon"><GiBookCover /></span>
-          <span className="empty-state-title">尚无规则书</span>
-          <span className="empty-state-hint">
-            上传规则书 PDF（如《守秘人规则书》），系统在本地建立可检索索引；
-            跑团时守秘人遇到拿不准的精确规则，会按需查阅原文再裁定。
-          </span>
-        </div>
-      ) : (
-        <div className="grid gap-3 mb-8 lg:grid-cols-2 2xl:grid-cols-3">
-          {books.map((b, i) => (
-            <div
-              key={b.id}
-              style={staggerStyle(i)}
-              className="card entity-card list-enter !p-0 flex flex-col overflow-hidden"
-            >
-              <div
-                className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
-                style={{ borderBottom: '1px solid var(--color-border)' }}
-              >
-                <span className="char-sigil" aria-hidden="true"><GiBookCover /></span>
-                <div className="min-w-0 flex-1">
-                  <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]" title={b.title}>
-                    {b.title}
-                  </h3>
-                  <div className="flex flex-wrap items-center gap-1">
-                    <span className="chip chip--accent">{b.rule_system.toUpperCase()}</span>
-                    <span className="chip" style={statusChipStyle(b.status)}>
-                      {STATUS_LABEL[b.status] || b.status}
-                    </span>
-                  </div>
-                </div>
-                <div className="entity-card-actions flex flex-shrink-0 items-center gap-1">
-                  <ConfirmDialog
-                    title="删除规则书"
-                    description={`确定要删除「${b.title}」及其索引吗？此操作不可恢复。`}
-                    confirmLabel="删除"
-                    onConfirm={() => deleteBook(b.id)}
-                  >
-                    {(open) => (
-                      <button
-                        onClick={open}
-                        className="chip chip--danger chip-btn chip-btn--danger"
-                      >
-                        删除
-                      </button>
-                    )}
-                  </ConfirmDialog>
-                </div>
+          {hasReady && (
+            <div className="card">
+              <h3 className="card-title flex items-center gap-2">
+                <GiMagnifyingGlass /> 测试检索
+              </h3>
+              <div className="flex gap-2">
+                {/* 与全站输入框同一质感（.input）：此前这里手搓内联样式，聚焦态没有琥珀辉光 */}
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
+                  placeholder="输入规则关键词，如「孤注一掷」「理智丧失」"
+                  className="input flex-1"
+                />
+                <button onClick={runSearch} disabled={searching || !query.trim()} className="btn-secondary">
+                  {searching ? '检索中…' : '检索'}
+                </button>
               </div>
-              <div className="flex flex-1 flex-col px-3 py-2.5">
-                <div className="grid grid-cols-2 gap-1">
-                  <div className="stat-tile">
-                    <div className="stat-tile-value">{b.page_count}</div>
-                    <div className="stat-tile-label">页</div>
-                  </div>
-                  <div className="stat-tile">
-                    <div className="stat-tile-value">{b.chunk_count}</div>
-                    <div className="stat-tile-label">片段</div>
-                  </div>
+              {hits && (
+                <div className="space-y-2 mt-3">
+                  {hits.length === 0 ? (
+                    <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>无匹配片段</p>
+                  ) : (
+                    hits.map((h, i) => (
+                      <div key={i} className="px-3 py-2 rounded text-sm" style={{ background: 'var(--color-bg-tertiary)' }}>
+                        <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                          第 {h.page} 页 · 相关度 {h.score.toFixed(3)}
+                        </div>
+                        {h.text}
+                      </div>
+                    ))
+                  )}
                 </div>
-                {b.embed_model && (
-                  <div
-                    className="mt-1.5 truncate"
-                    style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
-                    title={b.embed_model}
-                  >
-                    模型 {b.embed_model}
-                  </div>
-                )}
-                {b.status === 'failed' && b.error && (
-                  <p className="mt-1.5" style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-danger)' }}>
-                    错误：{b.error}
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {hasReady && (
-        <div className="card">
-          <h3 className="card-title flex items-center gap-2">
-            <GiMagnifyingGlass /> 测试检索
-          </h3>
-          <div className="flex gap-2">
-            {/* 与全站输入框同一质感（.input）：此前这里手搓内联样式，聚焦态没有琥珀辉光 */}
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
-              placeholder="输入规则关键词，如「孤注一掷」「理智丧失」"
-              className="input flex-1"
-            />
-            <button onClick={runSearch} disabled={searching || !query.trim()} className="btn-secondary">
-              {searching ? '检索中…' : '检索'}
-            </button>
-          </div>
-          {hits && (
-            <div className="space-y-2 mt-3">
-              {hits.length === 0 ? (
-                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>无匹配片段</p>
-              ) : (
-                hits.map((h, i) => (
-                  <div key={i} className="px-3 py-2 rounded text-sm" style={{ background: 'var(--color-bg-tertiary)' }}>
-                    <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      第 {h.page} 页 · 相关度 {h.score.toFixed(3)}
-                    </div>
-                    {h.text}
-                  </div>
-                ))
               )}
             </div>
           )}
         </div>
-      )}
+
+        {/* 村规：这一桌沿用的规则改动，跟着上面那个规则系统选择器走。
+            和「装了哪几本规则书」同属「这套规则怎么跑」这件事，所以同页；
+            但它是表单不是列表，收在窄侧栏里才不至于把每一行拉成大片空白。
+            max-w 只在堆叠时起作用（xl 下列宽 21rem 已经更窄）。 */}
+        <aside className="min-w-0 max-w-md" aria-label="村规">
+          <div className="card">
+            <h3 className="card-title flex items-center gap-2">
+              <GiScrollUnfurled /> 村规 · {ruleSystem.toUpperCase()}
+            </h3>
+            <VillageRulesPanel ruleSystem={ruleSystem} />
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }
