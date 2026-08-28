@@ -58,7 +58,7 @@ rm -rf ../src-tauri/resources/trpg-server
 mkdir -p ../src-tauri/resources
 cp -R dist/trpg-server ../src-tauri/resources/trpg-server # 3) onedir 目录 → Tauri resources
 cd .. && pnpm tauri build                                 # 4) 出包
-# 产物:src-tauri/target/release/bundle/{macos/TRPG Player.app, dmg/*.dmg}
+# 产物:src-tauri/target/release/bundle/{macos/CoC Player.app, dmg/*.dmg}
 ```
 
 > 未做代码签名/公证:别人首次打开 `.app` 需右键→打开(绕过 Gatekeeper)。要分发再做 codesign + notarize。

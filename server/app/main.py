@@ -60,7 +60,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="TRPG Player", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="CoC Player", version="0.1.0", lifespan=lifespan)
 
 # 速率限制（slowapi 要求把 limiter 挂在 app.state 上）。限的是房间码枚举与烧额度的
 # 操作，房主本机豁免；见 app/services/rate_limit.py。

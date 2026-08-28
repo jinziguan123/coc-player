@@ -104,6 +104,6 @@ it('首页提供唯一的新手团主入口', () => {
   const others = screen.getAllByRole('link', { name: /开始游戏|上传模组/ })
   expect(others.length).toBeGreaterThan(0)
   for (const other of others) expect(other).not.toHaveClass('home-entry--primary')
-  expect(screen.getByRole('heading', { name: 'TRPG Player' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'CoC Player' })).toBeInTheDocument()
   expect(screen.getByText('AI 驱动的跑团平台')).toBeInTheDocument()
 })

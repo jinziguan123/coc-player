@@ -26,8 +26,8 @@ export function Sidebar() {
 
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-      <div className="sidebar-logo" title="TRPG Player">
-        {collapsed ? 'T' : 'TRPG Player'}
+      <div className="sidebar-logo" title="CoC Player">
+        {collapsed ? 'C' : 'CoC Player'}
       </div>
       <nav className="sidebar-nav">
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (

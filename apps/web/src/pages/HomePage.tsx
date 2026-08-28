@@ -39,7 +39,7 @@ export function HomePage() {
             textShadow: '0 0 26px rgba(212, 162, 78, 0.22)',
           }}
         >
-          TRPG Player
+          CoC Player
         </h1>
         <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
           AI 驱动的跑团平台

@@ -1,5 +1,5 @@
 {
-  "name": "trpg-player",
+  "name": "coc-player",
   "private": true,
   "scripts": {
     "dev:web": "pnpm --filter web dev",

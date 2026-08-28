@@ -1,4 +1,4 @@
-# 开发守则（TRPG Player）
+# 开发守则（CoC Player）
 
 本文件由 Claude Code 每次会话自动加载，是本项目的硬性约定。**违反即视为错误**。
 

@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "TRPG Player",
+  "productName": "CoC Player",
   "version": "0.1.0",
   "identifier": "com.trpgplayer.app",
   "build": {
@@ -11,7 +11,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "TRPG Player",
+        "title": "CoC Player",
         "width": 1200,
         "height": 800,
         "resizable": true,

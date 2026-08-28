@@ -1,4 +1,4 @@
-# TRPG Player 现状架构与架构评审
+# CoC Player 现状架构与架构评审
 
 > 文档版本：v1.2
 > 梳理日期：2026-07-19；2026-07-27 按「实时层与联机边界」一轮改动更新；
@@ -12,7 +12,7 @@
 
 ## 1. 一页结论
 
-TRPG Player 当前是一个**桌面优先、单体后端、事件驱动交互、AI 增强规则执行**的 TRPG 应用：
+CoC Player 当前是一个**桌面优先、单体后端、事件驱动交互、AI 增强规则执行**的 TRPG 应用：
 
 - 前端是 React 19 + TypeScript + Vite 的 SPA，通过 REST 与 SSE 和后端通信。
 - 后端是 FastAPI + SQLAlchemy + Alembic 的 Python 单体，按 API、服务、AI、规则、模型、Schema 分层。
