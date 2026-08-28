@@ -548,3 +548,61 @@ class TestSceneHierarchy:
         kids = [hex_map.scene_coord(by[i]) for i in ("a", "b", "c")]
         assert (0, 0) not in kids                                   # 原点是父级的
         assert all(hex_map.axial_distance(c, (0, 0)) <= 3 for c in kids)  # 围着原点，不排成链
+
+
+# ── 被 KP 点名建议的子场景解除层级门禁 ──
+
+
+def _nested_fixture(world_state: dict):
+    """屋子挂在街区之下；玩家只到过门厅，没进过街区。"""
+    scenes = [
+        {"id": "hall", "title": "门厅", "kind": "location", "connections": ["block"],
+         "map": {"q": 0, "r": 0, "biome": "interior"}},
+        {"id": "block", "title": "街区", "kind": "location", "connections": ["hall"],
+         "map": {"q": 1, "r": 0, "biome": "urban"}},
+        {"id": "house", "title": "科比特的老房子", "kind": "location", "connections": ["block"],
+         "map": {"q": 2, "r": 0, "biome": "interior", "parent": "block"}},
+    ]
+    module = Module(title="M", rule_system="coc", description="", world_setting={},
+                    scenes=scenes, npcs=[], clues=[], triggers=[], handouts=[])
+    session = GameSession(
+        module_id="m", status="active", current_scene_id="hall",
+        navigation=SessionNavigation(visited_scenes=["hall"]),
+        world_state=dict(world_state),
+    )
+    return module, session
+
+
+class TestSuggestedUnlocksNested:
+    def test_没被建议过时子场景照旧藏着(self):
+        """门禁的本职：没听说过的地方不该提前曝光。"""
+        module, session = _nested_fixture({})
+        mention = [EventLog(
+            session_id="s", sequence_num=1, event_type="narration",
+            content="老板提到了科比特的老房子。", visibility=[],
+        )]
+        ids = {x["id"] for x in session_service.list_known_locations(module, session, events=mention)}
+        assert "house" not in ids          # 提及只算「已知」，父级没进过仍不上图
+        assert ids == {"hall"}
+
+    def test_KP挂过前往建议后就得让它上图(self):
+        """KP 都问「要前往【科比特的老房子】吗」了，地图上却找不到入口——
+        玩家只会以为系统坏了。地点被点名的那一刻，门禁要防的剧透已经发生过了。"""
+        module, session = _nested_fixture({"travel_suggested": ["house"]})
+        ids = {x["id"] for x in session_service.list_known_locations(module, session)}
+        assert "house" in ids
+
+    def test_建议只解锁被点名的那一个(self):
+        """解除门禁的理由是「这个地方被说破了」，不能顺带把同父级的其它屋子也曝光。"""
+        module, session = _nested_fixture({"travel_suggested": ["house"]})
+        module.scenes.append({
+            "id": "shop", "title": "杂货铺", "kind": "location", "connections": ["block"],
+            "map": {"q": 3, "r": 0, "biome": "interior", "parent": "block"},
+        })
+        mention = [EventLog(
+            session_id="s", sequence_num=1, event_type="narration",
+            content="街上还有一家杂货铺。", visibility=[],
+        )]
+        ids = {x["id"] for x in session_service.list_known_locations(module, session, events=mention)}
+        assert "house" in ids
+        assert "shop" not in ids

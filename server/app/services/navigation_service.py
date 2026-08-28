@@ -221,6 +221,9 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
     known = set(get_visited_scenes(session))
     if session.current_scene_id:
         known.add(session.current_scene_id)
+    # KP 挂过「要前往【X】吗」的地点必然已知——这是确定性记录，不该绕道去卡片文案里
+    # 匹配场景名（卡片措辞一改，或场景名与关键词对不上，地点就会莫名其妙地消失）。
+    known.update((session.world_state or {}).get("travel_suggested") or [])
     visible_events = [
         event for event in (events or [])
         if getattr(event, "event_type", None) in ("narration", "dialogue", "action", "system")
@@ -379,9 +382,14 @@ def list_known_locations(
     # 队伍当前所在的场景永不隐藏（分头行动时有人已经在里面了）。
     from app.services import hex_map
 
+    # KP 明确挂过「要前往【X】吗」的地点解除门禁：它已经被点名了，藏着只剩坏处——
+    # 玩家收到邀请却在地图上找不到入口，只会以为系统坏了。门禁防的是「还没听说过的
+    # 地方提前曝光」，而这个地方 KP 自己说破了，剧透早已发生。
+    suggested = set((session.world_state or {}).get("travel_suggested") or [])
+
     def _unlocked(sid: str) -> bool:
         parent = hex_map.scene_parent(by_id.get(sid))
-        return not parent or parent in visited or sid == cur
+        return not parent or parent in visited or sid == cur or sid in suggested
 
     known = {
         sid for sid in known_scene_ids(module, session, events)
