@@ -24,7 +24,6 @@ interface AIProfile {
   is_active: boolean
   is_fast?: boolean
   is_vision?: boolean
-  vision?: boolean
   context_window?: number
   thinking_disabled?: boolean
   reasoning_effort?: string
@@ -42,7 +41,6 @@ type FormData = {
   base_url: string
   model_name: string
   api_key: string
-  vision: boolean
   context_window: number
   thinking_disabled: boolean
   reasoning_effort: string
@@ -54,7 +52,6 @@ const EMPTY_FORM: FormData = {
   base_url: '',
   model_name: '',
   api_key: '',
-  vision: false,
   context_window: 0,
   thinking_disabled: false,
   reasoning_effort: '',
@@ -105,7 +102,6 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
       base_url: p.base_url,
       model_name: p.model_name,
       api_key: p.api_key,
-      vision: !!p.vision,
       context_window: p.context_window || 0,
       thinking_disabled: !!p.thinking_disabled,
       reasoning_effort: p.reasoning_effort || '',
@@ -553,25 +549,6 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div>
                   <label
-                    className="flex items-center gap-2 text-sm font-semibold cursor-pointer"
-                    style={{ fontSize: '0.85rem' }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.vision}
-                      onChange={(e) => setForm({ ...form, vision: e.target.checked })}
-                    />
-                    支持视觉（多模态）
-                  </label>
-                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    勾选后才能使用「上传图片生成地图」「图片剧本解析」等需要模型看图的功能。
-                    请确认所选模型支持看图（如 GPT-4o、Claude、Gemini、Qwen-VL）。
-                    这里说的是「看懂图片」，生成图片请到「生图模型」页设置。
-                  </p>
-                </div>
-
-                <div>
-                  <label
                     className="block text-sm font-semibold mb-1"
                     style={{ fontSize: '0.85rem' }}
                   >
@@ -587,9 +564,6 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                       setForm({ ...form, context_window: Number(e.target.value) || 0 })
                     }
                   />
-                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    用来估算游戏页显示的「上下文占用」，提示这局还能继续多久。留空会按模型名自动判断。
-                  </p>
                 </div>
 
                 {/* 思考开关与等级只在 OpenAI 兼容协议下出现——Anthropic 的 Provider 不接这两个
@@ -605,61 +579,40 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                       <input
                         type="checkbox"
                         checked={form.thinking_disabled}
-                        onChange={(e) => setForm({ ...form, thinking_disabled: e.target.checked })}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            thinking_disabled: e.target.checked,
+                            reasoning_effort: e.target.checked ? '' : form.reasoning_effort,
+                          })
+                        }
                         style={{ marginTop: '0.2rem', flexShrink: 0 }}
                       />
-                      <span>
-                        <strong>关闭模型思考</strong>
-                        <span
-                          className="block text-xs mt-1"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                        >
-                          这是唯一能真正提速的开关。思考模式<strong>默认是开的</strong>，而思考内容
-                          会被丢弃、只有耗时留下——实测一个回合 91% 的输出是思考，落到正文的只有
-                          1.1k。跑团的裁定与队友决策并不需要长篇思考，
-                          <strong>建议给「快模型」勾上</strong>（planner / 摘要 / 校验走的都是它）。
-                          不认这个参数的服务会忽略它。
-                        </span>
-                      </span>
+                      <strong>关闭模型思考</strong>
                     </label>
                   </div>
                 )}
 
                 {supportsReasoning(form.protocol) ? (
-                  <div>
-                    <label
-                      className="block text-sm font-semibold mb-1"
-                      style={{ fontSize: '0.85rem' }}
-                    >
-                      思考等级
-                    </label>
-                    {/* 手填而非下拉：各家取值并不统一（有的只认 low/medium/high，有的还有
-                        minimal/xhigh，往后还会变），写死选项等于把能用的值挡在外面。 */}
-                    <input
-                      type="text"
-                      className="input w-full"
-                      placeholder="留空 = 用模型默认档（DeepSeek 默认 high）；可填 low / high / max"
-                      value={form.reasoning_effort}
-                      onChange={(e) => setForm({ ...form, reasoning_effort: e.target.value })}
-                      disabled={form.thinking_disabled}
-                      style={{ opacity: form.thinking_disabled ? 0.5 : 1 }}
-                    />
-                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {form.thinking_disabled ? (
-                        <>已关闭思考，这一项不再起作用。</>
-                      ) : (
-                        <>
-                          <strong style={{ color: 'var(--color-text-accent)' }}>
-                            它只调强度、关不掉思考
-                          </strong>
-                          ——要关请勾上面那个开关。留空表示不下发该参数、用模型默认档，
-                          而默认档往往就是最费的一档（DeepSeek 默认 <code className="coach-code">high</code>）。
-                          各家取值不统一，具体请看所用模型的文档；不带思考能力的模型请留空，
-                          否则有些服务会直接报错。
-                        </>
-                      )}
-                    </p>
-                  </div>
+                  !form.thinking_disabled && (
+                    <div>
+                      <label
+                        className="block text-sm font-semibold mb-1"
+                        style={{ fontSize: '0.85rem' }}
+                      >
+                        思考等级
+                      </label>
+                      {/* 手填而非下拉：各家取值并不统一（有的只认 low/medium/high，有的还有
+                          minimal/xhigh，往后还会变），写死选项等于把能用的值挡在外面。 */}
+                      <input
+                        type="text"
+                        className="input w-full"
+                        placeholder="留空 = 用模型默认档（DeepSeek 默认 high）；可填 low / high / max"
+                        value={form.reasoning_effort}
+                        onChange={(e) => setForm({ ...form, reasoning_effort: e.target.value })}
+                      />
+                    </div>
+                  )
                 ) : (
                   staleReasoning && (
                     <div className="notice notice--danger" role="alert">

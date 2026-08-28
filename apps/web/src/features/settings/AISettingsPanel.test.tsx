@@ -137,9 +137,9 @@ describe('AI 配置面板', () => {
     expect(mockPut.mock.calls[0][1]).toMatchObject({ reasoning_effort: 'ultra' })
   })
 
-  it('「关闭模型思考」勾上后随表单保存，并禁用只调强度的思考等级', async () => {
+  it('「关闭模型思考」勾上后随表单保存，并隐藏只调强度的思考等级', async () => {
     // 思考默认是开的、effort 默认 high，这个开关是唯一能真正关掉它的途径；
-    // 而 reasoning_effort 只调强度、关不掉思考，两者同时可填只会让人以为自己关了。
+    // 而 reasoning_effort 只调强度、关不掉思考，所以关闭思考后不再展示该输入框。
     const user = userEvent.setup()
     mockPut.mockResolvedValue(chatProfile)
     render(<AISettingsPanel />)
@@ -148,11 +148,10 @@ describe('AI 配置面板', () => {
     const dialog = await findDialog('编辑配置')
     await user.click(within(dialog).getByRole('tab', { name: '能力' }))
 
-    const effort = within(dialog).getByPlaceholderText(/可填 low \/ high \/ max/)
-    expect(effort).not.toBeDisabled()
+    expect(within(dialog).getByPlaceholderText(/可填 low \/ high \/ max/)).toBeInTheDocument()
 
     await user.click(within(dialog).getByRole('checkbox', { name: /关闭模型思考/ }))
-    expect(effort).toBeDisabled()          // 关了思考，强度就没有意义了
+    expect(within(dialog).queryByPlaceholderText(/可填 low \/ high \/ max/)).not.toBeInTheDocument()
 
     await user.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(mockPut).toHaveBeenCalled())
