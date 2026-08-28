@@ -114,7 +114,9 @@ async def test_validate_checks_player_echo_and_control_when_turn_inputs_present(
     )
     joined = "\n".join(message["content"] for message in captured["messages"])
     assert "本轮已在界面展示" in joined
-    assert "复述" in joined and "姿势" in joined and "心理" in joined
+    # 判据是「有没有后果」：台词/移动/判断要拦，姿态与感官细节明确放行
+    # （本例那句「推了推墨镜、勾起嘴角」正属于后者，不该被改写）。
+    assert "台词" in joined and "移动" in joined and "不算代演" in joined
     assert "怎么，弄丢枪了" in joined
 
 
