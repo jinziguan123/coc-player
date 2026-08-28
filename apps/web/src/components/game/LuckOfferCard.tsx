@@ -22,7 +22,7 @@ export function LuckOfferCard({
   onDecide: (spend: boolean) => void
 }) {
   return (
-    <div className="chat-msg py-1 flex justify-center">
+    <div data-tour="luck-offer" className="chat-msg py-1 flex justify-center">
       <div
         className="rounded-md px-3 py-2 text-sm"
         style={{

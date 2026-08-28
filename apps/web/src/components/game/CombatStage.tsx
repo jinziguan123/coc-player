@@ -559,7 +559,7 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
 
   // ===== 嵌入布局（现状）：聊天流底部的可收起卡片 =====
   return (
-    <div className="card combat-hud mx-3 mb-2 !px-3 !py-2.5">
+    <div data-tour="combat" className="card combat-hud mx-3 mb-2 !px-3 !py-2.5">
       {/* 顶部：战斗标识 + 轮次徽章 + 布局切换 + 收起/展开 */}
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0">

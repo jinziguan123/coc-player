@@ -102,6 +102,7 @@ export function CheckResultCard({
 
   return (
     <div
+      data-tour="dice-result"
       className={`dice-card dice-readout rounded-md px-3 py-2 flex flex-wrap items-center gap-3 ${animClass}`}
       style={{ borderLeft: `3px solid ${accent}`, width: 'fit-content', maxWidth: '100%' }}
     >

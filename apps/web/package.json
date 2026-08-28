@@ -25,6 +25,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",
+    "driver.js": "^1.8.0",
     "konva": "^10.3.0",
     "lucide-react": "^1.21.0",
     "lxgw-wenkai-screen-webfont": "1.7.0",

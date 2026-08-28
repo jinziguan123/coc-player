@@ -39,7 +39,8 @@ import {
 } from '../components/game/CheckResultCard'
 import { CheckRequestCard } from '../components/game/CheckRequestCard'
 import { LuckOfferCard } from '../components/game/LuckOfferCard'
-import { OnboardingCoach, hasSeenCoach } from '../components/game/OnboardingCoach'
+import { startGameTour, hasSeenGameTour } from '@/features/tour/gameTour'
+import { showHintOnce } from '@/features/tour/hints'
 import { buildCheckCaption } from '../components/game/diceNotation'
 import { normalizeOpposedData } from '../components/game/opposedDice'
 import { BurstCard, OpposedCard, type BurstData } from '../components/game/DiceContestCards'
@@ -265,7 +266,6 @@ export function GameSessionPage() {
   // 新手引导：本机从未看过时自动弹一次（intro，从第一页走）；之后从顶栏那个问号重开时直接
   // 落在速查页（reference）——玩到一半回头查一条规则，不该先点三次「下一步」。
   // KP 席不弹——这几页讲的是玩家侧操作（输入语法/投骰/角色卡），对 KP 没用。
-  const [showCoach, setShowCoach] = useState<false | 'intro' | 'reference'>(false)
   // 窄屏默认收起：角色卡在手机上是覆盖式抽屉，默认展开会挡住叙事流。
   const [showPanel, setShowPanel] = useState(
     () => !(typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches),
@@ -311,11 +311,29 @@ export function GameSessionPage() {
   // 独自开团 → 发送即推进（判定见 derive.isSoloTable）。KP 席不适用：他走右侧工作台。
   const soloTable = !isKp && !!currentSession && isSoloTable(currentSession.participants)
   const shownCharId = panelCharId ?? myCharId
-  // 会话载入完、且确认自己是玩家（非 KP）后再决定弹不弹——KP 席不需要这套玩家侧操作说明。
+  // 会话载入完、且确认自己是玩家（非 KP）后再跑导览——KP 席不需要这套玩家侧操作说明。
+  // 导览要高亮角色卡，先把面板打开，否则那一步没东西可指。
+  const runGameTour = useCallback(() => {
+    startGameTour({ onNeedSheet: () => setShowPanel(true) })
+  }, [])
   useEffect(() => {
-    if (!currentSession || isKp) return
-    if (!hasSeenCoach()) setShowCoach('intro')
-  }, [currentSession, isKp])
+    if (!currentSession || isKp || hasSeenGameTour()) return
+    runGameTour()
+  }, [currentSession, isKp, runGameTour])
+
+  // 动态功能的一次性就地提示：这几样开场导览时根本不在 DOM 里（要等实际游戏事件），
+  // 所以改在它们**第一次真出现**时各讲一句——玩家正要用到，比开场灌一遍留得住。
+  // 放 useEffect 而不是渲染里：要等 DOM 更新完，driver 才找得到元素。
+  useEffect(() => {
+    if (isKp) return
+    showHintOnce('check-request', '[data-tour="check-request"]')
+    showHintOnce('luck-offer', '[data-tour="luck-offer"]')
+    showHintOnce('dice-result', '[data-tour="dice-result"]')
+  }, [messages, isKp])
+  useEffect(() => {
+    if (isKp || !combat) return
+    showHintOnce('combat', '[data-tour="combat"]')
+  }, [combat, isKp])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   // 开局前置校验：是否已配置可用 AI（null=未知/检查中）。未配置时提示去设置，避免开场直接失败。
@@ -1458,6 +1476,7 @@ export function GameSessionPage() {
             <ContextUsageBadge sessionId={currentSession.id} refreshKey={messages.length} paused={streaming} />
             <button
               onClick={() => setShowSearch((v) => !v)}
+              data-tour="search"
               className="btn-secondary btn-xs flex items-center gap-1"
               title="检索本局历史记录"
             >
@@ -1465,6 +1484,7 @@ export function GameSessionPage() {
             </button>
             <button
               onClick={() => setShowRecap(true)}
+              data-tour="recap"
               className="btn-secondary btn-xs flex items-center gap-1"
               title="战报 / 章节小结：把本局经历浓缩成结构化小结"
             >
@@ -1518,6 +1538,7 @@ export function GameSessionPage() {
             )}
             <button
               onClick={() => { setConfirmTravel(null); setShowBigMap((v) => !v) }}
+              data-tour="map"
               className="btn-secondary btn-xs flex items-center gap-1"
               title="大地图：前往已知地点"
             >
@@ -1543,9 +1564,9 @@ export function GameSessionPage() {
             )}
             {!isKp && (
               <button
-                onClick={() => setShowCoach('reference')}
+                onClick={runGameTour}
                 className="btn-secondary btn-xs flex items-center gap-1"
-                title="操作速查：怎么读骰子、暗投是什么、怎么申请检定"
+                title="重看新手导览：界面上每个地方是干什么的"
               >
                 <HelpCircle size={13} />
               </button>
@@ -1598,7 +1619,7 @@ export function GameSessionPage() {
           />
         )}
         {currentSession.participants && currentSession.participants.length > 1 && (
-          <div className="pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div data-tour="party" className="pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
             <PartyRoster
               participants={currentSession.participants}
               selectedId={shownCharId}
@@ -2244,6 +2265,7 @@ export function GameSessionPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={advanceTurn}
+                data-tour="advance"
                 disabled={!!(turnState && myCharId && turnState.confirmed_ids.includes(myCharId))}
                 className="text-xs px-3 py-1 rounded font-semibold transition-colors cursor-pointer"
                 style={{
@@ -2330,6 +2352,7 @@ export function GameSessionPage() {
         <div className="chat-input-bar">
           <textarea
             ref={inputRef}
+            data-tour="input"
             value={input}
             onChange={(e) => {
               setInput(e.target.value)
@@ -2377,6 +2400,7 @@ export function GameSessionPage() {
       )}
       {!immersiveOn && showPanel && panelChar && (
         <aside
+          data-tour="sheet"
           className="game-character-panel w-64 flex-shrink-0 border-l overflow-y-auto game-info"
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}
         >
@@ -2435,12 +2459,6 @@ export function GameSessionPage() {
             <span className="side-token-label">KP</span>
           </button>
         </div>
-      )}
-      {showCoach && (
-        <OnboardingCoach
-          startAtReference={showCoach === 'reference'}
-          onClose={() => setShowCoach(false)}
-        />
       )}
       {isKp && !kpCollapsed && (
         <aside className="kp-console-pane flex-shrink-0">

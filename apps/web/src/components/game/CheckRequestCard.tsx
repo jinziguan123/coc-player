@@ -21,7 +21,7 @@ export function CheckRequestCard({
   animClass?: string
 }) {
   return (
-    <div className={`chat-msg py-1 flex justify-center ${animClass || ''}`}>
+    <div data-tour="check-request" className={`chat-msg py-1 flex justify-center ${animClass || ''}`}>
       <div
         className={`rounded-md px-3 py-2 text-sm ${pending && actionable ? 'dice-pending' : ''}`}
         style={{

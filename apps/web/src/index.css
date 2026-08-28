@@ -4370,3 +4370,74 @@ select.input option {
     scroll-behavior: auto !important;
   }
 }
+
+/* ===== 新手导览（driver.js）：把它默认的白底黑字换成本站两套主题 =====
+   气泡在遮罩之上，而遮罩是恒定深色——但气泡本身有实底，所以这里照常吃主题变量，
+   与 .entry-dismiss 那种「裸露在遮罩上」的情况不同（那个必须固定浅色）。 */
+.driver-popover.coc-tour {
+  background: var(--color-bg-card, var(--color-bg-secondary));
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius, 8px);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+  max-width: 22rem;
+  font-family: inherit;
+}
+.driver-popover.coc-tour .driver-popover-title {
+  font-family: var(--font-title);
+  font-size: 1rem;
+  color: var(--color-text-accent);
+  letter-spacing: 0.03em;
+}
+.driver-popover.coc-tour .driver-popover-description {
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--color-text-primary);
+}
+.driver-popover.coc-tour .driver-popover-description b {
+  color: var(--color-text-accent);
+  font-weight: 600;
+}
+.driver-popover.coc-tour .driver-popover-progress-text {
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.driver-popover.coc-tour .driver-popover-close-btn {
+  color: var(--color-text-secondary);
+}
+.driver-popover.coc-tour .driver-popover-close-btn:hover,
+.driver-popover.coc-tour .driver-popover-close-btn:focus {
+  color: var(--color-text-accent);
+}
+.driver-popover.coc-tour .driver-popover-footer-btn {
+  padding: 0.2rem 0.7rem;
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 3px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.driver-popover.coc-tour .driver-popover-footer-btn:hover {
+  color: var(--color-text-accent);
+  background: transparent;
+  border-color: var(--color-accent);
+}
+/* 「下一步 / 知道了」是主动作，给它实心琥珀，与全站 .btn-primary 同一语义 */
+.driver-popover.coc-tour .driver-popover-navigation-btns button:last-child {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.driver-popover.coc-tour .driver-popover-navigation-btns button:last-child:hover {
+  color: var(--color-on-accent);
+  background: var(--color-accent-hover);
+}
+/* 箭头默认吃 #fff，得跟着气泡底色走，否则指向被高亮元素的那个小三角是白的 */
+.driver-popover.coc-tour .driver-popover-arrow-side-left { border-left-color: var(--color-bg-card, var(--color-bg-secondary)); }
+.driver-popover.coc-tour .driver-popover-arrow-side-right { border-right-color: var(--color-bg-card, var(--color-bg-secondary)); }
+.driver-popover.coc-tour .driver-popover-arrow-side-top { border-top-color: var(--color-bg-card, var(--color-bg-secondary)); }
+.driver-popover.coc-tour .driver-popover-arrow-side-bottom { border-bottom-color: var(--color-bg-card, var(--color-bg-secondary)); }
