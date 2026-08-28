@@ -114,6 +114,9 @@ const STEPS: DriveStep[] = [
 
 /** 跑一遍对局导览。``onNeedSheet`` 会在开始前调用，用来先把角色卡面板打开（否则那一步没东西可高亮）。 */
 export function startGameTour(opts: { onNeedSheet?: () => void } = {}) {
+  // 已经有导览/提示在跑就别再起一个。driver 允许同时驱动多个实例，叠起来的后果是
+  // 屏幕上并排两个气泡、各记各的步数，点「下一步」只推进最上面那个，另一个永远关不掉。
+  if (document.body.classList.contains('driver-active')) return
   opts.onNeedSheet?.()
   // 面板是 React 渲染的，下一帧才在 DOM 里；driver 的 waitForElement 也兜一道。
   requestAnimationFrame(() => {

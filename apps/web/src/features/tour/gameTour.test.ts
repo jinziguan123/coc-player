@@ -17,6 +17,7 @@ type TourConfig = {
 
 beforeEach(() => {
   localStorage.clear()
+  document.body.className = ''
   driver.mockClear()
   drive.mockClear()
 })
@@ -74,6 +75,31 @@ describe('对局导览', () => {
     for (const dynamic of ['check-request', 'dice-result', 'luck-offer', 'combat']) {
       expect(anchors).not.toContain(`[data-tour="${dynamic}"]`)
     }
+  })
+
+  it('已有导览在跑时不再起第二个——两个实例会并排出两个气泡、各记各的步数', async () => {
+    startGameTour()
+    await tick()
+    expect(drive).toHaveBeenCalledTimes(1)
+
+    document.body.classList.add('driver-active')   // 第一个还开着
+    startGameTour()
+    await tick()
+    expect(drive).toHaveBeenCalledTimes(1)         // 没有叠上第二个
+
+    document.body.classList.remove('driver-active')
+  })
+
+  it('前一个关掉之后可以再开（顶栏问号要能重看）', async () => {
+    document.body.classList.add('driver-active')
+    startGameTour()
+    await tick()
+    expect(drive).not.toHaveBeenCalled()
+
+    document.body.classList.remove('driver-active')
+    startGameTour()
+    await tick()
+    expect(drive).toHaveBeenCalledTimes(1)
   })
 
   it('走完就记住，下次进对局不再自动弹', async () => {

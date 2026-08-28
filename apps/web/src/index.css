@@ -4441,3 +4441,37 @@ select.input option {
 .driver-popover.coc-tour .driver-popover-arrow-side-right { border-right-color: var(--color-bg-card, var(--color-bg-secondary)); }
 .driver-popover.coc-tour .driver-popover-arrow-side-top { border-top-color: var(--color-bg-card, var(--color-bg-secondary)); }
 .driver-popover.coc-tour .driver-popover-arrow-side-bottom { border-bottom-color: var(--color-bg-card, var(--color-bg-secondary)); }
+
+/* 被高亮的元素：挖洞之后露出来的还是原本那块暗色 UI，跟周围的差别只有「没被压暗」，
+   一眼扫过去根本注意不到。补一圈琥珀描边 + 向外扩散的脉冲，让视线自己被拽过去。 */
+.driver-active-element {
+  border-radius: 6px;
+  animation: tour-pulse 1.8s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+@keyframes tour-pulse {
+  0% {
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent),
+      0 0 14px 2px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+  70% {
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      0 0 0 14px color-mix(in srgb, var(--color-accent) 0%, transparent),
+      0 0 14px 2px color-mix(in srgb, var(--color-accent) 20%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      0 0 0 0 color-mix(in srgb, var(--color-accent) 0%, transparent),
+      0 0 14px 2px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+}
+/* 关掉动画的人只留描边——静态的那圈琥珀边本身就够指认位置 */
+@media (prefers-reduced-motion: reduce) {
+  .driver-active-element {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-accent), 0 0 16px 2px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  }
+}

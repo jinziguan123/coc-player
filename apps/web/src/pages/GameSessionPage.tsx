@@ -316,10 +316,14 @@ export function GameSessionPage() {
   const runGameTour = useCallback(() => {
     startGameTour({ onNeedSheet: () => setShowPanel(true) })
   }, [])
+  // 依赖只认路由上的会话 id（它不随 refetch 变）：依赖 currentSession 整个对象会让这个
+  // effect 在导览进行中被反复触发——那时导览还没走完、hasSeenGameTour() 还是 false，
+  // 拦不住，于是每 refetch 一次就再叠一个 driver 实例上去。
   useEffect(() => {
     if (!currentSession || isKp || hasSeenGameTour()) return
     runGameTour()
-  }, [currentSession, isKp, runGameTour])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只认 id：见上
+  }, [sessionId, isKp, runGameTour])
 
   // 动态功能的一次性就地提示：这几样开场导览时根本不在 DOM 里（要等实际游戏事件），
   // 所以改在它们**第一次真出现**时各讲一句——玩家正要用到，比开场灌一遍留得住。
