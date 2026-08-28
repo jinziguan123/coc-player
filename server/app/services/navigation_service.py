@@ -223,7 +223,8 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
         known.add(session.current_scene_id)
     # KP 挂过「要前往【X】吗」的地点必然已知——这是确定性记录，不该绕道去卡片文案里
     # 匹配场景名（卡片措辞一改，或场景名与关键词对不上，地点就会莫名其妙地消失）。
-    known.update((session.world_state or {}).get("travel_suggested") or [])
+    suggested = set((session.world_state or {}).get("travel_suggested") or [])
+    known.update(suggested)
     visible_events = [
         event for event in (events or [])
         if getattr(event, "event_type", None) in ("narration", "dialogue", "action", "system")
@@ -240,7 +241,25 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
                 known.add(sid)
     for event in visible_events:
         known.update(_relative_carriage_mentions(by_id, event))
-    return {sid for sid in known if sid in by_id}
+    known = {sid for sid in known if sid in by_id}
+    # **被点名建议**的子场景还要把父级链一并带出来，否则地图上无路可达：主沙盘只画顶层
+    # 格子，子地点要点父级下钻才看得到；父级不在列表里，连那个下钻入口都不存在。
+    #
+    # 只对 travel_suggested 这么做，不对「叙事提过」的场景做：那些本就该按层级门禁
+    # 慢慢解锁（听说过村里有屋子 ≠ 该在图上标出村子）。KP 明确请玩家去的地方不一样——
+    # 给了邀请就得给得到路。父级只是「已知」不是「已访问」，同一父级下的其它屋子仍被
+    # 门禁挡着，露出来的只有被点名的那一间。
+    from app.services import hex_map
+
+    for sid in suggested & known:
+        cursor = sid
+        for _ in range(8):          # 防御模组把 parent 配成环
+            parent = hex_map.scene_parent(by_id.get(cursor))
+            if not parent or parent in known or parent not in by_id:
+                break
+            known.add(parent)
+            cursor = parent
+    return known
 
 
 def _scene_adjacency(module) -> dict[str, set[str]]:

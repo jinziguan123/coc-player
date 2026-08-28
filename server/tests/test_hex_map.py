@@ -592,6 +592,14 @@ class TestSuggestedUnlocksNested:
         ids = {x["id"] for x in session_service.list_known_locations(module, session)}
         assert "house" in ids
 
+    def test_子地点可见时父级必须一起可见(self):
+        """主沙盘只画顶层格子，子地点要点父级下钻才看得到。父级不在列表里，
+        连那个下钻入口都不存在——数据给了也等于没给。"""
+        module, session = _nested_fixture({"travel_suggested": ["house"]})
+        ids = {x["id"] for x in session_service.list_known_locations(module, session)}
+        assert "block" in ids       # 街区：进老房子的唯一入口
+        assert "house" in ids
+
     def test_建议只解锁被点名的那一个(self):
         """解除门禁的理由是「这个地方被说破了」，不能顺带把同父级的其它屋子也曝光。"""
         module, session = _nested_fixture({"travel_suggested": ["house"]})
