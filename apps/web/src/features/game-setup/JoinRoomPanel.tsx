@@ -1,9 +1,10 @@
+import { isInviteCode } from '@/features/netlink/remoteRooms'
 import type { GameSetupState } from './useGameSetup'
 
-/** 邀请码形如 `trpg:<公钥>[:<房间码>]`，第三段是房间码。 */
+/** 邀请码形如 `coc:<公钥>[:<房间码>]`，第三段是房间码。 */
 function roomCodeFromInvite(raw: string): string | null {
   const cleaned = raw.trim().replace(/^["'「<]+|["'」>]+$/g, '')
-  if (!cleaned.toLowerCase().startsWith('trpg:')) return null
+  if (!isInviteCode(cleaned)) return null
   const code = cleaned.split(':')[2]
   return code ? code.toUpperCase() : null
 }
@@ -23,7 +24,7 @@ export function JoinRoomPanel({ setup }: { setup: GameSetupState }) {
   } = setup
 
   // 邀请码走内置直连，房间码可由它带来，界面提示与按钮禁用条件都要跟着变。
-  const isInvite = hostAddr.trim().toLowerCase().startsWith('trpg:')
+  const isInvite = isInviteCode(hostAddr)
 
   /**
    * 粘进来就地拆解：邀请码自带房间码时立刻填到下面那栏。
@@ -62,7 +63,7 @@ export function JoinRoomPanel({ setup }: { setup: GameSetupState }) {
       <input
         value={hostAddr}
         onChange={(event) => onHostAddrChange(event.target.value)}
-        placeholder="邀请码（trpg:…）或主机地址（如 192.168.1.5）；留空 = 本机房间"
+        placeholder="邀请码（coc:…）或主机地址（如 192.168.1.5）；留空 = 本机房间"
         className="input mb-2 w-full"
       />
       {/* 房主那边看到的是一串公钥，有个名字他才认得出敲门的是谁。 */}

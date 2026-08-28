@@ -16,9 +16,9 @@ cd "$ROOT/server"
 .venv/bin/pyinstaller desktop.spec --noconfirm
 
 echo "==> [3/4] 复制后端 onedir 到 Tauri resources"
-rm -rf "$ROOT/src-tauri/resources/trpg-server"
+rm -rf "$ROOT/src-tauri/resources/coc-server"
 mkdir -p "$ROOT/src-tauri/resources"
-cp -R "dist/trpg-server" "$ROOT/src-tauri/resources/trpg-server"
+cp -R "dist/coc-server" "$ROOT/src-tauri/resources/coc-server"
 
 echo "==> [4/4] Tauri 出包"
 cd "$ROOT"

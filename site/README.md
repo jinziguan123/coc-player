@@ -1,6 +1,6 @@
 # 公开介绍页
 
-TRPG Player 的对外介绍与下载页。**纯静态，没有构建步骤** —— 目录里是什么，部署上去就是什么。
+CoC Player 的对外介绍与下载页。**纯静态，没有构建步骤** —— 目录里是什么，部署上去就是什么。
 
 ```
 site/
@@ -15,14 +15,14 @@ site/
 
 ## 换下载链接
 
-只改 `index.html` 顶部 `window.TRPG_DOWNLOADS` 那一段：
+只改 `index.html` 顶部 `window.COC_DOWNLOADS` 那一段：
 
 ```js
-window.TRPG_DOWNLOADS = {
+window.COC_DOWNLOADS = {
   version: 'v0.1.0',
   released: '2026-08-28',                 // 留空则不显示
-  mac: { url: 'https://…/TRPG-Player_0.1.0_aarch64.dmg', size: '128 MB', note: 'macOS 11 及以上 · Apple Silicon / Intel' },
-  win: { url: 'https://…/TRPG-Player_0.1.0_x64-setup.exe', size: '132 MB', note: 'Windows 10 / 11 · 64 位' },
+  mac: { url: 'https://…/CoC-Player_0.1.0_aarch64.dmg', size: '128 MB', note: 'macOS 11 及以上 · Apple Silicon / Intel' },
+  win: { url: 'https://…/CoC-Player_0.1.0_x64-setup.exe', size: '132 MB', note: 'Windows 10 / 11 · 64 位' },
 }
 ```
 
@@ -32,7 +32,7 @@ window.TRPG_DOWNLOADS = {
 
 ### Vercel
 
-1. 新建 Project，导入 `jinziguan123/trpg-player`；
+1. 新建 Project，导入 `jinziguan123/coc-player`；
 2. **Root Directory** 填 `site`，Framework Preset 选 **Other**；
 3. Build Command 和 Output Directory 都留空（纯静态，不需要构建）。
 

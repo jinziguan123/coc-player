@@ -1,7 +1,7 @@
 [project]
-name = "trpg-server"
+name = "coc-server"
 version = "0.1.0"
-description = "TRPG 跑团平台后端"
+description = "CoC 跑团平台后端"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115.0",

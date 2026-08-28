@@ -1,4 +1,4 @@
-# TRPG Player Web
+# CoC Player Web
 
 React 前端负责模组、角色、房间、跑团和设置界面，通过 `/api` 与 FastAPI 后端通信。开发环境由 Vite 代理请求；桌面包中由后端同源托管 `dist`。
 

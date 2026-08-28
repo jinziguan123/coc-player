@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   forgetRemoteRoom,
   hostIdFromInvite,
+  isInviteCode,
   listRemoteRooms,
   rememberRemoteRoom,
 } from './remoteRooms'
@@ -77,6 +78,24 @@ describe('记住在别人那儿玩的房间', () => {
       null,
     ]))
     expect(listRemoteRooms()).toHaveLength(1)
+  })
+})
+
+describe('识别邀请码', () => {
+  it('认当前前缀，也认改名前的 trpg:', () => {
+    expect(isInviteCode('coc:xu4vabc:K7M9PQ2R')).toBe(true)
+    expect(isInviteCode('trpg:xu4vabc')).toBe(true)
+  })
+
+  it('大小写与聊天软件的引号都不影响判断', () => {
+    expect(isInviteCode('  COC:xu4vabc  ')).toBe(true)
+    expect(isInviteCode('「TRPG:xu4vabc」')).toBe(true)
+  })
+
+  it('主机地址和空串不算邀请码', () => {
+    expect(isInviteCode('192.168.1.5')).toBe(false)
+    expect(isInviteCode('https://example.com')).toBe(false)
+    expect(isInviteCode('')).toBe(false)
   })
 })
 

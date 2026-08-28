@@ -70,7 +70,20 @@ export function forgetRemoteRoom(room: Pick<RemoteRoom, 'hostId' | 'roomCode'>):
   }
 }
 
-/** 邀请码形如 `trpg:<公钥>[:<房间码>]`，取出公钥。 */
+/**
+ * 邀请码的前缀。`coc:` 是当前的；`trpg:` 是项目改名前发出去的，仍然认——
+ * 码是发给别人的字符串，改名不该让对方手里那张当场作废。只认不发，生成一律用 `coc:`。
+ * 与 Rust 侧 `src-tauri/src/netlink/invite.rs` 的 PREFIX / LEGACY_PREFIX 对齐。
+ */
+const INVITE_PREFIXES = ['coc:', 'trpg:']
+
+/** 这串是邀请码（走内置直连），而不是主机地址（走局域网直连）。 */
+export function isInviteCode(raw: string): boolean {
+  const cleaned = raw.trim().replace(/^["'「<]+/, '').toLowerCase()
+  return INVITE_PREFIXES.some((prefix) => cleaned.startsWith(prefix))
+}
+
+/** 邀请码形如 `coc:<公钥>[:<房间码>]`，取出公钥。前缀是哪个都一样按冒号分段。 */
 export function hostIdFromInvite(invite: string): string {
   const cleaned = invite.trim().replace(/^["'「<]+|["'」>]+$/g, '')
   const parts = cleaned.split(':')

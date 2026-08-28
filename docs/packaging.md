@@ -25,7 +25,7 @@ Tauri 外壳(Rust) ──spawn──▶ 后端(PyInstaller onedir，放在 .app 
   扫描会慢一些)。loader 页会一直等到后端就绪。
 
 关键文件:
-- `server/run_desktop.py` — 后端入口(选端口起 uvicorn,打印 `TRPG_BACKEND_PORT <port>`)
+- `server/run_desktop.py` — 后端入口(选端口起 uvicorn,打印 `COC_BACKEND_PORT <port>`)
 - `server/desktop.spec` — PyInstaller onedir 配置(带 `alembic/`、`web_dist`、`seed/`;
   collect_all fastembed/onnxruntime/tokenizers)
 - `server/scripts/make_seed.py` — 从当前开发库生成内置种子
@@ -53,10 +53,10 @@ pnpm desktop:build      # 见 scripts/build-desktop.sh：vite → make_seed → 
 pnpm --filter web exec vite build                         # 1) 前端(跳过 tsc 门禁，只出产物)
 cd server
 .venv/bin/python scripts/make_seed.py                     # 2a) 生成内置种子
-.venv/bin/pyinstaller desktop.spec --noconfirm            # 2b) 后端 onedir → server/dist/trpg-server/
-rm -rf ../src-tauri/resources/trpg-server
+.venv/bin/pyinstaller desktop.spec --noconfirm            # 2b) 后端 onedir → server/dist/coc-server/
+rm -rf ../src-tauri/resources/coc-server
 mkdir -p ../src-tauri/resources
-cp -R dist/trpg-server ../src-tauri/resources/trpg-server # 3) onedir 目录 → Tauri resources
+cp -R dist/coc-server ../src-tauri/resources/coc-server # 3) onedir 目录 → Tauri resources
 cd .. && pnpm tauri build                                 # 4) 出包
 # 产物:src-tauri/target/release/bundle/{macos/CoC Player.app, dmg/*.dmg}
 ```
@@ -72,25 +72,25 @@ cd .. && pnpm tauri build                                 # 4) 出包
 pnpm --filter web exec vite build
 cd server
 .venv\Scripts\python scripts\make_seed.py
-.venv\Scripts\pyinstaller desktop.spec --noconfirm        # → server\dist\trpg-server\（onedir 目录）
-Remove-Item -Recurse -Force ..\src-tauri\resources\trpg-server -ErrorAction SilentlyContinue
+.venv\Scripts\pyinstaller desktop.spec --noconfirm        # → server\dist\coc-server\（onedir 目录）
+Remove-Item -Recurse -Force ..\src-tauri\resources\coc-server -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force ..\src-tauri\resources | Out-Null
-Copy-Item -Recurse dist\trpg-server ..\src-tauri\resources\trpg-server
+Copy-Item -Recurse dist\coc-server ..\src-tauri\resources\coc-server
 cd ..
 pnpm tauri build
 # 产物:src-tauri\target\release\bundle\{msi\*.msi, nsis\*.exe}
 ```
 
-> onedir 的可执行在 Windows 是 `trpg-server\trpg-server.exe`；`src/lib.rs` 里 spawn 的
-> 路径对两平台通用(拼 `resources/trpg-server/trpg-server`，Windows 会自动带 .exe 后缀由
+> onedir 的可执行在 Windows 是 `coc-server\coc-server.exe`；`src/lib.rs` 里 spawn 的
+> 路径对两平台通用(拼 `resources/coc-server/coc-server`，Windows 会自动带 .exe 后缀由
 > 系统解析——如遇找不到，可在 lib.rs 里按平台补 `.exe`)。
 
 ## 注意 / 排查
 
 - `src-tauri/resources/`、`src-tauri/gen/`、`src-tauri/target/`、`server/seed/` 均不入库,按上面步骤重建。
-- 端口默认优先 8756,被占用则自动换随机端口(Rust 侧读后端 stdout 的 `TRPG_BACKEND_PORT` 拿到实际端口)。
+- 端口默认优先 8756,被占用则自动换随机端口(Rust 侧读后端 stdout 的 `COC_BACKEND_PORT` 拿到实际端口)。
 - 若窗口一直停在加载页:多为后端崩溃。可单独运行
-  `"…app/Contents/Resources/resources/trpg-server/trpg-server"`(mac)看它的报错。
+  `"…app/Contents/Resources/resources/coc-server/coc-server"`(mac)看它的报错。
 - 首次用规则书检索会联网下一次嵌入模型(约百 MB)到 `app-data/models`;要完全离线分发,
   可把模型文件一并放进种子/资源并预置到该目录。
 

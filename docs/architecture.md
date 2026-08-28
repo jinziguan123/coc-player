@@ -69,7 +69,7 @@ flowchart LR
     Sidecar --> API
 ```
 
-桌面启动链路由 `src-tauri/src/lib.rs` 实现：启动 sidecar、读取 `TRPG_BACKEND_PORT`、等待后端健康检查，退出时杀掉子进程。后端在 `server/app/main.py` 中按需挂载 `apps/web/dist`，因此桌面模式是“一个窗口 + 一个本地服务进程”，不是把业务逻辑放进 Rust。
+桌面启动链路由 `src-tauri/src/lib.rs` 实现：启动 sidecar、读取 `COC_BACKEND_PORT`、等待后端健康检查，退出时杀掉子进程。后端在 `server/app/main.py` 中按需挂载 `apps/web/dist`，因此桌面模式是“一个窗口 + 一个本地服务进程”，不是把业务逻辑放进 Rust。
 
 > **现状（2026-07-31）**：外壳新增 `src-tauri/src/netlink/`（iroh QUIC 隧道 + 准入名册），
 > 这是**唯一**跑在 Rust 侧的运行时能力。它仍不承载业务逻辑——只做字节转发与准入，
@@ -263,9 +263,9 @@ sequenceDiagram
 
 ```text
 Tauri 窗口
-  -> spawn resources/trpg-server/trpg-server
+  -> spawn resources/coc-server/coc-server
   -> sidecar 选择 8756 或随机空闲端口
-  -> stdout 打印 TRPG_BACKEND_PORT <port>
+  -> stdout 打印 COC_BACKEND_PORT <port>
   -> loader 轮询 /api/health
   -> 窗口跳转到 http://127.0.0.1:<port>
   -> FastAPI 同源托管 web_dist + /api + /live

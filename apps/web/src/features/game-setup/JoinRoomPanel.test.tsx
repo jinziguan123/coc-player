@@ -35,14 +35,21 @@ describe('加入房间面板', () => {
 
   it('粘了邀请码时房间码可以留空——邀请码本身就带着它', () => {
     // 曾经的 bug：按钮只看房间码栏，于是粘了完整邀请码反而点不动。
-    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'trpg:xu4vabc:K7M9PQ2R' })} />)
+    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'coc:xu4vabc:K7M9PQ2R' })} />)
     expect(screen.getByRole('button', { name: '加入' })).toBeEnabled()
   })
 
   it('识别邀请码后说明要走内置直连、且需对方同意', () => {
-    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'TRPG:xu4vabc' })} />)
+    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'COC:xu4vabc' })} />)
     expect(screen.getByText(/内置直连/)).toBeInTheDocument()
     expect(screen.getByText(/同意/)).toBeInTheDocument()
+  })
+
+  it('改名前发出去的 trpg: 邀请码仍然按邀请码对待', () => {
+    // 码是发给别人的字符串，项目改名不该让对方手里那张当场作废。
+    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'trpg:xu4vabc:K7M9PQ2R' })} />)
+    expect(screen.getByText(/内置直连/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加入' })).toBeEnabled()
   })
 
   it('普通主机地址不显示直连提示，也仍然要求房间码', () => {
@@ -52,7 +59,7 @@ describe('加入房间面板', () => {
   })
 
   it('粘了邀请码才要求填自己的名字——房主那边只看得到一串公钥', () => {
-    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'trpg:xu4vabc' })} />)
+    render(<JoinRoomPanel setup={setupWith({ hostAddr: 'coc:xu4vabc' })} />)
     expect(screen.getByLabelText('你的名字')).toBeInTheDocument()
   })
 
@@ -65,7 +72,7 @@ describe('加入房间面板', () => {
     // 首次加入可能卡一两分钟，不说清楚会被当成卡死。
     render(
       <JoinRoomPanel
-        setup={setupWith({ hostAddr: 'trpg:xu4vabc:K7M9PQ2R', joinWaiting: true })}
+        setup={setupWith({ hostAddr: 'coc:xu4vabc:K7M9PQ2R', joinWaiting: true })}
       />,
     )
     expect(screen.getByText(/正在等房主同意/)).toBeInTheDocument()
@@ -80,7 +87,7 @@ describe('加入房间面板', () => {
     render(<JoinRoomPanel setup={setupWith({ setJoinCode })} />)
 
     await user.click(screen.getByPlaceholderText(/邀请码/))
-    await user.paste('trpg:xu4vabcdefg:k7m9pq2r')
+    await user.paste('coc:xu4vabcdefg:k7m9pq2r')
     expect(setJoinCode).toHaveBeenCalledWith('K7M9PQ2R')
   })
 
@@ -90,7 +97,7 @@ describe('加入房间面板', () => {
     render(<JoinRoomPanel setup={setupWith({ setJoinCode })} />)
 
     await user.click(screen.getByPlaceholderText(/邀请码/))
-    await user.paste('trpg:xu4vabcdefg')
+    await user.paste('coc:xu4vabcdefg')
     expect(setJoinCode).not.toHaveBeenCalled()
   })
 
@@ -100,7 +107,7 @@ describe('加入房间面板', () => {
     render(<JoinRoomPanel setup={setupWith({ setJoinCode })} />)
 
     await user.click(screen.getByPlaceholderText(/邀请码/))
-    await user.paste('「trpg:xu4vabcdefg:K7M9PQ2R」')
+    await user.paste('「coc:xu4vabcdefg:K7M9PQ2R」')
     expect(setJoinCode).toHaveBeenCalledWith('K7M9PQ2R')
   })
 

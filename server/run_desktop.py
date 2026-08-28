@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import socket
 
-PORT_LINE_PREFIX = "TRPG_BACKEND_PORT "
+PORT_LINE_PREFIX = "COC_BACKEND_PORT "
 PREFERRED_PORT = 8756
 
 

@@ -50,12 +50,12 @@ pub fn run() {
             let data_dir = handle.path().app_data_dir()?;
             handle.manage(netlink::Netlink::new(data_dir));
 
-            // 拉起打包进来的后端（PyInstaller onedir，放在 resources/trpg-server/）。
+            // 拉起打包进来的后端（PyInstaller onedir，放在 resources/coc-server/）。
             let resource_dir = handle.path().resource_dir()?;
             let exe = resource_dir
                 .join("resources")
-                .join("trpg-server")
-                .join("trpg-server");
+                .join("coc-server")
+                .join("coc-server");
 
             // `pnpm tauri dev` 下没有这个二进制——它是打包产物，开发时后端由
             // `pnpm dev` 单独跑在 8000（窗口也直接加载 vite 的 5173，不走 loader）。
@@ -97,12 +97,12 @@ pub fn run() {
                 .unwrap()
                 .replace(child);
 
-            // 读取 sidecar stdout，解析它打印的 `TRPG_BACKEND_PORT <port>`。
+            // 读取 sidecar stdout，解析它打印的 `COC_BACKEND_PORT <port>`。
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = rx.recv().await {
                     if let CommandEvent::Stdout(bytes) = event {
                         let line = String::from_utf8_lossy(&bytes);
-                        if let Some(rest) = line.trim().strip_prefix("TRPG_BACKEND_PORT ") {
+                        if let Some(rest) = line.trim().strip_prefix("COC_BACKEND_PORT ") {
                             if let Ok(p) = rest.trim().parse::<u16>() {
                                 *handle.state::<Backend>().port.lock().unwrap() = Some(p);
                             }

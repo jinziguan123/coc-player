@@ -1,14 +1,19 @@
 //! 邀请码：把「连谁 + 进哪个房间」压成一串可复制、可口述的文本。
 //!
-//! 形如 `trpg:xu4v…7q2m:K7M9PQ2R`，冒号分段：协议前缀、房主的 EndpointId、
+//! 形如 `coc:xu4v…7q2m:K7M9PQ2R`，冒号分段：协议前缀、房主的 EndpointId、
 //! 房间码（可选——房主可能还没建房就想先把码发出去）。
+//!
+//! 前缀随项目改名从 `trpg` 变成 `coc`。**解析仍然接受 `trpg:`**：邀请码是发出去给
+//! 别人的字符串，改名不该让已经发出去的那些当场失效；只有生成走新前缀。
 //!
 //! 不做加密也不做签名：EndpointId 本来就是公钥，泄露它的后果是「别人知道你的
 //! 地址」，而不是「别人能进你的房间」——准入由房主批准（见 `roster`）把关。
 
 use iroh::EndpointId;
 
-const PREFIX: &str = "trpg";
+const PREFIX: &str = "coc";
+/// 改名前发出去的邀请码用的前缀，只认不发。
+const LEGACY_PREFIX: &str = "trpg";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Invite {
@@ -33,8 +38,8 @@ impl Invite {
         let mut parts = cleaned.split(':');
 
         let prefix = parts.next().unwrap_or_default();
-        if !prefix.eq_ignore_ascii_case(PREFIX) {
-            return Err("这不像是 TRPG Player 的邀请码，应当以 trpg: 开头".into());
+        if !prefix.eq_ignore_ascii_case(PREFIX) && !prefix.eq_ignore_ascii_case(LEGACY_PREFIX) {
+            return Err("这不像是 CoC Player 的邀请码，应当以 coc: 开头".into());
         }
         let host = parts
             .next()
@@ -81,7 +86,16 @@ mod tests {
     #[test]
     fn treats_empty_room_code_as_absent() {
         let id = sample_id();
-        assert_eq!(Invite::encode(&id, Some("")), format!("trpg:{id}"));
+        assert_eq!(Invite::encode(&id, Some("")), format!("coc:{id}"));
+    }
+
+    #[test]
+    fn still_accepts_codes_minted_before_the_rename() {
+        // 改名前发出去的码不该当场失效——只有生成端换前缀。
+        let id = sample_id();
+        for raw in [format!("trpg:{id}:K7M9PQ2R"), format!("TRPG:{id}")] {
+            assert_eq!(Invite::parse(&raw).unwrap().host, id, "未能解析：{raw}");
+        }
     }
 
     #[test]
@@ -93,7 +107,7 @@ mod tests {
             format!("  {encoded}\n"),
             format!("\"{encoded}\""),
             format!("「{encoded}」"),
-            encoded.replace("trpg:", "TRPG:"),
+            encoded.replace("coc:", "COC:"),
         ] {
             assert_eq!(Invite::parse(&raw).unwrap().host, id, "未能解析：{raw}");
         }
@@ -104,11 +118,12 @@ mod tests {
         // 宁可报错让用户重新复制，也不要连到一个猜出来的地方。
         for raw in [
             "",
+            "coc:",
+            "coc",
             "trpg:",
-            "trpg",
             "https://example.com/room/abc",
-            "trpg:not-a-valid-key",
-            "trpg:xxx:yyy:zzz",
+            "coc:not-a-valid-key",
+            "coc:xxx:yyy:zzz",
         ] {
             assert!(Invite::parse(raw).is_err(), "本该拒绝：{raw:?}");
         }
@@ -118,6 +133,6 @@ mod tests {
     fn error_messages_are_actionable() {
         // 用户看到的是这句话，得能据此知道下一步做什么。
         let err = Invite::parse("https://example.com").unwrap_err();
-        assert!(err.contains("trpg:"), "错误信息应指出正确格式：{err}");
+        assert!(err.contains("coc:"), "错误信息应指出正确格式：{err}");
     }
 }

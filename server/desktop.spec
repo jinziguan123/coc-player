@@ -1,6 +1,6 @@
 # PyInstaller 打包桌面版后端（onedir：启动不每次解压，比 onefile 快很多）。
 # 用法：cd server && .venv/bin/pyinstaller desktop.spec --noconfirm
-# 产物：dist/trpg-server/（含 trpg-server 可执行 + _internal 依赖），由 Tauri 作为 resources
+# 产物：dist/coc-server/（含 coc-server 可执行 + _internal 依赖），由 Tauri 作为 resources
 # 打进 .app，运行时 spawn 其中的可执行。
 #
 # 打包内容：run_desktop.py 入口 + 整个 app 包；数据文件带上
@@ -66,7 +66,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="trpg-server",
+    name="coc-server",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -85,5 +85,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="trpg-server",
+    name="coc-server",
 )

@@ -6,6 +6,7 @@ import { netlinkConnect } from '@/api/netlink'
 import {
   forgetRemoteRoom,
   hostIdFromInvite,
+  isInviteCode,
   listRemoteRooms,
   rememberRemoteRoom,
   type RemoteRoom,
@@ -192,10 +193,10 @@ export function useGameSetup() {
     setError('')
     const typed = hostAddr.trim()
 
-    // 邀请码（trpg:…）走内置直连：先把隧道建起来，再照常连本机那一头。
+    // 邀请码（coc:… / 改名前的 trpg:…）走内置直连：先把隧道建起来，再照常连本机那一头。
     // 房间码可以由邀请码带来，所以这一步要在「房间码必填」的检查之前。
     let code = joinCode.trim().toUpperCase()
-    if (typed.toLowerCase().startsWith('trpg:')) {
+    if (isInviteCode(typed)) {
       try {
         const fromInvite = await connectByInvite(typed)
         if (fromInvite) {

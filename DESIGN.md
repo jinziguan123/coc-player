@@ -456,7 +456,7 @@ loop 行为}，行为分四类——`check`（掷骰后回注结果续写，挂�
 
 - **身份**：一把持久化的 iroh 私钥（`identity.rs`，unix 下 0600）。不持久化的话，
   邀请码每次重启作废、名册永远匹配不上。
-- **邀请码**：`trpg:<EndpointId>:<房间码>`，不加密不签名——EndpointId 本就是公钥，
+- **邀请码**：`coc:<EndpointId>:<房间码>`（改名前的 `trpg:` 仍可解析），不加密不签名——EndpointId 本就是公钥，
   准入由房主批准把关。
 - **准入**：`roster.rs` 名册 + `handshake.rs` 握手。客人连上后第一条流是控制流，
   自报备注名，房主批准/拒绝；自报的名字**不可信**，真身份是 QUIC 握手证明过的公钥。
@@ -478,9 +478,9 @@ loop 行为}，行为分四类——`check`（掷骰后回注结果续写，挂�
 
 ```text
 Tauri 窗口 → loader 加载页
-  → spawn resources/trpg-server/trpg-server（PyInstaller onedir sidecar）
+  → spawn resources/coc-server/coc-server（PyInstaller onedir sidecar）
   → sidecar 按开关决定绑回环还是全网卡，挑 8756 或随机空闲端口
-  → stdout 打印 "TRPG_BACKEND_PORT <port>"
+  → stdout 打印 "COC_BACKEND_PORT <port>"
   → loader 轮询 /api/health
   → 窗口跳转 http://127.0.0.1:<port>
   → FastAPI 同源托管 web_dist + /api + /live（SPA 深链回退 index.html）

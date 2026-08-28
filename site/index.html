@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRPG Player —— AI 当守秘人的本地跑团桌面应用</title>
-<meta name="description" content="TRPG Player 是一个本地优先的 AI 跑团桌面应用：AI 担任守秘人和 NPC，你可以独自开团，也可以在可信局域网里叫上朋友。数据和素材存在你自己的机器上。">
+<title>CoC Player —— AI 当守秘人的本地跑团桌面应用</title>
+<meta name="description" content="CoC Player 是一个本地优先的 AI 跑团桌面应用：AI 担任守秘人和 NPC，你可以独自开团，也可以在可信局域网里叫上朋友。数据和素材存在你自己的机器上。">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
-<meta property="og:title" content="TRPG Player —— AI 当守秘人的本地跑团桌面应用">
+<meta property="og:title" content="CoC Player —— AI 当守秘人的本地跑团桌面应用">
 <meta property="og:description" content="AI 担任守秘人和 NPC，一个人也能开团。本地优先，数据存在自己机器上。macOS / Windows 桌面应用。">
 <!-- 部署到正式域名后，把下面两行换成绝对地址，否则部分平台抓不到预览图 -->
 <meta property="og:image" content="assets/shots/home.webp">
@@ -19,7 +19,7 @@
      size 留空 = 不显示体积
      ========================================================== -->
 <script>
-  window.TRPG_DOWNLOADS = {
+  window.COC_DOWNLOADS = {
     version: 'v0.1.0',
     released: '',
     mac: { url: '', size: '', note: 'macOS 11 及以上 · Apple Silicon / Intel' },
@@ -321,13 +321,13 @@
 
 <header class="topbar">
   <div class="wrap">
-    <a class="wordmark" href="#top">TRPG Player</a>
+    <a class="wordmark" href="#top">CoC Player</a>
     <nav class="topnav">
       <a href="#before" class="hide-sm">下载前先看</a>
       <a href="#features" class="hide-sm">能做什么</a>
       <a href="#start">怎么开跑</a>
       <a href="#limits" class="hide-sm">边界</a>
-      <a class="gh" href="https://github.com/jinziguan123/trpg-player" target="_blank" rel="noopener">
+      <a class="gh" href="https://github.com/jinziguan123/coc-player" target="_blank" rel="noopener">
         <svg class="icon"><use href="#i-github"/></svg>GitHub
       </a>
     </nav>
@@ -339,7 +339,7 @@
   <!-- ================= Hero ================= -->
   <section class="hero">
     <div class="wrap">
-      <h1>TRPG Player</h1>
+      <h1>CoC Player</h1>
       <p class="sub">AI 当守秘人的本地跑团桌面应用</p>
       <p class="pitch">
         AI 担任守秘人（KP）和所有 NPC，你一个人也能随时开一场团；
@@ -365,7 +365,7 @@
 
       <figure class="shot" style="margin-bottom:0">
         <img src="assets/shots/home.webp" width="2000" height="1250"
-             alt="TRPG Player 首页：体验新手团、开始游戏、上传模组三个入口，下方是给新人的跑团与 CoC 规则速览">
+             alt="CoC Player 首页：体验新手团、开始游戏、上传模组三个入口，下方是给新人的跑团与 CoC 规则速览">
       </figure>
       <p class="shot-cap">首页。第一次跑团的人可以直接从「体验新手团」进入原创示例短团《雾港失灯事件》。</p>
     </div>
@@ -423,7 +423,7 @@
           <p>
             安装包里只随附项目原创的示例短团。你自己的规则书 PDF、模组和角色卡由你导入，
             版权与授权也由你自己负责 —— 详见
-            <a href="https://github.com/jinziguan123/trpg-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
+            <a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
           </p>
         </div>
       </div>
@@ -572,7 +572,7 @@
             <span class="tag">部分</span>
             属性、建卡、技能与对抗检定、理智与疯狂发作、战斗、追逐、成长都由引擎确定性结算；
             <strong>孤注一掷、花费幸运目前只有 AI 裁量，没有引擎强制</strong>；不定性疯狂与魔法尚未实现。
-            逐项对照见<a href="https://github.com/jinziguan123/trpg-player/blob/master/docs/coc-rule-coverage.md" target="_blank" rel="noopener">规则覆盖矩阵</a>。
+            逐项对照见<a href="https://github.com/jinziguan123/coc-player/blob/master/docs/coc-rule-coverage.md" target="_blank" rel="noopener">规则覆盖矩阵</a>。
           </div>
         </div>
         <div class="ledger-row">
@@ -614,7 +614,7 @@
           <svg class="icon"><use href="#i-github"/></svg>
           <h3>GitHub 仓库</h3>
           <p>源码、开发文档、架构决策记录（ADR）和构建流程都在这里。欢迎提 issue。</p>
-          <p style="margin-top:12px"><a href="https://github.com/jinziguan123/trpg-player" target="_blank" rel="noopener">jinziguan123/trpg-player</a></p>
+          <p style="margin-top:12px"><a href="https://github.com/jinziguan123/coc-player" target="_blank" rel="noopener">jinziguan123/coc-player</a></p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-map"/></svg>
@@ -626,7 +626,7 @@
           <svg class="icon"><use href="#i-laptop"/></svg>
           <h3>自己构建</h3>
           <p>需要 Node 20.19+、pnpm、Python 3.10+ 和 Rust。Windows 包必须在 Windows 上构建。</p>
-          <p style="margin-top:12px"><a href="https://github.com/jinziguan123/trpg-player/blob/master/docs/packaging.md" target="_blank" rel="noopener">打包文档</a></p>
+          <p style="margin-top:12px"><a href="https://github.com/jinziguan123/coc-player/blob/master/docs/packaging.md" target="_blank" rel="noopener">打包文档</a></p>
         </div>
       </div>
 
@@ -635,9 +635,9 @@
         <div>
           <h3>许可证与内容边界</h3>
           <p>
-            项目代码采用 <a href="https://github.com/jinziguan123/trpg-player/blob/master/LICENSE" target="_blank" rel="noopener">Apache License 2.0</a>。
+            项目代码采用 <a href="https://github.com/jinziguan123/coc-player/blob/master/LICENSE" target="_blank" rel="noopener">Apache License 2.0</a>。
             这不自动授权规则书、商业模组、用户上传内容、字体、模型权重或其他第三方素材 ——
-            完整范围见<a href="https://github.com/jinziguan123/trpg-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
+            完整范围见<a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
             你导入的内容，版权与授权由你自己负责；本应用提供的导入、解析、索引和生成能力不改变输入内容的版权归属。
           </p>
         </div>
@@ -650,7 +650,7 @@
   <div class="wrap">
     <div class="foot-grid">
       <div>
-        <div class="wordmark" style="font-size:18px">TRPG Player</div>
+        <div class="wordmark" style="font-size:18px">CoC Player</div>
         <p style="margin:10px 0 0;max-width:340px">
           本地优先的 AI 跑团桌面应用。适合本机游玩、开发测试和可信局域网联机，
           不具备面向公网部署所需的账号体系与传输安全。
@@ -661,16 +661,16 @@
         <ul>
           <li><a href="#top">macOS 版</a></li>
           <li><a href="#top">Windows 版</a></li>
-          <li><a href="https://github.com/jinziguan123/trpg-player/blob/master/docs/packaging.md" target="_blank" rel="noopener">从源码构建</a></li>
+          <li><a href="https://github.com/jinziguan123/coc-player/blob/master/docs/packaging.md" target="_blank" rel="noopener">从源码构建</a></li>
         </ul>
       </div>
       <div>
         <h4>文档</h4>
         <ul>
-          <li><a href="https://github.com/jinziguan123/trpg-player" target="_blank" rel="noopener">GitHub 仓库</a></li>
-          <li><a href="https://github.com/jinziguan123/trpg-player/blob/master/docs/coc-rule-coverage.md" target="_blank" rel="noopener">规则覆盖矩阵</a></li>
-          <li><a href="https://github.com/jinziguan123/trpg-player/blob/master/LICENSE" target="_blank" rel="noopener">LICENSE</a></li>
-          <li><a href="https://github.com/jinziguan123/trpg-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a></li>
+          <li><a href="https://github.com/jinziguan123/coc-player" target="_blank" rel="noopener">GitHub 仓库</a></li>
+          <li><a href="https://github.com/jinziguan123/coc-player/blob/master/docs/coc-rule-coverage.md" target="_blank" rel="noopener">规则覆盖矩阵</a></li>
+          <li><a href="https://github.com/jinziguan123/coc-player/blob/master/LICENSE" target="_blank" rel="noopener">LICENSE</a></li>
+          <li><a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a></li>
         </ul>
       </div>
     </div>
@@ -684,7 +684,7 @@
 
 <script>
   (function () {
-    var D = window.TRPG_DOWNLOADS || {}
+    var D = window.COC_DOWNLOADS || {}
 
     function fill(id, conf) {
       var el = document.getElementById(id)

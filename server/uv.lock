@@ -948,7 +948,7 @@ wheels = [
 ]
 
 [[package]]
-name = "trpg-server"
+name = "coc-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
