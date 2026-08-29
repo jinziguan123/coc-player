@@ -1116,6 +1116,38 @@ body {
   }
 }
 
+/* 三栏之下横贯一条讲联机。为什么不做成第四栏：上面三栏讲的是「跑团是什么 / 规则怎么转 /
+   怎么开始」，联机答的是「和谁一起」，本就不是同一维度；再者每列已经只有 250–330px，
+   分四栏会把中间那张检定表压垮。横过来一条，高度只多约一行半。 */
+.home-coop {
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--color-border);
+}
+/* 标题与那句总说明同行：首页的预算是「一屏」，多一段独立脚注就多 55px */
+.home-coop-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.home-coop-head > span { flex: 1 1 22rem; min-width: 0; }
+.home-coop-grid {
+  display: grid;
+  gap: 0.5rem 1.2rem;
+  grid-template-columns: 1fr;
+  margin-top: 0.4rem;
+}
+@media (min-width: 900px) {
+  .home-coop-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.home-coop-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+.home-coop-item > svg { flex-shrink: 0; margin-top: 0.1rem; }
+
 /* 段首导语与段内小字：并排后每列只有 250–330px，字号压到 xs/2xs、行高收到 1.65
    才能在窄窗口里也把三栏塞进一屏（再低中文就开始糊成一片了）。 */
 .home-intro-lede {

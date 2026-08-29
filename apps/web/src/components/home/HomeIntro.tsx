@@ -5,6 +5,9 @@ import {
   GiRollingDices,
   GiHeartBottle,
   GiBrain,
+  GiMeeple,
+  GiWifiRouter,
+  GiWorld,
 } from 'react-icons/gi'
 
 /** 跑团的三个要素：谁在讲、谁在演、谁来裁决。先把「桌上没有画面」这件事说清楚。 */
@@ -49,6 +52,27 @@ const STEPS = [
   { title: '挑一个本子', desc: '走新手团最快；也可以上传自己的模组，交给 AI 解析成场景与线索。', to: '/modules', linkText: '模组库' },
   { title: '备一位调查员', desc: '车卡向导掷属性、选技能，也支持 Excel 导入或 AI 生成。', to: '/characters', linkText: '角色名录' },
   { title: '开局', desc: '建房拿房间码叫上朋友，空着的席位可以交给 AI 队友。', to: '/game', linkText: '开始游戏' },
+] as const
+
+/** 联机的三种玩法。写清楚各自的前置条件——「不同网络」那条要双方都用桌面版，
+ *  隧道跑在 Tauri 外壳的 Rust 进程里（api/netlink.ts），浏览器里根本没有它。
+ *  漏掉这句，朋友照着做到一半才发现用不了。 */
+const COOP = [
+  {
+    Icon: GiMeeple,
+    title: '一个人也能开',
+    desc: '空着的席位交给 AI 队友，不必等人凑齐。',
+  },
+  {
+    Icon: GiWifiRouter,
+    title: '同一个网络',
+    desc: '房主去设置里打开「允许局域网加入」（默认关着），其他人填主机地址和房间码。仅限自家或朋友的网络。',
+  },
+  {
+    Icon: GiWorld,
+    title: '隔着网络',
+    desc: '房主开「内置直连」发一条邀请码，对方粘进「加入房间」即可，不必另装联网工具（双方需桌面版）。',
+  },
 ] as const
 
 /** 首页介绍：跑团是什么、规则怎么转、在本项目里怎么玩。
@@ -152,6 +176,28 @@ export function HomeIntro() {
             进桌之后不用学操作：像聊天一样描述你的行动，KP 喊检定时投骰就行。
           </p>
         </div>
+      </div>
+
+      <div className="home-coop">
+        {/* 说明并进标题行而不是另起一段：首页的预算是「一屏」，一段独立脚注就要多占 55px */}
+        <div className="home-coop-head">
+          <h3 className="section-head" style={{ margin: 0 }}>和朋友一起玩</h3>
+          <span className="home-intro-note">
+            <strong style={{ color: 'var(--color-text-primary)' }}>房主的电脑就是主机</strong>
+            ：没有账号也没有服务器，存档留在那台机器上，AI 只从房主那端调用——只有房主需要配模型，其他人拎包入座。
+          </span>
+        </div>
+        <ul className="home-coop-grid m-0 list-none p-0">
+          {COOP.map(({ Icon, title, desc }) => (
+            <li key={title} className="home-coop-item">
+              <Icon size={17} color="var(--color-text-accent)" aria-hidden="true" />
+              <div>
+                <div className="home-intro-role-name">{title}</div>
+                <div className="home-intro-note">{desc}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   )
