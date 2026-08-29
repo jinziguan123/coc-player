@@ -332,7 +332,9 @@ def _record_npc_say_memory(
     audience_names: list[str],
 ) -> None:
     """世界记忆钩子 c：本轮落库的 NPC 台词（[SAY]/引号抽取）记入该 NPC 的互动史
-    ——「对谁说了话」。同时登记**临场 NPC**（模组未列出的开口龙套）供收容机制约束。
+    ——「对谁说了话」，其中当面否认知情/持有的那些另记入 disclaimed（见
+    ``world_memory.record_npc_disclaimer``，那是不许改口的硬约束，不是流水账）。
+    同时登记**临场 NPC**（模组未列出的开口龙套）供收容机制约束。
 
     只认得出 module.npcs 的说话人（队友台词不入 NPC 记忆）；同一 NPC 一轮只记一条，
     防止多句台词灌爆环形缓冲。说话人不在 module.npcs、也不是玩家角色/系统 → 视为临场 NPC，
@@ -354,6 +356,7 @@ def _record_npc_say_memory(
     _non_npc |= {"系统", "KP", "旁白"}
     picked: dict[str, str] = {}
     improv_names: list[str] = []
+    disclaimed: list[tuple[str, str]] = []
     for speaker, text in speaker_texts:
         sp = (speaker or "").strip()
         if not sp or not str(text or "").strip():
@@ -362,6 +365,10 @@ def _record_npc_say_memory(
         if nid:
             if nid not in picked:
                 picked[nid] = str(text).strip()
+            # 否认**逐句**扫，不跟着 picked 只看第一句：一轮里 NPC 常连说四五句，
+            # 「我不知道」往往出现在被追问的第三、四句上——正是最该守住的那句。
+            if world_memory.looks_like_disclaimer(text):
+                disclaimed.append((nid, str(text).strip()))
         elif sp not in _non_npc and sp not in improv_names:
             improv_names.append(sp)   # 非正典、非玩家、非系统 → 临场龙套
     if not picked and not improv_names:
@@ -377,6 +384,13 @@ def _record_npc_say_memory(
             db, game_session,
             lambda ws, _nid=nid, _text=text: world_memory.record_npc_interaction(
                 ws, _nid, seq, f"对{audience}说：{_text[:40]}",
+            ),
+        )
+    for nid, text in disclaimed:
+        _apply_world_memory(
+            db, game_session,
+            lambda ws, _nid=nid, _text=text: world_memory.record_npc_disclaimer(
+                ws, _nid, seq, _text,
             ),
         )
     for name in improv_names:

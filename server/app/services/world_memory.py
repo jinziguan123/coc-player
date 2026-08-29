@@ -4,7 +4,7 @@
 
 - ``clue_ledger``：只记录已被触碰的线索（未触碰 = 不在字典里），
   status 二态：partial（有所察觉）/ known（完全掌握），known 不降级。
-- ``npc_memory``：每个 NPC 的态度 / 承诺 / 谎言 / 最近互动，
+- ``npc_memory``：每个 NPC 的态度 / 承诺 / 谎言 / 当面否认过的事 / 最近互动，
   interactions 是环形缓冲（最多 ``MAX_NPC_INTERACTIONS`` 条），防 world_state 无限膨胀。
 
 本模块全部是「读-改-写 world_state dict」的纯函数：不触碰数据库、不修改入参，
@@ -14,8 +14,12 @@ JSON 列就地修改不被追踪，必须整体重新赋值才会落库。
 
 from __future__ import annotations
 
+import re
+
 # interactions 环形缓冲上限
 MAX_NPC_INTERACTIONS = 8
+# 「当面否认过的事」上限。比互动史小：这是给提示词看的硬约束清单，不是流水账。
+MAX_NPC_DISCLAIMERS = 6
 # 台账备注 / 互动摘要的截断长度（确定性来源直接截原文，不调 LLM 浓缩）
 NOTE_MAX_CHARS = 80
 
@@ -345,6 +349,54 @@ def record_npc_interaction(ws: dict, npc_id: str, seq: int, summary: str) -> dic
     interactions = list(entry.get("interactions") or [])
     interactions.append({"seq": int(seq or 0), "summary": summary})
     entry["interactions"] = interactions[-MAX_NPC_INTERACTIONS:]
+    memory[npc_id] = entry
+    ws["npc_memory"] = memory
+    return ws
+
+
+# NPC 当面否认知情/持有的常见说法。命中即记入 disclaimed。
+#
+# 为什么单独一类，而不是塞进 interactions 或 lies_told：
+# · interactions 是环形缓冲的流水账，几轮就被挤掉了；而「我不知道」一旦出口就是**永久**
+#   约束，挤掉等于默许改口。
+# · lies_told 要求判定「这是谎话」，可 NPC 说不知道时往往他自己也真不知道，不是撒谎。
+#
+# 真实事故：房东先说「哪家医院我一概不知道」，玩家追问一句，下一轮就成了「我托人打听过，
+# 他就关在那里面」——那句话其实是模组场景表 description 的直译。
+#
+# 宁滥勿缺：误记一条的代价只是提示词里多一行，漏记一条的代价是 NPC 当场翻脸不认账。
+_DISCLAIMER_RE = re.compile(
+    r"不知道|不清楚|不晓得|不认识|没听说|没见过|没见着|不曾见"
+    r"|答不上来|说不上来|说不清|讲不清|道不明"
+    r"|不记得|记不得|记不清|想不起"
+    r"|打听不到|查不到|问不出|无从查起"
+    r"|什么都没|一概不|没有的事|无可奉告|恕难奉告"
+)
+
+
+def looks_like_disclaimer(text) -> bool:
+    """这句台词是否在当面否认知情或持有某物。"""
+    return bool(_DISCLAIMER_RE.search(str(text or "")))
+
+
+def record_npc_disclaimer(ws: dict, npc_id: str, seq: int, text: str) -> dict:
+    """记下某 NPC 当面否认过的一件事（去重，最多 ``MAX_NPC_DISCLAIMERS`` 条）。
+
+    与 interactions 不同，满了是丢**最早**的：早期的否认往往关乎主线（「我没见过那个人」），
+    比刚刚的一句推脱更该守住。
+    """
+    npc_id = str(npc_id or "").strip()
+    text = _truncate(text)
+    if not npc_id or not text:
+        return ws
+    ws = dict(ws or {})
+    memory = dict(ws.get("npc_memory") or {})
+    entry = dict(memory.get(npc_id) or {})
+    items = list(entry.get("disclaimed") or [])
+    if any(str((it or {}).get("text") or "") == text for it in items):
+        return ws                      # 同一句话反复说，不重复记
+    items.append({"seq": int(seq or 0), "text": text})
+    entry["disclaimed"] = items[:MAX_NPC_DISCLAIMERS]
     memory[npc_id] = entry
     ws["npc_memory"] = memory
     return ws
@@ -684,6 +736,13 @@ def format_npc_memory_brief(ws: dict, npc_id: str) -> str:
     lies = [str(p) for p in (mem.get("lies_told") or []) if str(p).strip()]
     if lies:
         parts.append("说过的谎：" + "；".join(lies))
+    denied = [
+        str((d or {}).get("text") or "").strip()
+        for d in (mem.get("disclaimed") or [])
+    ]
+    denied = [d for d in denied if d]
+    if denied:
+        parts.append("当面否认过（不得改口说其实知道）：" + "；".join(denied))
     recent = [
         str((i or {}).get("summary") or "").strip()
         for i in (mem.get("interactions") or [])[-3:]
@@ -730,8 +789,9 @@ def format_npc_memory_section(ws: dict, npc_defs: list[dict] | None) -> str:
     if not lines:
         return ""
     return (
-        "【NPC 记忆】（各 NPC 记得的过往——他们记得对玩家的承诺与自己说过的谎，"
-        "其言行必须与之一致，不得凭空遗忘或自相矛盾）\n" + "\n".join(lines)
+        "【NPC 记忆】（各 NPC 记得的过往——他们记得对玩家的承诺、自己说过的谎，"
+        "以及当面否认过的事，其言行必须与之一致，不得凭空遗忘或自相矛盾。"
+        "**已经否认过的事不许改口**：要么当初就别让他否认，要么让他付出代价地承认自己先前瞒了）\n" + "\n".join(lines)
     )
 
 
@@ -754,6 +814,16 @@ def format_npc_self_memory(ws: dict, npc_id: str) -> str:
     lies = [str(p) for p in (mem.get("lies_told") or []) if str(p).strip()]
     if lies:
         lines.append("你说过的谎（不要自相矛盾，也不要轻易承认）：" + "；".join(lies))
+    denied = [
+        str((d or {}).get("text") or "").strip()
+        for d in (mem.get("disclaimed") or [])
+    ]
+    denied = [d for d in denied if d]
+    if denied:
+        lines.append(
+            "你当面否认过下面这些事（说出口就是定论，之后不能改口说其实知道、其实打听过）："
+            + "；".join(denied)
+        )
     interactions = [
         str((i or {}).get("summary") or "").strip()
         for i in (mem.get("interactions") or [])

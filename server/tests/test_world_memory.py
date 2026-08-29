@@ -475,6 +475,33 @@ def test_record_npc_say_memory_hook(db_factory):
     assert "厨房" in interactions[0]["summary"]
 
 
+def test_否认逐句扫而不是只跟着第一句(db_factory):
+    """诺特的真实场景：一轮连说四句，「我一概不知道」出现在第三句上。
+
+    interactions 刻意只记每个 NPC 的第一句（防多句灌爆环形缓冲）。否认要是也跟着
+    只看第一句，最该守住的那句就永远记不进去——事故里恰恰如此。
+    """
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    extracted = [
+        ("老管家", "马卡里奥一家是前年开春搬进去的，住了没多久就出了事。"),
+        ("老管家", "没过一个月，他太太也跟着不对劲了。"),
+        ("老管家", "哪家医院、孩子们如今在哪儿，我一概不知道。"),
+        ("约翰", "我也不知道该不该信他。"),          # 队友的否认不入 NPC 记忆
+    ]
+    chat_service._record_npc_say_memory(
+        db, session.id, session, module, extracted, [player.name, mate.name],
+    )
+    memory = (session.world_state or {}).get("npc_memory", {})
+    assert list(memory.keys()) == ["npc_butler"]      # 队友没被记成 NPC
+    entry = memory["npc_butler"]
+    assert len(entry["interactions"]) == 1            # 互动史仍是一轮一条
+    assert "前年开春" in entry["interactions"][0]["summary"]
+    assert [d["text"] for d in entry["disclaimed"]] == [
+        "哪家医院、孩子们如今在哪儿，我一概不知道。",
+    ]
+
+
 def test_match_single_npc_requires_unique_hit():
     module = Module(title="t", rule_system="coc", npcs=[
         {"id": "npc_a", "name": "老管家"},
@@ -1225,3 +1252,67 @@ def test_浓缩落库走追加而非重写(db_factory):
     texts = [c["text"] for c in world_memory.story_chapters(ws)]
     assert texts == ["既有的第一章。", "新的一章。"]   # 老章节没被重写
     assert ws["story_summary_seq"] > 0
+
+
+# ── NPC 当面否认过的事（disclaimed）─────────────────────────────
+#
+# 真实事故（鬼屋，房东史蒂芬·诺特）：他先说「哪家医院、孩子们如今在哪儿，我一概不知道」，
+# 玩家追问一句「这附近有什么疗养院」，下一轮就改口成「我托人打听过，维托里奥·马卡里奥
+# 先生就关在那里面」——那句话几乎是模组场景表 description 的直译。
+#
+# 已有的 promises/lies_told 都盖不住这类话：它不是承诺，模型也未必判它是谎
+# （NPC 说不知道时往往他自己也真不知道）。
+
+
+def test_否认句式识别():
+    assert world_memory.looks_like_disclaimer("哪家医院、孩子们如今在哪儿，我一概不知道。")
+    assert world_memory.looks_like_disclaimer("这我真答不上来。")
+    assert world_memory.looks_like_disclaimer("我手上干干净净的，什么都没留下。")
+    assert world_memory.looks_like_disclaimer("报纸上有没有登过，我翻了翻，没见着。")
+    assert not world_memory.looks_like_disclaimer("钥匙、地址、二十五美元定金，都在这儿。")
+
+
+def test_否认满了丢最早的():
+    """与 interactions 相反：早期否认多半关乎主线，比刚才一句推脱更该守住。"""
+    ws = {}
+    for i in range(10):
+        ws = world_memory.record_npc_disclaimer(ws, "npc_host", i, f"我不知道第{i}件事")
+    items = ws["npc_memory"]["npc_host"]["disclaimed"]
+    assert len(items) == world_memory.MAX_NPC_DISCLAIMERS
+    assert items[0]["text"] == "我不知道第0件事"      # 最早的留住
+    assert items[-1]["text"] == "我不知道第5件事"
+
+
+def test_同一句否认反复说不重复记():
+    ws = {}
+    ws = world_memory.record_npc_disclaimer(ws, "npc_host", 1, "我一概不知道")
+    ws = world_memory.record_npc_disclaimer(ws, "npc_host", 7, "我一概不知道")
+    assert len(ws["npc_memory"]["npc_host"]["disclaimed"]) == 1
+
+
+def test_否认不冲掉既有记忆():
+    ws = {"npc_memory": {"npc_host": {"attitude": "warming", "promises": ["答应写介绍信"]}}}
+    ws = world_memory.record_npc_disclaimer(ws, "npc_host", 3, "哪家医院我一概不知道")
+    entry = ws["npc_memory"]["npc_host"]
+    assert entry["attitude"] == "warming"
+    assert entry["promises"] == ["答应写介绍信"]
+
+
+def test_否认进KP上下文且写明不许改口():
+    ws = {"npc_memory": {"npc_butler": {
+        "disclaimed": [{"seq": 3, "text": "哪家医院我一概不知道"}],
+    }}}
+    section = world_memory.format_npc_memory_section(ws, [{"id": "npc_butler", "name": "管家"}])
+    assert "哪家医院我一概不知道" in section
+    # 光把话摆出来不够，得说清楚这是不可撤销的
+    assert "不许改口" in section or "不得改口" in section
+
+
+def test_否认进NPC自己的记忆():
+    ws = {"npc_memory": {"npc_butler": {
+        "disclaimed": [{"seq": 3, "text": "我没见过那位先生"}],
+    }}}
+    messages = build_npc_context("npc_butler", _mem_session(ws), _mem_module(), [])
+    system = messages[0]["content"]
+    assert "我没见过那位先生" in system
+    assert "不能改口" in system
