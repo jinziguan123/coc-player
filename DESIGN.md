@@ -13,7 +13,8 @@
 - [一、定位与架构约束](#一定位与架构约束)
 - [二、运行形态与部署拓扑](#二运行形态与部署拓扑)
 - [三、分层与模块边界](#三分层与模块边界)
-- [四、核心架构不变量](#四核心架构不变量)（含 [4.8 事实由系统渲染](#48-kp-上下文里的事实由系统渲染不由模型自述)）
+- [四、核心架构不变量](#四核心架构不变量)（含 [4.8 事实由系统渲染](#48-kp-上下文里的事实由系统渲染不由模型自述)、
+  [4.10 依赖方向](#410-依赖方向单向向下局部导入不是解法)）
 - [五、领域数据模型与状态分布](#五领域数据模型与状态分布)
 - [六、回合主链路](#六回合主链路)
 - [七、实时层：房间事件与重连](#七实时层房间事件与重连)
@@ -125,15 +126,19 @@ docs/adr/              架构决策记录；docs/plans/ 设计稿
 |---|---|---|
 | 应用入口 | `main.py` | 生命周期（种子初始化 → 迁移 → 维护模式）、来源校验中间件、限流、CORS、SPA 同源托管 |
 | 授权 | `api/deps.py` | 全部会话读写的统一授权语义：viewer / actor / token actor / host / manager / kp / local |
-| 会话域 | `session_service.py` | 席位与房间码、权限判定、事件仓库与序号；导航与回合态已拆出，此处保留同名 re-export |
+| 会话域 | `session_service.py`、`character_service.py` | 席位与房间码、权限判定、角色资产；导航与回合态已拆出，此处保留同名 re-export |
+| 事件仓库 | `event_store.py` | 事件分页、全文检索、序号分配与暂存发言——[§4.2](#42-一个事件只能有一个稳定序号) 的落地处 |
 | 导航域 | `navigation_service.py` | 谁在哪儿、哪些地点可见（`known_scene_ids`）、连通图与寻路（`find_scene_path`）、沙盘节点下发 |
 | 回合态 | `turn_state_service.py` | `turn_state` 的两件事：待投检定台账与回合确认锁——同属「本回合尚未定稿」的短生命周期状态 |
 | 回合编排 | `turn_orchestrator.py` | 回合用例编排：开场、玩家行动、检定申请、投骰续写、分头行动、战斗善后、前往、重新生成 |
-| 回合支撑 | `turn_context.py`、`turn_effects.py`、`planned_effects.py`、`turn_event_order.py`、`kp_tool_loop.py`、`narration_protocol.py`、`command_protocol.py`、`chat_event_writer.py`、`dice_runtime.py`、`team_turn_service.py` | 上下文取数与校验、确定性副作用、计划落实、事件重排、工具循环与文本兼容路径、叙事流协议、事件落库、骰子协议与检定对象解析、AI 队友回合决策 |
+| 回合支撑 | `turn_context.py`、`turn_effects.py`、`planned_effects.py`、`turn_event_order.py`、`kp_tool_loop.py`、`kp_actions.py`、`command_protocol.py`、`chat_event_writer.py`、`dice_runtime.py`、`team_turn_service.py` | 上下文取数与校验、确定性副作用、计划落实、事件重排、工具循环与文本兼容路径、NPC/战斗/追逐动作、事件落库、骰子协议与检定对象解析、AI 队友回合决策 |
 | 生成生命周期 | `generation_manager.py`、`generation_lifecycle.py`、`generation_housekeeping.py`、`ai_quota.py` | 单房间生成锁、错误分类、后台收尾任务、房间级配额 |
 | 战斗/追逐 | `combat_service.py`、`chase_service.py` + `rules/coc/combat.py`、`chase.py`、`positioning.py` | 可暂停状态机、先攻队列、方格站位与掩体、抽象距离轨 |
-| 模组/规则书 | `module_service.py`、`module_rag_service.py`、`rulebook_service.py`、`module_map_service.py`、`hex_map.py`、`excel_import.py` | 导入解析、结构化、切块与向量检索、六边形沙盘落位 |
+| 模组/规则书 | `module_service.py`、`module_rag_service.py`、`rulebook_service.py`、`module_map_service.py`、`module_ocr.py`、`module_map_vision.py`、`hex_map.py`、`excel_import.py` | 导入解析、结构化、切块与向量检索、扫描件 OCR 与地图视觉定位、六边形沙盘落位 |
+| 向量检索共用件 | `vector_search.py` | float32 BLOB 上的余弦 top-k；规则书 RAG、模组 RAG、事件召回三处共用同一份实现 |
 | 世界状态 | `world_state.py`、`world_memory.py`、`event_recall.py` | `world_state` 的唯一读写口径；线索台账与 NPC 记忆；本局事件原文的向量索引与回捞 |
+| 运行统计 | `session_stats.py`、`rag_stats.py` | token 用量与 RAG 调用统计（已拆出 `world_state`，见 [§5.1](#51-持久化模型)） |
+| 角色资产 | `inventory_service.py`、`ai_character_service.py`、`image_store.py` | 活库存增删、AI 建卡、生成图片落盘 |
 | 规则可选项 | `rule_options_service.py` | 模组默认 → 村规 → 本局覆盖三层合并，读时交给引擎（见 [§8.1](#81-规则系统插件化)） |
 | 身份呈现 | `npc_identity.py` | NPC 在机制界面上的对外称呼（玩家还没认出来的东西不替 KP 报名） |
 | 配图 | `module_image_service.py`、`illustration_service.py`、`character_avatar.py`、`style_presets.py` | 提示词两段式装配、画风预设与词数预算、图片缓存与自愈 |
@@ -144,7 +149,28 @@ docs/adr/              架构决策记录；docs/plans/ 设计稿
 | 收尾产物 | `recap_service.py`、`replay_service.py`、`growth_service.py`、`promote_service.py`、`character_chronicle.py` | 战报、团记导出、成长结算、临场 NPC 转正、把本局经历写成第三人称小传存回角色卡 |
 | 新手引导 | `onboarding_service.py`、`content/onboarding.py` | 内置新手团的剧本内容与开局；界面侧是就地导览（遮罩挖洞高亮真实元素），不是另造一套演示数据 |
 
-### 3.3 前端模块边界
+### 3.3 AI 层模块边界
+
+`ai/` 不是「调模型的地方」，而是**模型能力的抽象层**：把「哪家供应商、什么协议、走不走
+工具调用」这些差异关在这一层里，上面的编排服务只面对稳定接口。
+
+| 模块簇 | 主要文件 | 职责 |
+|---|---|---|
+| 供应商抽象 | `provider.py`、`providers/`、`llm_factory.py` | `LLMProvider` 接口与流式增量；OpenAI 兼容 / Anthropic 实现；按激活配置选谁 |
+| 配置存储 | `profile_store.py` | `ai_settings.json` 的读写与「当前该用哪个配置」（见 [§8.2](#82-llm-provider-抽象)） |
+| 上下文装配 | `context.py` | KP / NPC / 队友三种上下文的取数、分段装配与预算（见 [§9](#九记忆检索与上下文预算)） |
+| 回合三段式 | `turn_planner.py`、`turn_validator.py` | 先裁定（低温 JSON）、落库前安检（见[第二部分](#kp-回合三段式规划器turnplan与校验器turnvalidator)） |
+| 工具注册表 | `tools.py` | 工具名 → schema + loop 行为的单一真源（`check`/`lookup`/`npc`/`state` 四类） |
+| 子代理 | `agents/` | KP / NPC / 队友 / 战斗 / 幕后五个代理（见 [§8.4](#84-子代理)） |
+| 长文产物 | `story_summarizer.py`、`recap.py`、`replay.py`、`npc_promote.py` | 滚动摘要、战报、团记改写、临场 NPC 转正——都是 fail-open 的增强件 |
+| 生图 | `image_gen.py`、`comfyui.py` | 文生图后端抽象与 ComfyUI 客户端；与文本 Provider 完全解耦 |
+| 嵌入 | `embedding.py` | `Embedder` 抽象，默认 fastembed + bge-small-zh，纯 ONNX 全本地 |
+| 节奏与文本 | `director_signals.py`、`text_guard.py` | 确定性节奏提示（规划器的软输入）、近重复检测纯函数 |
+| 用量归集 | `usage_tracker.py` | contextvar 按 asyncio task 隔离地累加一次生成里所有 LLM 调用的 usage |
+
+提示词单独放 `ai/prompts/`：它们是**内容**不是代码，改动频繁且要能被整段替换。
+
+### 3.4 前端模块边界
 
 | 模块 | 位置 | 职责 |
 |---|---|---|
@@ -246,6 +272,28 @@ REST 契约的单一真源是 `server/openapi.json`，前端类型由 `pnpm api:
 `services/room_events.py`，通过只为契约存在的 `GET /sessions/{id}/live/_schema`
 （`response_model=RoomEvent`）进入 OpenAPI。CI 对两份生成物做 `git diff --exit-code`，
 后端改了契约却没重新生成会直接失败。见 [ADR-006](docs/adr/ADR-006-OpenAPI生成与兼容策略.md)。
+
+### 4.10 依赖方向单向向下，局部导入不是解法
+
+```text
+api/  →  services/（编排）  →  ai/  →  services/（领域）  →  models/ · rules/
+```
+
+`services/` 里其实住着**两层**：会 import `ai/` 的是编排服务（`turn_orchestrator`、
+`kp_tool_loop`…），不 import 的是领域服务（`session_service`、`world_memory`、`hex_map`…），
+`ai/` 夹在两者中间。看懂这一点，「`ai/` 和 `services/` 好像成环了」的错觉就消失了——
+它不是环，是一个目录装了两层。
+
+硬性禁令（`tests/test_layering.py` 逐条检查，**局部导入照查**）：
+`ai/` 与 `services/` 不得 import `api/`；`models/`、`rules/`、`schemas/` 不得 import
+上面任何一层。
+
+> **「局部导入避免循环依赖」是个危险的创可贴。** 本项目曾在 `ai/` 下留着六处这样的注释，
+> 而那个循环**根本不存在**——注释比代码旧了几个月，没人发现，因为没有任何东西检查方向。
+> 真遇到环，说明有东西放错了层（AI 配置曾住在 `api/ai_settings`，于是 `services/` 与 `ai/`
+> 都得反过来 import `api/`；解法是把它抽成 `ai/profile_store`，不是加局部导入）。
+> 确因导入期副作用而必须局部导入的（如 `usage_tracker` 里的 `SessionLocal`），
+> 写清真实理由。
 
 ## 五、领域数据模型与状态分布
 
@@ -587,7 +635,8 @@ Tauri 窗口 → loader 加载页
 | 叙事流金标准 | 状态机行为逐字节不变 + 产物与分词方式无关 | `tests/test_narration_protocol_golden.py`（快照 `fixtures/narration_golden.json`） |
 | KP 上下文金标准 | 装配的小节不被悄悄增删；「哪些局面该有哪些小节」写成人读得懂的断言 | `tests/test_kp_context_golden.py` |
 | 双路径等价性 | 工具路径与文本兼容路径落库结果一致；新增 `state` 类工具没补用例即失败 | `tests/test_kp_dual_path_equivalence.py` |
-| 页面行数红线 | 大页面组件只降不升，撞线时该拆而不是调大数字 | `apps/web/src/test/fileSize.test.ts` |
+| 依赖方向 | [§4.10](#410-依赖方向单向向下局部导入不是解法) 的分层禁令，局部导入照查 | `tests/test_layering.py` |
+| 页面行数红线 | 大页面组件只降不升，撞线时该拆而不是调大数字 | `apps/web/tests/fileSize.test.ts` |
 
 前两者是**特征化测试**（characterization）：断言的不是「什么才对」，而是「当前就是这样」。
 更新快照必须是**有意**改行为，且要在提交信息里说明改了哪几条——它们的全部价值就在于
