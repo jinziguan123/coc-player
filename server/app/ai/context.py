@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import NamedTuple
 
 from app.ai import profile_store
@@ -131,6 +133,8 @@ def _active_context_budget() -> int:
     except Exception:
         logger.exception("解析自适应上下文预算失败，回落下限")
         return CONTEXT_TOKEN_BUDGET
+
+
 # 输出预留：KP 叙事（尤其分头/多 NPC/tool-loop 多步）可能较长，给足避免被截断。
 RESERVE_FOR_OUTPUT = 7000
 # 系统提示上限。此处装的不只是静态裁定手册，还有模组数据 + RAG 原文摘录（可达 ~2700 token）
@@ -944,28 +948,40 @@ def _format_combat_result(result: dict) -> str:
     )
 
 
-def build_kp_context(
+
+@dataclass
+class _KPFacts:
+    """取数阶段的产物：装配一轮 KP 上下文所需的全部「已解析事实」。
+
+    把「取数」与「装配」分开的理由：这两件事的失败形态完全不同。取数错了是**事实错**
+    （给了 KP 一份不存在的场景、漏掉一个在场 NPC）；装配错了是**取舍错**（某小节被预算
+    裁掉、或不该出现时出现了）。挤在一个函数里时，这两类问题看起来长得一模一样。
+    """
+
+    scene_id: str | None
+    flags: set[str]
+    scenes: list[dict]
+    npcs: list[dict]
+    current_scene: dict | None
+    current_scene_text: str
+    is_opening: bool
+    player_info: str
+    npcs_info: str
+    clues_info: str
+    clues_for_ledger: list[dict]
+    teammates: list[Character]
+
+
+def _collect_kp_facts(
     session: GameSession,
     module: Module,
     player_char: Character,
     events: list[EventLog],
-    teammates: list[Character] | None = None,
-    rules_lookup_enabled: bool = False,
-    viewer_scene_id: str | None = None,
-    module_excerpts: list[dict] | None = None,
-    module_lookup_enabled: bool = False,
-    rule_excerpts: list[dict] | None = None,
-    context_budget: int | None = None,
-    recall_enabled: bool = False,
-    scene_groups: list[dict] | None = None,
-    rule_options_block: str = "",
-) -> list[dict]:
-    # 本函数保持纯粹（不触数据库）：module_excerpts 是调用方（turn_orchestrator）检索好的
-    # 模组原文片段（[{"text", ...}]），未建索引/检索失败时传 None → 行为与无此特性时完全一致。
-    # rule_excerpts 同一模式：调用方按本轮回合类型检索好的规则书片段，None → 行为不变。
-    # 分头行动时，每个分组各以「该组所在场景」为锚构建上下文（current_scene / 可见 NPC / 线索 /
-    # 场景清单），否则所有分组都拿到主角场景的资料，KP 只能把主角场景重复叙述一遍。
-    # 默认 None → 回落主角所在场景（session.current_scene_id），非分头场景行为不变。
+    teammates: list[Character] | None,
+    viewer_scene_id: str | None,
+) -> _KPFacts:
+    """① 取数：把模组/会话解析成「当前样貌」——按 flags 解析场景与 NPC、算可见范围、
+    组装玩家侧资料、给当前场景补上连通与地貌。纯读，不触数据库。"""
     scene_id = viewer_scene_id or session.current_scene_id
     # 剧情状态：按已激活 flags 把场景/NPC 解析到「当前样貌」，再喂给 KP（向后兼容：无 states 即原样）。
     flags = _active_flags(session)
@@ -1073,213 +1089,390 @@ def build_kp_context(
         biome = hex_map.biome_label(current_scene)
         if biome:
             current_scene_text += f"\n【场景地貌】{biome}——环境细节与出入动线应与地貌相符。"
-
-    # ── 分段装配（顺序 = 缓存稳定性，不是阅读顺序）────────────────────────
-    # 静态段先入列：身份 + 裁定手册整场逐字不变，是缓存命中的主体（约 1.5 万估算 token）。
-    segs: list[_Seg] = [
-        _Seg(KP_IDENTITY_SECTION.format(rule_system=module.rule_system.upper()),
-             SYS_TIER_STATIC, 0, "identity"),
-        _Seg(KP_MANUAL_SECTION, SYS_TIER_STATIC, 0, "manual"),
-    ]
-
-    # 文风（玩家指定）：本局 > 模组默认 > 不指定。本局内不变，故归静态段；
-    # 紧跟手册之后是有意的——段内那句「上文的全部叙事纪律优先级更高」要指得着手册。
-    style_prompt = style_presets.narrative_style_prompt(
-        getattr(session, "narrative_style", ""),
-        getattr(module, "default_narrative_style", ""),
+    return _KPFacts(
+        scene_id=scene_id, flags=flags, scenes=scenes, npcs=npcs, current_scene=current_scene, current_scene_text=current_scene_text, is_opening=is_opening, player_info=player_info, npcs_info=npcs_info, clues_info=clues_info, clues_for_ledger=clues_for_ledger, teammates=teammates,
     )
-    if style_prompt:
-        segs.append(_Seg(NARRATIVE_STYLE_SECTION.format(style=style_prompt),
-                         SYS_TIER_STATIC, 0, "narrative-style"))
 
-    # 村规与桌面约定（调用方经 rule_options_service.context_block 备好）：本局内不变 →
-    # 静态段。同样紧跟手册，理由同文风——段内那句「不得松动叙事纪律」要指得着手册。
-    # 全默认且没写约定时调用方给的是空串，一个 token 也不多花。
-    if rule_options_block:
-        segs.append(_Seg(rule_options_block, SYS_TIER_STATIC, 0, "village-rules"))
 
-    # 「建议前往」能力：本子有多个 location 场景（真有地方可去）才广告——只有一处的本子
-    # 广告了也只会诱导 KP 发无效指令。与「有规则书才广告 [RULE_LOOKUP]」同一取舍。
-    # 广告本身整场不变（静态）；当前封着的路每轮都可能变，拆成独立的易变段。
-    has_multi_location = sum(
-        1 for x in scenes if (x.get("kind") or "location") == "location"
-    ) > 1
-    if has_multi_location:
-        segs.append(_Seg(TRAVEL_SUGGEST_INSTRUCTION, SYS_TIER_STATIC, 0, "travel-suggest"))
+@dataclass
+class _SectionCtx:
+    """小节生成器共享的入参袋 + 若干「算一次给多处用」的派生量。
 
-    # 能力广告：是否广告取决于本场配置（有无规则书 / 索引 / 队友），会话内恒定 → 静态段。
-    if rules_lookup_enabled:
-        segs.append(_Seg(RULE_LOOKUP_INSTRUCTION, SYS_TIER_STATIC, 0, "rule-lookup-ad"))
-    if module_lookup_enabled:
-        segs.append(_Seg(MODULE_LOOKUP_INSTRUCTION, SYS_TIER_STATIC, 0, "module-lookup-ad"))
-    # 只在**确实已经有剧情被浓缩掉**时才广告回想能力：局刚开始时全部历史都还逐字躺在
-    # 上下文里，广告了只会诱导 KP 去查它眼前就有的东西。
-    if recall_enabled:
-        segs.append(_Seg(RECALL_HISTORY_INSTRUCTION, SYS_TIER_STATIC, 0, "recall-ad"))
-    if not is_opening and _has_plot_state(module):
-        segs.append(_Seg(PLOT_FLAG_INSTRUCTION, SYS_TIER_STATIC, 0, "plot-flag-ad"))
+    每个小节只从这里取自己要的东西，彼此不知道对方存在——这正是拆成注册表要买到的性质：
+    新增一节 = 写一个 ``_sec_*`` 函数 + 在 ``_SECTIONS`` 里加一行，不必读懂另外二十节。
+    """
 
-    # ── 半静态段：模组数据随已访问场景/剧情推进而变，同一轮内稳定 ──────────
-    segs.append(_Seg(
-        KP_MODULE_DATA_SECTION.format(
-            module_title=module.title,
-            module_description=module.description,
-            world_setting=_format_json_compact(module.world_setting),
-            scenes_info=_compact_scenes(scenes, scene_id),
-            current_scene=current_scene_text,
-            plot_state=_format_plot_state(flags, module.triggers),
-            npcs_info=npcs_info,
-            clues_info=clues_info,
-            player_info=player_info,
-        ),
-        SYS_TIER_SEMI, 0, "module-data",
-    ))
+    facts: _KPFacts
+    session: GameSession
+    module: Module
+    player_char: Character
+    events: list[EventLog]
+    rules_lookup_enabled: bool
+    module_lookup_enabled: bool
+    recall_enabled: bool
+    module_excerpts: list[dict] | None
+    rule_excerpts: list[dict] | None
+    scene_groups: list[dict] | None
+    viewer_scene_id: str | None
+    rule_options_block: str
 
-    # 幕后真相（守秘人专属）：模组解析出的全局真相，KP 据此裁定与铺垫（带守密措辞）。
-    truth = (getattr(module, "truth", "") or "").strip()
-    if truth:
-        segs.append(_Seg(TRUTH_SECTION.format(truth=truth), SYS_TIER_SEMI, 0, "truth"))
+    def __post_init__(self) -> None:
+        self._cache: dict[str, str] = {}
 
-    # ── 易变段：每轮都可能变，排在最后，不污染上面两块的缓存前缀 ───────────
-    # 队伍位置：**每轮无条件全量渲染**（开场除外，那时还没人动过）。权重给得高——
-    # 它是「这一轮该演谁、演在哪」的前提，被裁掉的话 KP 又只能从对话历史里猜分头。
-    if not is_opening and scene_groups:
-        lines = "\n".join(
-            f"- {g.get('label') or '未知地点'}：{'、'.join(g.get('members') or []) or '（无人）'}"
-            for g in scene_groups
-        )
-        if len(scene_groups) >= 2:
-            focus = next(
-                (g.get("label") for g in scene_groups if g.get("scene_id") == viewer_scene_id),
-                scene_groups[0].get("label") or "",
-            )
-            note = PARTY_SPLIT_NOTE.format(focus=focus)
-        else:
-            note = PARTY_TOGETHER_NOTE
-        segs.append(_Seg(PARTY_LOCATION_SECTION.format(lines=lines, note=note),
-                         SYS_TIER_VOLATILE, 2, "party-location"))
+    @property
+    def has_multi_location(self) -> bool:
+        """本子是否真有多个可去的地点——只有一处时广告「建议前往」只会诱导无效指令。"""
+        return sum(
+            1 for x in self.facts.scenes if (x.get("kind") or "location") == "location"
+        ) > 1
 
-    if has_multi_location:
-        blocked = world_memory.blocked_scenes(session.world_state or {})
-        if blocked:
-            by_id = {x.get("id"): x for x in scenes if x.get("id")}
-            items = "；".join(
-                f"{(by_id.get(sid) or {}).get('title') or (by_id.get(sid) or {}).get('name') or sid}"
-                f"（{why or '未说明'}）"
-                for sid, why in blocked.items()
-            )
-            segs.append(_Seg(BLOCKED_PATHS_SECTION.format(blocked_list=items),
-                             SYS_TIER_VOLATILE, 15, "blocked-paths"))
+    def _memo(self, key: str, make) -> str:
+        """世界记忆的三段各被读两次（自身 + mark-seen 的存在性判断），算一次即可。"""
+        if key not in self._cache:
+            self._cache[key] = make() or ""
+        return self._cache[key]
 
-    # 模组原文摘录（被动注入）：调用方检索好才有，独立小节、带泄密警示措辞。
-    # priority 较高（先丢）：丢了 KP 还能用 [MODULE_LOOKUP] 主动查回来，是可恢复的损失。
-    if module_excerpts:
-        excerpt_body = _format_module_excerpts(module_excerpts)
-        if excerpt_body:
-            segs.append(_Seg(MODULE_EXCERPT_SECTION.format(excerpts=excerpt_body),
-                             SYS_TIER_VOLATILE, 40, "module-excerpts"))
-
-    # 规则要点（被动注入）：调用方按本轮回合类型检索好的规则书片段，裁定时优先遵此执行。
-    # 截断/编号复用模组摘录逻辑，单块上限见 RULE_EXCERPT_MAX_CHARS（top-3 合计 ≈1800 token）。
-    # 同样可被 [RULE_LOOKUP] 找回，故与模组摘录同档先丢。
-    if rule_excerpts:
-        rule_body = _format_module_excerpts(rule_excerpts, max_chars=RULE_EXCERPT_MAX_CHARS)
-        if rule_body:
-            segs.append(_Seg(RULE_EXCERPT_SECTION.format(excerpts=rule_body),
-                             SYS_TIER_VOLATILE, 40, "rule-excerpts"))
-
-    # 刚结束的战斗/追逐：把结果摘要注入，供 KP 续写余波（读一次后由生成流程清除 combat_result）。
-    # priority=0：一次性内容，本轮不给就永远没了，KP 无从续写余波。
-    combat_result = (session.world_state or {}).get("combat_result")
-    if combat_result:
-        segs.append(_Seg(_format_combat_result(combat_result),
-                         SYS_TIER_VOLATILE, 0, "combat-result"))
-
-    # **正在进行**的战斗：此前上下文里只有「刚结束」的摘要，没有「正打着」这回事。
-    # 于是开战后紧接着的主线生成（如投骰后续写）对战斗态一无所知，会按自由叙事的惯性
-    # 把冲突就地收尾——实测写出「怪物松开手缩回门里、队友把人拉走」，而战斗轮仍在推进，
-    # 下一条就是那只已经缩回去的东西扑上来。叙事与机制当场对撞。priority=0：本轮不给就没了。
-    combat_now = _format_combat_in_progress(session)
-    if combat_now:
-        segs.append(_Seg(combat_now, SYS_TIER_VOLATILE, 0, "combat-active"))
-
-    # 手书（Handouts）：仅当模组尚有未发放的手书、且非开场时，广告 [HANDOUT] 发放能力，
-    # 附「id｜类型｜标题｜发放条件」清单（正文不进上下文——发放时才由系统展开成卡片）。
-    # 已发放的经线索台账自然呈现；无手书的旧模组不注入本小节（行为不变）。
-    if not is_opening:
-        try:
-            handout_list = _format_handout_list(module, session)
-            if handout_list:
-                segs.append(_Seg(HANDOUT_INSTRUCTION.format(handout_list=handout_list),
-                                 SYS_TIER_VOLATILE, 25, "handouts"))
-        except Exception:
-            logger.exception("手书清单注入 KP 上下文失败（忽略）")
-
-    # 世界记忆注入（fail-open：格式化异常绝不阻塞出牌，退回无记忆行为）——
-    # 线索台账：玩家已 known/partial 的线索清单 + 「已列出的不要重复安排发现桥段、
-    # 未列出的一律视为未发现」的硬指示；NPC 记忆：各 NPC 的态度/承诺/谎言/最近互动，
-    # 保证 NPC 言行跨回合一致。台账/记忆为空时不注入任何小节（与现状完全一致）。
-    # 台账 priority 最低（最后才丢）：丢了 KP 会重复安排已发现线索的发现桥段，玩家直接可感。
-    if not is_opening:
-        try:
-            ws_mem = session.world_state or {}
+    def clue_ledger_text(self) -> str:
+        def make() -> str:
             clue_names = {
-                c.get("id"): c.get("name")
-                for c in (module.clues or []) if c.get("id")
+                c.get("id"): c.get("name") for c in (self.module.clues or []) if c.get("id")
             }
-            char_names = {player_char.id: player_char.name}
-            char_names.update({t.id: t.name for t in teammates})
-            ledger_section = world_memory.format_clue_ledger_section(
-                ws_mem, clue_names, char_names, visible_clues=clues_for_ledger,
+            char_names = {self.player_char.id: self.player_char.name}
+            char_names.update({t.id: t.name for t in self.facts.teammates})
+            return world_memory.format_clue_ledger_section(
+                self.session.world_state or {}, clue_names, char_names,
+                visible_clues=self.facts.clues_for_ledger,
             )
-            if ledger_section:
-                segs.append(_Seg("\n\n" + ledger_section,
-                                 SYS_TIER_VOLATILE, 5, "clue-ledger"))
-            # 当前场景机制点进度：events 逐条标已发生/未发生。与台账同档 priority——
-            # 丢了 KP 就会把「被手拖进屋」这类一次性桥段照着场景 JSON 重演一遍，玩家直接可感。
-            led = session.ledger
+        return self._memo("clue_ledger", make)
+
+    def scene_events_text(self) -> str:
+        def make() -> str:
+            led = self.session.ledger
             seen = led.scene_events_seen if led else {}
-            scene_events_section = world_memory.format_scene_events_section(
-                seen, current_scene,
-            )
-            if scene_events_section:
-                segs.append(_Seg("\n\n" + scene_events_section,
-                                 SYS_TIER_VOLATILE, 5, "scene-events"))
-            # 记账指令：两张清单至少有一张在场时才广告——没有清单可标，说明也没意义。
-            if ledger_section or scene_events_section:
-                segs.append(_Seg(MARK_SEEN_INSTRUCTION,
-                                 SYS_TIER_VOLATILE, 6, "mark-seen"))
-            npc_memory_section = world_memory.format_npc_memory_section(ws_mem, npcs)
-            if npc_memory_section:
-                segs.append(_Seg("\n\n" + npc_memory_section,
-                                 SYS_TIER_VOLATILE, 10, "npc-memory"))
-        except Exception:
-            logger.exception("世界记忆注入 KP 上下文失败（忽略）")
+            return world_memory.format_scene_events_section(seen, self.facts.current_scene)
+        return self._memo("scene_events", make)
 
-    # 幕后动态（Backstage Clock）：最近几条幕后推演事件注入 KP 专属小节。
-    # fail-open：格式化异常绝不阻塞出牌；无幕后事件时不注入（与现状完全一致）。
-    if not is_opening:
+
+# ── 各小节的生成器：返回小节正文，返回 None/"" 即「本轮不注入」──────────────
+#
+# 命名一律 _sec_<注册名>。函数体里不要出现 tier/priority——那两项属于「排在哪、先丢谁」，
+# 是装配策略，写在下面的注册表里；小节自己只回答「这一轮有没有内容要说」。
+
+def _sec_identity(c: _SectionCtx) -> str:
+    return KP_IDENTITY_SECTION.format(rule_system=c.module.rule_system.upper())
+
+
+def _sec_manual(c: _SectionCtx) -> str:
+    return KP_MANUAL_SECTION
+
+
+def _sec_narrative_style(c: _SectionCtx) -> str | None:
+    """文风（玩家指定）：本局 > 模组默认 > 不指定。"""
+    style_prompt = style_presets.narrative_style_prompt(
+        getattr(c.session, "narrative_style", ""),
+        getattr(c.module, "default_narrative_style", ""),
+    )
+    return NARRATIVE_STYLE_SECTION.format(style=style_prompt) if style_prompt else None
+
+
+def _sec_village_rules(c: _SectionCtx) -> str | None:
+    """村规与桌面约定（调用方经 rule_options_service.context_block 备好）。
+
+    全默认且没写约定时调用方给的是空串，一个 token 也不多花。
+    """
+    return c.rule_options_block or None
+
+
+def _sec_travel_suggest(c: _SectionCtx) -> str | None:
+    return TRAVEL_SUGGEST_INSTRUCTION if c.has_multi_location else None
+
+
+def _sec_rule_lookup_ad(c: _SectionCtx) -> str | None:
+    return RULE_LOOKUP_INSTRUCTION if c.rules_lookup_enabled else None
+
+
+def _sec_module_lookup_ad(c: _SectionCtx) -> str | None:
+    return MODULE_LOOKUP_INSTRUCTION if c.module_lookup_enabled else None
+
+
+def _sec_recall_ad(c: _SectionCtx) -> str | None:
+    """只在**确实已经有剧情被浓缩掉**时才广告回想能力：局刚开始时全部历史都还逐字躺在
+    上下文里，广告了只会诱导 KP 去查它眼前就有的东西。"""
+    return RECALL_HISTORY_INSTRUCTION if c.recall_enabled else None
+
+
+def _sec_plot_flag_ad(c: _SectionCtx) -> str | None:
+    return PLOT_FLAG_INSTRUCTION if (not c.facts.is_opening and _has_plot_state(c.module)) else None
+
+
+def _sec_module_data(c: _SectionCtx) -> str:
+    f = c.facts
+    return KP_MODULE_DATA_SECTION.format(
+        module_title=c.module.title,
+        module_description=c.module.description,
+        world_setting=_format_json_compact(c.module.world_setting),
+        scenes_info=_compact_scenes(f.scenes, f.scene_id),
+        current_scene=f.current_scene_text,
+        plot_state=_format_plot_state(f.flags, c.module.triggers),
+        npcs_info=f.npcs_info,
+        clues_info=f.clues_info,
+        player_info=f.player_info,
+    )
+
+
+def _sec_truth(c: _SectionCtx) -> str | None:
+    """幕后真相（守秘人专属）：模组解析出的全局真相，KP 据此裁定与铺垫（带守密措辞）。"""
+    truth = (getattr(c.module, "truth", "") or "").strip()
+    return TRUTH_SECTION.format(truth=truth) if truth else None
+
+
+def _sec_party_location(c: _SectionCtx) -> str | None:
+    """队伍位置：**每轮无条件全量渲染**（开场除外，那时还没人动过）。
+
+    权重给得高——它是「这一轮该演谁、演在哪」的前提，被裁掉的话 KP 又只能从对话历史里
+    猜分头（那正是《鬼屋》那次故障的形态）。
+    """
+    if c.facts.is_opening or not c.scene_groups:
+        return None
+    groups = c.scene_groups
+    lines = "\n".join(
+        f"- {g.get('label') or '未知地点'}：{'、'.join(g.get('members') or []) or '（无人）'}"
+        for g in groups
+    )
+    if len(groups) >= 2:
+        focus = next(
+            (g.get("label") for g in groups if g.get("scene_id") == c.viewer_scene_id),
+            groups[0].get("label") or "",
+        )
+        note = PARTY_SPLIT_NOTE.format(focus=focus)
+    else:
+        note = PARTY_TOGETHER_NOTE
+    return PARTY_LOCATION_SECTION.format(lines=lines, note=note)
+
+
+def _sec_blocked_paths(c: _SectionCtx) -> str | None:
+    if not c.has_multi_location:
+        return None
+    blocked = world_memory.blocked_scenes(c.session.world_state or {})
+    if not blocked:
+        return None
+    by_id = {x.get("id"): x for x in c.facts.scenes if x.get("id")}
+    items = "；".join(
+        f"{(by_id.get(sid) or {}).get('title') or (by_id.get(sid) or {}).get('name') or sid}"
+        f"（{why or '未说明'}）"
+        for sid, why in blocked.items()
+    )
+    return BLOCKED_PATHS_SECTION.format(blocked_list=items)
+
+
+def _sec_module_excerpts(c: _SectionCtx) -> str | None:
+    """模组原文摘录（被动注入）：调用方检索好才有，独立小节、带泄密警示措辞。"""
+    if not c.module_excerpts:
+        return None
+    body = _format_module_excerpts(c.module_excerpts)
+    return MODULE_EXCERPT_SECTION.format(excerpts=body) if body else None
+
+
+def _sec_rule_excerpts(c: _SectionCtx) -> str | None:
+    """规则要点（被动注入）：调用方按本轮回合类型检索好的规则书片段，裁定时优先遵此执行。"""
+    if not c.rule_excerpts:
+        return None
+    body = _format_module_excerpts(c.rule_excerpts, max_chars=RULE_EXCERPT_MAX_CHARS)
+    return RULE_EXCERPT_SECTION.format(excerpts=body) if body else None
+
+
+def _sec_combat_result(c: _SectionCtx) -> str | None:
+    """刚结束的战斗/追逐结果摘要，供 KP 续写余波（读一次后由生成流程清除）。"""
+    result = (c.session.world_state or {}).get("combat_result")
+    return _format_combat_result(result) if result else None
+
+
+def _sec_combat_active(c: _SectionCtx) -> str | None:
+    """**正在进行**的战斗：不给的话主线 KP 会按自由叙事的惯性把冲突就地收尾，
+    而战斗轮仍在推进——叙事与机制当场对撞。"""
+    return _format_combat_in_progress(c.session) or None
+
+
+def _sec_handouts(c: _SectionCtx) -> str | None:
+    """手书清单：广告 [HANDOUT] 发放能力（正文不进上下文，发放时才展开成卡片）。"""
+    if c.facts.is_opening:
+        return None
+    handout_list = _format_handout_list(c.module, c.session)
+    return HANDOUT_INSTRUCTION.format(handout_list=handout_list) if handout_list else None
+
+
+def _sec_clue_ledger(c: _SectionCtx) -> str | None:
+    """线索台账：已 known/partial 的线索清单 + 「未列出的一律视为未发现」的硬指示。
+
+    priority 最低（最后才丢）：丢了 KP 会重复安排已发现线索的发现桥段，玩家直接可感。
+    """
+    if c.facts.is_opening:
+        return None
+    text = c.clue_ledger_text()
+    return "\n\n" + text if text else None
+
+
+def _sec_scene_events(c: _SectionCtx) -> str | None:
+    """当前场景机制点进度：events 逐条标已发生/未发生。
+
+    丢了 KP 就会把「被手拖进屋」这类一次性桥段照着场景 JSON 重演一遍，玩家直接可感。
+    """
+    if c.facts.is_opening:
+        return None
+    text = c.scene_events_text()
+    return "\n\n" + text if text else None
+
+
+def _sec_mark_seen(c: _SectionCtx) -> str | None:
+    """记账指令：两张清单至少有一张在场时才广告——没有清单可标，说明也没意义。"""
+    if c.facts.is_opening:
+        return None
+    if not (c.clue_ledger_text() or c.scene_events_text()):
+        return None
+    return MARK_SEEN_INSTRUCTION
+
+
+def _sec_npc_memory(c: _SectionCtx) -> str | None:
+    """NPC 记忆：各 NPC 的态度/承诺/谎言/最近互动，保证 NPC 言行跨回合一致。"""
+    if c.facts.is_opening:
+        return None
+    text = world_memory.format_npc_memory_section(c.session.world_state or {}, c.facts.npcs)
+    return "\n\n" + text if text else None
+
+
+def _sec_backstage(c: _SectionCtx) -> str | None:
+    """幕后动态（Backstage Clock）：最近几条幕后推演事件注入 KP 专属小节。"""
+    if c.facts.is_opening:
+        return None
+    text = _format_backstage_section(c.events)
+    return "\n\n" + text if text else None
+
+
+def _sec_improvised_npcs(c: _SectionCtx) -> str | None:
+    """临场角色名单：让 KP 每回合都看得见谁是龙套，据「临场角色纪律」保持其边缘。"""
+    if c.facts.is_opening:
+        return None
+    text = _improvised_npc_section(c.session)
+    return "\n\n" + text if text else None
+
+
+class _Section(NamedTuple):
+    """一条小节注册项：``(注册名, 缓存档位, 丢弃优先级, 生成器, 是否 fail-open)``。
+
+    ``tier`` 决定排在哪一块（静态 → 半静态 → 易变），``priority`` 决定超预算时谁先被丢
+    （数越大越先丢，0 = 绝不主动丢）。两者都属于装配策略，刻意留在注册表里而不是生成器体内。
+    """
+
+    name: str
+    tier: int
+    priority: int
+    build: Callable[["_SectionCtx"], str | None]
+    fail_open: bool = False
+
+
+# 注册表顺序 = 实际装配顺序 = 缓存稳定性顺序，**不是**阅读顺序：
+# 静态段整场逐字不变，是 prompt caching 命中的主体；任何易变内容混进去都会让它后面的
+# 全部前缀失效。新增小节前先想清它属于哪一档。
+_SECTIONS: tuple[_Section, ...] = (
+    # ── 静态：整场逐字不变（约 1.5 万估算 token，缓存命中的主体）──
+    _Section("identity",          SYS_TIER_STATIC, 0, _sec_identity),
+    _Section("manual",            SYS_TIER_STATIC, 0, _sec_manual),
+    # 文风与村规紧跟手册是有意的——段内那句「上文的叙事纪律优先级更高」要指得着手册。
+    _Section("narrative-style",   SYS_TIER_STATIC, 0, _sec_narrative_style),
+    _Section("village-rules",     SYS_TIER_STATIC, 0, _sec_village_rules),
+    # 能力广告：是否广告取决于本场配置（有无规则书 / 索引 / 多地点），会话内恒定。
+    _Section("travel-suggest",    SYS_TIER_STATIC, 0, _sec_travel_suggest),
+    _Section("rule-lookup-ad",    SYS_TIER_STATIC, 0, _sec_rule_lookup_ad),
+    _Section("module-lookup-ad",  SYS_TIER_STATIC, 0, _sec_module_lookup_ad),
+    _Section("recall-ad",         SYS_TIER_STATIC, 0, _sec_recall_ad),
+    _Section("plot-flag-ad",      SYS_TIER_STATIC, 0, _sec_plot_flag_ad),
+    # ── 半静态：模组数据随已访问场景/剧情推进而变，同一轮内稳定 ──
+    _Section("module-data",       SYS_TIER_SEMI, 0, _sec_module_data),
+    _Section("truth",             SYS_TIER_SEMI, 0, _sec_truth),
+    # ── 易变：每轮都可能变，排在最后，不污染上面两块的缓存前缀 ──
+    # 注意：**这里的先后就是最终拼接的先后**（_assemble_system 按 tier 分组后按本表顺序
+    # 直接 join），不要为了「按 priority 排整齐」而调换——priority 只管超预算时谁先被丢。
+    _Section("party-location",    SYS_TIER_VOLATILE, 2,  _sec_party_location),
+    _Section("blocked-paths",     SYS_TIER_VOLATILE, 15, _sec_blocked_paths),
+    # 摘录类排在丢弃序列最前（priority 最大）：丢了 KP 还能用 [MODULE_LOOKUP] /
+    # [RULE_LOOKUP] 主动取回，是可恢复的损失。
+    _Section("module-excerpts",   SYS_TIER_VOLATILE, 40, _sec_module_excerpts),
+    _Section("rule-excerpts",     SYS_TIER_VOLATILE, 40, _sec_rule_excerpts),
+    # 一次性内容：本轮不给就永远没了，priority=0 绝不主动丢。
+    _Section("combat-result",     SYS_TIER_VOLATILE, 0,  _sec_combat_result),
+    _Section("combat-active",     SYS_TIER_VOLATILE, 0,  _sec_combat_active),
+    _Section("handouts",          SYS_TIER_VOLATILE, 25, _sec_handouts,        True),
+    # 世界记忆四节：台账 priority 最低（最后才丢）——丢了 KP 会重复安排已发现线索的
+    # 发现桥段，玩家直接可感。
+    _Section("clue-ledger",       SYS_TIER_VOLATILE, 5,  _sec_clue_ledger,     True),
+    _Section("scene-events",      SYS_TIER_VOLATILE, 5,  _sec_scene_events,    True),
+    _Section("mark-seen",         SYS_TIER_VOLATILE, 6,  _sec_mark_seen,       True),
+    _Section("npc-memory",        SYS_TIER_VOLATILE, 10, _sec_npc_memory,      True),
+    _Section("backstage",         SYS_TIER_VOLATILE, 30, _sec_backstage,       True),
+    _Section("improvised-npcs",   SYS_TIER_VOLATILE, 35, _sec_improvised_npcs, True),
+)
+
+
+def _build_system_segments(
+    facts: _KPFacts,
+    session: GameSession,
+    module: Module,
+    player_char: Character,
+    events: list[EventLog],
+    *,
+    rules_lookup_enabled: bool,
+    viewer_scene_id: str | None,
+    module_excerpts: list[dict] | None,
+    module_lookup_enabled: bool,
+    rule_excerpts: list[dict] | None,
+    recall_enabled: bool,
+    scene_groups: list[dict] | None,
+    rule_options_block: str,
+) -> list[_Seg]:
+    """② 装配：遍历 ``_SECTIONS`` 注册表，把有内容的小节排进 segs。
+
+    ``fail_open=True`` 的小节由这里统一兜异常——它们都是「增强件」，格式化炸了只该退化为
+    没有该小节，绝不能阻塞出牌。**兜异常的粒度是每节一个**：此前世界记忆那四节共用一个
+    try/except，线索台账格式化一抛异常会连坐 scene-events 与 npc-memory 一起消失。
+    按 §4.8「静默的缺席无法与本来就没有区分」，这种连坐正是最该避免的形态。
+    """
+    ctx = _SectionCtx(
+        facts=facts, session=session, module=module, player_char=player_char, events=events,
+        rules_lookup_enabled=rules_lookup_enabled,
+        module_lookup_enabled=module_lookup_enabled,
+        recall_enabled=recall_enabled,
+        module_excerpts=module_excerpts, rule_excerpts=rule_excerpts,
+        scene_groups=scene_groups, viewer_scene_id=viewer_scene_id,
+        rule_options_block=rule_options_block,
+    )
+    segs: list[_Seg] = []
+    for spec in _SECTIONS:
         try:
-            backstage_section = _format_backstage_section(events)
-            if backstage_section:
-                segs.append(_Seg("\n\n" + backstage_section,
-                                 SYS_TIER_VOLATILE, 30, "backstage"))
+            text = spec.build(ctx)
         except Exception:
-            logger.exception("幕后动态注入 KP 上下文失败（忽略）")
+            if not spec.fail_open:
+                raise
+            logger.exception("小节 %s 注入 KP 上下文失败（忽略）", spec.name)
+            continue
+        if text:
+            segs.append(_Seg(text, spec.tier, spec.priority, spec.name))
+    return segs
 
-    # 临场角色名单：此前 KP 临时添加的开口龙套（world_state.improvised_npcs）。
-    # 让 KP 每回合都看得见谁是龙套，据「临场角色纪律」保持其边缘（不带线索、不升级）。
-    if not is_opening:
-        try:
-            improv_section = _improvised_npc_section(session)
-            if improv_section:
-                segs.append(_Seg("\n\n" + improv_section,
-                                 SYS_TIER_VOLATILE, 35, "improvised-npcs"))
-        except Exception:
-            logger.exception("临场角色名单注入 KP 上下文失败（忽略）")
 
+
+def _assemble_kp_messages(
+    facts: _KPFacts,
+    segs: list[_Seg],
+    session: GameSession,
+    module: Module,
+    player_char: Character,
+    events: list[EventLog],
+    context_budget: int | None,
+) -> list[dict]:
+    """③ 消息组装：系统段落 → 一条 system 消息（附 prompt-cache 分块），再把事件流按
+    预算铺成对话消息，并插入回合交接、导演微调等临场提示。"""
+    teammates = facts.teammates
     party_char_ids = {player_char.id} | {t.id for t in teammates}
-
     # 装配：超预算按 priority 整段丢弃（不再从尾部切字符——那会切碎模组 JSON）。
     #
     # 系统提示仍是**一条** system 消息，`content` 是完整正文（下游一切读取口径不变）；
@@ -1430,6 +1623,48 @@ def build_kp_context(
             })
 
     return messages
+
+
+def build_kp_context(
+    session: GameSession,
+    module: Module,
+    player_char: Character,
+    events: list[EventLog],
+    teammates: list[Character] | None = None,
+    rules_lookup_enabled: bool = False,
+    viewer_scene_id: str | None = None,
+    module_excerpts: list[dict] | None = None,
+    module_lookup_enabled: bool = False,
+    rule_excerpts: list[dict] | None = None,
+    context_budget: int | None = None,
+    recall_enabled: bool = False,
+    scene_groups: list[dict] | None = None,
+    rule_options_block: str = "",
+) -> list[dict]:
+    # 本函数保持纯粹（不触数据库）：module_excerpts 是调用方（turn_orchestrator）检索好的
+    # 模组原文片段（[{"text", ...}]），未建索引/检索失败时传 None → 行为与无此特性时完全一致。
+    # rule_excerpts 同一模式：调用方按本轮回合类型检索好的规则书片段，None → 行为不变。
+    # 分头行动时，每个分组各以「该组所在场景」为锚构建上下文（current_scene / 可见 NPC / 线索 /
+    # 场景清单），否则所有分组都拿到主角场景的资料，KP 只能把主角场景重复叙述一遍。
+    # 默认 None → 回落主角所在场景（session.current_scene_id），非分头场景行为不变。
+    facts = _collect_kp_facts(
+        session, module, player_char, events, teammates, viewer_scene_id,
+    )
+    segs = _build_system_segments(
+        facts, session, module, player_char, events,
+        rules_lookup_enabled=rules_lookup_enabled,
+        viewer_scene_id=viewer_scene_id,
+        module_excerpts=module_excerpts,
+        module_lookup_enabled=module_lookup_enabled,
+        rule_excerpts=rule_excerpts,
+        recall_enabled=recall_enabled,
+        scene_groups=scene_groups,
+        rule_options_block=rule_options_block,
+    )
+    return _assemble_kp_messages(
+        facts, segs, session, module, player_char, events, context_budget,
+    )
+
 
 
 def build_npc_context(
