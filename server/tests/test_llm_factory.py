@@ -5,17 +5,15 @@ import json
 
 import pytest
 
-from app.ai import llm_factory
+from app.ai import llm_factory, profile_store
 from app.ai.llm_factory import OpenAICompatProvider
 
 
 def test_get_llm_uses_active_profile(monkeypatch):
     """AI 唯一真源是设置页的激活 profile；据其协议/密钥建 Provider（不再读 .env）。"""
-    from app.api import ai_settings
-
     monkeypatch.setattr(
-        ai_settings, "load_active_profile",
-        lambda: ai_settings.AIProfile(
+        profile_store, "load_active_profile",
+        lambda: profile_store.AIProfile(
             name="p", protocol="openai", model_name="deepseek-chat",
             base_url="https://x", api_key="sk-live",
         ),
@@ -26,27 +24,24 @@ def test_get_llm_uses_active_profile(monkeypatch):
 
 def test_get_llm_raises_without_active_profile(monkeypatch):
     """无激活配置时抛可读错误（此前会静默回退 .env——.env 已移除）。"""
-    from app.api import ai_settings
 
-    monkeypatch.setattr(ai_settings, "load_active_profile", lambda: None)
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: None)
     with pytest.raises(ValueError, match="未配置可用的 AI 模型"):
         llm_factory.get_llm()
 
 
 def test_get_fast_llm_uses_fast_profile_or_falls_back(monkeypatch):
     """标记了快模型 → 副任务走它；未标记 → 回落激活配置（旧行为）。"""
-    from app.api import ai_settings
-
     monkeypatch.setattr(
-        ai_settings, "load_active_profile",
-        lambda: ai_settings.AIProfile(
+        profile_store, "load_active_profile",
+        lambda: profile_store.AIProfile(
             name="主", protocol="openai", model_name="big-model",
             base_url="https://x", api_key="sk-main",
         ),
     )
     monkeypatch.setattr(
-        ai_settings, "load_fast_profile",
-        lambda: ai_settings.AIProfile(
+        profile_store, "load_fast_profile",
+        lambda: profile_store.AIProfile(
             name="快", protocol="openai", model_name="small-model",
             base_url="https://y", api_key="sk-fast", is_fast=True,
         ),
@@ -54,7 +49,7 @@ def test_get_fast_llm_uses_fast_profile_or_falls_back(monkeypatch):
     fast = llm_factory.get_fast_llm()
     assert isinstance(fast, OpenAICompatProvider) and fast.model == "small-model"
 
-    monkeypatch.setattr(ai_settings, "load_fast_profile", lambda: None)
+    monkeypatch.setattr(profile_store, "load_fast_profile", lambda: None)
     assert llm_factory.get_fast_llm().model == "big-model"   # 回落主模型
 
 
@@ -121,7 +116,6 @@ class _401Resp:
         import httpx
         raise httpx.HTTPStatusError("unauth", request=httpx.Request("POST", "http://x"),
                                     response=httpx.Response(401))
-
 
 async def _nosleep(_):
     pass

@@ -3,7 +3,7 @@
 import httpx
 from fastapi.testclient import TestClient
 
-from app.api import ai_settings
+from app.ai import profile_store
 from app.main import app
 from app.services.chat_service import _classify_llm_error
 
@@ -12,20 +12,20 @@ def test_ai_status_reports_configured(monkeypatch):
     c = TestClient(app)
 
     # 无激活配置 → 未就绪
-    monkeypatch.setattr(ai_settings, "load_active_profile", lambda: None)
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: None)
     assert c.get("/api/settings/ai/status").json()["configured"] is False
 
     # 有激活配置但缺 key → 未就绪
     monkeypatch.setattr(
-        ai_settings, "load_active_profile",
-        lambda: ai_settings.AIProfile(name="x", model_name="m", api_key=""),
+        profile_store, "load_active_profile",
+        lambda: profile_store.AIProfile(name="x", model_name="m", api_key=""),
     )
     assert c.get("/api/settings/ai/status").json()["configured"] is False
 
     # 有 key + 模型名 → 就绪
     monkeypatch.setattr(
-        ai_settings, "load_active_profile",
-        lambda: ai_settings.AIProfile(name="主配置", model_name="deepseek-chat", api_key="sk-x"),
+        profile_store, "load_active_profile",
+        lambda: profile_store.AIProfile(name="主配置", model_name="deepseek-chat", api_key="sk-x"),
     )
     body = c.get("/api/settings/ai/status").json()
     assert body["configured"] is True and body["name"] == "主配置"
@@ -46,21 +46,21 @@ def test_classify_llm_error_maps_status_and_network():
 def test_set_fast_profile_toggle(monkeypatch, tmp_path):
     """快模型标记：单选（设 A 清 B）、重复点同一个即取消；load_fast_profile 读取一致。"""
     c = TestClient(app)
-    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    monkeypatch.setattr(profile_store, "SETTINGS_FILE", tmp_path / "ai_settings.json")
 
     a = c.post("/api/settings/ai/profiles", json={"name": "A", "model_name": "m1", "api_key": "k1"}).json()
     b = c.post("/api/settings/ai/profiles", json={"name": "B", "model_name": "m2", "api_key": "k2"}).json()
 
     assert c.post(f"/api/settings/ai/profiles/{a['id']}/set-fast").json()["is_fast"] is True
-    assert ai_settings.load_fast_profile().name == "A"
+    assert profile_store.load_fast_profile().name == "A"
 
     # 换标 B → A 被清
     c.post(f"/api/settings/ai/profiles/{b['id']}/set-fast")
-    assert ai_settings.load_fast_profile().name == "B"
+    assert profile_store.load_fast_profile().name == "B"
 
     # 重复点 B → 取消标记，回落主模型（load_fast_profile None）
     resp = c.post(f"/api/settings/ai/profiles/{b['id']}/set-fast").json()
-    assert resp["is_fast"] is False and ai_settings.load_fast_profile() is None
+    assert resp["is_fast"] is False and profile_store.load_fast_profile() is None
 
     assert c.post("/api/settings/ai/profiles/nonexistent/set-fast").status_code == 404
 
@@ -68,22 +68,22 @@ def test_set_fast_profile_toggle(monkeypatch, tmp_path):
 def test_set_vision_profile_toggle(monkeypatch, tmp_path):
     """视觉模型标记：单选、可取消，与快模型互不干扰（两个槽位各自独立）。"""
     c = TestClient(app)
-    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    monkeypatch.setattr(profile_store, "SETTINGS_FILE", tmp_path / "ai_settings.json")
 
     a = c.post("/api/settings/ai/profiles", json={"name": "A", "model_name": "m1", "api_key": "k1"}).json()
     b = c.post("/api/settings/ai/profiles", json={"name": "B", "model_name": "qwen-vl-max", "api_key": "k2"}).json()
 
     assert c.post(f"/api/settings/ai/profiles/{b['id']}/set-vision").json()["is_vision"] is True
-    assert ai_settings.load_vision_profile().name == "B"
+    assert profile_store.load_vision_profile().name == "B"
 
     # 两个槽位互不干扰：A 标快模型不影响 B 的视觉标记
     c.post(f"/api/settings/ai/profiles/{a['id']}/set-fast")
-    assert ai_settings.load_fast_profile().name == "A"
-    assert ai_settings.load_vision_profile().name == "B"
+    assert profile_store.load_fast_profile().name == "A"
+    assert profile_store.load_vision_profile().name == "B"
 
     # 重复点 B → 取消，回落主模型
     resp = c.post(f"/api/settings/ai/profiles/{b['id']}/set-vision").json()
-    assert resp["is_vision"] is False and ai_settings.load_vision_profile() is None
+    assert resp["is_vision"] is False and profile_store.load_vision_profile() is None
 
     assert c.post("/api/settings/ai/profiles/nonexistent/set-vision").status_code == 404
 
@@ -93,7 +93,7 @@ def test_vision_llm_routes_to_vision_slot(monkeypatch, tmp_path):
     from app.ai import llm_factory
 
     c = TestClient(app)
-    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    monkeypatch.setattr(profile_store, "SETTINGS_FILE", tmp_path / "ai_settings.json")
     c.post("/api/settings/ai/profiles", json={"name": "带团", "model_name": "deepseek-chat", "api_key": "k1"})
     vis = c.post(
         "/api/settings/ai/profiles",
@@ -112,7 +112,7 @@ def test_reveal_key_and_duplicate_profile(monkeypatch, tmp_path):
     """列表/增改响应里 key 恒掩码；/key 端点返回明文供「显示/复制」；
     /duplicate 完整拷贝（含真实 key）、命名「X 副本」、不激活不标快。"""
     c = TestClient(app)
-    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    monkeypatch.setattr(profile_store, "SETTINGS_FILE", tmp_path / "ai_settings.json")
 
     a = c.post("/api/settings/ai/profiles", json={
         "name": "A", "model_name": "m", "api_key": "sk-verylongsecret1234",
@@ -139,7 +139,7 @@ def test_update_image_profile_persists_comfyui_fields(monkeypatch, tmp_path):
     生图配置独立后这几个字段搬到了 image-profiles，原来的 bug 形态在新端点上同样可能复发。
     """
     c = TestClient(app)
-    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    monkeypatch.setattr(profile_store, "SETTINGS_FILE", tmp_path / "ai_settings.json")
 
     p = c.post("/api/settings/ai/image-profiles", json={"name": "本地出图"}).json()
     r = c.put(f"/api/settings/ai/image-profiles/{p['id']}", json={
@@ -149,7 +149,7 @@ def test_update_image_profile_persists_comfyui_fields(monkeypatch, tmp_path):
         "comfyui_workflow": '{"1": {}}',
     })
     assert r.status_code == 200, r.text
-    saved = ai_settings._load_image_profiles()[0]
+    saved = profile_store._load_image_profiles()[0]
     assert saved.backend == "comfyui"
     assert saved.comfyui_base_url == "http://172.30.18.236:8188"
     assert saved.comfyui_workflow == '{"1": {}}'
@@ -164,7 +164,7 @@ def test_视觉槽位即视觉能力(monkeypatch, tmp_path):
     from app.ai import llm_factory
 
     c = TestClient(app)
-    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    monkeypatch.setattr(profile_store, "SETTINGS_FILE", tmp_path / "ai_settings.json")
     c.post("/api/settings/ai/profiles", json={"name": "带团", "model_name": "deepseek-chat", "api_key": "k1"})
     vis = c.post("/api/settings/ai/profiles", json={
         "name": "看图", "model_name": "qwen3.7-plus", "api_key": "k2",

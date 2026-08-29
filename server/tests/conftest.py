@@ -9,8 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.database as database
-from app.api import ai_settings
 from app.models.base import Base
+from app.ai import profile_store
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,7 @@ def isolate_ai_settings(tmp_path, monkeypatch):
     指向空目录 → ``load_active_profile()`` 返回 None → 窗口回落 65536 默认值，
     即这些用例被写下时的那套预算。要测特定窗口的行为，用例自行 monkeypatch。
     """
-    monkeypatch.setattr(ai_settings, "SETTINGS_FILE", tmp_path / "ai_settings.json")
+    monkeypatch.setattr(profile_store, "SETTINGS_FILE", tmp_path / "ai_settings.json")
 
 
 @pytest.fixture(autouse=True)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.ai import profile_store
 from app.ai.context import (
     RESERVE_FOR_OUTPUT,
     _estimate_tokens,
@@ -37,8 +38,6 @@ def _status(ratio: float) -> str:
 
 def estimate_session_context(db: Session, session_id: str) -> dict | None:
     """返回该会话下一回合 KP 上下文的 token 预估与窗口占比；会话/模组缺失返回 None。"""
-    from app.api.ai_settings import load_active_profile, resolve_context_window
-
     session = db.get(GameSession, session_id)
     if session is None:
         return None
@@ -60,8 +59,8 @@ def estimate_session_context(db: Session, session_id: str) -> dict | None:
     # 先解析当前模型窗口 → 自适应组装预算，让预估与实际跑团用同一套预算（否则事件裁剪口径不一致）。
     # 展示的是**校准后**的实际生效预算：build_kp_context 内部同样会乘这个系数，
     # 显示未校准的基准值会和真实裁剪行为对不上。
-    profile = load_active_profile()
-    context_window = resolve_context_window(profile)
+    profile = profile_store.load_active_profile()
+    context_window = profile_store.resolve_context_window(profile)
     base_budget = resolve_context_budget(context_window)
     ws_for_scale = session.world_state or {}
     context_budget = effective_context_budget(ws_for_scale, base_budget)

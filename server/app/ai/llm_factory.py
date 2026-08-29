@@ -4,6 +4,7 @@
 为兼容既有导入，仍从此处再导出 OpenAICompatProvider。
 """
 
+from app.ai import profile_store
 from app.ai.provider import LLMProvider
 from app.ai.providers.openai_compat import OpenAICompatProvider
 
@@ -45,9 +46,7 @@ def get_llm() -> LLMProvider:
     AI 配置的唯一真源是设置页（ai_settings.json 的激活 profile）；不再有 .env 回退。
     没有激活配置时抛出可读错误，由生成路径兜成「请到设置页配置 AI」的提示。
     """
-    from app.api.ai_settings import load_active_profile
-
-    profile = load_active_profile()
+    profile = profile_store.load_active_profile()
     if not profile:
         raise ValueError("未配置可用的 AI 模型：请到设置页添加并激活一个 AI 配置。")
     return _provider_from_profile(profile)
@@ -63,9 +62,7 @@ def get_fast_llm() -> LLMProvider:
     早先图快让队友走快模型，结果演出来发木、同桌感塌掉）。快模型只接产结构、
     玩家看不到的那些活。
     """
-    from app.api.ai_settings import load_fast_profile
-
-    profile = load_fast_profile()
+    profile = profile_store.load_fast_profile()
     if not profile:
         return get_llm()
     return _provider_from_profile(profile)
@@ -81,9 +78,7 @@ def get_vision_llm() -> LLMProvider:
     模型也换成多模态」——多数人不会为了导一次模组这么折腾，于是图文模组直接解析不了。
     拆开之后，视觉模型可以是云端的（Qwen-VL/GPT-4o/Gemini），也可以是本机跑的。
     """
-    from app.api.ai_settings import load_vision_profile
-
-    profile = load_vision_profile()
+    profile = profile_store.load_vision_profile()
     if not profile:
         return get_llm()
     # 把某个配置**放进视觉槽位**这个动作，本身就是用户在断言「这个模型会看图」。

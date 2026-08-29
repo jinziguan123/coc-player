@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.services import world_memory
+
 # 聚光灯：在最近这么多条事件里统计每个玩家角色的「出场」次数
 SPOTLIGHT_WINDOW = 30
 # 某角色 0 次出场、而他人出场达到此阈值 → 判定其被冷落
@@ -207,8 +209,6 @@ def compute_promotable_npcs(world_state: dict) -> list[str]:
     ``mentions`` 是登记侧已有的计数——出场够多次就说明这个龙套在桌上站住了，
     值得提醒把他固化成有卡的配角。
     """
-    from app.services import world_memory
-
     improv = (world_state or {}).get("improvised_npcs") or {}
     out: list[str] = []
     for name, entry in improv.items():

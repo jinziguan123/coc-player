@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.ai_settings import AIProfile, resolve_context_window
+from app.ai.profile_store import AIProfile, resolve_context_window
 from app.models.base import Base
 from app.models.character import Character
 from app.models.event_log import EventLog  # noqa: F401 — 注册建表

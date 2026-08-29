@@ -25,6 +25,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
 from app.services import chat_service, combat_service, npc_identity, session_service
+from app.ai import profile_store
 
 
 # ── 测试基建 ──────────────────────────────────────────────────────────────
@@ -404,11 +405,10 @@ def _patch_runtime(monkeypatch, db_factory, llm):
 
 def test_switch_off_uses_legacy_path(db_factory, monkeypatch):
     """开关关闭（默认）：走旧路径（KPAgent.stream），不碰 stream_chat。"""
-    import app.api.ai_settings as ai_settings
 
     llm = _FakeToolLLM([[_text("不该被用到。")]])
     _patch_runtime(monkeypatch, db_factory, llm)
-    monkeypatch.setattr(ai_settings, "load_active_profile", lambda: _Profile(False))
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: _Profile(False))
 
     db = db_factory()
     session_id, session, module, hero = _seed(db)
@@ -426,11 +426,10 @@ def test_switch_off_uses_legacy_path(db_factory, monkeypatch):
 
 def test_switch_on_uses_agent_loop(db_factory, monkeypatch):
     """开关开启且 Provider 支持工具：走 agent loop（stream_chat + 工具清单 + 工具模式提示）。"""
-    import app.api.ai_settings as ai_settings
 
     llm = _FakeToolLLM([[_text("loop 路径叙事。")]])
     _patch_runtime(monkeypatch, db_factory, llm)
-    monkeypatch.setattr(ai_settings, "load_active_profile", lambda: _Profile(True))
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: _Profile(True))
 
     db = db_factory()
     session_id, session, module, hero = _seed(db)
@@ -617,14 +616,13 @@ def test_tool_loop_group_check_suspends_after_narration_for_human_roll(
     db_factory, monkeypatch,
 ):
     """公开群检遇到真人时，先保留已生成旁白，再发待投请求并暂停后续叙事。"""
-    import app.api.ai_settings as ai_settings
 
     llm = _FakeToolLLM([
         [_text("门厅一片死寂。"), _call("dice_check", {"skill": "聆听", "chars": "在场"})],
         [_text("什么都没听见。")],
     ])
     _patch_runtime(monkeypatch, db_factory, llm)
-    monkeypatch.setattr(ai_settings, "load_active_profile", lambda: _Profile(True))
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: _Profile(True))
 
     db = db_factory()
     session_id, session, module, hero = _seed(db)

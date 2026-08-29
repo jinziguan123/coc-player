@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy.orm import Session
 
-from app.ai import turn_planner
+from app.ai import profile_store, turn_planner
 from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import _CHECK_TURN_TEMPERATURE, KPAgent
 from app.ai.context import build_kp_context
@@ -151,8 +151,7 @@ def _tool_loop_active(llm) -> bool:
     开关**默认开启**（use_tool_calls=true）；无激活档/读取异常一律回退旧路径（fail-open）。
     """
     try:
-        from app.api.ai_settings import load_active_profile
-        profile = load_active_profile()
+        profile = profile_store.load_active_profile()
     except Exception:
         return False
     if not profile or not getattr(profile, "use_tool_calls", True):

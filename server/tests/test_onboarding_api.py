@@ -1,3 +1,4 @@
+from app.ai import profile_store
 from types import SimpleNamespace
 
 import pytest
@@ -5,7 +6,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api import ai_settings
 from app.database import get_db
 from app.main import app
 from app.models import Base
@@ -29,8 +29,7 @@ def client(tmp_path, monkeypatch):
 
     app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr(
-        ai_settings,
-        "load_active_profile",
+        profile_store, "load_active_profile",
         lambda: SimpleNamespace(api_key="test-key", model_name="test-model"),
     )
     try:
@@ -47,7 +46,7 @@ def test_start_requires_player_token(client):
 
 
 def test_start_requires_active_ai_profile(client, monkeypatch):
-    monkeypatch.setattr(ai_settings, "load_active_profile", lambda: None)
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: None)
 
     response = client.post(
         "/api/onboarding/start",

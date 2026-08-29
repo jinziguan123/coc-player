@@ -14,6 +14,8 @@ from __future__ import annotations
 import contextvars
 import logging
 
+from app.services import session_stats
+
 logger = logging.getLogger(__name__)
 
 #: reasoning_tokens 单独记：思考型模型把它算进 completion_tokens，但内容会被丢弃
@@ -146,9 +148,10 @@ async def tracked(session_id: str, coro) -> None:
 
 
 def _persist(session_id: str, snap: dict) -> None:
+    # SessionLocal/GameSession 保持局部导入：这里是「开一个新 DB 会话」的运行时行为，
+    # 顶层引 app.database 会让 usage_tracker 在导入期就绑定引擎，影响测试替换。
     from app.database import SessionLocal
     from app.models.session import GameSession
-    from app.services import session_stats
 
     db = SessionLocal()
     try:

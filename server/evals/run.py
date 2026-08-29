@@ -43,7 +43,7 @@ def _git_sha() -> str:
 
 def _active_model_name() -> str:
     try:
-        from app.api.ai_settings import load_active_profile
+        from app.ai.profile_store import load_active_profile
         profile = load_active_profile()
         return profile.model_name if profile else "env-fallback"
     except Exception:

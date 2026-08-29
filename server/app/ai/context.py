@@ -5,6 +5,7 @@ import logging
 import re
 from typing import NamedTuple
 
+from app.ai import profile_store
 from app.ai.provider import CACHE_BLOCKS_KEY
 from app.models.character import Character
 from app.models.event_log import EventLog
@@ -37,7 +38,13 @@ from app.ai.prompts.team_system import (
     TEAM_MODE_TOGETHER,
     TEAM_SYSTEM_PROMPT,
 )
-from app.services import combat_service, style_presets, world_memory
+from app.services import (
+    combat_service,
+    hex_map,
+    session_service,
+    style_presets,
+    world_memory,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +123,11 @@ def effective_context_budget(ws: dict | None, context_budget: int | None = None)
 
 
 def _active_context_budget() -> int:
-    """按「当前激活模型」的窗口解析组装预算；任何异常一律回落下限（放宽前行为）。
-
-    局部导入 ai_settings 避免顶层循环依赖（与 context_estimate 同款处理）。
-    """
+    """按「当前激活模型」的窗口解析组装预算；任何异常一律回落下限（放宽前行为）。"""
     try:
-        from app.api.ai_settings import load_active_profile, resolve_context_window
-        return resolve_context_budget(resolve_context_window(load_active_profile()))
+        return resolve_context_budget(
+            profile_store.resolve_context_window(profile_store.load_active_profile())
+        )
     except Exception:
         logger.exception("解析自适应上下文预算失败，回落下限")
         return CONTEXT_TOKEN_BUDGET
@@ -1042,8 +1047,6 @@ def build_kp_context(
     # KP 据此叙述移动（去更远的连通地点须途经），scene_change 的确定性校验也以同一张图为准。
     current_scene_text = _format_json(current_scene) if current_scene else "初始场景"
     if current_scene:
-        from app.services import hex_map, session_service  # 局部导入避免顶层循环依赖
-
         neighbor_ids = session_service.scene_neighbors(module, scene_id)
         if neighbor_ids:
             by_id = {s.get("id"): s for s in scenes if s.get("id")}
@@ -1522,8 +1525,6 @@ def build_team_context(
     ``team_guidance``：本轮导演对队友的软指引（由 planner 的 direction 派生，如「把话头
     多递给某冷场玩家」）。空则不注入；非空时作为一条 system 提示追加，队友决策仍自主。
     """
-    from app.services import session_service  # 局部导入避免顶层循环依赖
-
     flags = _active_flags(session)
     scenes = [_resolve_state(s, flags) for s in (module.scenes or [])]
     # 用队友「自己所在」的场景（分头后各在各处），而非会话级单一场景

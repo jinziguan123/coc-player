@@ -18,6 +18,8 @@ import logging
 
 import httpx
 
+from app.ai import profile_store
+
 logger = logging.getLogger(__name__)
 
 
@@ -107,6 +109,4 @@ def image_generator_from_profile(profile) -> ImageGenerator:
 
 def get_image_llm() -> ImageGenerator:
     """当前激活的生图后端；没配过生图则返回空对象（配图静默跳过，不报错、不中断游戏）。"""
-    from app.api.ai_settings import load_active_image_profile
-
-    return image_generator_from_profile(load_active_image_profile())
+    return image_generator_from_profile(profile_store.load_active_image_profile())

@@ -21,6 +21,7 @@ from app.ai.agents.base import BaseAgent
 from app.ai.context import _active_flags
 from app.ai.provider import LLMProvider
 from app.ai.turn_planner import _extract_json_object
+from app.services import world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +98,6 @@ def build_backstage_messages(
     events_since_cursor: list[Any],
 ) -> list[dict]:
     """构建幕后推演的 LLM 消息（纯函数，不触数据库）。"""
-    from app.services import world_memory  # 局部导入，避免与 context 的依赖交叉
-
     flags = _active_flags(session)
     ws = session.world_state or {}
     scenes = [

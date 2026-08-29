@@ -18,7 +18,7 @@ from pydantic import (
 from app.ai import director_signals
 from app.ai.context import _active_flags, _resolve_state
 from app.models import Character, GameSession, Module
-from app.services import world_memory
+from app.services import session_service, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -561,8 +561,6 @@ def build_turn_plan_messages(
     )
     # 场景连通：当前场景可直达的邻居（模组建了 connections 图才非空）。
     # scene_change 的确定性校验以同一张图为准——planner 别裁定不连通的切换。
-    from app.services import session_service  # 局部导入避免顶层循环依赖
-
     scene_neighbors = session_service.scene_neighbors(module, session.current_scene_id)
     teammates = teammates or []
     # 线索台账：已发现的线索不再是 candidate——known 的直接标记 discovered，

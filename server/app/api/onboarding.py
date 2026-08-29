@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api import ai_settings
+from app.ai import profile_store
 from app.api.deps import player_token, require_local_client
 from app.database import get_db
 from app.schemas.onboarding import OnboardingStartResponse
@@ -22,7 +22,7 @@ def start(
     if not token or not token.strip():
         raise HTTPException(status_code=401, detail="缺少玩家身份")
 
-    profile = ai_settings.load_active_profile()
+    profile = profile_store.load_active_profile()
     if not profile or not profile.api_key.strip() or not profile.model_name.strip():
         raise HTTPException(
             status_code=409,

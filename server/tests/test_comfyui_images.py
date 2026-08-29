@@ -55,7 +55,7 @@ def test_client_fails_open_without_base_url():
 
 def test_comfyui_generator_from_profile():
     from app.ai import image_gen
-    from app.api.ai_settings import ImageProfile
+    from app.ai.profile_store import ImageProfile
 
     gen = image_gen.image_generator_from_profile(
         ImageProfile(name="本地", backend="comfyui",
@@ -71,7 +71,7 @@ def test_image_generator_needs_no_text_profile():
     现在生图配置自成一体，压根不经过文本 Provider——用什么协议跑团都不影响出图。
     """
     from app.ai import image_gen
-    from app.api.ai_settings import ImageProfile
+    from app.ai.profile_store import ImageProfile
 
     gen = image_gen.image_generator_from_profile(
         ImageProfile(name="远端", backend="openai", model="gpt-image-1", api_key="k"),
@@ -88,7 +88,7 @@ def test_no_image_profile_means_no_image_gen():
     assert asyncio.run(gen.generate_image("x")) is None
 
     # 后端选了 openai 却没填模型名 → 同样不出图，且不打任何端点
-    from app.api.ai_settings import ImageProfile
+    from app.ai.profile_store import ImageProfile
 
     bare = image_gen.image_generator_from_profile(ImageProfile(name="空", backend="openai"))
     assert bare.supports_image_gen() is False
