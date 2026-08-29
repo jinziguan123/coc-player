@@ -45,3 +45,9 @@ src-tauri/binaries/
 src-tauri/resources/*
 !src-tauri/resources/README.md
 server/trpg.db.bak-*
+
+# npx skills 装的第三方 skill：内容由 skills-lock.json 里的 hash 锁住，
+# `npx skills install` 就能复现，不必把别人的仓库连 LICENSE 一起搬进来
+.agents/skills/
+# pytest 覆盖率产物
+server/.coverage

@@ -34,7 +34,8 @@ describe('首页介绍的联机段落', () => {
     const { container } = setup()
     const item = [...container.querySelectorAll('.home-coop-item')]
       .find((el) => el.textContent?.includes('同一个网络'))
-    expect(item?.textContent).toContain('默认关着')
+    // 钉的是「说清楚它默认关着」这件事，不是某种特定措辞——改写句子不该误报
+    expect(item?.textContent).toMatch(/默认.{0,3}关/)
   })
 
   it('通篇不得出现 emoji：图标一律走矢量图标库（见 CLAUDE.md）', () => {

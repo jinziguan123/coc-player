@@ -15,17 +15,17 @@ const ROLES = [
   {
     Icon: GiRobotGolem,
     title: '守秘人（KP）',
-    desc: '描述场景、扮演所有 NPC、决定何时该掷骰。本项目里由 AI 担任。',
+    desc: '描述场景、扮演所有 NPC、决定什么时候该掷骰。在本项目里，这个位子由 AI 来坐。',
   },
   {
     Icon: GiCharacter,
     title: '调查员（你）',
-    desc: '一张角色卡：属性、技能、生命与理智。你只需说出「我想做什么」。',
+    desc: '一张角色卡：属性、技能、生命与理智。剩下的就是说出「我想做什么」。',
   },
   {
     Icon: GiRollingDices,
     title: '骰子',
-    desc: '只在结果不确定时出场，定的不是「能不能试」，是「试得成不成」。',
+    desc: '只在结果不确定时才掷。想试什么都行，骰子管的是试没试成。',
   },
 ] as const
 
@@ -42,15 +42,15 @@ const CHECK_TIERS = [
 
 /** 生命与理智：CoC 的两条命脉，各一行，不占卡片的高度。 */
 const VITALS = [
-  { Icon: GiHeartBottle, color: 'var(--color-danger)', name: '生命（HP）', desc: '挨打就掉，归零濒死——正面硬刚往往不是最优解。' },
-  { Icon: GiBrain, color: 'var(--color-text-accent)', name: '理智（SAN）', desc: '目睹超自然与惨状会降，单次掉太狠会当场陷入临时疯狂。' },
+  { Icon: GiHeartBottle, color: 'var(--color-danger)', name: '生命（HP）', desc: '挨打就掉，归零濒死。在 CoC 里正面硬刚很少有好下场。' },
+  { Icon: GiBrain, color: 'var(--color-text-accent)', name: '理智（SAN）', desc: '目睹超自然与惨状会掉，一次掉太狠会当场陷入临时疯狂。' },
 ] as const
 
 /** 上手四步，每步挂一个能立刻点进去的入口——只讲流程不给门把手，等于还得让人自己找。 */
 const STEPS = [
-  { title: '接一个 AI 模型', desc: '守秘人由 AI 扮演。先在设置里填好接口并测通，除模型外全部跑在本机。', to: '/settings', linkText: '去设置' },
-  { title: '挑一个本子', desc: '走新手团最快；也可以上传自己的模组，交给 AI 解析成场景与线索。', to: '/modules', linkText: '模组库' },
-  { title: '备一位调查员', desc: '车卡向导掷属性、选技能，也支持 Excel 导入或 AI 生成。', to: '/characters', linkText: '角色名录' },
+  { title: '接一个 AI 模型', desc: '守秘人由 AI 扮演。先去设置里填好接口，测通再走。除了模型，其它都跑在你自己机器上。', to: '/settings', linkText: '去设置' },
+  { title: '挑一个本子', desc: '走新手团最快。也可以传自己的模组，AI 会把它拆成场景和线索。', to: '/modules', linkText: '模组库' },
+  { title: '备一位调查员', desc: '车卡向导带你掷属性、选技能；懒得动手就让 AI 生成，手头有现成的可以用 Excel 导入。', to: '/characters', linkText: '角色名录' },
   { title: '开局', desc: '建房拿房间码叫上朋友，空着的席位可以交给 AI 队友。', to: '/game', linkText: '开始游戏' },
 ] as const
 
@@ -66,12 +66,12 @@ const COOP = [
   {
     Icon: GiWifiRouter,
     title: '同一个网络',
-    desc: '房主去设置里打开「允许局域网加入」（默认关着），其他人填主机地址和房间码。仅限自家或朋友的网络。',
+    desc: '房主去设置里打开「允许局域网加入」，这个开关默认是关的。其他人填主机地址和房间码就能进。别在公共网络上开。',
   },
   {
     Icon: GiWorld,
     title: '隔着网络',
-    desc: '房主开「内置直连」发一条邀请码，对方粘进「加入房间」即可，不必另装联网工具（双方需桌面版）。',
+    desc: '房主开「内置直连」，发一条邀请码，对方粘进「加入房间」就行，不用另外装联网工具。双方都得用桌面版。',
   },
 ] as const
 
@@ -98,8 +98,8 @@ export function HomeIntro() {
         <div>
           <h3 className="section-head">什么是跑团</h3>
           <p className="home-intro-lede">
-            跑团（TRPG，桌上角色扮演游戏）是「用嘴玩」的游戏：没有预渲染画面和固定关卡，
-            场景由主持人口述，你说出角色想做什么，故事就顺着走。剧情不是被写好的，是被玩出来的。
+            跑团（TRPG，桌上角色扮演游戏）没有画面，也没有关卡。场景靠主持人讲出来，
+            你说角色要做什么，故事就顺着往下走。同一个本子，两桌人能玩出完全不同的结局。
           </p>
           <ul className="m-0 mt-2 flex list-none flex-col gap-1.5 p-0">
             {ROLES.map(({ Icon, title, desc }) => (
@@ -140,7 +140,7 @@ export function HomeIntro() {
             </table>
           </div>
           <p className="home-intro-note mt-1.5">
-            右列是「侦查 60」的骰点区间。技能不到 50 时 96–100 皆为大失败；处境有利或不利时会多掷一颗十位骰取优或取劣，即奖惩骰。
+            右列按「侦查 60」算。技能不到 50 时，96–100 都是大失败。处境有利或不利时多掷一颗十位骰，取好的或取差的那个，这就是奖骰和惩骰。
           </p>
           {/* 这两行不套卡片外框：中列本就是三栏里最高的一栏，边框和内边距的高度省下来给一屏 */}
           <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
@@ -184,7 +184,7 @@ export function HomeIntro() {
           <h3 className="section-head" style={{ margin: 0 }}>和朋友一起玩</h3>
           <span className="home-intro-note">
             <strong style={{ color: 'var(--color-text-primary)' }}>房主的电脑就是主机</strong>
-            ：没有账号也没有服务器，存档留在那台机器上，AI 只从房主那端调用——只有房主需要配模型，其他人拎包入座。
+            。没有账号，也没有服务器，存档就在那台机器上。AI 也只从房主那端调用，所以只有房主需要配模型。
           </span>
         </div>
         <ul className="home-coop-grid m-0 list-none p-0">

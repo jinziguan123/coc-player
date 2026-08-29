@@ -42,7 +42,7 @@ export function HomePage() {
           CoC Player
         </h1>
         <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-          AI 驱动的跑团平台
+          AI 当守秘人，你带调查员上桌
         </p>
         {/* 标题下的细分隔纹，收住居中标题与下方卡片 */}
         <div className="home-rule mx-auto mt-3" />
