@@ -78,18 +78,28 @@ async def filter_narration_stream(
         party_names=party_names, shown_dialogues=shown_dialogues,
         prior_narration=prior_narration,
     )
-    full_response = ""
+    # ``full_response`` 只记**扫描器真正吃进去的字符**，因此按 token 切片累加而不是整块累加。
+    #
+    # 此前是 ``full_response += token``，而命令标签终止时 ``break`` 只跳出字符循环——于是
+    # 标签之后、同一 token 之内的文字会残留下来，残留多少取决于 Provider 怎么切词（不可控）。
+    # 这不只是「尾巴脏了」：``full_response`` 正是下游 ``_process_commands`` 解析指令的输入，
+    # 而它对 SET_FLAG / BLOCK_PATH 这些用的是 finditer。于是模型写
+    # ``[SET_FLAG: a][SET_FLAG: b]`` 时，第二条**时而执行、时而不执行**，
+    # 全看那两个标签落在同一个 token 里没有。
+    #
+    # 语义上以「第一个终止标签就停」为准（本函数一直是这么设计的，叙事也在那里截断），
+    # 所以切到扫描器停下的那个字符为止——第二条指令一律不执行，可预测、可测试。
+    consumed: list[str] = []
 
     async for token in token_stream:
-        # 注意：整个 token 先记进 full_response，再逐字符喂。命令标签终止时，标签之后、
-        # 同一 token 之内的文字会残留在 full_response 里（已知缺口，见金标准测试）。
-        full_response += token
-
+        used = 0
         for ch in token:
+            used += 1
             for chunk in scanner.feed(ch):
                 yield chunk
             if scanner.terminated:
                 break
+        consumed.append(token[:used])   # 未终止时 used == len(token)，即整块
 
         if scanner.terminated:
             for chunk in scanner.flush_on_terminate():
@@ -104,4 +114,4 @@ async def filter_narration_stream(
         for chunk in scanner.finish():
             yield chunk
 
-    scanner.write_result(full_response)
+    scanner.write_result("".join(consumed))

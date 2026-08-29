@@ -44,9 +44,9 @@ def _normalize(run: dict) -> tuple:
         else:
             merged.append([kind, content, actor, group])
     shaped = [(k, c.strip(), a, g) for k, c, a, g in merged if c.strip()]
-    # 刻意不比 full_response：它是**已知**随分词浮动的（见下方 test_命令标签终止时…）。
+    # full_response 一并纳入比对：它是下游指令解析的输入，曾经随分词浮动（见下方回归用例）。
     return (
-        shaped, run["narration"],
+        shaped, run["narration"], run["full"],
         tuple(map(tuple, run["extracted"])),
         tuple(map(tuple, run["marks"])),
         tuple(map(tuple, run["groups"])),
@@ -77,28 +77,33 @@ async def test_金标准覆盖了全部语料():
 
 
 @pytest.mark.asyncio
-async def test_命令标签终止时_full_response_随分词浮动_已知缺口():
-    """**记录一处既有缺口，不是期望行为。**
+async def test_命令标签终止时_full_response_切在标签处不受分词影响():
+    """回归：``full_response`` 曾经把「终止标签所在的整个 token」都收进去。
 
-    命令标签（[DICE_CHECK] 等）终止本次流时，``full_response`` 已经把「标签所在的
-    那个 token」整体收进去了——``full_response += token`` 发生在 token 粒度，而
-    ``break`` 只跳出字符循环。于是标签之后、同一 token 之内的文字会残留在
-    ``full_response`` 里，残留多少取决于 Provider 怎么切词（不可控）。
-
-    这有实际影响：``full_response`` 正是下游 ``_process_commands`` 解析指令的输入，
-    紧跟在终止标签后的第二条指令**可能被解析、也可能不被**，取决于分词。
-
-    此处只把现状钉住：改这条要连同 ``kp_tool_loop`` 的指令解析一起评估，
-    不该在重构里顺手改掉。旁白与气泡（result[0]/[2]/[3]/[4]）不受影响。
+    ``full_response += token`` 是 token 粒度，而 ``break`` 只跳出字符循环，于是标签之后、
+    同一 token 之内的文字会残留下来，残留多少取决于 Provider 怎么切词。现在改成按扫描器
+    实际消费的字符切片累加，标签之后一个字都不留。
     """
     text = "他伸手去够抽屉。[DICE_CHECK: skill=侦查]后面不该出现。"
-    tail = "后面不该出现。"
+    expected = "他伸手去够抽屉。[DICE_CHECK: skill=侦查]"
 
-    fine = await _run(text, {}, chunk=3)      # 细切：标签闭合处正好断开
-    coarse = await _run(text, {}, chunk=0)    # 整串：标签与后文同在一个 token
+    for size in (1, 2, 3, 5, 13, 0):   # 0 = 整串一次给完（最容易踩到旧缺口的切法）
+        run = await _run(text, {}, chunk=size)
+        assert run["full"] == expected, f"按 {size or '整串'} 字切分时 full_response 漂移"
+        assert run["narration"] == "他伸手去够抽屉。"
 
-    assert not fine["full"].endswith(tail)
-    assert coarse["full"].endswith(tail)
-    # 面向玩家的产物两边一致——缺口只在 full_response 这一层
-    assert fine["narration"] == coarse["narration"] == "他伸手去够抽屉。"
-    assert fine["extracted"] == coarse["extracted"] == []
+
+@pytest.mark.asyncio
+async def test_终止标签之后的第二条指令一律不执行():
+    """上一条的**实际后果**：``full_response`` 是 ``_process_commands`` 解析指令的输入，
+    而它对 SET_FLAG / BLOCK_PATH 这些用的是 finditer。
+
+    旧行为下，``[SET_FLAG: a][SET_FLAG: b]`` 里第二条时而被执行、时而不被——全看那两个
+    标签落在同一个 token 里没有。现在以「第一个终止标签就停」为准（叙事本来也在那里截断），
+    第二条一律不进 full_response，因此一律不执行。
+    """
+    text = "他推开门。[SET_FLAG: flag=a][SET_FLAG: flag=b]"
+    for size in (1, 3, 7, 0):
+        full = (await _run(text, {}, chunk=size))["full"]
+        assert full.count("SET_FLAG") == 1, f"按 {size or '整串'} 字切分时漏进了第二条指令"
+        assert "flag=b" not in full
