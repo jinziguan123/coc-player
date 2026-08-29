@@ -6,6 +6,10 @@
 一次带评审意见与改进建议的架构快照见 [`docs/architecture.md`](docs/architecture.md)
 （那是**评审**，本文件是**事实**，两者角色不同）。
 
+> 文中的架构图是 [`scripts/gen_design_diagrams.py`](scripts/gen_design_diagrams.py) 的产物，
+> 存在 [`docs/images/`](docs/images/)。**不要直接编辑 SVG**——改内容请改脚本再重新生成
+> （`python3 scripts/gen_design_diagrams.py`），一致性由 `server/tests/test_design_diagrams.py` 守着。
+
 ## 目录
 
 **第一部分：架构设计**
@@ -72,26 +76,7 @@ CoC Player 是一个**本地优先的 AI 跑团桌面应用**：AI（或真人�
 | 局域网客人 | 客人的 SPA | 客人前端把 `server_url` 指向房主后端 | 同一可信网络多人 |
 | 内置直连客人 | 客人的 SPA 指向 `127.0.0.1:<临时端口>` | 请求经 Tauri 外壳内的 iroh QUIC 隧道反代到房主后端 | 不同网络的朋友 |
 
-```mermaid
-flowchart LR
-    subgraph Guest[客人机器]
-      GUI[React SPA] --> GT[iroh Endpoint<br/>Tauri 外壳]
-    end
-    subgraph Host[房主机器]
-      UI[React SPA] -->|REST /api| API[FastAPI]
-      UI -->|SSE /live| Hub[RoomHub<br/>进程内广播]
-      HT[iroh Endpoint + 反代<br/>Tauri 外壳] --> API
-      API --> SVC[领域服务<br/>session / turn / combat / module …]
-      SVC --> DB[(SQLite<br/>SQLAlchemy + Alembic)]
-      SVC --> EV[(event_logs)]
-      SVC --> RAG[(RuleChunk / ModuleChunk<br/>fastembed 向量)]
-      SVC --> RULES[规则引擎<br/>CoC]
-      SVC --> LLM[LLM Provider<br/>OpenAI 兼容 / Anthropic]
-      SVC --> Hub
-      Tauri[Tauri 外壳] -->|spawn sidecar| API
-    end
-    GT <-.QUIC，打不通走 relay.-> HT
-```
+![运行形态与部署拓扑](docs/images/deployment-topology.svg)
 
 值得注意的分工：**桌面外壳（Rust）不承载任何业务逻辑**，只做三件事——拉起 sidecar 并等健康检查、
 托管窗口、跑内置直连隧道。业务全部在 Python 单体里，因此「桌面版」和「开发版」跑的是同一套代码。
@@ -342,41 +327,7 @@ api/  →  services/（编排）  →  ai/  →  services/（领域）  →  mod
 
 ## 六、回合主链路
 
-```mermaid
-sequenceDiagram
-    participant UI as GameSessionPage
-    participant API as api/chat.py
-    participant SS as session_service
-    participant GM as GenerationManager
-    participant TO as turn_orchestrator
-    participant PL as turn_planner
-    participant TM as team_turn_service
-    participant KP as KPAgent + kp_tool_loop
-    participant RS as 规则引擎 / 领域服务
-    participant Hub as RoomHub → SSE
-
-    UI->>API: POST /chat（行动/台词/OOC）
-    API->>SS: 写 pending_turn 事件
-    API->>Hub: 广播事件与 turn_state
-    UI->>API: POST /advance
-    API->>SS: turn_confirm 齐 → commit_turn
-    API->>GM: start(run_chat_generation)
-    GM->>GM: 并发锁 + 房间配额 + in-flight buffer
-    GM->>TO: 执行回合用例
-    TO->>PL: ① TurnPlan（快模型，温度 0，JSON）
-    PL-->>TO: 裁定：检定/线索/NPC/场景/开战/安全
-    TO->>TM: ② AI 队友回合（主模型，据 plan.direction 派提示）
-    TM-->>TO: 队友行动与台词（暗骰结果不落库）
-    TO->>PL: ③ 二次 TurnPlan（仅当队友改了裁定前提）
-    TO->>KP: ④ 注入计划 + KP 上下文，流式叙事（主模型）
-    KP->>RS: 工具调用（掷骰、SAN、开战、切场景、道具、RAG）
-    RS-->>KP: 确定性结果回注（或 suspend 等真人投骰）
-    TO->>TO: ⑤ TurnValidator 落库前安检（预筛命中才调）
-    TO->>RS: 计划状态守卫（确保开战/伤害落地）
-    TO->>SS: 持久化事件（唯一序号）
-    TO->>Hub: 广播 token / 离散事件 / done
-    TO-->>TO: 后台收尾：滚动摘要、幕后推演、配图
-```
+![一轮对话的主链路时序](docs/images/turn-pipeline.svg)
 
 **生成入口一览**（全部经 `GenerationManager.start`）：
 
@@ -399,30 +350,7 @@ sequenceDiagram
 同一条链路换个角度看：它被两条线切成四段——**哪些环节串行花时间**，以及
 **哪些环节失败可以退化、哪些不能**。
 
-```mermaid
-flowchart TB
-    subgraph P1["一、回合确认（确定性）"]
-        A1["POST /chat<br/>暂存本轮发言"] --> A2["POST /advance<br/>需确认的真人都点过"] --> A3["commit_turn<br/>暂存转正"]
-    end
-    P1 --> GM["GenerationManager.start<br/>全应用唯一生成入口：并发锁 + 房间配额"]
-    GM --> P2
-    subgraph P2["二、串行 LLM 环节（玩家等待的来源）"]
-        B1["① TurnPlan · 快模型"] --> B2["② AI 队友回合 · 主模型"]
-        B2 --> B3["③ 二次 TurnPlan · 快模型<br/>仅当前提被改变"]
-        B3 --> B4["④ KP 叙事 · 主模型<br/>工具循环，流式广播"]
-        B4 --> B5["⑤ TurnValidator · 快模型<br/>零成本预筛，命中才调"]
-    end
-    P2 --> P3
-    subgraph P3["三、落库与守卫（fail-closed）"]
-        C1["状态守卫<br/>确保已裁定的落地"] --> C2["唯一序号落库"] --> C3["广播 done"]
-    end
-    P3 --> P4
-    subgraph P4["四、后台收尾（fail-open，三者彼此独立、无先后）"]
-        D1["滚动摘要"]
-        D2["幕后推演"]
-        D3["场景配图"]
-    end
-```
+![一轮生成的四个阶段](docs/images/turn-phases.svg)
 
 **第三段与第四段的分界就是 fail-closed / fail-open 的分界**（[§4.6](#46-fail-open-与-fail-closed-的分界)）：
 状态守卫与落库必须成功，后台收尾失败只退化为「这一轮没摘要/没配图」。
@@ -623,21 +551,7 @@ loop 行为}，行为分四类——`check`（掷骰后回注结果续写，挂�
 上面五层最终要落成**一次**发给模型的消息数组。这一节是那个收口：预算怎么算、算出来怎么分、
 不够时先丢谁。
 
-```mermaid
-flowchart TB
-    W["模型上下文窗口"] -->|× 0.6，clamp 48k–150k| B["基准预算"]
-    B -->|× budget_scale 在线校准| T["本轮总预算"]
-    T --> S["系统提示<br/>上限 30k"]
-    T --> E["事件区<br/>总预算 − 系统 − 预留"]
-    T --> R["输出预留 7k"]
-
-    S --> S1["静态 · 9 节<br/>身份、裁定手册、文风、能力广告"]
-    S --> S2["半静态 · 2 节<br/>模组数据、幕后真相"]
-    S --> S3["易变 · 13 节<br/>位置、台账、记忆、战斗态、摘录"]
-
-    E --> E1["游标之前<br/>只给持久摘要"]
-    E --> E2["游标之后<br/>按预算给全文，至少 10 条"]
-```
+![一次请求的上下文注入规则](docs/images/context-injection.svg)
 
 **三档的顺序是缓存纪律，不是阅读顺序。** 静态段整场逐字不变，是 prompt caching 命中的主体
 （约 1.5 万估算 token）。把任何易变内容混进静态段，会让它**后面的全部前缀失效**——
@@ -738,6 +652,7 @@ Tauri 窗口 → loader 加载页
 | KP 上下文金标准 | 装配的小节不被悄悄增删；「哪些局面该有哪些小节」写成人读得懂的断言 | `tests/test_kp_context_golden.py` |
 | 双路径等价性 | 工具路径与文本兼容路径落库结果一致；新增 `state` 类工具没补用例即失败 | `tests/test_kp_dual_path_equivalence.py` |
 | 依赖方向 | [§4.10](#410-依赖方向单向向下局部导入不是解法) 的分层禁令，局部导入照查 | `tests/test_layering.py` |
+| 架构图 | SVG 不落后于生成脚本、不被手改；文档不留 mermaid、不引用缺失的图 | `tests/test_design_diagrams.py` |
 | 页面行数红线 | 大页面组件只降不升，撞线时该拆而不是调大数字 | `apps/web/tests/fileSize.test.ts` |
 
 前两者是**特征化测试**（characterization）：断言的不是「什么才对」，而是「当前就是这样」。
