@@ -3,8 +3,8 @@
 本文件记录 CoC Player 的**架构设计**，以及**较重要、跨模块、不易从单个文件读出**的设计决策与
 工作机制，描述的是「当前实现的事实」。探索期的过程稿、备选方案与阶段规划见
 [`docs/plans/`](docs/plans/)；带约束力的决策见 [`docs/adr/`](docs/adr/)；
-一次带评审意见与改进建议的架构快照见 [`docs/architecture.md`](docs/architecture.md)
-（那是**评审**，本文件是**事实**，两者角色不同）。
+带评审意见与改进优先级的**判断**见 [`docs/architecture.md`](docs/architecture.md)
+（那里回答「下一刀该切哪」，本文件回答「现在是什么样」——两者角色不同，刻意不互相复述）。
 
 > 文中的架构图是 [`scripts/gen_design_diagrams.py`](scripts/gen_design_diagrams.py) 的产物，
 > 存在 [`docs/images/`](docs/images/)。**不要直接编辑 SVG**——改内容请改脚本再重新生成
@@ -698,7 +698,7 @@ CI（`.github/workflows/ci.yml`）三个 job：后端 ruff + pytest + evals 冒�
    靠 `test_kp_dual_path_equivalence.py` 的契约清单守着（新增 `state` 类工具不补用例即失败）。
    `check` / `lookup` / `npc` 三类因带掷骰随机性或要调模型，仍只有各自的用例。
 
-带评审意见与改进优先级的完整分析见 [`docs/architecture.md`](docs/architecture.md)；
+这些边界的取舍理由、以及「下一刀该切哪」的判断见 [`docs/architecture.md`](docs/architecture.md)；
 `turn_orchestrator` 的拆分纪律见 [`docs/chat-service-split-discipline.md`](docs/chat-service-split-discipline.md)
 （`chat_service.py` 现已退化为 9 行兼容垫片，回合用例编排已迁至 `turn_orchestrator.py`）。
 
