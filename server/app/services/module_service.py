@@ -58,7 +58,7 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
       "aliases": ["场上实际会用到的其它叫法，如 诺特先生、诺特；见下第 18 条"],
       "description": "外貌和身份描述",
       "looks_human": true,
-      "gender": "male|female|（外观辨不出性别就留空）",
+      "gender": "male|female|（真的判断不出才留空）。**据文本里的称呼与身份关系判断**——妻子/女儿/母亲/太太/小姐/修女→female，丈夫/儿子/父亲/先生/神父→male；别只盯着外貌描写，也别按外文译名猜（加布里埃尔、艾希礼这类中文里看不出性别）。只有非人怪物或刻意不透露性别的角色才留空",
       "unknown_as": "玩家还不知道它叫什么时，界面上怎么称呼它；见下第 19 条",
       "personality": "性格特点和行为方式",
       "background": "生平/来历：成长经历、与本案/其他角色的渊源等（KP 视角的背景，可含与剧情相关的过往；与 secrets 区分——background 是来历，secrets 是玩家不该直接知道的真相）",

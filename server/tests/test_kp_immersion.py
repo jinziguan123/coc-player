@@ -437,3 +437,52 @@ def test_kp_sees_npc_attributes_and_background(db_factory):
     # 开场：生平随 secrets 一同剥离，属性仍可给
     sys_open = ctx.build_kp_context(session, module, hero, [])[0]["content"]
     assert "侍奉宅邸三十年" not in sys_open
+
+
+# ── NPC 性别（叙事这条路）─────────────────────────────────────
+#
+# 实测事故：「加布里埃尔·马卡里奥」在模组里写着「维托里奥的妻子」，KP 却把马卡里奥家的
+# 姐妹一路叙述成了兄弟。出图那条路早就把 gender 递进去了
+# （module_image_service.npc_portrait_material），叙事这条一直没有——_compact_npcs
+# 只挑 id/name/description/personality 四个字段，性别根本没进上下文，模型只剩名字可猜。
+
+
+def test_npc性别进上下文():
+    out = ctx._compact_npcs([
+        {"id": "npc_1", "name": "加布里埃尔·马卡里奥",
+         "description": "维托里奥的妻子", "gender": "female"},
+    ])
+    assert "female" in out and "gender" in out
+
+
+def test_没填性别就不注入这个键():
+    """空值不占 token，也不给模型一个「未知」去发挥。"""
+    out = ctx._compact_npcs([
+        {"id": "npc_1", "name": "佐利先生", "description": "街角小贩"},
+    ])
+    assert "gender" not in out
+
+
+def test_prompt交代性别缺失时怎么读():
+    """存量模组的 gender 全是空的，只能靠 description 里的身份称谓——得说清楚，
+    否则模型会去猜名字，而外文译名在中文里根本看不出性别。"""
+    from app.ai.prompts.kp_system import KP_MODULE_DATA_SECTION
+
+    head = KP_MODULE_DATA_SECTION[
+        KP_MODULE_DATA_SECTION.index("### NPC 列表"):
+        KP_MODULE_DATA_SECTION.index("{npcs_info}")
+    ]
+    assert "gender" in head
+    assert "身份称谓" in head or "称谓" in head
+    assert "不要按名字猜" in head
+
+
+def test_解析schema按称呼判性别而不是按外观():
+    """原措辞是「外观辨不出性别就留空」，把判据引向了长相——可「妻子」「小女儿」是身份
+    关系，不是外观。整份鬼屋模组的 gender 因此全空。"""
+    from app.services.module_service import PARSE_PROMPT_TEMPLATE as hint
+
+    line = next(ln for ln in hint.splitlines() if '"gender"' in ln)
+    assert "称呼" in line or "身份关系" in line
+    assert "妻子" in line          # 给出具体判据，别只说「判断一下」
+    assert "外文译名" in line or "别按" in line

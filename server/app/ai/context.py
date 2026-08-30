@@ -584,6 +584,12 @@ def _compact_npcs(
             "description": (n.get("description") or "")[:100],
             "personality": (n.get("personality") or "")[:60],
         }
+        # 性别必须显式给：模型只有名字可依时就得猜，而外文译名在中文里看不出性别
+        # （「加布里埃尔·马卡里奥」被叙述成了男人，她其实是维托里奥的妻子）。
+        # 出图那条路早就带上了它（module_image_service.npc_portrait_material），
+        # 叙事这条一直没有。空值不注入——省 token，也不给模型一个「未知」去发挥。
+        if n.get("gender"):
+            item["gender"] = n.get("gender")
         if n.get("attributes"):  # CoC 九维：非剧透，供对抗/战斗判断与叙述参考
             item["attributes"] = n.get("attributes")
         if n.get("alive") is False:  # 剧情变体可将 NPC 标记为已死亡
