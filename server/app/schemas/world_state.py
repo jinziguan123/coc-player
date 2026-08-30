@@ -32,6 +32,9 @@ class WorldStateSchema(BaseModel):
     # promote_service 都按 improvised_npcs[name] 读写）。曾误声明为 list——因为本 schema
     # 的校验是 fail-open（只告警不阻断），这个错声明一直没被任何用例照出来。
     improvised_npcs: dict = Field(default_factory=dict)
+    # 只被指认过一次的陌生名字：够 world_memory.IMPROV_CONFIRM_MENTIONS 才移进上面那个。
+    # 挡的是工具调用切错参数留下的残片（「先生报出」），它们不会重复出现，真龙套会。
+    improvised_npc_pending: dict = Field(default_factory=dict)
     story_summary: str = ""                                  # 滚动剧情摘要
     story_summary_seq: int = 0                              # 摘要游标（已浓缩到的 seq）
     handouts_issued: list = Field(default_factory=list)     # 已发放 handouts

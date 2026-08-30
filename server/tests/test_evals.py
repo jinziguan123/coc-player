@@ -416,14 +416,45 @@ class TestImprovisedNpcContainment:
         assert "improvised_containment" in RUBRIC
 
     def test_record_improvised_npc_累加(self):
+        """头一次只在暂存区计数，被再次指认才落名单；之后照旧累加存在感。"""
         from app.services import world_memory
         ws = world_memory.record_improvised_npc({}, "门房老赵", 3)
-        assert ws["improvised_npcs"]["门房老赵"]["first_seq"] == 3
-        assert ws["improvised_npcs"]["门房老赵"]["mentions"] == 1
-        ws = world_memory.record_improvised_npc(ws, "门房老赵", 5)
+        assert not (ws.get("improvised_npcs") or {})                    # 还没确认
+        assert ws["improvised_npc_pending"]["门房老赵"]["mentions"] == 1
+
+        ws = world_memory.record_improvised_npc(ws, "门房老赵", 5)      # 第二次 → 确认
         e = ws["improvised_npcs"]["门房老赵"]
         assert e["first_seq"] == 3 and e["last_seq"] == 5 and e["mentions"] == 2
+        assert "门房老赵" not in (ws.get("improvised_npc_pending") or {})
+
+        ws = world_memory.record_improvised_npc(ws, "门房老赵", 9)
+        assert ws["improvised_npcs"]["门房老赵"]["mentions"] == 3
         assert world_memory.record_improvised_npc(ws, "  ", 6) is ws or True  # 空名不崩
+
+    def test_同一轮说多句只算一次指认(self):
+        """门槛要的是「跨轮被再次指认」。同一轮连说四句是一次登场，不该顶替第二次。"""
+        from app.services import world_memory
+        ws = world_memory.record_improvised_npc({}, "门房老赵", 3)
+        ws = world_memory.record_improvised_npc(ws, "门房老赵", 3)
+        assert not (ws.get("improvised_npcs") or {})
+        assert ws["improvised_npc_pending"]["门房老赵"]["mentions"] == 1
+
+    def test_切错参数的残片不进世界状态(self):
+        """真实事故：模型把 say 的 who 切成了「先生报出」（黑名单里没收「报」「出」）。
+
+        它挡不住字符黑名单，但挡得住「被再次指认」这道门槛——切割事故不会重复。
+        """
+        from app.services import world_memory
+        assert world_memory.is_plausible_npc_name("先生报出")   # 词表确实放行了它
+        ws = world_memory.record_improvised_npc({}, "先生报出", 29)
+        assert not (ws.get("improvised_npcs") or {})            # 但没能进名单
+
+    def test_暂存区不会无界增长(self):
+        from app.services import world_memory
+        ws = {}
+        for i in range(world_memory.MAX_IMPROV_PENDING + 10):
+            ws = world_memory.record_improvised_npc(ws, f"路人甲{chr(0x4e00 + i)}", i)
+        assert len(ws["improvised_npc_pending"]) <= world_memory.MAX_IMPROV_PENDING
 
     def test_implausible_names_不登记(self):
         """台词归属误命中的垃圾名（代词/动词短语/结构指称/旁白碎片）不得登记为临场 NPC。"""
@@ -433,6 +464,7 @@ class TestImprovisedNpcContainment:
             assert not (ws.get("improvised_npcs") or {}), f"垃圾名不该登记：{bad}"
         for good in ["护士长", "前台女士", "管理员", "门房老赵", "玛格丽特修女"]:
             ws = world_memory.record_improvised_npc({}, good, 1)
+            ws = world_memory.record_improvised_npc(ws, good, 2)   # 被再次指认才算数
             assert good in (ws.get("improvised_npcs") or {}), f"真龙套应登记：{good}"
 
     def test_list_improvised_滤除存量垃圾名(self):
@@ -461,7 +493,7 @@ class TestImprovisedNpcContainment:
 
     def test_record_npc_say_memory_登记非正典说话人(self):
         # 说话人不在 module.npcs、不是玩家/系统 → 登记进 improvised_npcs；正典/玩家/系统不登记。
-        from app.services import chat_service
+        from app.services import chat_service, session_service
         from app.models import Character, GameSession, Module
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
@@ -476,17 +508,34 @@ class TestImprovisedNpcContainment:
         gs = GameSession(module_id=module.id, player_character_id=pc.id,
                          status="active", world_state={})
         db.add(gs); db.commit()
+        said = [("门房老赵", "屋里的事我不晓得"),   # 临场龙套 → 登记
+                ("格雷夫斯", "请随我来"),            # 正典 → 不登记进 improvised
+                ("伊芙琳·哈特", "你说谎"),           # 玩家 → 不登记
+                ("系统", "检定失败")]                # 系统 → 不登记
         chat_service._record_npc_say_memory(
-            db, gs.id, gs, module,
-            [("门房老赵", "屋里的事我不晓得"),      # 临场龙套 → 登记
-             ("格雷夫斯", "请随我来"),               # 正典 → 不登记进 improvised
-             ("伊芙琳·哈特", "你说谎"),              # 玩家 → 不登记
-             ("系统", "检定失败")],                  # 系统 → 不登记
-            audience_names=["伊芙琳·哈特"],
+            db, gs.id, gs, module, said, audience_names=["伊芙琳·哈特"],
+        )
+        # 头一次只进暂存区——玩家又问了他一句，这才算被指认过
+        session_service.add_event(db, gs.id, "action", "再问一句", actor_name="伊芙琳·哈特")
+        db.commit()
+        chat_service._record_npc_say_memory(
+            db, gs.id, gs, module, said, audience_names=["伊芙琳·哈特"],
         )
         improv = (db.get(GameSession, gs.id).world_state or {}).get("improvised_npcs") or {}
         assert "门房老赵" in improv
         assert "格雷夫斯" not in improv and "伊芙琳·哈特" not in improv and "系统" not in improv
+
+    def test_存量残片不再喂给KP和planner(self):
+        """门槛是后加的：老存档里已经固化了 mentions=1 的切割残片，读取侧一并滤掉。
+
+        用户的真实存档里就躺着 {"先生报出": {"mentions": 1}}——写入侧现在挡得住，
+        但已经写进去的那条得靠这里滤，否则它会一直出现在 KP 名单与 planner 输入里。
+        """
+        from app.services import world_memory
+        assert not world_memory.improvised_confirmed("先生报出", {"mentions": 1})
+        assert world_memory.improvised_confirmed("门房老赵", {"mentions": 2})
+        # 存量里连 mentions 都没有的条目同样算不得数
+        assert not world_memory.improvised_confirmed("门房老赵", {})
 
     def test_上下文注入临场角色名单(self):
         case = load_fixture(IMPROV_PROBE)

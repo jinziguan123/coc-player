@@ -142,7 +142,8 @@ def cases() -> list[tuple[str, dict]]:
         session=_session(world_state_extra={"backstage": {"cursor": 2}}))
     add("临场 NPC 已转正",
         session=_session(world_state_extra={"improvised_npcs": {
-            "码头小贩": {"description": "卖热汤的瘸腿老头。"},
+            # mentions 是必备字段：只被指认过一次的名字算不得数（见 improvised_confirmed）
+            "码头小贩": {"description": "卖热汤的瘸腿老头。", "mentions": 2},
         }}))
     add("滚动摘要已推进游标就广告回想能力",
         recall_enabled=True,

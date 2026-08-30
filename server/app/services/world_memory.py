@@ -277,24 +277,82 @@ def is_plausible_npc_name(name: str) -> bool:
     return not any(c in name for c in _NON_NAME_CHARS)
 
 
+# 陌生名字要被**独立指认过这么多轮**才算数，够数之前只在暂存区里计数。
+IMPROV_CONFIRM_MENTIONS = 2
+# 暂存区上限：world_state 是持久化的，切错一次留一条，不设上限就是无界增长。
+MAX_IMPROV_PENDING = 24
+
+
+def improvised_confirmed(name: str, entry) -> bool:
+    """这个临场角色算不算数——名字像个称呼，且被独立指认过不止一次。
+
+    读取侧兼容存量：mentions 门槛是后加的（见 ``record_improvised_npc``），
+    早先的库里存着只被指认过一次的切割残片（真实例子：「先生报出」），写入侧现已挡在
+    暂存区，这里把已经固化的那些一并滤掉，免得老存档一直把它们喂给 KP 和 planner。
+    """
+    if not is_plausible_npc_name(name):
+        return False
+    entry = entry if isinstance(entry, dict) else {}
+    return int(entry.get("mentions", 0)) >= IMPROV_CONFIRM_MENTIONS
+
+
 def record_improvised_npc(ws: dict, name: str, seq: int) -> dict:
     """登记一个「临场 NPC」（模组未列出、KP 临时添加的开口龙套）到 world_state.improvised_npcs。
 
     只增不删；``mentions`` 每登记一次自增，用于观察存在感（不驱动任何自动行为）。
     key 用规整后的显示名（同名变体不做模糊合并，见设计文档 §7）。
-    不像人名/称呼的（台词归属误命中的旁白碎片/代词/动词短语）直接丢弃，不登记。
+    不像人名/称呼的（代词、结构指称）直接丢弃，不登记。
+
+    **头一次见到的名字先进暂存区，被再次指认才落名单**（``IMPROV_CONFIRM_MENTIONS``）。
+
+    因为 ``is_plausible_npc_name`` 那道字符黑名单挡不住工具调用切错参数留下的残片：
+    模型想写「诺特先生报出『一家四口』时扳着手指」，却把 say 的 who 切成了「先生报出」，
+    而黑名单里恰好没收「报」「出」，于是它作为临场 NPC 固化进了世界状态，此后一直出现在
+    KP 名单与 planner 输入里。往词表里补字治不了本——同一类错误挡不挡，纯看那个字碰巧
+    在不在表里（「先生答说」挡住了，「老头讲起」「房东提到」照样放行）。
+
+    换个判据：**切割事故不会重复，真龙套会**。玩家拉着路人问话，他就得答第二句；
+    而模型下一句不会再切出一模一样的残片。这个判据是确定性的，不去猜「像不像人名」。
+
+    代价是真龙套第一句话时不进名单——没有实际损失：名单是给 KP 后续记住用的，
+    而说第一句话时 KP 刚写完他，本来就记得。
     """
     name = str(name or "").strip()
     if not name or not is_plausible_npc_name(name):
         return ws
+    seq = int(seq or 0)
     ws = dict(ws or {})
     improv = dict(ws.get("improvised_npcs") or {})
-    entry = dict(improv.get(name) or {})
-    entry["first_seq"] = entry.get("first_seq", int(seq or 0))
-    entry["last_seq"] = int(seq or 0)
-    entry["mentions"] = int(entry.get("mentions", 0)) + 1
-    improv[name] = entry
-    ws["improvised_npcs"] = improv
+
+    entry = improv.get(name)
+    if entry is not None:                      # 已确认过的，照旧累加存在感
+        entry = dict(entry)
+        if entry.get("last_seq") == seq:
+            return ws                          # 同一轮说多句只算一次
+        entry["last_seq"] = seq
+        entry["mentions"] = int(entry.get("mentions", 0)) + 1
+        improv[name] = entry
+        ws["improvised_npcs"] = improv
+        return ws
+
+    pending = dict(ws.get("improvised_npc_pending") or {})
+    seen = dict(pending.get(name) or {})
+    if seen and seen.get("last_seq") == seq:
+        return ws                              # 同一轮内不重复计数
+    seen["first_seq"] = seen.get("first_seq", seq)
+    seen["last_seq"] = seq
+    seen["mentions"] = int(seen.get("mentions", 0)) + 1
+    if seen["mentions"] >= IMPROV_CONFIRM_MENTIONS:
+        pending.pop(name, None)
+        improv[name] = seen
+        ws["improvised_npcs"] = improv
+    else:
+        pending[name] = seen
+        if len(pending) > MAX_IMPROV_PENDING:  # 丢最早见到的，留最近的
+            oldest = sorted(pending, key=lambda k: pending[k].get("first_seq", 0))
+            for k in oldest[:len(pending) - MAX_IMPROV_PENDING]:
+                pending.pop(k, None)
+    ws["improvised_npc_pending"] = pending
     return ws
 
 
