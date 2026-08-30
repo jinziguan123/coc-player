@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 
 import httpx
@@ -12,12 +13,51 @@ from app.ai.provider import LLMProvider, StreamDelta, ToolCall, strip_provider_k
 
 logger = logging.getLogger(__name__)
 
+# 「压根连不上」：DNS/路由/代理断线。与下面那些不同，它是**确定性**故障——同一个端点
+# 半秒后还是连不上，重试纯属让玩家多等。实测一次代理掉线：planner 3 次 + 三个队友各 3 次
+# + planner 再 3 次 + KP 叙事 3 次 = 15 次注定失败的尝试，玩家干等 60 秒。
+_CONNECT_ERRORS = (httpx.ConnectError,)
+
 # 可重试的瞬时传输错误：连接被对端中途掐断/网络抖动/超时——非流式补全（模组解析、校验、
 # 转正等）遇到这类错误重试一次往往就成，避免整条请求裸 500。4xx（鉴权/参数）不重试。
+# ConnectTimeout 留在这里：连接慢和连不上是两回事，慢可能下一次就成。
 _TRANSIENT_ERRORS = (
-    httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError, httpx.ConnectError,
+    httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError,
     httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout,
-)
+) + _CONNECT_ERRORS
+
+
+# ── 端点连通性熔断 ──────────────────────────────────────────────
+#
+# get_llm() 每次调用都新建 provider 实例，熔断状态挂不到实例上；而一个回合里
+# planner、每个 AI 队友、KP 叙事各是一次独立调用。所以按 base_url 记在模块级。
+#
+# TTL 很短：网络恢复后最多让一个回合白等，而不是把整个进程的 AI 调用禁掉几分钟。
+_CONNECT_DOWN_TTL = 15.0
+_endpoint_down_at: dict[str, float] = {}
+
+
+def _mark_endpoint_down(url: str) -> None:
+    _endpoint_down_at[url] = time.monotonic()
+
+
+def _endpoint_is_down(url: str) -> bool:
+    at = _endpoint_down_at.get(url)
+    if at is None:
+        return False
+    if time.monotonic() - at < _CONNECT_DOWN_TTL:
+        return True
+    _endpoint_down_at.pop(url, None)   # 过期即忘，下一次照常尝试
+    return False
+
+
+# 短路时抛出的提示。上层按异常类型分流玩家可见文案，这句只进日志。
+_DOWN_HINT = "刚刚连不上模型服务，本次直接跳过重试"
+
+
+def reset_endpoint_health() -> None:
+    """清空熔断记录（供测试与「重新生成」这类玩家主动重试用）。"""
+    _endpoint_down_at.clear()
 
 
 def _http_error_detail(error: httpx.HTTPStatusError) -> str:
@@ -178,7 +218,10 @@ class OpenAICompatProvider(LLMProvider):
             payload["response_format"] = response_format
         self._apply_reasoning(payload)
 
-        # 瞬时传输错误（连接被中途掐断/抖动/超时）与 5xx 重试最多 3 次；4xx 立即抛。
+        # 瞬时传输错误（连接被中途掐断/抖动/超时）与 5xx 重试最多 3 次；4xx 立即抛；
+        # 「连不上」既不重试也不尝试——刚有别的调用撞上就直接短路（见 _endpoint_is_down）。
+        if _endpoint_is_down(self._api_url):
+            raise httpx.ConnectError(_DOWN_HINT)
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
@@ -218,6 +261,14 @@ class OpenAICompatProvider(LLMProvider):
                 if not text.strip():
                     self._warn_empty_completion()
                 return text
+            except _CONNECT_ERRORS as e:
+                # 连不上是确定性故障，重试同一个端点没有意义；顺手把端点标记为不可达，
+                # 本回合后续的 planner / 队友 / KP 叙事直接短路，不再各等各的三次。
+                _mark_endpoint_down(self._api_url)
+                logger.warning(
+                    "连不上模型服务（%.0fs 内不再尝试）：%s", _CONNECT_DOWN_TTL, e,
+                )
+                raise
             except _TRANSIENT_ERRORS as e:
                 last_exc = e
                 logger.warning("补全传输中断，重试 %d/3：%s", attempt + 1, e)
@@ -314,6 +365,8 @@ class OpenAICompatProvider(LLMProvider):
         token/工具调用（``produced[0]`` 置真），就绝不重试、原样抛：重试会把已下发的内容重复一遍。
         4xx（鉴权/参数）不重试。调用方在 yield 可见内容后须把 produced[0] 置真。
         """
+        if _endpoint_is_down(self._api_url):
+            raise httpx.ConnectError(_DOWN_HINT)
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
@@ -338,6 +391,12 @@ class OpenAICompatProvider(LLMProvider):
                             continue  # 心跳/非 JSON 行
                         yield chunk
                 return
+            except _CONNECT_ERRORS as e:
+                _mark_endpoint_down(self._api_url)
+                logger.warning(
+                    "连不上模型服务（%.0fs 内不再尝试）：%s", _CONNECT_DOWN_TTL, e,
+                )
+                raise
             except _TRANSIENT_ERRORS as e:
                 if produced[0]:
                     raise            # 已下发可见内容 → 不能重试（会重复）

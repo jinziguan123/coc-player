@@ -406,3 +406,194 @@ def test_stream_skips_empty_choices(monkeypatch):
         return [c async for c in prov.stream([{"role": "user", "content": "hi"}])]
 
     assert asyncio.run(collect()) == ["你好", "世界"]
+
+
+# ── 连不上：不重试 + 回合内熔断 ────────────────────────────────
+#
+# 实测一次代理掉线（Clash 节点断了）：planner 重试 3 次、三个 AI 队友各 3 次、
+# planner 再 3 次、KP 叙事 3 次——15 次注定失败的尝试，玩家干等 60 秒。
+# 连不上跟 429/503 不是一回事：它是确定性的，半秒后还是连不上。
+
+
+class _ConnectErrCtx:
+    """建连就失败——对应代理断线/DNS 指向不可达地址时的 start_tls 崩溃。"""
+    async def __aenter__(self):
+        import httpx
+        raise httpx.ConnectError("connect failed")
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def _fresh_provider(monkeypatch):
+    from app.ai.providers.openai_compat import reset_endpoint_health
+    reset_endpoint_health()
+    prov = OpenAICompatProvider(model="x", api_key="k")
+    monkeypatch.setattr("app.ai.providers.openai_compat.asyncio.sleep", _nosleep)
+    return prov
+
+
+def test_连不上时不重试(monkeypatch):
+    import httpx
+    from app.ai.providers.openai_compat import reset_endpoint_health
+
+    prov = _fresh_provider(monkeypatch)
+    calls = {"n": 0}
+
+    def stream(*a, **k):
+        calls["n"] += 1
+        return _ConnectErrCtx()
+
+    monkeypatch.setattr(prov._client, "stream", stream)
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(prov.complete([{"role": "user", "content": "hi"}]))
+    assert calls["n"] == 1          # 试一次就够了，不是三次
+    reset_endpoint_health()
+
+
+def test_连不上后同一端点的后续调用直接短路(monkeypatch):
+    """一个回合里 planner / 每个队友 / KP 叙事各是一次独立调用，不该各等各的。"""
+    import httpx
+    from app.ai.providers.openai_compat import reset_endpoint_health
+
+    prov = _fresh_provider(monkeypatch)
+    calls = {"n": 0}
+
+    def stream(*a, **k):
+        calls["n"] += 1
+        return _ConnectErrCtx()
+
+    monkeypatch.setattr(prov._client, "stream", stream)
+    for _ in range(4):              # planner + 三个队友
+        with pytest.raises(httpx.ConnectError):
+            asyncio.run(prov.complete([{"role": "user", "content": "hi"}]))
+    assert calls["n"] == 1          # 只有第一次真的去连了，后三次直接短路
+    reset_endpoint_health()
+
+
+def test_熔断按端点隔离(monkeypatch):
+    """连不上 A 家不该顺带把 B 家也停了——主模型与快模型常配在不同服务商。"""
+    import httpx
+    from app.ai.providers.openai_compat import reset_endpoint_health
+
+    reset_endpoint_health()
+    monkeypatch.setattr("app.ai.providers.openai_compat.asyncio.sleep", _nosleep)
+    down = OpenAICompatProvider(model="x", api_key="k", base_url="https://a.example")
+    other = OpenAICompatProvider(model="y", api_key="k", base_url="https://b.example")
+    calls = {"n": 0}
+
+    def stream(*a, **k):
+        calls["n"] += 1
+        return _ConnectErrCtx()
+
+    monkeypatch.setattr(down._client, "stream", stream)
+    monkeypatch.setattr(other._client, "stream", stream)
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(down.complete([{"role": "user", "content": "hi"}]))
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(other.complete([{"role": "user", "content": "hi"}]))
+    assert calls["n"] == 2          # 另一家照常尝试，没被殃及
+    reset_endpoint_health()
+
+
+def test_熔断不误伤中途掐断的重试(monkeypatch):
+    """只有「压根连不上」才短路。连上了又被掐断是抖动，重试往往就成——不能一起停掉。"""
+    from app.ai.providers.openai_compat import reset_endpoint_health
+
+    prov = _fresh_provider(monkeypatch)
+    calls = {"n": 0}
+    good = ["data: " + json.dumps({"choices": [{"delta": {"content": "好了"}}]}), "data: [DONE]"]
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        return _StreamCtx(_DropResp() if calls["n"] == 1 else _LinesResp(good))
+
+    monkeypatch.setattr(prov._client, "stream", flaky)
+    out = asyncio.run(prov.complete([{"role": "user", "content": "hi"}]))
+    assert out == "好了" and calls["n"] == 2
+    reset_endpoint_health()
+
+
+def test_reset_endpoint_health_让玩家的重试真的去试(monkeypatch):
+    """玩家点「重新生成」时会清熔断——网络多半正是这会儿刚好，被自己的熔断挡住就成了帮倒忙。"""
+    import httpx
+    from app.ai.providers.openai_compat import reset_endpoint_health
+
+    prov = _fresh_provider(monkeypatch)
+    calls = {"n": 0}
+    good = ["data: " + json.dumps({"choices": [{"delta": {"content": "恢复了"}}]}), "data: [DONE]"]
+
+    def stream(*a, **k):
+        calls["n"] += 1
+        return _ConnectErrCtx() if calls["n"] == 1 else _StreamCtx(_LinesResp(good))
+
+    monkeypatch.setattr(prov._client, "stream", stream)
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(prov.complete([{"role": "user", "content": "hi"}]))
+
+    reset_endpoint_health()         # 玩家点了「重新生成」
+    assert asyncio.run(prov.complete([{"role": "user", "content": "hi"}])) == "恢复了"
+    reset_endpoint_health()
+
+
+def test_失败文案把连不上和模型出错分开说():
+    """玩家自己能处理「网络断了」，处理不了「模型抽风」。混成一句话只会让人找错方向。"""
+    import httpx
+    from app.services.turn_orchestrator import _failure_notice
+
+    net = _failure_notice(httpx.ConnectError("connect failed"))
+    assert "网络" in net or "代理" in net
+    other = _failure_notice(ValueError("模型返回了非法 JSON"))
+    assert "网络" not in other and "代理" not in other
+
+
+def test_流式路径同样不重试且参与熔断(monkeypatch):
+    """KP 叙事走的是流式路径——那正是玩家真正在等的那一环，不能让它也白试三次。"""
+    import httpx
+    from app.ai.providers.openai_compat import reset_endpoint_health
+
+    prov = _fresh_provider(monkeypatch)
+    calls = {"n": 0}
+
+    def stream(*a, **k):
+        calls["n"] += 1
+        return _ConnectErrCtx()
+
+    monkeypatch.setattr(prov._client, "stream", stream)
+
+    async def collect():
+        return [d.text async for d in prov.stream_chat([{"role": "user", "content": "hi"}])]
+
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(collect())
+    assert calls["n"] == 1
+
+    with pytest.raises(httpx.ConnectError):   # 熔断已置位，第二次连试都不试
+        asyncio.run(collect())
+    assert calls["n"] == 1
+    reset_endpoint_health()
+
+
+def test_补全踩到的熔断也拦得住流式(monkeypatch):
+    """planner（complete）先撞上不通，KP 叙事（stream_chat）不必再撞一次——同一个端点。"""
+    import httpx
+    from app.ai.providers.openai_compat import reset_endpoint_health
+
+    prov = _fresh_provider(monkeypatch)
+    calls = {"n": 0}
+
+    def stream(*a, **k):
+        calls["n"] += 1
+        return _ConnectErrCtx()
+
+    monkeypatch.setattr(prov._client, "stream", stream)
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(prov.complete([{"role": "user", "content": "hi"}]))
+
+    async def collect():
+        return [d.text async for d in prov.stream_chat([{"role": "user", "content": "hi"}])]
+
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(collect())
+    assert calls["n"] == 1
+    reset_endpoint_health()

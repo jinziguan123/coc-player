@@ -5,6 +5,8 @@ import logging
 import re
 import time
 
+import httpx
+
 from sqlalchemy.orm import Session
 
 from app.ai import turn_planner, usage_tracker
@@ -12,6 +14,7 @@ from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import KPAgent
 from app.ai.context import build_kp_context
 from app.ai.llm_factory import get_fast_llm, get_llm
+from app.ai.providers import openai_compat
 from app.ai.prompts.kp_system import (
     CHECK_REQUEST_PROMPT,
     COMBAT_AFTERMATH_PROMPT,
@@ -924,10 +927,22 @@ def _stashed_check_request(turn: list, actor_id: str | None) -> str:
     return skill
 
 
+def _failure_notice(exc: BaseException) -> str:
+    """把失败原因翻成玩家看得懂的一句话。
+
+    「连不上」和「模型出错了」得分开说：前者玩家自己能处理（查网络、看代理有没有掉），
+    后者除了重试没别的办法。都写成「生成中断」的话，玩家只会对着屏幕找自己哪步操作错了。
+    """
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return "（连不上模型服务——请检查网络或代理，然后重试）"
+    return "（KP 生成中断，请重试或继续输入）"
+
+
 async def run_chat_generation(session_id: str) -> None:
     # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 → 二次 planner →
     # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
     # 都要有耗时，否则「为什么这么慢」只能靠猜。t_turn 给出总时长做对账。
+    openai_compat.reset_endpoint_health()   # 见 run_regenerate_generation 里的同一行
     t_turn = time.monotonic()
     t_drain = time.monotonic()
     await _drain_housekeeping(session_id)
@@ -1114,9 +1129,9 @@ async def run_chat_generation(session_id: str) -> None:
         usage_tracker.warn_if_reasoning_dominates(turn_usage)
     except asyncio.CancelledError:
         logger.info("生成被取消: session=%s", session_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("生成失败: session=%s", session_id)
-        _persist_error_notice(db, session_id, "（KP 生成中断，请重试或继续输入）")
+        _persist_error_notice(db, session_id, _failure_notice(exc))
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
@@ -2257,6 +2272,10 @@ async def run_regenerate_generation(session_id: str) -> None:
     调用前应已由端点：①取消卡住的旧生成 task；②回滚上一轮 KP 叙事产物
     （session_service.rollback_last_kp_output）。本函数只负责用清理后的事件流重跑 KP。
     """
+    # 连不上模型时的熔断只在**一个回合内**有效：它防的是 planner/队友/KP 叙事各等各的
+    # 三次重试。玩家点「重新生成」是明确的重试意图，网络多半也是这会儿刚好了，
+    # 不清掉的话这一下会被自己的熔断短路——那就成了帮倒忙。
+    openai_compat.reset_endpoint_health()
     await _drain_housekeeping(session_id)
     from app.database import SessionLocal
 
