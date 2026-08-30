@@ -406,18 +406,35 @@ _NO_CHECK_PHRASES = (
 
 def requested_check_settled(
     db: Session, session_id: str, actor_id: str, pre_gen_seq: int,
+    actor_name: str = "",
 ) -> bool:
-    """本轮 KP 是否已经为该角色挂出待投检定（即：它对这次申请给了机制上的答复）。
+    """本轮 KP 是否已经为该角色给出机制上的答复——**挂出待投检定，或者已经把骰掷了**。
 
-    **不算数的**：系统守卫补的 SAN 检定（kind=san_check）——那是恐怖裁定，不是对
-    「我要用格斗砸它」这次申请的答复。实测那一局正是这样：玩家申请格斗检定，KP 写了段
-    叙事没发指令，SAN 守卫补了个理智检定，于是看起来「挂了检定」，玩家申请的那个却蒸发了。
+    两种形态都要认，判据不同：
+
+    - 待投请求（``check_request``）：等玩家点投骰的，按 ``char_id`` 认人。
+    - 已掷出的骰（``event_type='dice'``）：**暗投**是 KP 一步投完的，不产生 check_request、
+      元数据里也没有 char_id，只按角色名（``meta['actor']``）认人。只认前一种的话，
+      暗投等于没发生——实测一次心理学申请因此挂出了两条暗投。
+
+    **不算数的**：系统守卫补的 SAN 检定——那是恐怖裁定，不是对「我要用格斗砸它」这次申请的
+    答复。实测那一局正是这样：玩家申请格斗检定，KP 写了段叙事没发指令，SAN 守卫补了个理智
+    检定，于是看起来「挂了检定」，玩家申请的那个却蒸发了。两种形态各有各的标记：请求看
+    ``kind=san_check``，掷出的骰看 ``skill='SAN'``。
     技能名换了不算问题（玩家申请侦查、KP 认为该用聆听，那是 KP 的裁定权）。
     """
+    name = (actor_name or "").strip()
     for ev in session_service.get_session_events(db, session_id):
         if int(ev.sequence_num or 0) <= pre_gen_seq:
             continue
         meta = ev.metadata_ or {}
+        if ev.event_type == "dice":
+            # 战斗骰（combat_roll/combat_attack）没有 actor 字段，按名字比对自然不会命中。
+            if str(meta.get("skill") or "").upper() == "SAN":
+                continue
+            if name and str(meta.get("actor") or "").strip() == name:
+                return True
+            continue
         if not meta.get("check_request"):
             continue
         if meta.get("kind") == "san_check":
@@ -442,7 +459,10 @@ def requested_check_fallback_command(
     skill = (skill or "").strip()
     if not skill or actor is None:
         return ""
-    if requested_check_settled(db, session_id, getattr(actor, "id", ""), pre_gen_seq):
+    if requested_check_settled(
+        db, session_id, getattr(actor, "id", ""), pre_gen_seq,
+        actor_name=getattr(actor, "name", ""),
+    ):
         return ""
     narration = _narrated_turn_text(db, session_id, pre_gen_seq)
     if any(phrase in narration for phrase in _NO_CHECK_PHRASES):

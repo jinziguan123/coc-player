@@ -2010,6 +2010,58 @@ def test_san_guard_check_does_not_count_as_answer(db_factory):
     assert "[DICE_CHECK:" in cmd
 
 
+def test_暗投也算答复不再补挂(db_factory):
+    """KP 直接暗投掉了 → 申请已有归宿，不能再补一次。
+
+    实测事故：玩家申请心理学，KP 挂了一次暗投（[dice] + blind），守卫只认
+    check_request，把这条看成没发生，于是补挂第二次——界面上并排出现两条
+    「进行了一次暗投·心理学」。暗投一步投完，元数据里没有 char_id，只有角色名。
+    """
+    from app.services import planned_effects
+
+    db = db_factory()
+    session_id, actor, pre = _seed_check_request(db)
+    session_service.add_event(
+        db, session_id, "dice", f"{actor.name} 进行了一次暗投·心理学（结果仅 KP 可见）",
+        actor_name="系统",
+        metadata={"skill": "心理学", "actor": actor.name, "blind": True},
+    )
+    assert not planned_effects.requested_check_fallback_command(
+        db, session_id, actor, "心理学", pre,
+    )
+
+
+def test_别人的暗投不顶替我的申请(db_factory):
+    """暗投按角色名认人：队友掷的那次不能算作对我这次申请的答复。"""
+    from app.services import planned_effects
+
+    db = db_factory()
+    session_id, actor, pre = _seed_check_request(db)
+    session_service.add_event(
+        db, session_id, "dice", "别的角色 进行了一次暗投·心理学（结果仅 KP 可见）",
+        actor_name="系统",
+        metadata={"skill": "心理学", "actor": "别的角色", "blind": True},
+    )
+    assert "[DICE_CHECK:" in planned_effects.requested_check_fallback_command(
+        db, session_id, actor, "心理学", pre,
+    )
+
+
+def test_掷出的SAN骰不算对技能申请的答复(db_factory):
+    """与 check_request 那条同理，只是标记不同：请求看 kind，掷出的骰看 skill='SAN'。"""
+    from app.services import planned_effects
+
+    db = db_factory()
+    session_id, actor, pre = _seed_check_request(db)
+    session_service.add_event(
+        db, session_id, "dice", f"{actor.name}｜理智检定：失败", actor_name="系统",
+        metadata={"skill": "SAN", "actor": actor.name, "roll": 93, "san_loss": 13},
+    )
+    assert "[DICE_CHECK:" in planned_effects.requested_check_fallback_command(
+        db, session_id, actor, "格斗(斗殴)", pre,
+    )
+
+
 def test_explicit_no_check_verdict_is_respected(db_factory):
     """KP 明说这次不用掷 → 尊重它的裁定权，不补挂。"""
     from app.services import planned_effects
