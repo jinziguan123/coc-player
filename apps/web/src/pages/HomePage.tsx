@@ -32,17 +32,20 @@ export function HomePage() {
   const inventory = useHomeInventory()
 
   return (
-    // 5xl 而不是 4xl：下方介绍要并排成三栏，容器太窄会把规则表挤到换行。
-    // 上下留白也一并收紧——首页的目标是「一屏看全」，标题区不该独吞四分之一屏。
-    // 也不加页面级 mt：上边距统一由 main 的内边距给，各页自己再加一层，标题就会上下错位。
+    // 与内页同一套容器：**不居中、不限宽、不加页面级 mt**。
     //
-    // **不居中**：内页都是左对齐（max-w-[100rem] 在常见窗口下直接占满），首页若居中，
-    // 两边留白会让标题左边缘比内页往右挪一百多像素，跳一次页整块就横着弹一下。
-    // 这一页已经从落地页变成工作台了，左对齐本也更合它的身份。
-    <div className="w-full max-w-5xl">
+    // 居中会让标题左边缘随窗口宽度浮动，跳一次页整块横着弹一下；页面级 mt 则让它上下错位
+    // （各页曾经是 232/237/253 与 37/57/69 三种位置）。上边距统一交给 main 的内边距。
+    //
+    // 也不再压到 5xl：左对齐 ＋ 窄容器＝内容全挤在左上角、右边空掉一大片。放开之后
+    // 三栏介绍每列也能从 250–330px 松到四百多，比原先好读。
+    // 撑满可用高度、把「第一次跑团？」压到底：老玩家的首页内容本来就少（三个入口 ＋
+    // 一两桌在跑），全挤在顶端时下面那一大片看着像没写完。推到底之后，留白落在中间，
+    // 成了「常用的」与「要不要看科普」之间的分隔。
+    <div className="flex min-h-full w-full flex-col">
       <CaseFileHeader inventory={inventory} />
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3 mt-1">
         {ENTRIES.map(({ to, Icon, title, desc, primary }) => (
           <Link
             key={title}
@@ -67,7 +70,7 @@ export function HomePage() {
         ))}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         {SHORTCUTS.map(({ to, Icon, label }) => (
           <Link key={label} to={to} className="home-shortcut no-underline">
             <Icon /> {label}
@@ -80,7 +83,9 @@ export function HomePage() {
       {inventory && <ResumeSessions sessions={inventory.openSessions} />}
 
       {/* 一个调查员都没有 = 还没上过桌，这种人才需要看科普；老玩家默认收起。 */}
+      <div className="mt-auto pt-6">
       <HomeIntro defaultOpen={inventory?.characters === 0} />
+      </div>
     </div>
   )
 }

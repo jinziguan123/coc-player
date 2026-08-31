@@ -23,9 +23,9 @@ export function GamePage() {
   const pick = (next: Mode) => { setMode(next); setChooser(false) }
 
   return (
-    // 开局表单是线性流程，房间列表是并列卡片——容器放到 4xl，够两列房间卡又不至于把表单拉散。
-    // 不居中：各页标题的左边缘要落在同一条线上，居中会让它随窗口宽度左右浮动（见 HomePage）。
-    <div className="max-w-4xl">
+    // 抬头占满整幅宽度，标题在左、操作贴右；表单与房间列表另外限宽——开局表单是线性流程，
+    // 拉到满屏反而难用。不居中：各页标题的左边缘要落在同一条线上（见 HomePage）。
+    <div>
       {/* 在流程里，左上角的「返回」退回房间列表，而不是退出整个页面——这一层才是用户
           心里的上一步。流程中也不再提供「新增游戏」：此刻要么把这一步做完，要么返回。 */}
       <ArchiveHead
@@ -40,6 +40,7 @@ export function GamePage() {
         )}
       />
 
+      <div className="max-w-4xl">
       {/* 先问「开一局，还是去别人那局」，再只展开该出现的那一半——
           从前两个表单同屏堆着，页面一打开就是一长条，而用户此刻只想回答这一个问题。 */}
       <GameEntryChooser
@@ -54,6 +55,7 @@ export function GamePage() {
       {mode === 'create' ? <NewGamePanel setup={setup} />
         : mode === 'join' ? <JoinRoomPanel setup={setup} />
           : <SessionList setup={setup} />}
+      </div>
     </div>
   )
 }

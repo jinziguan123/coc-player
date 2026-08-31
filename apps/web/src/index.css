@@ -1036,6 +1036,10 @@ body {
 .home-entry {
   color: inherit;
   cursor: pointer;
+  /* 容器放开之后每张卡有近 400px 宽，若高度还是内容撑出来的九十来像素，就成了 4:1 的扁条。
+     给个下限把比例拉回来，顺带把首页内容在纵向铺开一点——不然整页都堆在顶部。 */
+  min-height: 8.5rem;
+  justify-content: center;
 }
 .home-entry:hover {
   border-color: var(--color-border-strong);
