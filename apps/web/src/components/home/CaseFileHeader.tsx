@@ -11,6 +11,9 @@ import type { HomeInventory } from '@/features/home/useHomeInventory'
  * 所以把顶部改成一份卷宗的抬头：**左对齐**（档案是左对齐的，居中是海报的语言），
  * 右侧挂一行等宽的库存清单。
  *
+ * 原先标题上头还有一枚「卷宗」书签，拿掉了：侧边栏第一项已经高亮着「卷宗」，书签只是
+ * 把同一件事再说一遍；它还随各页容器宽度浮动，跳页时看着像在飘（详见 ArchiveHead）。
+ *
  * 那行清单不是仿真的档案编号——假编号只是装饰，编码不了任何真实信息。它列的是你手上
  * **真有什么**，正好回答这一页要回答的问题：我现在能不能开一局。手上是空的时候，
  * 它就直接变成下一步该点哪儿。
@@ -35,7 +38,7 @@ export function CaseFileHeader({ inventory }: { inventory: HomeInventory | null 
   return (
     <header className="case-head">
       <div className="case-head-top">
-        <span className="case-tab">卷宗</span>
+        <h1 className="case-title">CoC Player</h1>
         {inventory && (
           <div className="case-stats">
             {rowsOf(inventory).map(({ label, count, emptyText, to }) => (
@@ -60,7 +63,6 @@ export function CaseFileHeader({ inventory }: { inventory: HomeInventory | null 
         )}
       </div>
 
-      <h1 className="case-title">CoC Player</h1>
       <p className="case-sub">AI 当守秘人，你带调查员上桌</p>
     </header>
   )

@@ -34,7 +34,12 @@ export function HomePage() {
   return (
     // 5xl 而不是 4xl：下方介绍要并排成三栏，容器太窄会把规则表挤到换行。
     // 上下留白也一并收紧——首页的目标是「一屏看全」，标题区不该独吞四分之一屏。
-    <div className="mx-auto mt-5 w-full max-w-5xl">
+    // 也不加页面级 mt：上边距统一由 main 的内边距给，各页自己再加一层，标题就会上下错位。
+    //
+    // **不居中**：内页都是左对齐（max-w-[100rem] 在常见窗口下直接占满），首页若居中，
+    // 两边留白会让标题左边缘比内页往右挪一百多像素，跳一次页整块就横着弹一下。
+    // 这一页已经从落地页变成工作台了，左对齐本也更合它的身份。
+    <div className="w-full max-w-5xl">
       <CaseFileHeader inventory={inventory} />
 
       <div className="grid gap-3 sm:grid-cols-3">

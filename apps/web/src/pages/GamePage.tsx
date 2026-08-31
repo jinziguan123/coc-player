@@ -23,15 +23,16 @@ export function GamePage() {
   const pick = (next: Mode) => { setMode(next); setChooser(false) }
 
   return (
-    // 开局表单是线性流程，房间列表是并列卡片——容器放到 4xl，够两列房间卡又不至于把表单拉散
-    <div className="mx-auto mt-8 max-w-4xl">
+    // 开局表单是线性流程，房间列表是并列卡片——容器放到 4xl，够两列房间卡又不至于把表单拉散。
+    // 不居中：各页标题的左边缘要落在同一条线上，居中会让它随窗口宽度左右浮动（见 HomePage）。
+    <div className="max-w-4xl">
       {/* 在流程里，左上角的「返回」退回房间列表，而不是退出整个页面——这一层才是用户
           心里的上一步。流程中也不再提供「新增游戏」：此刻要么把这一步做完，要么返回。 */}
       <ArchiveHead
-        tab="牌桌"
         title={mode ? TITLE[mode] : '开始游戏'}
         stats={mode ? undefined : [{ label: '开着的桌', value: setup.activeSessions.length }]}
-        onBack={mode ? () => setMode(null) : undefined}
+        back={!!mode}
+        onBack={() => setMode(null)}
         actions={mode ? undefined : (
           <button onClick={() => setChooser(true)} className="btn-primary btn-sm flex items-center gap-1">
             <Plus size={14} aria-hidden="true" /> 新增游戏

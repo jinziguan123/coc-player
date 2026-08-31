@@ -877,14 +877,14 @@ export function CharacterPage() {
   })
 
   return (
-    <div className="flex h-full min-h-0 flex-col p-4">
+    // 只留底部内边距：左右上跟随 main 的 24px，多加一层会让标题比别的页横挪 16px
+    <div className="flex h-full min-h-0 flex-col pb-4">
       {/* 建卡流程是线性表单，窄栏更易读、自己滚；名录+详情是一本摊开的书，占满剩余高度 */}
       <div className={`flex min-h-0 flex-1 flex-col ${inCreateFlow ? 'max-w-3xl overflow-auto' : ''}`}>
         <div className="contents">
-          {/* 「名录」是这一页在卷宗里的名字；标题按人怎么叫它取（角色），不叫「角色管理」。
-              建卡途中不报总数——那会儿你在写第一页，看总数没有意义。 */}
+          {/* 标题按人怎么叫它取（角色），不叫「角色管理」。建卡途中不报总数——那会儿你在
+              写第一页，看总数没有意义；退出建卡走下面那个「返回列表」，它还负责清掉草稿。 */}
           <ArchiveHead
-            tab="名录"
             title="角色"
             stats={inCreateFlow ? undefined : [{ label: '调查员', value: characters.length }]}
             actions={inCreateFlow ? (

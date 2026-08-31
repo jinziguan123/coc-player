@@ -133,9 +133,8 @@ export function ModulePage() {
   return (
     // 上传区是线性表单（窄栏更好用），列表是并列卡片（放宽让网格铺开）——分别限宽
     <div className="max-w-[100rem]">
-      {/* 「书目」是这一页在卷宗里的名字；标题按人怎么叫它取（模组），不叫「模组管理」 */}
+      {/* 标题按人怎么叫它取（模组），不叫「模组管理」——管理是系统视角 */}
       <ArchiveHead
-        tab="书目"
         title="模组"
         stats={[{ label: '在库', value: modules.length }]}
         actions={(
