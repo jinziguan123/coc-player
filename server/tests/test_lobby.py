@@ -132,6 +132,38 @@ def test_kick_frees_seat_and_host_only(db_factory):
     assert freed.character_id is None and freed.owner_token is None and freed.claimed is False
 
 
+def test_开局后踢人把角色交给_AI_而不是让他凭空消失(db_factory):
+    """故事已经在跑，那个调查员不该因为操作他的人离席就从房间里消失。
+
+    空着不管更糟——他会杵在原地，既不行动也不能被别人接手。
+    """
+    db = db_factory()
+    module, host, joiner = _seed(db)
+    session = session_service.create_session(
+        db, module.id,
+        [
+            {"character_id": host.id, "role": "human", "is_primary": True},
+            {"character_id": None, "role": "human"},
+        ],
+        creator_token="host-tok",
+    )
+    sid = session.id
+    seat = next(p for p in session_service.get_participants(db, sid) if not p.character_id)
+    session_service.claim_seat(db, sid, seat.seat_order, joiner.id, "joiner-tok")
+    session_service.set_ready(db, sid, "joiner-tok", True)
+    session_service.set_ready(db, sid, "host-tok", True)
+    session_service.start_game(db, sid, "host-tok")
+
+    _, name = session_service.kick_seat(db, sid, seat.seat_order, "host-tok")
+
+    assert name == joiner.name
+    db.refresh(seat)
+    assert seat.role == "ai"                  # 交给 AI 驱动
+    assert seat.character_id == joiner.id     # 角色留在场上
+    assert seat.owner_token is None and seat.claimed is False
+    assert seat.ready is True                 # AI 席没有「谁来点准备」，留 False 会卡住整桌
+
+
 def test_human_kp_host_can_kick_primary_player(db_factory):
     db = db_factory()
     module, _host, joiner = _seed(db)

@@ -802,12 +802,22 @@ def assign_seat_character(
 def kick_seat(
     db: Session, session_id: str, seat_order: int, token: str | None
 ) -> tuple[GameSession, str]:
-    """房主把某真人席位的玩家移出，席位回到空席待认领。返回 (session, 被踢角色名)。"""
+    """房主把某真人席位的玩家移出。返回 (session, 被移出的角色名)。
+
+    开局前后处理不同，因为「席位空了」这件事在两个阶段的含义不一样：
+
+    - 大厅里席位回到**空席待认领**，角色一并摘掉——本来就还没开始，等人来坐就是了。
+    - 开局后交给 **AI 接管**，角色留在场上。故事已经在跑，那个调查员不会因为操作他的人
+      离席就从房间里消失；空着不管则更糟——他会杵在原地，既不行动也不能被别人接手。
+
+    想让角色彻底退场是另一回事（剧情上的离场），不该混在「把这个人从席位上移开」里。
+
+    移出席位也不等于禁止对方再连进来——那是接入名册的事（``lan_roster``），两件事分开：
+    换个角色重来和不许再来，是不同的决定。
+    """
     session = db.get(GameSession, session_id)
     if not session:
         raise ValueError("房间不存在")
-    if session.status != "setup":
-        raise ValueError("游戏已开始，无法移出席位")
     if not is_host(db, session_id, token):
         raise ValueError("只有房主可以移出玩家")
     seat = (
@@ -829,10 +839,16 @@ def kick_seat(
         raise ValueError("只能移出真人玩家")
     char = db.get(Character, seat.character_id) if seat.character_id else None
     name = char.name if char else "玩家"
-    seat.character_id = None
     seat.owner_token = None
     seat.claimed = False
-    seat.ready = False
+    if session.status == "setup":
+        seat.character_id = None
+        seat.ready = False
+    else:
+        # 角色留在场上，改由 AI 驱动。ready 置 True 与 add_ai_seat 同源：
+        # AI 席没有「谁来点准备」可言，留 False 会把整桌卡在等待就绪上。
+        seat.role = "ai"
+        seat.ready = True
     db.commit()
     db.refresh(session)
     if seat.is_primary:

@@ -273,15 +273,20 @@ def kick_seat(
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    """大厅：房主把某真人席位的玩家移出，席位回到空席。"""
-    require_session_host(
+    """房主把某真人席位的玩家移出。
+
+    大厅里席位回到空席待认领；开局后角色留在场上改由 AI 接管——理由见
+    ``session_service.kick_seat``。
+    """
+    in_game = require_session_host(
         db, session_id, token, detail="只有房主可以移出玩家",
-    )
+    ).status != "setup"
     try:
         session, name = session_service.kick_seat(db, session_id, seat_order, token)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    room_hub.broadcast(session_id, _make_chunk("seat", f"{name} 已被移出席位", actor_name=name))
+    moved = f"{name} 的席位已交给 AI 接管" if in_game else f"{name} 已被移出席位"
+    room_hub.broadcast(session_id, _make_chunk("seat", moved, actor_name=name))
     room_hub.broadcast(session_id, _make_chunk("lobby"))
     module = db.get(Module, session.module_id)
     return _session_payload(

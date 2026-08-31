@@ -1496,7 +1496,10 @@ export interface paths {
         put?: never;
         /**
          * Kick Seat
-         * @description 大厅：房主把某真人席位的玩家移出，席位回到空席。
+         * @description 房主把某真人席位的玩家移出。
+         *
+         *     大厅里席位回到空席待认领；开局后角色留在场上改由 AI 接管——理由见
+         *     ``session_service.kick_seat``。
          */
         post: operations["kick_seat_api_sessions__session_id__kick__seat_order__post"];
         delete?: never;
