@@ -1,11 +1,11 @@
 // 重拍介绍页（site/）用的应用截图。
 //
 //     pnpm site:shots            # 需要 dev server 已在跑（pnpm dev）
-//     pnpm site:shots --base=http://127.0.0.1:5177
+//     pnpm site:shots --base=http://127.0.0.1:5173
 //
-// 为什么要有这个脚本：site/assets/shots 里那十张图（gothic / parchment 各五张）每次界面
-// 一动就过时，而介绍页上摆着过时截图，比文案有 AI 味更容易被人一眼看穿。手动截十张要
-// 切两次主题、跑五个页面、再逐张转 webp，做一次就不想做第二次——所以固化成脚本。
+// 为什么要有这个脚本：site/assets/shots 里那些图（gothic / parchment 各一套）每次界面
+// 一动就过时，而介绍页上摆着过时截图，比文案有 AI 味更容易被人一眼看穿。手动截十几张要
+// 切两次主题、跑六个页面、再逐张转 webp，做一次就不想做第二次——所以固化成脚本。
 //
 // 主题只从 localStorage 的 trpg_theme 读（见 apps/web/index.html 的首帧内联脚本），
 // 没有 URL 开关，所以无头浏览器必须在页面加载前把它写进去。Playwright 的 addInitScript
@@ -26,17 +26,66 @@ const OUT = path.join(ROOT, 'site/assets/shots')
 const argBase = process.argv.find((a) => a.startsWith('--base='))
 const BASE = argBase ? argBase.slice('--base='.length) : 'http://127.0.0.1:5177'
 
-/** 介绍页里按 data-shot 引用的五张。宽高与页面上写的 width/height 一一对应，改这里要同步改 index.html。
- *  高度按各页内容量单独给——统一高度会让内容少的页（规则书、建卡）截出大半张空背景。
+/**
+ * 游戏页要 token 才进得去：会话按 `X-Player-Token` 授权（server/app/api/deps.py），
+ * 没有它 `/api/sessions` 只会返回空。前端把这串 UUID 存在 localStorage 的
+ * `trpg_player_token` 下，值就落在房主席位的 `owner_token` 列里——从本机库里取出来
+ * 注入，等价于「你自己在自己机器上打开了这一局」，不伪造任何东西。
  *
- *  两张要先点进去才到得了——介绍页的 alt 写明了它们是「模组沙盘视图」和「创建角色向导」，
- *  不是模组列表和角色名录。截错页面比截图过时更糟，所以这里带上到达路径。 */
+ * 不写死某个会话 id：那是这台机器上的存档，随时会被删。挑最近动过的一局，谁跑都能
+ * 截到自己的桌。
+ */
+function hostSeat() {
+  const sql = `SELECT s.id || '|' || p.owner_token
+    FROM game_sessions s JOIN session_participants p ON p.session_id = s.id
+    WHERE p.role = 'human' AND p.owner_token IS NOT NULL AND s.status = 'active'
+    ORDER BY s.updated_at DESC LIMIT 1;`
+  try {
+    const out = execFileSync('sqlite3', [path.join(ROOT, 'server/trpg.db'), sql], {
+      encoding: 'utf8',
+    }).trim()
+    if (!out) return null
+    const [sessionId, token] = out.split('|')
+    return { sessionId, token }
+  } catch {
+    return null                       // 没装 sqlite3 或库还没建，跳过游戏页
+  }
+}
+
+const seat = hostSeat()
+
+/**
+ * 介绍页里按 data-shot 引用的每一张。宽高与页面上写的 width/height 一一对应，
+ * 改这里要同步改 index.html。
+ *
+ * **一律 16:10**，跟真实窗口一个比例。曾经试过「按各页内容量单独定高」，想把留白裁掉，
+ * 结果每张图比例都不一样（3.8:1、2.9:1、2.1:1），一张都不像应用窗口——留白多是内容
+ * 本身的事，不该靠压扁窗口去掩盖。
+ *
+ * 有几张要先点进去才到得了：介绍页的 alt 写明了它们是「模组沙盘视图」「创建角色向导」，
+ * 不是模组列表和角色名录。截错页面比截图过时更糟，所以这里带上到达路径。
+ */
 const PAGES = [
-  // 首页只在有开着的桌时才多出「接着玩」一块。截高度按「没有开着的桌」这个下限给，
-  // 有桌时那块会把中间填上，图会更满而不是被截断。
-  { shot: 'home', path: '/', w: 2000, h: 520 },
+  { shot: 'home', path: '/', w: 2000, h: 1250 },
+
+  // 游戏页是这东西跑起来的样子，介绍页最该有的一张。
+  seat && {
+    shot: 'game', path: `/game/${seat.sessionId}`, w: 2000, h: 1250,
+    token: seat.token,
+    // 游戏页的 SSE 长连接一直开着，networkidle 永远等不到——只等 DOM，再靠 settle 兜住
+    // 历史消息渲染、角色卡雷达图这些异步的部分。
+    waitUntil: 'domcontentloaded',
+    settle: 4000,
+    // 出图 2000×1250，但按 1333×833 的逻辑视口排版再 1.5× 放大。介绍页把图缩到千把
+    // 像素宽显示，1× 的 2000 宽图缩一半，字就只有真实大小的一半。倍率不能再往上抬：
+    // 2× 意味着 1000px 的逻辑宽度，那时侧边栏和角色卡把消息区挤成一条，叙述只剩几行。
+    dpr: 1.5,
+    // 侧边栏收起。展开时它占掉 1/5 的宽，而截图要展示的是对局本身，不是导航。
+    collapseSidebar: true,
+  },
+
   {
-    shot: 'sandbox', w: 1600, h: 760,
+    shot: 'sandbox', w: 1440, h: 900,
     // 优先挑 alt 里点名的那个本子，找不到就用第一个
     path: async (page, base) => {
       const list = await page.evaluate((b) => fetch(b + '/api/modules').then((r) => r.json()), base)
@@ -49,22 +98,25 @@ const PAGES = [
       await page.waitForTimeout(900)      // 六边形网格是 canvas，等它画完
     },
   },
-  { shot: 'rulebooks', path: '/rulebooks', w: 1600, h: 560, ready: '.archive-title' },
+
+  { shot: 'rulebooks', path: '/rulebooks', w: 1440, h: 900, ready: '.archive-title' },
+
   {
-    shot: 'char-wizard', path: '/characters', w: 1600, h: 640, ready: '.archive-title',
+    shot: 'char-wizard', path: '/characters', w: 1440, h: 900, ready: '.archive-title',
     after: async (page) => {
       await page.getByRole('button', { name: '创建角色' }).click()
       await page.waitForTimeout(600)
     },
   },
+
   {
-    shot: 'settings', path: '/settings', w: 1600, h: 560,
+    shot: 'settings', path: '/settings', w: 1440, h: 900,
     // 这张配的是介绍页「接一个模型」那一步，读者正是还没配过的人——空状态才对题。
     // 而且本机那份配置列表里是真实的接口地址（含第三方中转站），介绍页是要公开发布的，
     // 不该把它截进去。拦掉这个接口拿到的就是新装那天的样子，既贴题又不外泄。
     mock: { '**/settings/ai/profiles': [], '**/settings/ai/image-profiles': [] },
   },
-]
+].filter(Boolean)
 
 const THEMES = ['gothic', 'parchment']
 
@@ -80,18 +132,29 @@ let made = 0
 try {
   for (const theme of THEMES) {
     for (const p of PAGES) {
-      // 视口＝目标尺寸，1× 出图。别用「半尺寸 ＋ 2×」——那样内容是按 800px 逻辑宽度
+      // 视口＝目标尺寸，1× 出图。别用「半尺寸 ＋ 2×」——那样内容是按一半的逻辑宽度
       // 排版的，宽屏才有的三列布局根本不会出现，截出来是窄窗口的样子。
-      // 页面上这些图按 1600/2000 宽声明、实际显示到千把像素，本身就相当于 2× 了。
+      // 页面上这些图按 1440/2000 宽声明、实际显示到千把像素，本身就相当于 2× 了。
+      const dpr = p.dpr ?? 1
       const ctx = await browser.newContext({
-        viewport: { width: p.w, height: p.h },
-        deviceScaleFactor: 1,
+        viewport: { width: Math.round(p.w / dpr), height: Math.round(p.h / dpr) },
+        deviceScaleFactor: dpr,
         colorScheme: 'dark',
       })
       // 必须在页面脚本跑之前写：首帧内联脚本就是靠它决定 data-theme 的
-      await ctx.addInitScript((t) => {
-        try { localStorage.setItem('trpg_theme', t) } catch { /* 隐私模式，忽略 */ }
-      }, theme)
+      await ctx.addInitScript(([t, tok, collapse]) => {
+        try {
+          localStorage.setItem('trpg_theme', t)
+          if (tok) localStorage.setItem('trpg_player_token', tok)
+          // 新手引导（features/tour/）会蒙一层挖洞遮罩，整页被压暗，截出来是张灰片。
+          // 标成看过——截图要的是界面本身，不是第一次进来的教学态。
+          localStorage.setItem('coc_game_tour_seen_v1', '1')
+          if (collapse) localStorage.setItem('trpg_sidebar_collapsed', '1')
+          for (const k of ['check-request', 'dice-result', 'luck-offer', 'combat', 'split-party']) {
+            localStorage.setItem('coc_hint_seen::' + k, '1')
+          }
+        } catch { /* 隐私模式，忽略 */ }
+      }, [theme, p.token || null, p.collapseSidebar || false])
 
       const page = await ctx.newPage()
       for (const [pattern, body] of Object.entries(p.mock || {})) {
@@ -101,10 +164,10 @@ try {
       // 动态路径要先有个页面才能发 fetch，所以先落到首页
       await page.goto(BASE + '/', { waitUntil: 'networkidle' })
       const target = typeof p.path === 'function' ? await p.path(page, BASE) : p.path
-      await page.goto(BASE + target, { waitUntil: 'networkidle' })
+      await page.goto(BASE + target, { waitUntil: p.waitUntil ?? 'networkidle' })
       if (p.ready) await page.waitForSelector(p.ready, { timeout: 10_000 })
       // 列表进场动画有错峰延迟，等它们落定，否则截到半透明的中间态
-      await page.waitForTimeout(1200)
+      await page.waitForTimeout(p.settle ?? 1200)
       if (p.after) await p.after(page)
 
       const png = path.join(tmp, `${theme}-${p.shot}.png`)
@@ -122,3 +185,4 @@ try {
 
 console.log(`\n共 ${made} 张，已写入 site/assets/shots/`)
 console.log('注意：截到的是这台机器上的真实数据。首页的「接着玩」只有本机存档里有开着的桌时才会出现。')
+if (!seat) console.log('跳过了游戏页：本机没有进行中的对局，或读不到 server/trpg.db。')
