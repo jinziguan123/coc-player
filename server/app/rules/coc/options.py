@@ -50,6 +50,18 @@ class CocRuleOptions:
     #: 花幸运买来的成功是否不计成长勾（原文：不计——走运没教会你任何事）。
     luck_spend_blocks_improvement: bool = True
 
+    # ── 燃运重骰（**不是官方规则**，常见村规；默认关）──────────────────
+    #
+    # 第七版规则书 p.85 只给了「1:1 花幸运改变掷骰结果」这一种用法，没有花幸运重掷的条目；
+    # 重掷在原文里叫**孤注一掷**，它不花幸运，代价是失败后果加重，而且与花幸运二选一
+    # （「当技能检定失败时，玩家可以选择孤注一掷或是花费幸运」）。
+    #
+    # 所以这条放在村规里：想要就开，不开则完全照原文。
+    #: 开启后，失败的检定可以烧掉固定点数幸运，整骰重掷一次。
+    luck_reroll: bool = False
+    #: 烧一次要花几点。重掷是「买一次机会」而非「买这次成功」，所以是定价而不是补差额。
+    luck_reroll_cost: int = 10
+
     # ── 伤害与状态 ────────────────────────────────────────────────────
     #: 单击伤害 ≥ 最大 HP ÷ 此值 → 重伤。RAW 是半血。
     major_wound_divisor: int = 2
@@ -109,6 +121,11 @@ def describe(options: CocRuleOptions) -> list[str]:
             f"幸运消费：已开启——{detail}。"
             "所以别把一次失败写成『已成定局、再无转圜』，玩家可能正要花幸运翻盘"
         )
+    if options.luck_reroll:
+        lines.append(
+            f"燃运重骰（本桌自定，非规则书内容）：失败后可烧 {options.luck_reroll_cost} 点幸运"
+            "整骰重掷一次，重掷结果照单全收。同样别把一次失败写死"
+        )
     if options.major_wound_divisor != DEFAULT_OPTIONS.major_wound_divisor:
         lines.append(
             f"重伤线：单次伤害达到最大 HP 的 1/{options.major_wound_divisor} 即为重伤"
@@ -129,6 +146,7 @@ _INT_BOUNDS = {
     "critical_max": (1, 20),
     "dice_pool_cap": (0, 3),
     "luck_spend_max": (0, 999),
+    "luck_reroll_cost": (1, 99),
     "major_wound_divisor": (1, 10),
     "insanity_flat_threshold": (1, 99),
 }

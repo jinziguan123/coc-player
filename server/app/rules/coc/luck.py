@@ -55,29 +55,53 @@ def rescue_offer(
     in_combat: bool = False,
     pushed: bool = False,
 ) -> dict | None:
-    """这一骰能不能用幸运救回来？能则返回 ``{cost, available, target}``，否则 None。
+    """这一骰能不能用幸运救回来？能则返回可选项，否则 None。
 
-    ``cost`` 是**刚好够翻盘**的点数：把骰值降到本次要求难度的及格线上，一点不多花。
+    返回 ``{cost, reroll_cost, available, target}``：
+
+    - ``cost``：补差额要花的点数（官方用法），**刚好够翻盘**——把骰值降到本次要求难度的
+      及格线上，一点不多花。0 表示这条路不通（没开、差得比幸运还多、或超了单次上限）。
+    - ``reroll_cost``：燃运重骰要烧的点数（村规用法）。0 表示没开或烧不起。
+
+    两者各自独立：差 40 点而只有 30 点幸运时补不起，但烧 10 点重掷仍烧得起。
     """
     opts = options or DEFAULT_OPTIONS
-    if not opts.luck_spend or pushed:
+    # 两种用法共同的前提。「孤注一掷之后不能再花幸运」是原文明写的
+    # （「当技能检定失败时，玩家可以选择孤注一掷或是花费幸运，孤注一掷的结果不能用幸运值改变」）。
+    if pushed or (not opts.luck_spend and not opts.luck_reroll):
         return None
     if in_combat and not opts.luck_spend_in_combat:
         return None
     if is_forbidden_skill(result.skill_name):
         return None
     # 大失败是掷出来的定局，不是差几点的问题；已经达标的更不必救。
+    # 原文：「大成功、大失败与枪械故障总是要应用，不能通过幸运值改变」。
     if result.outcome == "fumble" or result.meets_difficulty:
         return None
-    cost = result.roll - result.target
-    if cost <= 0:
-        return None
-    if opts.luck_spend_max and cost > opts.luck_spend_max:
-        return None
+
     available = available_luck(character_data)
-    if cost > available:
+    gap = result.roll - result.target
+
+    # 补差额（官方，规则书 p.85）：花到刚好够翻盘，一点不多花。
+    cost = 0
+    if opts.luck_spend and gap > 0 and gap <= available:
+        if not (opts.luck_spend_max and gap > opts.luck_spend_max):
+            cost = gap
+
+    # 燃运重骰（村规）：定价买一次机会，与补差额**各自独立**——差得太多买不起时，
+    # 烧运重掷往往还烧得起，那正是它存在的意义。
+    reroll_cost = 0
+    if opts.luck_reroll and 0 < opts.luck_reroll_cost <= available:
+        reroll_cost = opts.luck_reroll_cost
+
+    if not cost and not reroll_cost:
         return None
-    return {"cost": cost, "available": available, "target": result.target}
+    return {
+        "cost": cost,
+        "reroll_cost": reroll_cost,
+        "available": available,
+        "target": result.target,
+    }
 
 
 def apply_rescue(
@@ -108,6 +132,26 @@ def apply_rescue(
         units=result.units,
         bonus=result.bonus,
         penalty=result.penalty,
+    )
+
+
+def apply_reroll(
+    character_data: dict,
+    skill_name: str,
+    difficulty: str,
+    bonus: int = 0,
+    penalty: int = 0,
+    options: CocRuleOptions | None = None,
+):
+    """燃运重骰：整骰重来一次，走的还是同一套 ``resolve_skill_check``。
+
+    **重掷结果照单全收**——包括掷出大失败。买的是一次机会，不是一次成功；
+    要是重掷还能接着花幸运补差额，这条村规就成了「幸运够多就永不失败」。
+    """
+    from app.rules.coc.checks import resolve_skill_check
+
+    return resolve_skill_check(
+        character_data, skill_name, difficulty, bonus, penalty, options or DEFAULT_OPTIONS,
     )
 
 

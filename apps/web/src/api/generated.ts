@@ -3207,9 +3207,17 @@ export interface components {
         };
         /**
          * LuckDecisionRequest
-         * @description 对「要不要花幸运扭转这一骰」拍板。spend=False 即认了这次失败。
+         * @description 对「要不要动用幸运」拍板。
+         *
+         *     两种用法各有各的代价，玩家自己挑：``spend`` 补差额买下这次成功（官方，规则书 p.85），
+         *     ``reroll`` 烧固定点数整骰重掷（村规）。都不选就是放弃，接受原来的结果。
          */
         LuckDecisionRequest: {
+            /**
+             * Reroll
+             * @default false
+             */
+            reroll: boolean;
             /**
              * Spend
              * @default false

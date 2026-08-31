@@ -1743,11 +1743,13 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         db.close()
 
 
-async def run_luck_decision(session_id: str, spend: bool) -> None:
-    """玩家对「要不要花幸运」拍板后，接着把结算链走完。
+async def run_luck_decision(session_id: str, spend: bool, reroll: bool = False) -> None:
+    """玩家对「要不要动用幸运」拍板后，接着把结算链走完。
 
-    ``spend=True`` 才扣点改判；``False`` 是「认了这次失败」。无论哪种，之后都汇回
-    ``_settle_rolled_check`` 那一条链——买来的成功和掷出来的成功，后续待遇必须一模一样。
+    ``spend`` 补差额买下这次成功（官方，规则书 p.85）；``reroll`` 烧固定点数整骰重掷
+    （村规）。两者同时给时以 reroll 为准——它是更贵的那个，不该被静默忽略。
+    都不选就是放弃。无论哪种，之后都汇回 ``_settle_rolled_check`` 那一条链——买来的成功、
+    重掷来的成功和掷出来的成功，后续待遇必须一模一样。
     """
     from app.database import SessionLocal
 
@@ -1771,7 +1773,7 @@ async def run_luck_decision(session_id: str, spend: bool) -> None:
         difficulty = str(pending.get("difficulty") or "normal")
         spent = 0
 
-        if spend:
+        if spend or reroll:
             char = db.get(Character, str(pending.get("char_id") or ""))
             options = coc_options.from_dict(
                 rule_options_service.effective(db, game_session),
@@ -1781,7 +1783,8 @@ async def run_luck_decision(session_id: str, spend: bool) -> None:
                 "skills": char.skills if char else {},
                 "system_data": char.system_data if char else {},
             }
-            cost = int(offer.get("cost") or 0)
+            # reroll 优先：两个都给时以更贵的那个为准（见本函数文档串）
+            cost = int(offer.get("reroll_cost" if reroll else "cost") or 0)
             # 重新校验而不是照单全收：这份 offer 是上一步存下来的，中间幸运值可能已被
             # 别处扣掉（同一轮的另一次消费、KP 手动改卡）。
             if char is not None and cost > 0 and coc_luck.available_luck(char_data) >= cost:
@@ -1792,10 +1795,18 @@ async def run_luck_decision(session_id: str, spend: bool) -> None:
                     )
                 else:
                     _set_attr_luck(db, char, deduction["new"])
-                result = coc_luck.apply_rescue(result, difficulty, cost, options)
+                if reroll:
+                    # 整骰重来，结果照单全收（含重掷出大失败）——买的是机会不是成功
+                    result = coc_luck.apply_reroll(
+                        char_data, skill, difficulty,
+                        int(check.get("bonus") or 0), int(check.get("penalty") or 0),
+                        options,
+                    )
+                else:
+                    result = coc_luck.apply_rescue(result, difficulty, cost, options)
                 spent = cost
                 _broadcast_luck_applied(
-                    db, session_id, pending, result, cost, deduction,
+                    db, session_id, pending, result, cost, deduction, reroll=reroll,
                 )
 
         if spent == 0:
@@ -1832,20 +1843,26 @@ def _set_attr_luck(db, char: Character, value: int) -> None:
 
 def _broadcast_luck_applied(
     db, session_id: str, pending: dict, result, cost: int, deduction: dict,
+    *, reroll: bool = False,
 ) -> None:
     """把「花了几点、原本掷了多少、现在算什么」摆到台面上，并订正那张结果卡。
 
     改判必须回到原来那张 dice 事件上：玩家（和重连的人）看的是历史记录，留着一张
     写着「失败」的卡、旁边另起一条「其实成功了」，账就对不上了。
+
+    两种用法要写得能分辨：补差额是「把骰值压下去」，燃运重骰是「换了一骰」——
+    后者可能烧了点数反而更糟，账面上得看得出来是重掷不是没生效。
     """
     tier_cn = TIER_LABEL.get(result.tier, result.tier)
     shown_name = str(pending.get("shown_name") or "")
     skill = str(pending.get("skill") or "")
     original = dict(pending.get("result") or {})
     event_id = str(pending.get("dice_event_id") or "")
+    how = "烧" if reroll else "花"
+    verdict = "重掷得" if reroll else "改判"
     content = (
-        f"{shown_name}｜{skill} 检定：花 {cost} 点幸运（{deduction['old']}→{deduction['new']}），"
-        f"{original.get('roll')} → {result.roll}，改判 {tier_cn}"
+        f"{shown_name}｜{skill} 检定：{how} {cost} 点幸运（{deduction['old']}→{deduction['new']}），"
+        f"{original.get('roll')} → {result.roll}，{verdict} {tier_cn}"
     )
     ev = session_service.add_event(
         db, session_id, "dice", content, actor_name="系统",

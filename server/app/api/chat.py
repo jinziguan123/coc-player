@@ -307,7 +307,7 @@ async def decide_luck(
     room_hub.broadcast(session_id, _make_chunk("generating"))
     generation_manager.start(
         session_id,
-        run_luck_decision(session_id, bool(data.spend)),
+        run_luck_decision(session_id, bool(data.spend), bool(data.reroll)),
     )
     return {"ok": True}
 

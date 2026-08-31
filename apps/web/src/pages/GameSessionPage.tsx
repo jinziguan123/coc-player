@@ -1352,11 +1352,13 @@ export function GameSessionPage() {
   }
 
   // 幸运消费拍板：买或不买，之后系统都会把这一骰的结算链走完（同 submitRoll，fire-and-forget）。
-  const decideLuck = (spend: boolean) => {
+  const decideLuck = (action: 'spend' | 'reroll' | 'give_up') => {
     if (!currentSession) return
     setLuckDecided(true)
     setStreaming(true)
-    api.post(`/sessions/${currentSession.id}/luck-decision`, { spend })
+    api.post(`/sessions/${currentSession.id}/luck-decision`, {
+      spend: action === 'spend', reroll: action === 'reroll',
+    })
       .then(() => setLuckOffer(null))    // 拍完就收起来，别留一张点不动的卡在那儿
       .catch((e: unknown) => {
         setLuckDecided(false)
@@ -2187,6 +2189,7 @@ export function GameSessionPage() {
               actor={luckOffer.actor ?? ''}
               skill={luckOffer.skill ?? ''}
               cost={luckOffer.cost ?? 0}
+              rerollCost={luckOffer.reroll_cost ?? 0}
               available={luckOffer.available ?? 0}
               mine={!luckOffer.char_id || luckOffer.char_id === myCharId}
               busy={luckDecided || streaming}

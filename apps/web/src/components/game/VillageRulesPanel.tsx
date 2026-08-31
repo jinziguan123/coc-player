@@ -21,6 +21,8 @@ export interface VillageRules {
   luck_spend_max: number
   luck_spend_in_combat: boolean
   luck_spend_blocks_improvement: boolean
+  luck_reroll: boolean
+  luck_reroll_cost: number
   major_wound_divisor: number
   insanity_rule: string
   insanity_flat_threshold: number
@@ -222,6 +224,21 @@ export function VillageRulesPanel({ ruleSystem, twoColumn }: {
                   onChange={(v) => patch({ luck_spend_blocks_improvement: v })} />
               </Row>
             </>
+          )}
+
+          <Row
+            label="燃运重骰"
+            hint="本桌自定，规则书里没有这条：失败后可烧固定点数幸运，整骰重掷一次。规则书的重掷叫「孤注一掷」，它不花幸运、且与花幸运二选一。"
+          >
+            <Switch label="燃运重骰" checked={rules.luck_reroll}
+              onChange={(v) => patch({ luck_reroll: v })} />
+          </Row>
+
+          {rules.luck_reroll && (
+            <Row indent label="每次烧几点" hint="买的是一次机会不是一次成功，所以是定价，不随差多少变">
+              <NumberBox label="燃运重骰花费" value={rules.luck_reroll_cost} min={1} max={99}
+                onChange={(v) => patch({ luck_reroll_cost: v })} />
+            </Row>
           )}
         </div>
 

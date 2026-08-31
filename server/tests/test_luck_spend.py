@@ -46,7 +46,7 @@ def test_offer_covers_exactly_the_gap(monkeypatch):
     """差几点就报几点，一点不多花。"""
     result = _rolled(65, 60, monkeypatch=monkeypatch)   # 目标 60，差 5
     offer = coc_luck.rescue_offer(result, "normal", _char(40), ON)
-    assert offer == {"cost": 5, "available": 40, "target": 60}
+    assert offer == {"cost": 5, "reroll_cost": 0, "available": 40, "target": 60}
 
 
 def test_no_offer_when_rule_disabled(monkeypatch):
@@ -192,3 +192,59 @@ def test_luck_bought_success_earns_no_improvement_tick(db_factory):
     db.commit()
     relaxed = {item["skill"] for item in growth_service.eligible_skills(db, session.id, char.id)}
     assert relaxed == {"聆听", "侦查"}
+
+
+# ── 燃运重骰（村规，非官方）──────────────────────────────────
+#
+# 第七版规则书 p.85 只有「1:1 花幸运改变掷骰结果」一种用法；重掷在原文里叫**孤注一掷**，
+# 它不花幸运，且与花幸运二选一。所以「烧幸运重掷」是村规，默认关。
+
+REROLL_ON = coc_options.from_dict({"luck_reroll": True, "luck_reroll_cost": 10})
+BOTH_ON = coc_options.from_dict(
+    {"luck_spend": True, "luck_reroll": True, "luck_reroll_cost": 10},
+)
+
+
+def test_默认不提供燃运重骰(monkeypatch):
+    """非官方规则，不开就当它不存在。"""
+    result = _rolled(65, 60, monkeypatch=monkeypatch)
+    assert coc_luck.rescue_offer(result, "normal", _char(40), ON)["reroll_cost"] == 0
+
+
+def test_补不起时仍可烧运重掷(monkeypatch):
+    """这正是它存在的意义：差 40 点、只有 30 点幸运，补差额买不起，烧 10 点还烧得起。"""
+    result = _rolled(95, 55, monkeypatch=monkeypatch)   # 差 40
+    offer = coc_luck.rescue_offer(result, "normal", _char(30), BOTH_ON)
+    assert offer["cost"] == 0            # 补差额这条路不通
+    assert offer["reroll_cost"] == 10    # 但还能烧一次
+
+
+def test_两条路都不通时不问(monkeypatch):
+    result = _rolled(95, 55, monkeypatch=monkeypatch)
+    assert coc_luck.rescue_offer(result, "normal", _char(5), BOTH_ON) is None
+
+
+def test_只开重掷时也会问(monkeypatch):
+    result = _rolled(65, 60, monkeypatch=monkeypatch)
+    offer = coc_luck.rescue_offer(result, "normal", _char(40), REROLL_ON)
+    assert offer["cost"] == 0 and offer["reroll_cost"] == 10
+
+
+def test_大失败照旧不可挽回(monkeypatch):
+    """原文：大成功、大失败与枪械故障总是要应用。开了重掷也一样。"""
+    result = _rolled(100, 55, monkeypatch=monkeypatch)
+    assert coc_luck.rescue_offer(result, "normal", _char(90), BOTH_ON) is None
+
+
+def test_烧不起就不给这个选项(monkeypatch):
+    result = _rolled(65, 60, monkeypatch=monkeypatch)
+    offer = coc_luck.rescue_offer(result, "normal", _char(8), BOTH_ON)
+    assert offer["reroll_cost"] == 0     # 只有 8 点，烧不动 10 点
+    assert offer["cost"] == 5            # 补差额还够
+
+
+def test_重掷是整骰重来_结果照单全收(monkeypatch):
+    """买的是一次机会，不是一次成功——重掷掷出大失败也认。"""
+    monkeypatch.setattr("app.rules.coc.checks.random.randint", lambda a, b: 0)
+    out = coc_luck.apply_reroll(_char(40), "侦查", "normal", options=BOTH_ON)
+    assert out.roll != 65                # 不是原来那一骰了

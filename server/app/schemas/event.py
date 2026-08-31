@@ -49,9 +49,15 @@ class RollRequest(BaseModel):
 
 
 class LuckDecisionRequest(BaseModel):
-    """对「要不要花幸运扭转这一骰」拍板。spend=False 即认了这次失败。"""
+    """对「要不要动用幸运」拍板。
+
+    两种用法各有各的代价，玩家自己挑：``spend`` 补差额买下这次成功（官方，规则书 p.85），
+    ``reroll`` 烧固定点数整骰重掷（村规）。都不选就是放弃，接受原来的结果。
+    """
 
     spend: bool = False
+    #: 燃运重骰。与 spend 互斥——同时给时以 reroll 为准（它是更"贵"的那个，不该被静默忽略）。
+    reroll: bool = False
 
 
 class AdvanceRequest(BaseModel):

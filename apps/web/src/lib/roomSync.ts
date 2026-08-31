@@ -18,7 +18,10 @@ export interface LuckSnapshot {
   actor?: string
   skill?: string
   dice_event_id?: string
+  /** 补差额买下这次成功要花几点（官方，规则书 p.85）；0 = 这条路不通 */
   cost?: number
+  /** 烧掉整骰重掷一次要花几点（村规，默认关）；0 = 没开或烧不起 */
+  reroll_cost?: number
   available?: number
   target?: number
 }
@@ -27,13 +30,15 @@ export interface LuckSnapshot {
  * 从 `/sync` 快照或 `luck_offer` 广播的 metadata 归一出待决询价，没有则 null。
  *
  * 两个来源同一个形状（后端刻意对齐过），走同一个出口才不会一边改了另一边忘了。
- * `cost` 缺失时返回 null：与其渲染一张「差 0 点」点不动的卡，不如不画。
+ * 两条路都不通时返回 null：与其渲染一张点不动的卡，不如不画。
  */
 export function luckSnapshotFrom(src: Record<string, unknown> | undefined | null): LuckSnapshot | null {
   if (!src) return null
   if ('pending' in src && !src.pending) return null
   const cost = Number(src.cost ?? 0)
-  if (!cost) return null
+  const rerollCost = Number(src.reroll_cost ?? 0)
+  // 两条路都不通就没什么可问的了（后端同样的判据，那边压根不会挂起流程）
+  if (!cost && !rerollCost) return null
   return {
     pending: true,
     char_id: String(src.char_id ?? ''),
@@ -41,6 +46,7 @@ export function luckSnapshotFrom(src: Record<string, unknown> | undefined | null
     skill: String(src.skill ?? ''),
     dice_event_id: String(src.dice_event_id ?? ''),
     cost,
+    reroll_cost: rerollCost,
     available: Number(src.available ?? 0),
     target: Number(src.target ?? 0),
   }

@@ -85,6 +85,7 @@ def _luck_snapshot(db: Session, session: GameSession) -> dict:
         "skill": pending.get("skill") or "",
         "dice_event_id": pending.get("dice_event_id") or "",
         "cost": offer.get("cost"),
+        "reroll_cost": offer.get("reroll_cost"),
         "available": offer.get("available"),
         "target": offer.get("target"),
     }
