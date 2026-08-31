@@ -91,11 +91,13 @@ function NumberBox({ label, value, onChange, min, max }: {
 
 const NOTES_MAX = 800
 
-export function VillageRulesPanel({ ruleSystem, twoColumn }: {
+export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
   ruleSystem: string
   /** 宽容器里把参数排成两列：单列十一行要滚半屏，两列一屏就看完了，
    *  而且判定类与伤害/状态类天然分开，比一长串更有条理。 */
   twoColumn?: boolean
+  /** 保存成功后回调——页面上方的规矩摘要靠它跟着刷新，否则会停在旧值上。 */
+  onSaved?: () => void
 }) {
   const [rules, setRules] = useState<VillageRules | null>(null)
   const [notes, setNotes] = useState('')
@@ -136,6 +138,7 @@ export function VillageRulesPanel({ ruleSystem, twoColumn }: {
         options: rules, table_notes: notes, enabled,
       })
       toast.success(enabled ? '村规已更新，下一次掷骰起生效' : '村规已停用，这一桌回到规则原文')
+      onSaved?.()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '保存失败')
     } finally {

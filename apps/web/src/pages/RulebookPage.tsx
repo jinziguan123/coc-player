@@ -6,6 +6,7 @@ import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiBookCover, GiReturnArrow, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
 import { VillageRulesPanel } from '@/components/game/VillageRulesPanel'
+import { VillageRulesSummary } from '@/components/game/VillageRulesSummary'
 import { staggerStyle } from '@/lib/stagger'
 
 interface Rulebook {
@@ -39,6 +40,13 @@ function statusChipStyle(status: string): React.CSSProperties {
     failed: 'var(--color-danger)',
   } as Record<string, string>)[status]
   return tone ? { color: tone, borderColor: tone } : {}
+}
+
+/** 摘要要的那点东西：差异项、桌面约定、总开关。完整回显交给折叠里的配置面板。 */
+interface VillageRulesBrief {
+  options: Record<string, unknown>
+  table_notes: string
+  enabled?: boolean
 }
 
 export function RulebookPage() {
@@ -124,6 +132,9 @@ export function RulebookPage() {
     }
   }
 
+  const [rules, setRules] = useState<VillageRulesBrief | null>(null)
+  const [rulesOpen, setRulesOpen] = useState(false)
+
   const runSearch = async () => {
     const q = query.trim()
     if (!q) return
@@ -141,6 +152,17 @@ export function RulebookPage() {
 
   const hasReady = books.some((b) => b.status === 'ready' && b.rule_system === ruleSystem)
 
+  // 摘要与配置面板各拉各的：面板是折叠的、展开才挂载，而摘要要一进页就在。
+  // 面板保存后回调这里重取，免得摘要还停在旧值上。
+  const fetchRules = useCallback(async () => {
+    try {
+      setRules(await api.get<VillageRulesBrief>(`/rulebooks/village-rules/${ruleSystem}`))
+    } catch {
+      setRules(null)   // 读不到就不显示摘要，不打扰——规则书那块照常可用
+    }
+  }, [ruleSystem])
+  useEffect(() => { void fetchRules() }, [fetchRules])
+
   return (
     <div className="max-w-[100rem]">
       <div className="page-head">
@@ -150,20 +172,40 @@ export function RulebookPage() {
         <h2 className="page-title">规则书</h2>
       </div>
 
-      {/* 主区域给村规：来这一页最常做的事是调它（跑团前每次都可能动），而上传规则书是
-          一次性的、翻书目是低频的。村规在宽栏里排成两列，十一项一屏看完，不必上下滚；
-          书库收进窄侧栏，书卡单列照样读得清。 */}
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_21rem]">
-        <div className="min-w-0 space-y-6">
-          <div className="card">
-            <h3 className="card-title flex items-center gap-2">
-              <GiScrollUnfurled /> 村规 · {ruleSystem.toUpperCase()}
+      {/* 顺序按「谁来看、看什么」排，不按「谁改得多」：
+          玩家（含联机进来的客人，他们连村规都改不了——端点限本机）来这一页只想知道
+          「我在什么规则下掷骰」，那件事该一眼看完，所以规矩摘要排最前、且只列与原文
+          不同的那几项。改村规是房主的低频动作，收进「调整」里；书库拿回整幅宽度——
+          这一页的名字就叫规则书。 */}
+      <div className="space-y-6">
+        <div className="card">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="card-title !mb-0 flex items-center gap-2">
+              <GiScrollUnfurled /> 本桌规矩 · {ruleSystem.toUpperCase()}
             </h3>
-            <VillageRulesPanel ruleSystem={ruleSystem} twoColumn />
+            <button
+              onClick={() => setRulesOpen((v) => !v)}
+              aria-expanded={rulesOpen}
+              className="btn-secondary btn-sm"
+            >
+              {rulesOpen ? '收起' : '调整'}
+            </button>
           </div>
+
+          {rules && (
+            <VillageRulesSummary
+              options={rules.options} notes={rules.table_notes} enabled={rules.enabled !== false}
+            />
+          )}
+
+          {rulesOpen && (
+            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <VillageRulesPanel ruleSystem={ruleSystem} twoColumn onSaved={fetchRules} />
+            </div>
+          )}
         </div>
 
-        <aside className="min-w-0 max-w-md space-y-6" aria-label="规则书库">
+        <div className="min-w-0" aria-label="规则书库">
           {/* 书库与上传合成一张卡：上传是**低频入口动作**，此前那块大拖拽区占掉首屏三分之一，
               把真正的主体（装了哪几本书）挤到折叠线以下。收成一行工具条，整张卡仍可拖入 PDF。 */}
           <div
@@ -223,9 +265,9 @@ export function RulebookPage() {
                 </span>
               </div>
             ) : (
-              // 侧栏只有 21rem，必须单列：响应式列数看的是**视口**宽度而非容器，
-              // 留着 sm:grid-cols-2 会让书卡在这里被挤到 141px、标题折成一条竖线。
-              <div className="grid gap-2">
+              // 不再挤在 21rem 侧栏里，书卡可以并排了。三列封顶：书名本就长，
+              // 再窄下去标题就得截断，反而不如两列读得清。
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {books.map((b, i) => (
                   <div
                     key={b.id}
@@ -342,7 +384,7 @@ export function RulebookPage() {
               )}
             </div>
           )}
-        </aside>
+        </div>
       </div>
     </div>
   )
