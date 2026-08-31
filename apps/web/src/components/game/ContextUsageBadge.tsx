@@ -91,7 +91,9 @@ export function ContextUsageBadge({
       data-tour="usage"
       // 尺寸走 btn-xs：它排在顶栏那排按钮里，自己写一套 padding/字号就会高矮不齐。
       // 但不套 btn-secondary——这是个读数不是按钮，不该有 hover 反馈。
-      className="btn-xs rounded border inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap cursor-default"
+      // 数字走等宽 + tabular-nums：它每回合都在涨，位数一跳整条就跟着抖；
+      // 也与房间码、各页抬头统计同一种「这是数据」的写法
+      className="btn-xs rounded border inline-flex items-center gap-1 flex-shrink-0 whitespace-nowrap cursor-default font-mono tabular-nums"
       style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
       title={cumTitle}
     >

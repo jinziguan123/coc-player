@@ -39,6 +39,7 @@ import {
 } from '../components/game/CheckResultCard'
 import { CheckRequestCard } from '../components/game/CheckRequestCard'
 import { LuckOfferCard } from '../components/game/LuckOfferCard'
+import { MoreMenu } from '@/components/ui/more-menu'
 import { luckSnapshotFrom, type LuckSnapshot, type SyncSnapshot } from '@/lib/roomSync'
 import { startGameTour, hasSeenGameTour } from '@/features/tour/gameTour'
 import { showHintOnce } from '@/features/tour/hints'
@@ -1532,15 +1533,6 @@ export function GameSessionPage() {
                 </ConfirmDialog>
               )
             )}
-            {myCharId && currentSession.status === 'ended' && (
-              <button
-                onClick={() => setShowGrowth(true)}
-                className="btn-secondary btn-xs flex items-center gap-1"
-                title="成长结算：本局成功用过的技能做成长检定（模组结束后可用）"
-              >
-                <GiUpgrade size={13} /> 成长
-              </button>
-            )}
             <button
               onClick={() => { setConfirmTravel(null); setShowBigMap((v) => !v) }}
               data-tour="map"
@@ -1549,33 +1541,26 @@ export function GameSessionPage() {
             >
               <GiTreasureMap size={13} /> {showBigMap ? '收起大地图' : '大地图'}
             </button>
-            {isHost && (
-              <button
-                onClick={() => setShowImprov(true)}
-                className="btn-secondary btn-xs flex items-center gap-1"
-                title="临场角色：把 KP 临时添加的出彩龙套收编为正式配角（房主）"
-              >
-                <GiCharacter size={13} /> 临场角色
-              </button>
-            )}
-            {isHost && (
-              <button
-                onClick={() => setShowStyle(true)}
-                className="btn-secondary btn-xs flex items-center gap-1"
-                title="本局的文风与画风：几档预设或自己写一段，留空则跟随模组（房主）"
-              >
-                <GiQuillInk size={13} /> 风格
-              </button>
-            )}
-            {!isKp && (
-              <button
-                onClick={runGameTour}
-                className="btn-secondary btn-xs flex items-center gap-1"
-                title="重看新手导览：界面上每个地方是干什么的"
-              >
-                <HelpCircle size={13} />
-              </button>
-            )}
+            {/* 一局用不了一次的收进「更多」：这几个原本与检索、战报、大地图并排成一堵
+                同样大小的按钮墙，性质却完全不同（房主设置 / 收场结算 / 帮助）。 */}
+            <MoreMenu
+              items={[
+                ...(myCharId && currentSession.status === 'ended'
+                  ? [{ label: '成长结算', icon: <GiUpgrade size={13} />, onClick: () => setShowGrowth(true),
+                       title: '本局成功用过的技能做成长检定（模组结束后可用）' }]
+                  : []),
+                ...(isHost
+                  ? [{ label: '临场角色', icon: <GiCharacter size={13} />, onClick: () => setShowImprov(true),
+                       title: '把 KP 临时添加的出彩龙套收编为正式配角', separated: true },
+                     { label: '本局风格', icon: <GiQuillInk size={13} />, onClick: () => setShowStyle(true),
+                       title: '文风与画风：几档预设或自己写一段，留空则跟随模组' }]
+                  : []),
+                ...(!isKp
+                  ? [{ label: '重看导览', icon: <HelpCircle size={13} />, onClick: runGameTour,
+                       title: '界面上每个地方是干什么的', separated: true }]
+                  : []),
+              ]}
+            />
             {!immersiveOn && !(showPanel && panelChar) && (
               <button
                 onClick={() => setShowPanel(true)}

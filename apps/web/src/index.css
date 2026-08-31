@@ -1160,6 +1160,55 @@ body {
 }
 .case-sub { margin-top: 0.15rem; font-size: var(--text-sm); color: var(--color-text-secondary); }
 
+/* ── 顶栏的「更多」菜单 ───────────────────────────────────────────────
+   对局页顶栏一度并排挂着九个同样大小的按钮，性质完全不同却长得一模一样。
+   常用的留外面，一局用不了一次的收进这里。 */
+.more-menu { position: relative; display: inline-flex; }
+.more-menu-list {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 40;
+  min-width: 9.5rem;
+  padding: 0.25rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.more-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.more-menu-item:hover { background: var(--color-bg-tertiary); }
+.more-menu-item:focus-visible {
+  outline: 2px solid var(--color-text-accent);
+  outline-offset: -2px;
+}
+/* 组与组之间一道细线：查看信息 / 局面控制 / 房主设置本就是三件事 */
+.more-menu-item--sep {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 3px 3px;
+}
+.more-menu-icon {
+  display: inline-flex;
+  color: var(--color-text-accent);
+  opacity: 0.85;
+}
+
 /* ── 页面抬头（内页）─────────────────────────────────────────────────
    标题 ＋ 等宽统计 ＋ 右侧操作，一行放完。统计与首页卷宗抬头同源（.case-stats）。
    曾经这里还有一枚档案书签，因为各页容器宽度不同、跳页时会飘，且与侧边栏和标题
