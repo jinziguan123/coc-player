@@ -483,6 +483,7 @@
     <nav class="topnav">
       <a href="#before" class="hide-sm">下载前先看</a>
       <a href="#features" class="hide-sm">能做什么</a>
+      <a href="#coop" class="hide-sm">一起玩</a>
       <a href="#start">怎么开跑</a>
       <a href="#limits" class="hide-sm">边界</a>
       <a class="gh" href="https://github.com/jinziguan123/coc-player" target="_blank" rel="noopener">
@@ -561,7 +562,7 @@
         <div>
           <h3>安装包没有做代码签名和公证</h3>
           <p>
-            所以首次打开会被系统拦。macOS：在应用上<strong>右键 → 打开</strong>，再确认一次即可；
+            所以首次打开会被系统拦。macOS：在应用上<strong>右键 → 打开</strong>，再确认一次就行；
             Windows：SmartScreen 弹窗里点<strong>「更多信息」→「仍要运行」</strong>。
             介意这一点的话，可以按仓库文档自己从源码构建。
           </p>
@@ -687,6 +688,36 @@
           <img src="assets/shots/gothic-char-wizard.webp" data-shot="char-wizard" width="1600" height="1000" loading="lazy"
                alt="创建角色向导：顶部是基本信息、属性设定、职业选择、技能加点、背景故事、随身物品六个步骤，页面提供 Excel 导入与 AI 生成角色卡入口">
         </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 联机 ================= -->
+  <section id="coop">
+    <div class="wrap">
+      <p class="eyebrow">Play together</p>
+      <h2>和朋友一起玩</h2>
+      <p class="section-lede">
+        房主的电脑就是主机。没有账号，也没有服务器，存档和角色卡都留在那台机器上；
+        AI 也只从房主那端调用，所以只有房主需要配模型，其他人接上就能玩。
+      </p>
+
+      <div class="grid">
+        <div class="card">
+          <svg class="icon"><use href="#i-sparkles"/></svg>
+          <h3>一个人也能开</h3>
+          <p>空着的席位交给 AI 队友，不必等人凑齐。他们各有性格与记忆，会自己行动、自己掷骰，也会记得你对他们说过什么。</p>
+        </div>
+        <div class="card">
+          <svg class="icon"><use href="#i-network"/></svg>
+          <h3>同一个网络</h3>
+          <p>房主在「设置 → 联机」打开「允许局域网加入」，其他人填主机地址和房间码就能进。这个开关默认是关的，打开后要重启应用才生效。只在自家或朋友的网络里开。</p>
+        </div>
+        <div class="card">
+          <svg class="icon"><use href="#i-laptop"/></svg>
+          <h3>隔着网络</h3>
+          <p>房主开「内置直连」发一条邀请码，对方粘进「加入房间」就行，不用另外装联网工具，也不必做端口转发。双方都得用桌面版：隧道跑在应用外壳里，浏览器里没有它。</p>
+        </div>
       </div>
     </div>
   </section>
