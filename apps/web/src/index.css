@@ -1167,6 +1167,72 @@ body {
 }
 .case-sub { margin-top: 0.15rem; font-size: var(--text-sm); color: var(--color-text-secondary); }
 
+/* ── 接着玩 ───────────────────────────────────────────────────────────
+   还开着的桌。卡片刻意比上面三个入口轻：入口是「开始做什么」，这里是「回到哪儿」，
+   后者不该在视觉上压过前者。 */
+.resume { margin-top: 1.4rem; }
+.resume-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.resume-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) { .resume-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) { .resume-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.resume-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-card);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.resume-card:hover {
+  border-color: var(--color-text-accent);
+  background: var(--color-bg-tertiary);
+}
+.resume-card:focus-visible {
+  outline: 2px solid var(--color-text-accent);
+  outline-offset: 2px;
+}
+.resume-icon {
+  display: flex;
+  flex-shrink: 0;
+  font-size: 1.05rem;
+  color: var(--color-text-accent);
+  opacity: 0.85;
+}
+/* min-width:0 是这行能截断的前提——少了它长模组名会把整张卡撑破 */
+.resume-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.resume-title {
+  font-family: var(--font-title);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resume-sub {
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .resume-card { transition: none; }
+}
+
 /* 「第一次跑团？」的折叠头。它是一条分隔线上的问句，不是一张卡——首页的主体是卷宗，
    这块内容只对还没上过桌的人自动摊开，对老玩家应当近乎隐形。 */
 .home-intro { margin-top: 1.6rem; }

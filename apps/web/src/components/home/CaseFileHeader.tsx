@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '@/api/client'
+import type { HomeInventory } from '@/features/home/useHomeInventory'
 
 /**
  * 卷宗抬头。
@@ -24,49 +23,22 @@ interface Row {
   to: string
 }
 
-export function CaseFileHeader({ onLoaded }: {
-  /** 库存点完之后告诉外面「这是不是个还没上过桌的人」——首页据此决定要不要摊开新手介绍。 */
-  onLoaded?: (newcomer: boolean) => void
-} = {}) {
-  const [rows, setRows] = useState<Row[] | null>(null)
+function rowsOf(inv: HomeInventory): Row[] {
+  return [
+    { label: '调查员', count: inv.characters, emptyText: '建一位调查员', to: '/characters' },
+    { label: '模组', count: inv.modules, emptyText: '导入模组', to: '/modules' },
+    { label: '在跑', count: inv.openSessions.length, emptyText: '开一局', to: '/game' },
+  ]
+}
 
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const [chars, modules, sessions] = await Promise.all([
-          api.get<unknown[]>('/characters'),
-          api.get<unknown[]>('/modules'),
-          api.get<{ status: string }[]>('/sessions'),
-        ])
-        const open = sessions.filter(
-          (s) => s.status === 'active' || s.status === 'paused' || s.status === 'setup',
-        ).length
-        if (!alive) return
-        // 一个调查员都没有 = 还没开始玩。已经车过卡的人不需要再被科普一遍跑团是什么。
-        onLoaded?.(chars.length === 0)
-        setRows([
-          { label: '调查员', count: chars.length, emptyText: '建一位调查员', to: '/characters' },
-          { label: '模组', count: modules.length, emptyText: '导入模组', to: '/modules' },
-          { label: '在跑', count: open, emptyText: '开一局', to: '/game' },
-        ])
-      } catch {
-        // 取不到就不显示这一行——首页的其余部分照常可用，不为一行统计挡住整页
-        if (alive) setRows(null)
-      }
-    })()
-    return () => { alive = false }
-    // onLoaded 只在首次点完库存时叫一次；把它列进依赖会让父组件每次重渲染都重新拉一遍
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
+export function CaseFileHeader({ inventory }: { inventory: HomeInventory | null }) {
   return (
     <header className="case-head">
       <div className="case-head-top">
         <span className="case-tab">卷宗</span>
-        {rows && (
+        {inventory && (
           <div className="case-stats">
-            {rows.map(({ label, count, emptyText, to }) => (
+            {rowsOf(inventory).map(({ label, count, emptyText, to }) => (
               <Link
                 key={label}
                 to={to}

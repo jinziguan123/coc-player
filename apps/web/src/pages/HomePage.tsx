@@ -1,9 +1,10 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Dices, Sparkles, Upload } from 'lucide-react'
 import { GiScrollUnfurled, GiCharacter, GiBookmarklet } from 'react-icons/gi'
 import { HomeIntro } from '@/components/home/HomeIntro'
 import { CaseFileHeader } from '@/components/home/CaseFileHeader'
+import { ResumeSessions } from '@/components/home/ResumeSessions'
+import { useHomeInventory } from '@/features/home/useHomeInventory'
 
 /** 首页入口卡：图标 + 标题 + 一句说明，比裸按钮更能交代「点进去是什么」。 */
 const ENTRIES = [
@@ -27,15 +28,14 @@ const SHORTCUTS = [
 ] as const
 
 export function HomePage() {
-  // 还没车过卡 = 还没上过桌，这种人一进来就该看到「第一次跑团？」是摊开的；
-  // 已经玩起来的人不必每次进首页都被科普一遍。
-  const [newcomer, setNewcomer] = useState(false)
+  // 库存拉一次，抬头、续玩卡、新手介绍三处共用（见 useHomeInventory 的说明）
+  const inventory = useHomeInventory()
 
   return (
     // 5xl 而不是 4xl：下方介绍要并排成三栏，容器太窄会把规则表挤到换行。
     // 上下留白也一并收紧——首页的目标是「一屏看全」，标题区不该独吞四分之一屏。
     <div className="mx-auto mt-5 w-full max-w-5xl">
-      <CaseFileHeader onLoaded={setNewcomer} />
+      <CaseFileHeader inventory={inventory} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         {ENTRIES.map(({ to, Icon, title, desc, primary }) => (
@@ -70,9 +70,12 @@ export function HomePage() {
         ))}
       </div>
 
-      {/* 介绍放在入口卡之下：老玩家进来先看见三张入口，新人往下滚一屏能补齐
-          「跑团是什么 / 规则怎么转 / 在这儿怎么开局」。 */}
-      <HomeIntro defaultOpen={newcomer} />
+      {/* 还开着的桌摆在入口之下：回到进行中的游戏是这个工作台上最高频的事，
+          此前却要先点「开始游戏」再去列表里找。一桌都没开时整块不渲染。 */}
+      {inventory && <ResumeSessions sessions={inventory.openSessions} />}
+
+      {/* 一个调查员都没有 = 还没上过桌，这种人才需要看科普；老玩家默认收起。 */}
+      <HomeIntro defaultOpen={inventory?.characters === 0} />
     </div>
   )
 }
