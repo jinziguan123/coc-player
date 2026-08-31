@@ -69,10 +69,13 @@ def test_sync_returns_all_systems_and_watermark(client, db_factory):
 
     body = _get(client, session.id).json()
     assert set(body) == {"seq", "generating", "systems"}
-    # 三个系统都要在——turn 此前根本没有查询端点，重连时确认进度只能靠错过的那条广播
-    assert set(body["systems"]) == {"combat", "chase", "turn"}
+    # 四个系统都要在——turn 此前根本没有查询端点，重连时确认进度只能靠错过的那条广播；
+    # luck 更狠，它不是显示对不对的问题：询价停住整条结算链，而 luck_offer 事件不落库，
+    # 少了这份快照，刷新一次那张卡就永远回不来，人却还等着拍板。
+    assert set(body["systems"]) == {"combat", "chase", "turn", "luck"}
     assert body["systems"]["combat"] == {"active": False}
     assert body["systems"]["chase"] == {"active": False}
+    assert body["systems"]["luck"] == {"pending": False}
     assert body["generating"] is False
     assert body["seq"] == 0  # 尚无事件
 
@@ -144,3 +147,54 @@ def test_sync_requires_viewer_permission(client, db_factory):
         f"/api/sessions/{session.id}/sync", headers={"X-Player-Token": "someone-else"},
     )
     assert r.status_code == 403
+
+
+# ── 幸运询价的重连对齐 ────────────────────────────────────────
+#
+# 实测事故：一次侦查检定掷出 71 > 55，差 16 点、角色幸运 45，后端正确挂出了询价并把
+# pending_luck 写进 turn_state，整条结算链停在那儿等回答。可 luck_offer 是 log 类事件、
+# 不落库——玩家刷新一次，卡片没了，人却还等着拍板。那局就此停住，之后一个事件都没有。
+
+
+def _pending_luck_payload():
+    return {
+        "check": {"skill": "侦查"},
+        "check_id": "chk-1",
+        "char_id": "char-1",
+        "dice_event_id": "dice-1",
+        "skill": "侦查",
+        "shown_name": "陈守一",
+        "offer": {"cost": 16, "available": 45, "target": 55},
+    }
+
+
+def test_待决的幸运询价出现在快照里(client, db_factory):
+    from app.services import session_service
+
+    db = db_factory()
+    session, _ = _seed(db)
+    session_service.set_pending_luck(db, session.id, _pending_luck_payload())
+
+    luck = _get(client, session.id).json()["systems"]["luck"]
+    assert luck["pending"] is True
+    assert luck["cost"] == 16 and luck["available"] == 45
+    assert luck["actor"] == "陈守一" and luck["skill"] == "侦查"
+
+
+def test_快照的id与广播用同一个(client, db_factory):
+    """前端 addMessage 按 id 幂等：两边不一致就会并排出两张一模一样的卡。"""
+    from app.services import session_service
+    from app.services.event_protocol import luck_offer_event_id
+
+    db = db_factory()
+    session, _ = _seed(db)
+    session_service.set_pending_luck(db, session.id, _pending_luck_payload())
+
+    luck = _get(client, session.id).json()["systems"]["luck"]
+    assert luck["id"] == luck_offer_event_id("dice-1")
+
+
+def test_没有待决时快照是空的(client, db_factory):
+    db = db_factory()
+    session, _ = _seed(db)
+    assert _get(client, session.id).json()["systems"]["luck"] == {"pending": False}

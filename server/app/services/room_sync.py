@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.models.session import GameSession
 from app.services import chase_service, combat_service, session_service
+from app.services.event_protocol import luck_offer_event_id
 
 # 系统名 → 取快照。键即前端 sync 事件的归属系统，两边用同一套名字。
 PROVIDERS: dict[str, Callable[[Session, GameSession], dict]] = {}
@@ -57,6 +58,36 @@ def _turn_snapshot(db: Session, session: GameSession) -> dict:
     # 在线集合交给调用方注入过——这里按「全体应确认者」取，重连场景下宁可多显示
     # 一个待确认者，也好过让已确认的人看不到自己的确认。
     return session_service.turn_confirm_state(db, session.id)
+
+
+@register("luck")
+def _luck_snapshot(db: Session, session: GameSession) -> dict:
+    """待决的幸运询价。
+
+    这一项和上面几个不一样：它不是「HUD 显示得对不对」的问题，而是**流程会不会卡死**。
+    询价一旦发出，整条结算链（物品发货、线索记账、KP 续写）就停在那儿等回答，
+    而 ``pending_luck`` 是落在 turn_state 里的持久状态。可 ``luck_offer`` 事件是 log 类、
+    **不落库**——玩家刷新或断线一次，那张卡就再也回不来了，人却还在等他拍板。
+    实测有存档正是这么停在一次侦查检定上，之后一个事件都没有。
+
+    返回的字段与广播时的 metadata 一致，前端两条路复用同一套渲染。
+    """
+    pending = session_service.get_pending_luck(db, session.id) or {}
+    offer = pending.get("offer") or {}
+    if not pending or not offer:
+        return {"pending": False}
+    return {
+        "pending": True,
+        # 与广播同一个 id：前端按 id 幂等，重连补的与广播来的会合成一条
+        "id": luck_offer_event_id(str(pending.get("dice_event_id") or "")),
+        "char_id": pending.get("char_id") or "",
+        "actor": pending.get("shown_name") or pending.get("disp_name") or "",
+        "skill": pending.get("skill") or "",
+        "dice_event_id": pending.get("dice_event_id") or "",
+        "cost": offer.get("cost"),
+        "available": offer.get("available"),
+        "target": offer.get("target"),
+    }
 
 
 def snapshot(db: Session, session: GameSession, systems: list[str] | None = None) -> dict:

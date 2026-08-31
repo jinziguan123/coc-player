@@ -55,6 +55,7 @@ from app.services import (
     turn_event_order,
     world_state,
 )
+from app.services.event_protocol import luck_offer_event_id
 from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
@@ -1720,6 +1721,9 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
                     "char_id": char_id, "actor": shown_name, "skill": skill,
                     "dice_event_id": ev.id, **offer,
                 },
+                # 与 room_sync 的 luck 快照用同一个 id：前端 addMessage 按 id 幂等，
+                # 重连补出来的那张与广播来的那张会合成一条，不会并排出两张卡。
+                event_id=luck_offer_event_id(ev.id),
             ))
             room_hub.broadcast(session_id, _make_chunk("done"))
             return

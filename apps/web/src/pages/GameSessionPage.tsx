@@ -39,6 +39,7 @@ import {
 } from '../components/game/CheckResultCard'
 import { CheckRequestCard } from '../components/game/CheckRequestCard'
 import { LuckOfferCard } from '../components/game/LuckOfferCard'
+import { luckOfferMessage, type SyncSnapshot } from '@/lib/roomSync'
 import { startGameTour, hasSeenGameTour } from '@/features/tour/gameTour'
 import { showHintOnce } from '@/features/tour/hints'
 import { buildCheckCaption } from '../components/game/diceNotation'
@@ -232,17 +233,6 @@ interface ChunkPayload {
   actor_id?: string
   id?: string
   metadata?: Record<string, unknown>
-}
-
-/** GET /sessions/{id}/sync：sync 类状态的快照 + 事件水位线（见后端 room_sync.py）。 */
-interface SyncSnapshot {
-  seq: number
-  generating: boolean
-  systems: {
-    combat?: { active: boolean; pending_reaction?: PendingReaction | null; started_seq?: number | null }
-    chase?: { active: boolean }
-    turn?: { confirmed_ids: string[]; total: number; ready: boolean }
-  }
 }
 
 
@@ -645,15 +635,20 @@ export function GameSessionPage() {
       const s = await api.get<SyncSnapshot>(`/sessions/${sessionId}/sync`)
       const combatSnap = s.systems.combat
       setCombat(combatSnap?.active ? (combatSnap as unknown as CombatState) : null)
-      setPendingReaction(combatSnap?.active ? (combatSnap.pending_reaction ?? null) : null)
+      setPendingReaction(combatSnap?.active ? ((combatSnap.pending_reaction as PendingReaction | null) ?? null) : null)
       setCombatLogSince(combatSnap?.active ? (combatSnap.started_seq ?? null) : null)
       const chaseSnap = s.systems.chase
       setChase(chaseSnap?.active ? (chaseSnap as unknown as ChaseState) : null)
       setTurnState(s.systems.turn ?? null)
+      // 幸运询价：补回那张卡（不补的话刷新一次它就没了，而流程还等着拍板）
+      const luckMsg = luckOfferMessage(s.systems.luck)
+      if (luckMsg) addMessage(luckMsg)
+      // 没有待决的 = 已经在别处拍过板：按钮置灰，别让人再点一次去撞 404
+      setLuckDecided(!luckMsg)
     } catch {
       // 取不到就维持现状：宁可显示旧状态，也不要在网络抖动时把战斗面板清空
     }
-  }, [sessionId])
+  }, [sessionId, addMessage])
 
   // 节流刷新会话（席位/在线变更用）：合并 400ms 内的连续 presence/seat，避免风暴
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)

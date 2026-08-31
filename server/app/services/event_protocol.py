@@ -37,6 +37,16 @@ def split_ooc(text: str) -> tuple[str, str]:
     return in_character, ooc
 
 
+def luck_offer_event_id(dice_event_id: str) -> str:
+    """幸运询价卡的稳定 id。
+
+    这张卡有两个来源——检定当场的广播，和断线重连时由 ``room_sync`` 的快照补出来的。
+    前端 ``addMessage`` 按 id 幂等，两边用同一个 id 才不会并排出两张一模一样的卡。
+    以骰子事件 id 作键：一骰至多问一次幸运。
+    """
+    return f"luck:{dice_event_id}"
+
+
 def make_chunk(
     chunk_type: str,
     content: str = "",
