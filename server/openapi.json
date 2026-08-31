@@ -2834,6 +2834,11 @@
             "title": "Effective",
             "type": "object"
           },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
           "options": {
             "additionalProperties": true,
             "title": "Options",
@@ -2860,6 +2865,17 @@
       "VillageRulesUpdate": {
         "description": "改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。\n\n``table_notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。",
         "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
           "options": {
             "additionalProperties": true,
             "default": {},

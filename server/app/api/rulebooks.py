@@ -93,11 +93,15 @@ def read_village_rules(rule_system: str, db: Session = Depends(get_db)):
 
     不限本机：玩家有权知道自己在什么规则下掷骰。
     """
+    # 面板要回显**存着的**配置，不能走 village_options——那个在开关关掉时按「没配过」
+    # 返回空，界面会把用户辛苦配的一整套显示成默认值，一保存就真的没了。
+    row = rule_options_service.village_row(db, rule_system)
     return VillageRulesRead(
         rule_system=rule_system,
-        options=rule_options_service.village_options(db, rule_system),
+        options=dict((row.options if row else None) or {}),
         effective=rule_options_service.village_view(db, rule_system),
-        table_notes=rule_options_service.table_notes(db, rule_system),
+        table_notes=(row.table_notes if row else "") or "",
+        enabled=bool(row.enabled) if row else True,
     )
 
 
@@ -117,11 +121,12 @@ def update_village_rules(
     改动对**所有**用这套规则的房间即时生效（含进行中的局）。
     """
     saved, notes = rule_options_service.save_village_options(
-        db, rule_system, data.options, data.table_notes,
+        db, rule_system, data.options, data.table_notes, data.enabled,
     )
     return VillageRulesRead(
         rule_system=rule_system,
         options=saved,
         effective=rule_options_service.village_view(db, rule_system),
         table_notes=notes,
+        enabled=rule_options_service.village_enabled(db, rule_system),
     )

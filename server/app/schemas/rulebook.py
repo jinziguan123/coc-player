@@ -38,6 +38,8 @@ class VillageRulesRead(BaseModel):
     effective: dict
     #: 桌面约定原文（参数表达不了的规矩）；只影响叙述与裁定倾向，不改骰子结算
     table_notes: str = ""
+    #: 村规总开关。关掉时上面的 options/table_notes 一律按「没配过」生效（配置本身还留着）
+    enabled: bool = True
 
 
 class VillageRulesUpdate(BaseModel):
@@ -48,3 +50,5 @@ class VillageRulesUpdate(BaseModel):
 
     options: dict = {}
     table_notes: str | None = None
+    #: ``None`` = 本次不动总开关（只改参数时不必把它一并回传）
+    enabled: bool | None = None

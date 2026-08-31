@@ -3743,6 +3743,11 @@ export interface components {
             effective: {
                 [key: string]: unknown;
             };
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
             /** Options */
             options: {
                 [key: string]: unknown;
@@ -3762,6 +3767,8 @@ export interface components {
          *     ``table_notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。
          */
         VillageRulesUpdate: {
+            /** Enabled */
+            enabled?: boolean | null;
             /**
              * Options
              * @default {}

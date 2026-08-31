@@ -27,24 +27,48 @@ DEFAULT_RULE_SYSTEM = "coc"
 TABLE_NOTES_MAX = 800
 
 
+def village_row(db: Session, rule_system: str) -> RuleSystemOptions | None:
+    return db.get(RuleSystemOptions, (rule_system or DEFAULT_RULE_SYSTEM).strip())
+
+
+def village_enabled(db: Session, rule_system: str) -> bool:
+    """村规总开关。没配过这套规则时视为开着——那种情况下本来也没东西可关。"""
+    row = village_row(db, rule_system)
+    return True if row is None else bool(row.enabled)
+
+
 def village_options(db: Session, rule_system: str) -> dict:
-    """某套规则系统的村规；没配过则空 dict（＝全照规则原文）。"""
-    row = db.get(RuleSystemOptions, (rule_system or DEFAULT_RULE_SYSTEM).strip())
-    return dict(row.options or {}) if row else {}
+    """某套规则系统的村规；没配过或总开关关着则空 dict（＝全照规则原文）。
+
+    关掉时按「没配过」返回而不是删配置：玩家想先照原文跑一局试试，回头还要开回来。
+    """
+    row = village_row(db, rule_system)
+    if row is None or not row.enabled:
+        return {}
+    return dict(row.options or {})
 
 
 def table_notes(db: Session, rule_system: str) -> str:
-    """桌面约定原文（参数表达不了的那些规矩）；没写过则空串。"""
-    row = db.get(RuleSystemOptions, (rule_system or DEFAULT_RULE_SYSTEM).strip())
-    return (row.table_notes or "").strip() if row else ""
+    """桌面约定原文（参数表达不了的那些规矩）；没写过或总开关关着则空串。
+
+    它和 options 同属「这一桌的规矩」，一个开关一起管——只关参数却仍把约定喂给 KP，
+    等于关了一半。
+    """
+    row = village_row(db, rule_system)
+    if row is None or not row.enabled:
+        return ""
+    return (row.table_notes or "").strip()
 
 
 def save_village_options(
     db: Session, rule_system: str, raw: dict | None, notes: str | None = None,
+    enabled: bool | None = None,
 ) -> tuple[dict, str]:
     """整份替换某套规则系统的村规与桌面约定，返回落库后的 (差异项, 约定原文)。
 
-    ``notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。
+    ``notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）；
+    ``enabled=None`` 同理不动总开关。落库的始终是**配置本身**——关掉开关不清空它们，
+    只是读的时候当作没配过。
     """
     rule_system = (rule_system or DEFAULT_RULE_SYSTEM).strip()
     row = db.get(RuleSystemOptions, rule_system)
@@ -54,6 +78,8 @@ def save_village_options(
     row.options = normalized(raw)
     if notes is not None:
         row.table_notes = (notes or "").strip()[:TABLE_NOTES_MAX]
+    if enabled is not None:
+        row.enabled = bool(enabled)
     db.commit()
     return dict(row.options), row.table_notes or ""
 

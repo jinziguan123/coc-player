@@ -266,3 +266,65 @@ def test_table_notes_are_injected_with_their_limits(db_factory):
     assert "本局重调查轻战斗" in block
     assert "不改任何骰子结算" in block
     assert "不得" in block and "纪律" in block
+
+
+# ── 村规总开关 ────────────────────────────────────────────────
+#
+# 此前只要在规则书页面动过任何一项，村规就一直生效，没有「先照原文跑一局试试」的退路。
+
+
+def _session_with_module(db):
+    module = Module(title="M", rule_system="coc", npcs=[], scenes=[])
+    db.add(module); db.flush()
+    session = GameSession(module_id=module.id, status="active", world_state={})
+    db.add(session); db.commit()
+    return session
+
+
+class Test村规总开关:
+    def test_默认开着_升级不该让存量村规失效(self, db_factory):
+        db = db_factory()
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, "")
+        assert rule_options_service.village_enabled(db, "coc") is True
+        assert rule_options_service.village_options(db, "coc")["luck_spend"] is True
+
+    def test_没配过这套规则时也算开着(self, db_factory):
+        """没配过就没东西可关，返回空 dict 与「关掉」是同一个结果。"""
+        db = db_factory()
+        assert rule_options_service.village_enabled(db, "coc") is True
+        assert rule_options_service.village_options(db, "coc") == {}
+
+    def test_关掉后按没配过返回(self, db_factory):
+        db = db_factory()
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, "重调查轻战斗")
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, None, enabled=False)
+
+        assert rule_options_service.village_options(db, "coc") == {}
+        # 桌面约定跟着一起停——只关参数却仍把约定喂给 KP，等于关了一半
+        assert rule_options_service.table_notes(db, "coc") == ""
+
+    def test_关掉不清空配置_开回来原样还在(self, db_factory):
+        db = db_factory()
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, "重调查轻战斗")
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, None, enabled=False)
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, None, enabled=True)
+
+        assert rule_options_service.village_options(db, "coc")["luck_spend"] is True
+        assert rule_options_service.table_notes(db, "coc") == "重调查轻战斗"
+
+    def test_关掉后本局生效的规则回到原文(self, db_factory):
+        """effective 是喂给引擎的那份——开关必须管到这里，否则关了个寂寞。"""
+        db = db_factory()
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, "")
+        session = _session_with_module(db)
+        assert rule_options_service.effective(db, session).get("luck_spend") is True
+
+        rule_options_service.save_village_options(db, "coc", {"luck_spend": True}, None, enabled=False)
+        assert "luck_spend" not in rule_options_service.effective(db, session)
+
+    def test_enabled_为_None_时不动开关(self, db_factory):
+        """只改参数时不必把开关一并回传。"""
+        db = db_factory()
+        rule_options_service.save_village_options(db, "coc", {}, None, enabled=False)
+        rule_options_service.save_village_options(db, "coc", {"critical_max": 5}, None)
+        assert rule_options_service.village_enabled(db, "coc") is False

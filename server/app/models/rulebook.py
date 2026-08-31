@@ -1,3 +1,4 @@
+import sqlalchemy as sa
 from sqlalchemy import JSON, ForeignKey, Index, Integer, LargeBinary, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -52,3 +53,6 @@ class RuleSystemOptions(Base, TimestampMixin):
     #: 桌面约定：参数表达不了的那些规矩，自由文本。**只影响叙述与裁定倾向，不改骰子结算**
     #: ——它是喂给 KP 的一段话，不是引擎能执行的东西（能执行的都在 options 里）。
     table_notes: Mapped[str] = mapped_column(Text, default="", server_default="")
+    #: 村规总开关。关掉时 options 与 table_notes 一律按「没配过」处理，整桌回到规则原文——
+    #: 配置本身留着，随时能开回来，不必把每一项手动改回默认。
+    enabled: Mapped[bool] = mapped_column(default=True, server_default=sa.true())

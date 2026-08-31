@@ -63,7 +63,7 @@ describe('村规面板', () => {
 
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/rulebooks/village-rules/coc',
-      { options: RAW, table_notes: '' },
+      { options: RAW, table_notes: '', enabled: true },
     ))
   })
 
@@ -81,7 +81,7 @@ describe('村规面板', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存村规' }))
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/rulebooks/village-rules/coc',
-      { options: RAW, table_notes: 'NPC 死亡不可逆' },
+      { options: RAW, table_notes: 'NPC 死亡不可逆', enabled: true },
     ))
   })
 
@@ -91,5 +91,36 @@ describe('村规面板', () => {
 
     rerender(<VillageRulesPanel ruleSystem="dnd5e" />)
     await waitFor(() => expect(get).toHaveBeenCalledWith('/rulebooks/village-rules/dnd5e'))
+  })
+})
+
+describe('村规总开关', () => {
+  it('关掉后保存：配置照旧整份提交，只是 enabled 变 false', async () => {
+    // 关键在于**不清空**——玩家想先照规则原文跑一局试试，回头一开就全回来了。
+    const user = userEvent.setup()
+    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '', enabled: true })
+    render(<VillageRulesPanel ruleSystem="coc" />)
+    await screen.findByText('启用村规')
+
+    await user.click(screen.getByRole('switch', { name: '启用村规' }))
+    await user.click(screen.getByRole('button', { name: '保存村规' }))
+
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    const [, body] = put.mock.calls[0] as [string, { enabled: boolean; options: unknown }]
+    expect(body.enabled).toBe(false)
+    expect(body.options).toEqual(RAW)      // 配置原样留着，没被清掉
+  })
+
+  it('后端说停用就照实回显，别让人以为还开着', async () => {
+    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '', enabled: false })
+    render(<VillageRulesPanel ruleSystem="coc" />)
+    expect(await screen.findByRole('switch', { name: '启用村规' })).not.toBeChecked()
+    expect(screen.getByText(/完全照规则书原文跑/)).toBeInTheDocument()
+  })
+
+  it('旧后端没有这个字段时按开着算——升级不该让人的村规突然失效', async () => {
+    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '' })
+    render(<VillageRulesPanel ruleSystem="coc" />)
+    expect(await screen.findByRole('switch', { name: '启用村规' })).toBeChecked()
   })
 })

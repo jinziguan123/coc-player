@@ -97,6 +97,7 @@ export function VillageRulesPanel({ ruleSystem, twoColumn }: {
 }) {
   const [rules, setRules] = useState<VillageRules | null>(null)
   const [notes, setNotes] = useState('')
+  const [enabled, setEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -107,10 +108,12 @@ export function VillageRulesPanel({ ruleSystem, twoColumn }: {
           options: Partial<VillageRules>
           effective: VillageRules
           table_notes: string
+          enabled: boolean
         }>(`/rulebooks/village-rules/${ruleSystem}`)
         if (alive) {
           setRules(data.effective)
           setNotes(data.table_notes || '')
+          setEnabled(data.enabled !== false)
         }
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : '读取村规失败')
@@ -128,9 +131,9 @@ export function VillageRulesPanel({ ruleSystem, twoColumn }: {
     try {
       // 整份提交，后端负责白名单化、钳区间、只存与规则原文的差异
       await api.put(`/rulebooks/village-rules/${ruleSystem}`, {
-        options: rules, table_notes: notes,
+        options: rules, table_notes: notes, enabled,
       })
-      toast.success('村规已更新，下一次掷骰起生效')
+      toast.success(enabled ? '村规已更新，下一次掷骰起生效' : '村规已停用，这一桌回到规则原文')
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '保存失败')
     } finally {
@@ -151,6 +154,24 @@ export function VillageRulesPanel({ ruleSystem, twoColumn }: {
       <div className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>
         这一桌长期沿用的规则改动，对所有用这套规则的房间生效（含进行中的局）；不改的项照规则书原文来。
       </div>
+
+      {/* 总开关。关掉时下面配好的东西一条都不生效，但也**不会被清掉**——
+          想先照规则原文跑一局试试，回头一开就全回来了。 */}
+      <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 mb-3"
+        style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+        <div className="min-w-0">
+          <div className="text-sm" style={{ color: 'var(--color-text-primary)' }}>启用村规</div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {enabled
+              ? '下面配好的改动正在生效。'
+              : '已停用：这一桌完全照规则书原文跑，下面的配置留着不动，随时能开回来。'}
+          </div>
+        </div>
+        <Switch label="启用村规" checked={enabled} onChange={setEnabled} />
+      </div>
+
+      {/* 停用时把配置区压暗：仍然可读可改（改完开回来就生效），但一眼看得出它此刻不算数 */}
+      <div style={enabled ? undefined : { opacity: 0.55 }}>
 
       <div className={twoColumn ? 'grid gap-x-6 md:grid-cols-2' : ''}>
         {/* 左组：一次检定怎么判 */}
@@ -262,6 +283,7 @@ export function VillageRulesPanel({ ruleSystem, twoColumn }: {
         }}>
           {notes.length}/{NOTES_MAX}
         </div>
+      </div>
       </div>
 
       <div className="flex justify-end mt-3">
