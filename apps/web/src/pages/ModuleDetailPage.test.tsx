@@ -319,3 +319,66 @@ describe('视图切换不挪动标签栏', () => {
     expect(tabsParent()!.className).not.toContain('ml-auto')            // 标签栏仍不受其影响
   })
 })
+
+describe('NPC 性别', () => {
+  // 解析漏填时 KP 只能按名字猜，而外文译名（加布里埃尔、艾希礼）在中文里看不出性别，
+  // 猜错会把这个角色整局写成另一个性别。所以它必须能在这里看见、也能改。
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGet.mockResolvedValue({
+      id: 'module-1', title: '鬼屋', rule_system: 'coc', description: '',
+      world_setting: {}, scenes: [], clues: [], triggers: [], truth: '',
+      npcs: [
+        { id: 'npc-1', name: '加布里埃尔·马卡里奥', gender: 'female', description: '维托里奥的妻子' },
+        { id: 'npc-2', name: '金·戴伯伦', description: '高等法院的年轻办公室职员' },
+      ],
+    })
+    mockPut.mockResolvedValue({
+      id: 'module-1', title: '鬼屋', rule_system: 'coc', description: '',
+      world_setting: {}, scenes: [], npcs: [], clues: [], triggers: [], truth: '',
+    })
+  })
+
+  function open() {
+    return render(
+      <MemoryRouter initialEntries={['/modules/module-1']}>
+        <Routes>
+          <Route path="/modules/:id" element={<ModuleDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it('查看态用中文显示，没填的显示占位而不是空白', async () => {
+    open()
+    expect(await screen.findByText('维托里奥的妻子')).toBeInTheDocument()
+    const labels = screen.getAllByText('性别')
+    expect(labels).toHaveLength(2)
+    // 第一位有性别、第二位没有——「没填」本身是要让人看见的状态
+    expect(labels[0].parentElement).toHaveTextContent('女')
+    expect(labels[1].parentElement).toHaveTextContent('—')
+  })
+
+  it('编辑态给出选择框，留空是合法选项', async () => {
+    const user = userEvent.setup()
+    open()
+    await user.click(await screen.findByRole('button', { name: '编辑' }))
+
+    const pickers = screen.getAllByRole('combobox', { name: '性别' })
+    expect(pickers).toHaveLength(2)
+    expect(pickers[0]).toHaveTextContent('女')
+    // 非人怪物、群体条目、原文没交代的都该留空，硬填反而更糟
+    expect(pickers[1]).toHaveTextContent('未指定')
+  })
+
+  it('保存时不能把性别丢掉', async () => {
+    const user = userEvent.setup()
+    open()
+    await user.click(await screen.findByRole('button', { name: '编辑' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledOnce())
+    const payload = mockPut.mock.calls[0][1] as { npcs: { name?: string; gender?: string }[] }
+    expect(payload.npcs[0].gender).toBe('female')
+  })
+})

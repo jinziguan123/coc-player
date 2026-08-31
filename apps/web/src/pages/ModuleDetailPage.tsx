@@ -14,6 +14,8 @@ import { ModuleGraph } from '../components/module/ModuleGraph'
 import { HexSandbox } from '../components/game/HexSandbox'
 import { type ModuleImageKind } from '../components/module/ModuleImage'
 import { ImageSlot } from '../components/module/ImageSlot'
+import { GenderPicker } from '../components/module/GenderPicker'
+import { NpcCombatFields } from '../components/module/NpcCombatFields'
 import { CharacterGuidanceCard } from '../components/module/CharacterGuidanceCard'
 import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { ModuleTimeline } from '../components/module/ModuleTimeline'
@@ -35,7 +37,7 @@ interface SceneEvent { trigger?: string; kind?: string; san_loss?: string; skill
 interface SceneMap { q?: number; r?: number; biome: string; parent?: string }
 interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; kind?: string; connections?: string[]; events?: SceneEvent[]; states?: SceneState[]; image?: string; map?: SceneMap | null }
 interface MapNode { id: string; q: number; r: number; biome: string; scene_id?: string | null; parent?: string }
-interface NPC { id: string; name?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; damage?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
+interface NPC { id: string; name?: string; gender?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; damage?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
 interface Clue { id: string; name?: string; description?: string; location?: string; trigger_condition?: string; image?: string }
 interface Trigger { id: string; when?: string; set_flags?: string[]; clear_flags?: string[]; description?: string }
 /** 结局分支：when 是可判定的达成条件，规划器据此认出「玩家已经抵达终局」。 */
@@ -937,45 +939,14 @@ export function ModuleDetailPage() {
             )}
             {edit && <Row label="姓名"><TextInput value={n.name || ''} onChange={(v) => updNpc(i, { name: v })} /></Row>}
             <Row label="描述">{edit ? <TextInput value={n.description || ''} onChange={(v) => updNpc(i, { description: v })} multiline /> : <span className="whitespace-pre-wrap">{n.description || '—'}</span>}</Row>
+            <Row label="性别"><GenderPicker value={n.gender} edit={edit} onChange={(v) => updNpc(i, { gender: v })} /></Row>
             <Row label="性格">{edit ? <TextInput value={n.personality || ''} onChange={(v) => updNpc(i, { personality: v })} /> : <span>{n.personality || '—'}</span>}</Row>
             <Row label="生平">{edit ? <TextInput value={n.background || ''} onChange={(v) => updNpc(i, { background: v })} multiline placeholder="来历渊源（与秘密区分）" /> : <span className="whitespace-pre-wrap">{n.background || '—'}</span>}</Row>
             <Row label="初始位置">{edit ? <TextInput value={n.initial_location || ''} onChange={(v) => updNpc(i, { initial_location: v })} placeholder="场景 id" /> : <span className="text-xs">{n.initial_location || '—'}</span>}</Row>
             <Row label="属性">{<AttrGrid attrs={n.attributes} edit={edit} onChange={(a) => updNpc(i, { attributes: a })} />}</Row>
             <Row label={<span style={{ color: 'var(--color-danger)' }} className="inline-flex items-center gap-0.5"><GiPadlock />秘密</span>}>{edit ? <TextInput value={(n.secrets || []).join('\n')} onChange={(v) => updNpc(i, { secrets: v.split('\n') })} multiline placeholder="每行一条，仅 KP 可见" /> : <span className="whitespace-pre-wrap" style={{ color: 'var(--color-danger)' }}>{(n.secrets || []).join('\n') || '—'}</span>}</Row>
             <Row label="技能">{edit ? <TextInput value={skillsToText(n.skills)} onChange={(v) => updNpc(i, { skills: parseSkills(v) })} multiline placeholder="每行 技能: 数值，如 侦查: 60" /> : <span className="text-xs">{skillsToText(n.skills).replace(/\n/g, '、') || '—'}</span>}</Row>
-            <Row label="战斗">{edit ? (
-              <div className="flex items-center gap-3 text-xs flex-wrap">
-                {([['hp', 'HP'], ['armor', '护甲']] as const).map(([k, lbl]) => (
-                  <label key={k} className="flex items-center gap-1">
-                    <span style={{ color: 'var(--color-text-secondary)' }}>{lbl}</span>
-                    <input type="number" value={n[k] ?? ''} className="w-14 px-1 py-0.5 rounded"
-                      style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-                      onChange={(e) => updNpc(i, { [k]: e.target.value === '' ? undefined : Number(e.target.value) })} />
-                  </label>
-                ))}
-                <label className="flex items-center gap-1 flex-1 min-w-32">
-                  <span style={{ color: 'var(--color-text-secondary)' }}>武器</span>
-                  <input value={n.weapon || ''} placeholder="如 匕首、撕咬" className="w-full px-1 py-0.5 rounded"
-                    style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-                    onChange={(e) => updNpc(i, { weapon: e.target.value })} />
-                </label>
-                {/* 伤害骰：怪物的自创攻击方式（撕咬/触手）不在武器表里，不填就只能按徒手 1D3 估伤 */}
-                <label className="flex items-center gap-1 flex-1 min-w-32"
-                  title="怪物自创攻击方式必填，否则按徒手 1D3+DB 估伤；常规武器留空即按武器表结算">
-                  <span style={{ color: 'var(--color-text-secondary)' }}>伤害</span>
-                  <input value={n.damage || ''} placeholder="如 1D6（常规武器可留空）" className="w-full px-1 py-0.5 rounded"
-                    style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }}
-                    onChange={(e) => updNpc(i, { damage: e.target.value })} />
-                </label>
-              </div>
-            ) : (
-              <span className="text-xs">{[
-                n.hp != null ? `HP ${n.hp}` : '',
-                n.armor != null ? `护甲 ${n.armor}` : '',
-                n.weapon ? `武器 ${n.weapon}` : '',
-                n.damage ? `伤害 ${n.damage}` : '',
-              ].filter(Boolean).join('、') || '—'}</span>
-            )}</Row>
+            <Row label="战斗"><NpcCombatFields npc={n} edit={edit} onChange={(patch) => updNpc(i, patch)} /></Row>
             <Row label="目标">{edit ? <TextInput value={(n.goals || []).join('\n')} onChange={(v) => updNpc(i, { goals: v.split('\n') })} multiline placeholder="每行一条：该 NPC 想达成什么（幕后推演据此让其行动）" /> : <span className="whitespace-pre-wrap text-xs">{(n.goals || []).join('\n') || '—'}</span>}</Row>
             <VariantList states={n.states} edit={edit} onAdd={() => addNpcState(i)} onRemove={(j) => rmNpcState(i, j)} onWhen={(j, f) => updNpcState(i, j, { when: f })}
               renderFields={(st, j) => (
