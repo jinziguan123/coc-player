@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Dices, Sparkles, Upload } from 'lucide-react'
 import { GiScrollUnfurled, GiCharacter, GiBookmarklet } from 'react-icons/gi'
 import { HomeIntro } from '@/components/home/HomeIntro'
+import { CaseFileHeader } from '@/components/home/CaseFileHeader'
 
 /** 首页入口卡：图标 + 标题 + 一句说明，比裸按钮更能交代「点进去是什么」。 */
 const ENTRIES = [
@@ -29,24 +30,7 @@ export function HomePage() {
     // 5xl 而不是 4xl：下方介绍要并排成三栏，容器太窄会把规则表挤到换行。
     // 上下留白也一并收紧——首页的目标是「一屏看全」，标题区不该独吞四分之一屏。
     <div className="mx-auto mt-5 w-full max-w-5xl">
-      <div className="mb-5 text-center">
-        <h1
-          className="mb-1 text-3xl font-bold"
-          style={{
-            fontFamily: 'var(--font-display)',
-            color: 'var(--color-text-accent)',
-            letterSpacing: '0.06em',
-            textShadow: '0 0 26px rgba(212, 162, 78, 0.22)',
-          }}
-        >
-          CoC Player
-        </h1>
-        <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-          AI 当守秘人，你带调查员上桌
-        </p>
-        {/* 标题下的细分隔纹，收住居中标题与下方卡片 */}
-        <div className="home-rule mx-auto mt-3" />
-      </div>
+      <CaseFileHeader />
 
       <div className="grid gap-3 sm:grid-cols-3">
         {ENTRIES.map(({ to, Icon, title, desc, primary }) => (
