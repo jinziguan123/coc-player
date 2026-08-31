@@ -1,10 +1,12 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { HomeIntro } from './HomeIntro'
 
+/** 这些用例查的是摊开后的内容，所以直接以展开态渲染（折叠行为另有一组用例）。 */
 function setup() {
-  return render(<MemoryRouter><HomeIntro /></MemoryRouter>)
+  return render(<MemoryRouter><HomeIntro defaultOpen /></MemoryRouter>)
 }
 
 describe('首页介绍的联机段落', () => {
@@ -43,5 +45,34 @@ describe('首页介绍的联机段落', () => {
     // 杂项符号、颜文字、装饰符号、变体选择符
     const emoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u
     expect(container.textContent ?? '').not.toMatch(emoji)
+  })
+})
+
+describe('该不该摊开', () => {
+  const open = (props = {}) => render(<MemoryRouter><HomeIntro {...props} /></MemoryRouter>)
+
+  it('默认收起——首页是卷宗，不是教学页', () => {
+    open()
+    expect(screen.getByRole('button', { name: /第一次跑团/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('什么是跑团')).not.toBeInTheDocument()
+  })
+
+  it('还没上过桌的人自动摊开——对他这不是噪音，是刚需', () => {
+    open({ defaultOpen: true })
+    expect(screen.getByText('什么是跑团')).toBeInTheDocument()
+  })
+
+  it('库存迟一步点完时也能摊开（异步到达）', () => {
+    const { rerender } = open()
+    expect(screen.queryByText('什么是跑团')).not.toBeInTheDocument()
+    rerender(<MemoryRouter><HomeIntro defaultOpen /></MemoryRouter>)
+    expect(screen.getByText('什么是跑团')).toBeInTheDocument()
+  })
+
+  it('老玩家想看也点得开', async () => {
+    const user = userEvent.setup()
+    open()
+    await user.click(screen.getByRole('button', { name: /第一次跑团/ }))
+    expect(screen.getByText('什么是跑团')).toBeInTheDocument()
   })
 })

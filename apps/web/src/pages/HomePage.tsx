@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Dices, Sparkles, Upload } from 'lucide-react'
 import { GiScrollUnfurled, GiCharacter, GiBookmarklet } from 'react-icons/gi'
@@ -26,11 +27,15 @@ const SHORTCUTS = [
 ] as const
 
 export function HomePage() {
+  // 还没车过卡 = 还没上过桌，这种人一进来就该看到「第一次跑团？」是摊开的；
+  // 已经玩起来的人不必每次进首页都被科普一遍。
+  const [newcomer, setNewcomer] = useState(false)
+
   return (
     // 5xl 而不是 4xl：下方介绍要并排成三栏，容器太窄会把规则表挤到换行。
     // 上下留白也一并收紧——首页的目标是「一屏看全」，标题区不该独吞四分之一屏。
     <div className="mx-auto mt-5 w-full max-w-5xl">
-      <CaseFileHeader />
+      <CaseFileHeader onLoaded={setNewcomer} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         {ENTRIES.map(({ to, Icon, title, desc, primary }) => (
@@ -67,7 +72,7 @@ export function HomePage() {
 
       {/* 介绍放在入口卡之下：老玩家进来先看见三张入口，新人往下滚一屏能补齐
           「跑团是什么 / 规则怎么转 / 在这儿怎么开局」。 */}
-      <HomeIntro />
+      <HomeIntro defaultOpen={newcomer} />
     </div>
   )
 }

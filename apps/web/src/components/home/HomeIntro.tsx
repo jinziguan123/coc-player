@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ChevronDown } from 'lucide-react'
 import {
   GiCharacter,
   GiRobotGolem,
@@ -76,25 +78,36 @@ const COOP = [
 ] as const
 
 /** 首页介绍：跑团是什么、规则怎么转、在本项目里怎么玩。
- *  三段并排而不是竖着堆——首页的价值是「一眼看全再决定点哪」，一旦要滚屏，
- *  下面两段对新人就等于不存在。 */
-export function HomeIntro() {
-  return (
-    <section className="mt-6" aria-labelledby="home-intro-heading">
-      <h2
-        id="home-intro-heading"
-        className="mb-4 text-center"
-        style={{
-          fontFamily: 'var(--font-title)',
-          fontSize: 'var(--text-base)',
-          letterSpacing: '0.12em',
-          color: 'var(--color-text-accent)',
-        }}
-      >
-        第一次跑团？
-      </h2>
+ *
+ *  **默认收起，只对还没上过桌的人自动摊开**。首页在导航里叫「卷宗」，是你的工作台——
+ *  已经车了七张卡、跑过几局的人每次进来都撞见一遍「什么是跑团」，那是噪音。可它对
+ *  真正的新人又是刚需，所以不能删，只能让它按人出现（见 CaseFileHeader 的 onLoaded）。
+ *
+ *  摊开后三段并排而不是竖着堆——一旦要滚屏，下面两段对新人就等于不存在。 */
+export function HomeIntro({ defaultOpen = false }: { defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  // 库存是异步点完的，defaultOpen 会迟一步到；只认「从收起变成该展开」这一次，
+  // 不能反过来把用户手动展开的又合上。
+  useEffect(() => { if (defaultOpen) setOpen(true) }, [defaultOpen])
 
-      <div className="home-intro-grid">
+  return (
+    <section className="home-intro" aria-labelledby="home-intro-heading">
+      <button
+        type="button"
+        id="home-intro-heading"
+        className="home-intro-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="home-intro-toggle-title">第一次跑团？</span>
+        <span className="home-intro-toggle-hint">跑团是什么、骰子怎么转、在这儿怎么开局</span>
+        <ChevronDown size={15} aria-hidden="true" className={open ? 'rotate-180' : ''}
+          style={{ transition: 'transform 160ms ease', flexShrink: 0 }} />
+      </button>
+
+      {open && (
+      <>
+      <div className="home-intro-grid mt-4">
         <div>
           <h3 className="section-head">什么是跑团</h3>
           <p className="home-intro-lede">
@@ -199,6 +212,8 @@ export function HomeIntro() {
           ))}
         </ul>
       </div>
+      </>
+      )}
     </section>
   )
 }

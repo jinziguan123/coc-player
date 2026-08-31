@@ -24,7 +24,10 @@ interface Row {
   to: string
 }
 
-export function CaseFileHeader() {
+export function CaseFileHeader({ onLoaded }: {
+  /** 库存点完之后告诉外面「这是不是个还没上过桌的人」——首页据此决定要不要摊开新手介绍。 */
+  onLoaded?: (newcomer: boolean) => void
+} = {}) {
   const [rows, setRows] = useState<Row[] | null>(null)
 
   useEffect(() => {
@@ -40,6 +43,8 @@ export function CaseFileHeader() {
           (s) => s.status === 'active' || s.status === 'paused' || s.status === 'setup',
         ).length
         if (!alive) return
+        // 一个调查员都没有 = 还没开始玩。已经车过卡的人不需要再被科普一遍跑团是什么。
+        onLoaded?.(chars.length === 0)
         setRows([
           { label: '调查员', count: chars.length, emptyText: '建一位调查员', to: '/characters' },
           { label: '模组', count: modules.length, emptyText: '导入模组', to: '/modules' },
@@ -51,6 +56,8 @@ export function CaseFileHeader() {
       }
     })()
     return () => { alive = false }
+    // onLoaded 只在首次点完库存时叫一次；把它列进依赖会让父组件每次重渲染都重新拉一遍
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
