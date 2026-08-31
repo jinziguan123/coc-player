@@ -39,7 +39,7 @@ import {
 } from '../components/game/CheckResultCard'
 import { CheckRequestCard } from '../components/game/CheckRequestCard'
 import { LuckOfferCard } from '../components/game/LuckOfferCard'
-import { luckOfferMessage, type SyncSnapshot } from '@/lib/roomSync'
+import { luckSnapshotFrom, type LuckSnapshot, type SyncSnapshot } from '@/lib/roomSync'
 import { startGameTour, hasSeenGameTour } from '@/features/tour/gameTour'
 import { showHintOnce } from '@/features/tour/hints'
 import { buildCheckCaption } from '../components/game/diceNotation'
@@ -269,6 +269,9 @@ export function GameSessionPage() {
   const [showStyle, setShowStyle] = useState(false)           // 本局文风/画风（房主专用）
   // 幸运询价已被拍板过一次 → 卡片收起按钮，防重复提交（后端也已把待决状态消费掉）
   const [luckDecided, setLuckDecided] = useState(false)
+  // 待决的幸运询价。**独立 state，不进消息流**——它是「当前状态」而非聊天记录，
+  // 塞进 messages 会被 loadHistory 的整体替换冲掉，还会把首屏标志顶掉（见 lib/roomSync.ts）。
+  const [luckOffer, setLuckOffer] = useState<LuckSnapshot | null>(null)
   const [locations, setLocations] = useState<KnownLocation[]>([])
   const [mapNodes, setMapNodes] = useState<MapNodePayload[]>([])
   const [mapBackdrop, setMapBackdrop] = useState('')     // 沙盘氛围底图（模组里生成的那张俯视图）
@@ -641,14 +644,13 @@ export function GameSessionPage() {
       setChase(chaseSnap?.active ? (chaseSnap as unknown as ChaseState) : null)
       setTurnState(s.systems.turn ?? null)
       // 幸运询价：补回那张卡（不补的话刷新一次它就没了，而流程还等着拍板）
-      const luckMsg = luckOfferMessage(s.systems.luck)
-      if (luckMsg) addMessage(luckMsg)
-      // 没有待决的 = 已经在别处拍过板：按钮置灰，别让人再点一次去撞 404
-      setLuckDecided(!luckMsg)
+      const luck = luckSnapshotFrom(s.systems.luck as Record<string, unknown> | undefined)
+      setLuckOffer(luck)
+      if (luck) setLuckDecided(false)
     } catch {
       // 取不到就维持现状：宁可显示旧状态，也不要在网络抖动时把战斗面板清空
     }
-  }, [sessionId, addMessage])
+  }, [sessionId])
 
   // 节流刷新会话（席位/在线变更用）：合并 400ms 内的连续 presence/seat，避免风暴
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -831,7 +833,7 @@ export function GameSessionPage() {
       if (cid) setOptimisticPending((s) => new Set(s).add(cid))
     } else if (t === 'luck_offer') {
       // 幸运询价：这一骰差几点够得着，问它的主人买不买。整条结算链停在这里等回答。
-      addMessage({ id: chunk.id || '', type: 'system', content: chunk.content || '', actor_name: chunk.actor_name, metadata: chunk.metadata })
+      setLuckOffer(luckSnapshotFrom(chunk.metadata as Record<string, unknown> | undefined))
       setLuckDecided(false)
     } else {
       // 走到这里说明有 log 类型没被渲染——加了新事件就必须在上面补一支。
@@ -1354,11 +1356,13 @@ export function GameSessionPage() {
     if (!currentSession) return
     setLuckDecided(true)
     setStreaming(true)
-    api.post(`/sessions/${currentSession.id}/luck-decision`, { spend }).catch((e: unknown) => {
-      setLuckDecided(false)
-      setStreaming(false)
-      toast.error(e instanceof Error ? e.message : '提交失败')
-    })
+    api.post(`/sessions/${currentSession.id}/luck-decision`, { spend })
+      .then(() => setLuckOffer(null))    // 拍完就收起来，别留一张点不动的卡在那儿
+      .catch((e: unknown) => {
+        setLuckDecided(false)
+        setStreaming(false)
+        toast.error(e instanceof Error ? e.message : '提交失败')
+      })
   }
 
   const sendMessage = async () => {
@@ -2051,22 +2055,6 @@ export function GameSessionPage() {
                   </div>
                 )
               }
-              // 幸运询价：差一点点的那一骰，问它的主人要不要花幸运买回来
-              if (msg.metadata?.cost && msg.metadata?.dice_event_id) {
-                const luckCharId = String(msg.metadata?.char_id ?? '')
-                return (
-                  <LuckOfferCard
-                    key={msg.id}
-                    actor={String(msg.metadata?.actor ?? '')}
-                    skill={String(msg.metadata?.skill ?? '')}
-                    cost={Number(msg.metadata?.cost ?? 0)}
-                    available={Number(msg.metadata?.available ?? 0)}
-                    mine={!luckCharId || luckCharId === myCharId}
-                    busy={luckDecided || streaming}
-                    onDecide={decideLuck}
-                  />
-                )
-              }
               // 待定检定提示：携带 check_request 元数据时，渲染成带「投骰」按钮的卡片
               const checkId = msg.metadata?.check_request ? String(msg.metadata?.id ?? '') : ''
               if (checkId) {
@@ -2193,6 +2181,18 @@ export function GameSessionPage() {
             )
           })
           })()}
+          {/* 幸运询价固定挂在消息流末尾：它是此刻待办的事，不是历史里的一条 */}
+          {luckOffer && (
+            <LuckOfferCard
+              actor={luckOffer.actor ?? ''}
+              skill={luckOffer.skill ?? ''}
+              cost={luckOffer.cost ?? 0}
+              available={luckOffer.available ?? 0}
+              mine={!luckOffer.char_id || luckOffer.char_id === myCharId}
+              busy={luckDecided || streaming}
+              onDecide={decideLuck}
+            />
+          )}
           {streaming && (
             <div className="chat-loading flex items-center gap-2">
               <span className="dot-pulse" />
