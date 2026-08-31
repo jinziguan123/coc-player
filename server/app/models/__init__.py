@@ -3,6 +3,7 @@ from app.models.character import Character
 from app.models.chase_state import ChaseState
 from app.models.combat_state import CombatState
 from app.models.event_log import EventLog
+from app.models.lan_peer import LanPeer
 from app.models.module import Module, ModuleChunk
 from app.models.rulebook import RuleChunk, Rulebook, RuleSystemOptions
 from app.models.session import GameSession
@@ -18,6 +19,7 @@ __all__ = [
     "ChaseState",
     "CombatState",
     "EventLog",
+    "LanPeer",
     "Module",
     "ModuleChunk",
     "Rulebook",

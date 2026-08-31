@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.api.router import api_router
 from app.config import settings
+from app.database import SessionLocal
 from app.services.ai_quota import QuotaExceeded
 from app.services.rate_limit import limiter
 
@@ -101,19 +102,48 @@ async def _maintenance_gate(request: Request, call_next):
     return await call_next(request)
 
 
+#: 局域网客户端在获批之前也能打的几个口子。少一个都会让「敲门」这件事无从发生：
+#: 客人要先探得到主机、报得上名字、查得到自己排到哪儿了，房主才有得批。
+_KNOCK_PATHS = frozenset({"/api/health", "/api/net/me", "/api/net/knock"})
+
+
 @app.middleware("http")
 async def _peer_gate(request: Request, call_next):
     """来源校验：见 ``app.services.net_access`` 的两道闸说明。
 
     注册在维护闸之后 → 位于其外层，未授权来源连维护页也拿不到。
+
+    IP 那道闸只回答「这个网段可不可信」。可信网段里仍是一台台具体的设备，第二道闸
+    按客户端逐个放行——直连那边本来就要房主逐个点头，局域网这边没道理整段敞开。
+    直连客人不走第二道：Tauri 侧的 roster 已经批过一次，隧道密钥就是那次批准的凭据。
     """
-    from app.services import net_access
+    from app.services import lan_roster, net_access
 
     client = request.client.host if request.client else None
     if not net_access.is_trusted_peer(client):
         return JSONResponse(
             {"detail": "房主未允许局域网加入，或请求来自不可信网络"}, status_code=403
         )
+
+    if net_access.peer_kind(client, request.headers) == "lan":
+        db = SessionLocal()
+        try:
+            status = lan_roster.check_in(
+                db, request.headers.get("x-player-token") or "", client
+            )
+        finally:
+            db.close()
+        if status != "approved" and request.url.path not in _KNOCK_PATHS:
+            return JSONResponse(
+                {
+                    "detail": (
+                        "房主还没同意这台设备加入" if status == "pending"
+                        else "房主拒绝了这台设备"
+                    ),
+                    "code": f"lan_{status}",
+                },
+                status_code=403,
+            )
     return await call_next(request)
 
 app.add_middleware(

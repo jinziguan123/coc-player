@@ -53,3 +53,8 @@ extend-exclude = ["alembic/versions"]
 # 含 22 处 B904 需手工加 `raise ... from e`，宜单独一 PR 做，不混进本次 CI 接线。
 select = ["F", "E9"]
 ignore = []
+
+[tool.pytest.ini_options]
+markers = [
+    "lan_roster_live: 让开 conftest 的名册放行夹具，实测局域网接入名册本身的行为",
+]

@@ -482,6 +482,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/net/knock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Knock
+         * @description 客人报个名字，好让房主认得出门口站着谁。免批准即可访问（见 ``_KNOCK_PATHS``）。
+         */
+        post: operations["knock_api_net_knock_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/net/lan": {
         parameters: {
             query?: never;
@@ -500,6 +520,64 @@ export interface paths {
          */
         post: operations["set_lan_api_net_lan_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/net/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Access
+         * @description 客人查自己排到哪儿了。等批准期间前端轮询这个。
+         */
+        get: operations["my_access_api_net_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/net/peers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Peers */
+        get: operations["list_peers_api_net_peers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/net/peers/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Peer */
+        post: operations["decide_peer_api_net_peers__token__post"];
+        /**
+         * Forget Peer
+         * @description 从名册里抹掉。对方下次再来会重新排到门口——「重新认识一遍」。
+         */
+        delete: operations["forget_peer_api_net_peers__token__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3095,6 +3173,14 @@ export interface components {
             /** Item Id */
             item_id: string;
         };
+        /** Knock */
+        Knock: {
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+        };
         /**
          * KpActionRequest
          * @description 真人 KP 工具桌动作；payload 由动作类型对应的表单字段组成。
@@ -3199,6 +3285,38 @@ export interface components {
             auto_ai_teammates?: boolean | null;
             /** Notes */
             notes?: string | null;
+        };
+        /** LanDecision */
+        LanDecision: {
+            /** Approved */
+            approved: boolean;
+            /** Label */
+            label?: string | null;
+        };
+        /** LanPeerOut */
+        LanPeerOut: {
+            /** Claimed Label */
+            claimed_label: string;
+            /**
+             * First Seen
+             * Format: date-time
+             */
+            first_seen: string;
+            /** Label */
+            label: string;
+            /** Last Addr */
+            last_addr: string;
+            /**
+             * Last Seen
+             * Format: date-time
+             */
+            last_seen: string;
+            /** Online */
+            online: boolean;
+            /** Status */
+            status: string;
+            /** Token */
+            token: string;
         };
         /** LanToggle */
         LanToggle: {
@@ -3383,6 +3501,13 @@ export interface components {
             world_setting: {
                 [key: string]: unknown;
             };
+        };
+        /** MyAccess */
+        MyAccess: {
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
         };
         /** NetStatus */
         NetStatus: {
@@ -4727,6 +4852,39 @@ export interface operations {
             };
         };
     };
+    knock_api_net_knock_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Knock"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyAccess"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_lan_api_net_lan_post: {
         parameters: {
             query?: never;
@@ -4748,6 +4906,110 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["NetStatus"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_access_api_net_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyAccess"];
+                };
+            };
+        };
+    };
+    list_peers_api_net_peers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanPeerOut"][];
+                };
+            };
+        };
+    };
+    decide_peer_api_net_peers__token__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LanDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanPeerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_peer_api_net_peers__token__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

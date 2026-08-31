@@ -1426,6 +1426,17 @@
         "title": "InventoryUseRequest",
         "type": "object"
       },
+      "Knock": {
+        "properties": {
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "title": "Knock",
+        "type": "object"
+      },
       "KpActionRequest": {
         "description": "真人 KP 工具桌动作；payload 由动作类型对应的表单字段组成。",
         "properties": {
@@ -1675,6 +1686,80 @@
           }
         },
         "title": "KpWorkspaceUpdate",
+        "type": "object"
+      },
+      "LanDecision": {
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "required": [
+          "approved"
+        ],
+        "title": "LanDecision",
+        "type": "object"
+      },
+      "LanPeerOut": {
+        "properties": {
+          "claimed_label": {
+            "title": "Claimed Label",
+            "type": "string"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "title": "First Seen",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_addr": {
+            "title": "Last Addr",
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "title": "Last Seen",
+            "type": "string"
+          },
+          "online": {
+            "title": "Online",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "status",
+          "label",
+          "claimed_label",
+          "last_addr",
+          "last_seen",
+          "first_seen",
+          "online"
+        ],
+        "title": "LanPeerOut",
         "type": "object"
       },
       "LanToggle": {
@@ -1998,6 +2083,24 @@
           "title"
         ],
         "title": "ModuleWrite",
+        "type": "object"
+      },
+      "MyAccess": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "status"
+        ],
+        "title": "MyAccess",
         "type": "object"
       },
       "NetStatus": {
@@ -4226,6 +4329,48 @@
         ]
       }
     },
+    "/api/net/knock": {
+      "post": {
+        "description": "客人报个名字，好让房主认得出门口站着谁。免批准即可访问（见 ``_KNOCK_PATHS``）。",
+        "operationId": "knock_api_net_knock_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Knock"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Knock",
+        "tags": [
+          "net"
+        ]
+      }
+    },
     "/api/net/lan": {
       "post": {
         "description": "开关局域网加入。\n\n只有本机才能改：这个开关决定别人能不能连进来，不能让已经连进来的客人自己放宽它。\n内置直连隧道的客人虽然源 IP 是回环，同样不算本机，见 ``net_access.peer_kind``。",
@@ -4263,6 +4408,139 @@
           }
         },
         "summary": "Set Lan",
+        "tags": [
+          "net"
+        ]
+      }
+    },
+    "/api/net/me": {
+      "get": {
+        "description": "客人查自己排到哪儿了。等批准期间前端轮询这个。",
+        "operationId": "my_access_api_net_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Access",
+        "tags": [
+          "net"
+        ]
+      }
+    },
+    "/api/net/peers": {
+      "get": {
+        "operationId": "list_peers_api_net_peers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LanPeerOut"
+                  },
+                  "title": "Response List Peers Api Net Peers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Peers",
+        "tags": [
+          "net"
+        ]
+      }
+    },
+    "/api/net/peers/{token}": {
+      "delete": {
+        "description": "从名册里抹掉。对方下次再来会重新排到门口——「重新认识一遍」。",
+        "operationId": "forget_peer_api_net_peers__token__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Forget Peer",
+        "tags": [
+          "net"
+        ]
+      },
+      "post": {
+        "operationId": "decide_peer_api_net_peers__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LanDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanPeerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Peer",
         "tags": [
           "net"
         ]

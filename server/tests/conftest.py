@@ -11,6 +11,24 @@ from sqlalchemy.orm import sessionmaker
 import app.database as database
 from app.models.base import Base
 from app.ai import profile_store
+from app.services import lan_roster
+
+
+@pytest.fixture(autouse=True)
+def open_lan_roster(monkeypatch, request):
+    """默认让局域网接入名册放行，除非用例标了 ``lan_roster_live``。
+
+    名册（``app/services/lan_roster.py``）是后加的一道闸：局域网客户端要房主先点头。
+    在它之前写的那些用例，模拟局域网客人时自然不会先去门口报到，于是一律吃 403——
+    可它们测的是限流、本机专属端点、地图广播这些别的事，不该被这道闸改写结论。
+
+    名册自身的行为在 ``test_lan_roster.py`` 里测，那个文件标 ``lan_roster_live``
+    把这个夹具让开。
+    """
+    lan_roster.reset_cache()
+    if request.node.get_closest_marker("lan_roster_live"):
+        return
+    monkeypatch.setattr(lan_roster, "check_in", lambda db, token, addr: "approved")
 
 
 @pytest.fixture(autouse=True)
