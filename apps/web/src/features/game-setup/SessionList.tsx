@@ -38,7 +38,9 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
           </span>
         </div>
       )}
-      <div className="grid gap-2.5 lg:grid-cols-2">
+      {/* 拿到整幅宽度后可以多排一列：卡里只有标题、角色和时间三行，两列时每张近 600px
+          宽得发空。三列封顶——再多模组名就要截断了。 */}
+      <div className="grid gap-2.5 lg:grid-cols-2 xl:grid-cols-3">
         {activeSessions.map((session, i) => (
           <div
             key={session.id}
@@ -102,7 +104,7 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
           <div className="mb-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             在朋友那儿的房间（点击连接房主并进入）
           </div>
-          <div className="grid gap-2.5 lg:grid-cols-2">
+          <div className="grid gap-2.5 lg:grid-cols-2 xl:grid-cols-3">
             {remoteRooms.map((room) => {
               const busy = reconnecting === `${room.hostId}::${room.roomCode}`
               return (

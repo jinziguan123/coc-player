@@ -40,7 +40,6 @@ export function GamePage() {
         )}
       />
 
-      <div className="max-w-4xl">
       {/* 先问「开一局，还是去别人那局」，再只展开该出现的那一半——
           从前两个表单同屏堆着，页面一打开就是一长条，而用户此刻只想回答这一个问题。 */}
       <GameEntryChooser
@@ -51,11 +50,14 @@ export function GamePage() {
       />
 
       {/* 三种状态互斥：要么在建房、要么在加入、要么在看自己的房间。
-          流程进行中还把「我的房间」挂在下面，等于让用户一边填表一边被另一条路岔开。 */}
-      {mode === 'create' ? <NewGamePanel setup={setup} />
-        : mode === 'join' ? <JoinRoomPanel setup={setup} />
+          流程进行中还把「我的房间」挂在下面，等于让用户一边填表一边被另一条路岔开。
+
+          **限宽只包表单**：建房/加入是线性表单，拉满屏一行跑到天边反而难填；
+          而「我的房间」是并列卡片，越宽排得越开——早先把两者一起塞进 4xl，
+          结果抬头占满整幅、房间列表却缩在左边三分之二，右侧白空一大片。 */}
+      {mode === 'create' ? <div className="max-w-4xl"><NewGamePanel setup={setup} /></div>
+        : mode === 'join' ? <div className="max-w-4xl"><JoinRoomPanel setup={setup} /></div>
           : <SessionList setup={setup} />}
-      </div>
     </div>
   )
 }
