@@ -5,7 +5,8 @@ import { api, localApi } from '../api/client'
 import { useModuleStore } from '../stores/moduleStore'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { GiUpCard, GiScrollUnfurled, GiReturnArrow, GiArchiveResearch } from 'react-icons/gi'
+import { GiUpCard, GiScrollUnfurled, GiArchiveResearch } from 'react-icons/gi'
+import { ArchiveHead } from '@/components/layout/ArchiveHead'
 import { Loader2, X } from 'lucide-react'
 import { staggerStyle } from '@/lib/stagger'
 
@@ -132,17 +133,17 @@ export function ModulePage() {
   return (
     // 上传区是线性表单（窄栏更好用），列表是并列卡片（放宽让网格铺开）——分别限宽
     <div className="max-w-[100rem]">
-      <div className="page-head">
-        <button onClick={() => navigate(-1)} className="btn-secondary btn-sm flex items-center gap-1">
-          <GiReturnArrow /> 返回
-        </button>
-        <h2 className="page-title">模组管理</h2>
-        <div className="page-head-actions">
+      {/* 「书目」是这一页在卷宗里的名字；标题按人怎么叫它取（模组），不叫「模组管理」 */}
+      <ArchiveHead
+        tab="书目"
+        title="模组"
+        stats={[{ label: '在库', value: modules.length }]}
+        actions={(
           <button onClick={() => navigate('/modules/new')} className="btn-primary btn-sm flex items-center gap-1">
             <GiUpCard /> 新建模组
           </button>
-        </div>
-      </div>
+        )}
+      />
 
       <div className="card mb-8 max-w-3xl">
         <h3 className="card-title flex items-center gap-2">

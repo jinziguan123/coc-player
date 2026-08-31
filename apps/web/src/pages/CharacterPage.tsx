@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { syncCharactersBackFromHost } from '@/features/characters/syncBack'
 import { api, getServerUrl, uploadFile } from '../api/client'
@@ -20,6 +19,7 @@ import { NumberField } from '@/components/ui/number-field'
 import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
 import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { CharacterList } from '@/features/characters/CharacterList'
+import { ArchiveHead } from '@/components/layout/ArchiveHead'
 import {
   createCharacter,
   generateCharacter,
@@ -134,7 +134,6 @@ interface ApplyAgeResponse {
 }
 
 export function CharacterPage() {
-  const navigate = useNavigate()
   const { modules, fetchModules } = useModuleStore()
   const [characters, setCharacters] = useState<Character[]>([])
   const [step, setStep] = useState<Step>('基本信息')
@@ -882,19 +881,20 @@ export function CharacterPage() {
       {/* 建卡流程是线性表单，窄栏更易读、自己滚；名录+详情是一本摊开的书，占满剩余高度 */}
       <div className={`flex min-h-0 flex-1 flex-col ${inCreateFlow ? 'max-w-3xl overflow-auto' : ''}`}>
         <div className="contents">
-          <div className="page-head">
-            <button onClick={() => navigate(-1)} className="btn-secondary btn-sm flex items-center gap-1">
-              <GiReturnArrow /> 返回
-            </button>
-            <h2 className="page-title">角色管理</h2>
-            {inCreateFlow ? (
-              <div className="page-head-actions">
+          {/* 「名录」是这一页在卷宗里的名字；标题按人怎么叫它取（角色），不叫「角色管理」。
+              建卡途中不报总数——那会儿你在写第一页，看总数没有意义。 */}
+          <ArchiveHead
+            tab="名录"
+            title="角色"
+            stats={inCreateFlow ? undefined : [{ label: '调查员', value: characters.length }]}
+            actions={inCreateFlow ? (
+              <>
                 <button onClick={() => { setInCreateFlow(false); resetForm() }} className="btn-secondary btn-sm flex items-center gap-1">
                   <GiReturnArrow /> 返回列表
                 </button>
-              </div>
+              </>
             ) : (
-              <div className="page-head-actions">
+              <>
                 {/* 兜底：正常情况下进出房间会自动同步，这里给一个手动入口，
                     应对异常退出（关窗口/掉线/房主先退）后想立刻把结果取回来。 */}
                 {connectedToHost && (
@@ -910,9 +910,9 @@ export function CharacterPage() {
                 <button onClick={() => { resetForm(); setInCreateFlow(true) }} className="btn-primary btn-sm flex items-center gap-1">
                   <GiUpCard /> 创建角色
                 </button>
-              </div>
+              </>
             )}
-          </div>
+          />
 
           {/* 未完成草稿：非模态横幅，可恢复或丢弃 */}
           {draftSavedAt && (

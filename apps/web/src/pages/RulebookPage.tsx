@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, getApiBase, getPlayerToken, localApi } from '../api/client'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { GiBookCover, GiReturnArrow, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
+import { GiBookCover, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
 import { VillageRulesPanel } from '@/components/game/VillageRulesPanel'
 import { VillageRulesSummary } from '@/components/game/VillageRulesSummary'
+import { ArchiveHead } from '@/components/layout/ArchiveHead'
 import { staggerStyle } from '@/lib/stagger'
 
 interface Rulebook {
@@ -50,7 +50,6 @@ interface VillageRulesBrief {
 }
 
 export function RulebookPage() {
-  const navigate = useNavigate()
   const fileRef = useRef<HTMLInputElement>(null)
   const [books, setBooks] = useState<Rulebook[]>([])
   const [ruleSystem, setRuleSystem] = useState('coc')
@@ -165,12 +164,7 @@ export function RulebookPage() {
 
   return (
     <div className="max-w-[100rem]">
-      <div className="page-head">
-        <button onClick={() => navigate(-1)} className="btn-secondary btn-sm flex items-center gap-1">
-          <GiReturnArrow /> 返回
-        </button>
-        <h2 className="page-title">规则书</h2>
-      </div>
+      <ArchiveHead tab="书架" title="规则书" stats={[{ label: '已装载', value: books.length }]} />
 
       {/* 顺序按「谁来看、看什么」排，不按「谁改得多」：
           玩家（含联机进来的客人，他们连村规都改不了——端点限本机）来这一页只想知道

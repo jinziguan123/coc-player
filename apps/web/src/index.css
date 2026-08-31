@@ -1167,6 +1167,29 @@ body {
 }
 .case-sub { margin-top: 0.15rem; font-size: var(--text-sm); color: var(--color-text-secondary); }
 
+/* ── 档案抬头（内页）─────────────────────────────────────────────────
+   与首页卷宗抬头同源：复用 .case-tab / .case-stats，只换下面这一行的排布。
+   标题比首页的 h1 小一号——内页的主角是内容，不是标题。 */
+.archive-head { margin-bottom: 1.35rem; }
+.archive-head-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+}
+.archive-title {
+  font-family: var(--font-title);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--color-text-accent);
+  text-shadow: 0 0 18px rgba(212, 162, 78, 0.18);
+  margin: 0;
+}
+/* 抬头里的统计是只读的，不像首页那几条能点进去——去掉指针与悬停反馈，
+   免得看着像按钮却点不动 */
+.case-head-top .case-stat:not(a) { cursor: default; }
+
 /* ── 接着玩 ───────────────────────────────────────────────────────────
    还开着的桌。卡片刻意比上面三个入口轻：入口是「开始做什么」，这里是「回到哪儿」，
    后者不该在视觉上压过前者。 */

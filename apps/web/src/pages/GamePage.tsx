@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { ArrowLeft, Plus } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Plus } from 'lucide-react'
+import { ArchiveHead } from '@/components/layout/ArchiveHead'
 import { GameEntryChooser } from '@/features/game-setup/GameEntryChooser'
 import { JoinRoomPanel } from '@/features/game-setup/JoinRoomPanel'
 import { NewGamePanel } from '@/features/game-setup/NewGamePanel'
@@ -16,7 +16,6 @@ const TITLE: Record<'create' | 'join', string> = {
 }
 
 export function GamePage() {
-  const navigate = useNavigate()
   const setup = useGameSetup()
   const [chooser, setChooser] = useState(false)
   const [mode, setMode] = useState<Mode>(null)
@@ -26,28 +25,19 @@ export function GamePage() {
   return (
     // 开局表单是线性流程，房间列表是并列卡片——容器放到 4xl，够两列房间卡又不至于把表单拉散
     <div className="mx-auto mt-8 max-w-4xl">
-      <div className="page-head">
-        {/* 在流程里，左上角的「返回」退回房间列表，而不是退出整个页面——
-            这一层才是用户心里的上一步。 */}
-        <button
-          onClick={() => (mode ? setMode(null) : navigate(-1))}
-          className="btn-secondary btn-sm flex items-center gap-1"
-        >
-          <ArrowLeft size={14} aria-hidden="true" /> 返回
-        </button>
-        <h2 className="page-title">{mode ? TITLE[mode] : '开始游戏'}</h2>
-        {/* 流程中不再提供「新增游戏」：此刻要么把这一步做完，要么返回。 */}
-        {!mode && (
-          <div className="page-head-actions">
-            <button
-              onClick={() => setChooser(true)}
-              className="btn-primary btn-sm flex items-center gap-1"
-            >
-              <Plus size={14} aria-hidden="true" /> 新增游戏
-            </button>
-          </div>
+      {/* 在流程里，左上角的「返回」退回房间列表，而不是退出整个页面——这一层才是用户
+          心里的上一步。流程中也不再提供「新增游戏」：此刻要么把这一步做完，要么返回。 */}
+      <ArchiveHead
+        tab="牌桌"
+        title={mode ? TITLE[mode] : '开始游戏'}
+        stats={mode ? undefined : [{ label: '开着的桌', value: setup.activeSessions.length }]}
+        onBack={mode ? () => setMode(null) : undefined}
+        actions={mode ? undefined : (
+          <button onClick={() => setChooser(true)} className="btn-primary btn-sm flex items-center gap-1">
+            <Plus size={14} aria-hidden="true" /> 新增游戏
+          </button>
         )}
-      </div>
+      />
 
       {/* 先问「开一局，还是去别人那局」，再只展开该出现的那一半——
           从前两个表单同屏堆着，页面一打开就是一长条，而用户此刻只想回答这一个问题。 */}
