@@ -226,3 +226,17 @@ async fn sse_chunks_arrive_before_the_stream_ends() {
     assert!(got_event, "首条 SSE 事件应在后端仍持有连接时就抵达客人侧");
     let _ = release.send(());
 }
+
+/// `LiveConns` 的增删需要真实的 QUIC `Connection` 才能构造，单测覆盖不到；
+/// 这里只钉住不依赖连接的边界，避免「掐一个没连着的人」把状态搞坏。
+mod live_conns {
+    use super::super::LiveConns;
+
+    #[test]
+    fn 空表时没人在线且掐谁都掐不到() {
+        let live = LiveConns::default();
+        assert!(live.peers().is_empty());
+        assert_eq!(live.cut("从没连过的人"), 0);
+        assert!(live.peers().is_empty());
+    }
+}

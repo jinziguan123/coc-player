@@ -47,6 +47,9 @@ class RoomHub:
         self._inflight: dict[str, list[str]] = {}
         # 在线状态：room → {token: 该 token 的活跃 /live 连接数}
         self._presence: dict[str, dict[str, int]] = defaultdict(dict)
+        # token → 它的所有活跃队列（跨房间）。吊销一个客户端时要能立刻掐掉它的 SSE，
+        # 而 _subs 只按房间索引，拿着 token 找不到队列。
+        self._by_token: dict[str, set[asyncio.Queue]] = defaultdict(set)
 
     def subscribe(self, room_id: str, token: str | None = None) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=MAX_PENDING_CHUNKS)
@@ -58,6 +61,7 @@ class RoomHub:
         self._subs[room_id].append(q)
         if token:
             self._presence[room_id][token] = self._presence[room_id].get(token, 0) + 1
+            self._by_token[token].add(q)
         return q
 
     def unsubscribe(
@@ -76,6 +80,11 @@ class RoomHub:
                     del p[token]
                 if not p:
                     self._presence.pop(room_id, None)
+            held = self._by_token.get(token)
+            if held is not None:
+                held.discard(q)
+                if not held:
+                    self._by_token.pop(token, None)
 
     def online_tokens(self, room_id: str) -> set[str]:
         return set(self._presence.get(room_id, {}).keys())
@@ -110,6 +119,25 @@ class RoomHub:
             q.get_nowait()
         q.put_nowait(None)
         logger.warning("房间 %s 有订阅者积压超过 %d 条，已断开令其重连", room_id, MAX_PENDING_CHUNKS)
+
+    def disconnect_token(self, token: str) -> int:
+        """掐掉某个客户端的所有 /live 连接，返回掐掉的条数。
+
+        吊销之后它的下一个 HTTP 请求会吃 403——但 /live 是条**已经建好的**长连接，
+        不发新请求也照收房间事件。不掐它，「吊销」就只是个名义动作：被踢的人还能
+        接着看这一桌在演什么。
+
+        投 ``None`` 的手法与 ``_drop_stalled`` 同源，``stream_room`` 收到即结束生成器。
+        差别在于那边是让对方重连，这边对方重连也进不来了。
+        """
+        queues = list(self._by_token.get(token, ()))
+        for q in queues:
+            while not q.empty():
+                q.get_nowait()
+            q.put_nowait(None)
+        if queues:
+            logger.info("吊销客户端 %s…，掐断 %d 条实时连接", token[:8], len(queues))
+        return len(queues)
 
     def begin_generation(self, room_id: str) -> None:
         self._inflight[room_id] = []

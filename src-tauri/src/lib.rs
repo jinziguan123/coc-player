@@ -34,6 +34,7 @@ pub fn run() {
             netlink::netlink_approve,
             netlink::netlink_reject,
             netlink::netlink_revoke,
+            netlink::netlink_live_peers,
             netlink::netlink_invite,
         ])
         .setup(|app| {

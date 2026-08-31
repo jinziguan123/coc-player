@@ -93,6 +93,58 @@ struct Guesting {
     watchdog: JoinHandle<()>,
 }
 
+/// 房主侧此刻还连着的客人。
+///
+/// 为什么要单独留一份句柄：名册只在**握手时**查一次，之后这条连接就一路转发下去了。
+/// 于是「吊销」原本只是个名义动作——被吊销的人照旧连着，要等他自己断线重连才会被挡。
+/// 想真的把人踢下线，就得留住 `Connection` 并主动 `close`。
+///
+/// 顺带也回答了「谁正连着」：房主此前只看得到名册（允许谁），看不到此刻谁在。
+#[derive(Default)]
+pub struct LiveConns {
+    /// peer → {句柄号: 连接}。用自增句柄号而不是连接自身的 id 索引，纯粹是为了不依赖
+    /// 底层库的标识 API——同一个人开多条连接是正常的（浏览器并发请求）。
+    inner: Mutex<std::collections::HashMap<String, std::collections::HashMap<u64, Connection>>>,
+    next: std::sync::atomic::AtomicU64,
+}
+
+impl LiveConns {
+    fn add(&self, peer: &str, conn: Connection) -> u64 {
+        let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut map = self.inner.lock().unwrap();
+        map.entry(peer.to_string()).or_default().insert(id, conn);
+        id
+    }
+
+    fn drop_one(&self, peer: &str, id: u64) {
+        let mut map = self.inner.lock().unwrap();
+        if let Some(conns) = map.get_mut(peer) {
+            conns.remove(&id);
+            if conns.is_empty() {
+                map.remove(peer);
+            }
+        }
+    }
+
+    /// 掐掉某个对端的所有连接，返回掐掉的条数。
+    pub fn cut(&self, peer: &str) -> usize {
+        let conns = {
+            let mut map = self.inner.lock().unwrap();
+            map.remove(peer).unwrap_or_default()
+        };
+        for conn in conns.values() {
+            // 带上原因码，客人侧能显示「房主取消了你的接入」而不是干巴巴的断线。
+            conn.close(2u8.into(), b"access revoked by host");
+        }
+        conns.len()
+    }
+
+    /// 此刻连着的对端，按公钥。
+    pub fn peers(&self) -> Vec<String> {
+        self.inner.lock().unwrap().keys().cloned().collect()
+    }
+}
+
 /// 隧道的全部运行时状态。房主与客人两侧互不相干，可以同时存在
 /// （一个人既开自己的团、又连别人的团）。
 pub struct Netlink {
@@ -101,6 +153,8 @@ pub struct Netlink {
     secret: String,
     /// 准入名册。跨重启保留，所以朋友只需被批准一次。
     roster: Arc<roster::Roster>,
+    /// 此刻还连着的客人。与名册不同，这份只活在进程里。
+    live: Arc<LiveConns>,
     /// 本机在直连网络里的长期身份。**必须跨重启稳定**，否则邀请码作废、
     /// 名册失配，见 `identity` 模块。
     secret_key: iroh::SecretKey,
@@ -120,6 +174,7 @@ impl Netlink {
         Self {
             secret,
             roster: Arc::new(roster::Roster::load(data_dir.join("netlink_roster.json"))),
+            live: Arc::new(LiveConns::default()),
             secret_key: identity::Identity::at(data_dir.join("netlink_key")).load_or_create(),
             wanted_flag: data_dir.join("netlink_wanted"),
             hosting: Mutex::new(None),
@@ -194,9 +249,10 @@ pub async fn netlink_start(
 
     let secret = state.secret.clone();
     let roster = state.roster.clone();
+    let live = state.live.clone();
     let accepting = endpoint.clone();
     let task = tauri::async_runtime::spawn(async move {
-        accept_loop(accepting, backend_port, secret, roster, app).await;
+        accept_loop(accepting, backend_port, secret, roster, live, app).await;
     });
 
     state.hosting.lock().unwrap().replace(Hosting {
@@ -226,11 +282,13 @@ async fn accept_loop(
     backend_port: u16,
     secret: String,
     roster: Arc<roster::Roster>,
+    live: Arc<LiveConns>,
     app: AppHandle,
 ) {
     while let Some(incoming) = endpoint.accept().await {
         let secret = secret.clone();
         let roster = roster.clone();
+        let live = live.clone();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             let conn = match incoming.await {
@@ -268,7 +326,10 @@ async fn accept_loop(
                 return;
             };
             log::info!("直连客人接入：{peer}");
+            // 登记之后才开始转发：吊销要能立刻把这条连接掐掉，见 `LiveConns`。
+            let handle = live.add(&peer, conn.clone());
             serve_connection(conn, backend_port, stamp).await;
+            live.drop_one(&peer, handle);
             log::info!("直连客人断开：{peer}");
         });
     }
@@ -623,17 +684,25 @@ pub fn netlink_approve(
 #[tauri::command]
 pub fn netlink_reject(state: State<'_, Netlink>, peer_id: String) -> Result<(), String> {
     state.roster.reject(&peer_id);
+    state.live.cut(&peer_id);
     Ok(())
 }
 
-/// 吊销。已建立的连接**不会**被立即切断，见下方说明。
+/// 吊销，并把对方此刻的连接一并掐掉。
 #[tauri::command]
 pub fn netlink_revoke(state: State<'_, Netlink>, peer_id: String) -> Result<(), String> {
     state.roster.revoke(&peer_id);
-    // 名册只在建立连接时查一次，所以吊销对当前还连着的人不生效——他要断线重连
-    // 才会被挡住。真正的「踢人下线」需要连接层保留句柄并主动 close，留给后续。
-    log::info!("已吊销 {peer_id}；若对方仍连着，重连后才会被挡住");
+    // 名册只在握手时查一次，光改它对已经连着的人不生效——他能一直用到自己断线为止，
+    // 那样「吊销」就只是个名义动作。连接句柄留在 `LiveConns` 里，就是为了这一下。
+    let cut = state.live.cut(&peer_id);
+    log::info!("已吊销 {peer_id}，掐断 {cut} 条连接");
     Ok(())
+}
+
+/// 此刻连着的客人（公钥）。名册回答「允许谁」，这个回答「谁在」。
+#[tauri::command]
+pub fn netlink_live_peers(state: State<'_, Netlink>) -> Vec<String> {
+    state.live.peers()
 }
 
 /// 生成邀请码。房间码可选——房主可能还没建房就想先把码发出去。

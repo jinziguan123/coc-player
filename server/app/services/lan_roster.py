@@ -116,6 +116,8 @@ def decide(db: Session, token: str, *, approved: bool, label: str | None = None)
     db.commit()
     db.refresh(peer)
     reset_cache()
+    if not approved:
+        _cut_live(token)
     return peer
 
 
@@ -126,6 +128,20 @@ def forget(db: Session, token: str) -> None:
         db.delete(peer)
         db.commit()
     reset_cache()
+    _cut_live(token)
+
+
+def _cut_live(token: str) -> None:
+    """把这个客户端已经建好的实时连接掐掉。
+
+    光改名册不够：403 只挡得住**下一个** HTTP 请求，而 /live 是条已经建立的 SSE，
+    不发新请求也照收房间事件。不掐它，「拒绝」和「吊销」就只是名义动作。
+
+    延迟导入避开循环依赖——room_hub 属于传输层，名册不该在模块加载期就把它拖进来。
+    """
+    from app.services.room_hub import room_hub
+
+    room_hub.disconnect_token(token)
 
 
 def listing(db: Session) -> list[LanPeer]:

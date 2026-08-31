@@ -188,3 +188,49 @@ def test_门口的排在名册前面():
     assert [p["status"] for p in host.get("/api/net/peers").json()] == [
         "pending", "approved", "rejected",
     ]
+
+
+def test_吊销要真的把实时连接掐掉():
+    """403 只挡得住下一个 HTTP 请求。/live 是条已经建好的 SSE，不掐它，被拒的人还能
+    接着看这一桌在演什么——那样「吊销」就只是个名义动作。"""
+    import asyncio
+
+    from app.services.room_hub import room_hub
+
+    async def scenario() -> tuple[int, object]:
+        q = room_hub.subscribe("room-1", token="tok-live")
+        db = SessionLocal()
+        try:
+            db.add(LanPeer(token="tok-live", status="approved"))
+            db.commit()
+            lan_roster.decide(db, "tok-live", approved=False)
+        finally:
+            db.close()
+        return q.qsize(), q.get_nowait()
+
+    size, first = asyncio.run(scenario())
+    assert size == 1
+    assert first is None      # stream_room 收到 None 即结束这条连接
+
+
+def test_没被吊销的人的连接不受牵连():
+    import asyncio
+
+    from app.services.room_hub import room_hub
+
+    async def scenario() -> object:
+        mine = room_hub.subscribe("room-2", token="tok-keep")
+        room_hub.subscribe("room-2", token="tok-drop")
+        db = SessionLocal()
+        try:
+            db.add_all([
+                LanPeer(token="tok-keep", status="approved"),
+                LanPeer(token="tok-drop", status="approved"),
+            ])
+            db.commit()
+            lan_roster.decide(db, "tok-drop", approved=False)
+        finally:
+            db.close()
+        return mine.qsize()
+
+    assert asyncio.run(scenario()) == 0
