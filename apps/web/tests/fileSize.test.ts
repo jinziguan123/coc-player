@@ -34,7 +34,7 @@ const GRANDFATHERED: Record<string, number> = {
   'components/game/HumanKpPanel.tsx': 1477,
   'pages/ModuleDetailPage.tsx': 1261,
   'pages/RoomLobbyPage.tsx': 1019,
-  'pages/SettingsPage.tsx': 976,
+  'pages/SettingsPage.tsx': 722,
 }
 
 /** 生成物不算数：它由 openapi-typescript 产出，长度不受我们控制。 */

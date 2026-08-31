@@ -43,6 +43,10 @@ const LAST_INVITE_KEY = 'trpg_last_invite'
 /** 上次进过的房间码。断线后连同邀请码一起回填，重连就不必再问房主要一遍。 */
 const LAST_ROOM_KEY = 'trpg_last_room_code'
 
+/** 等房主点头最多等这么久。与直连侧的挂起时限同量级——房主可能不在电脑前。 */
+const ADMISSION_TIMEOUT_MS = 120_000
+const ADMISSION_POLL_MS = 2000
+
 export function useGameSetup() {
   const { createSession, fetchSessions, sessions } = useSessionStore()
   const { modules, fetchModules } = useModuleStore()
@@ -227,6 +231,35 @@ export function useGameSetup() {
     return await enterRoom(code)
   }
 
+  /**
+   * 等房主放行这台设备。返回等到的结果。
+   *
+   * 直连那边是把握手**卡住**等房主点头（连接是长的，卡得住）；局域网这边是 HTTP，
+   * 占着连接等只会超时，所以敲一次门再轮询。对客人来说两者呈现一致：都是「等他同意」。
+   */
+  const waitForAdmission = async (): Promise<'approved' | 'rejected' | 'timeout'> => {
+    const first = await api.post<{ kind: string; status: string }>(
+      '/net/knock', { label: guestLabel.trim() },
+    )
+    // 本机与直连接入不过这道闸——直连在 Tauri 侧已经批过一次了。
+    if (first.status !== 'pending') {
+      return first.status === 'approved' ? 'approved' : 'rejected'
+    }
+    setJoinWaiting(true)
+    try {
+      const until = Date.now() + ADMISSION_TIMEOUT_MS
+      while (Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, ADMISSION_POLL_MS))
+        const me = await api.get<{ status: string }>('/net/me')
+        if (me.status === 'approved') return 'approved'
+        if (me.status === 'rejected') return 'rejected'
+      }
+      return 'timeout'
+    } finally {
+      setJoinWaiting(false)
+    }
+  }
+
   /** 握手协议版本并进房。地址已经设好，这里只管「进得去进不去」。 */
   const enterRoom = async (code: string) => {
     try {
@@ -242,6 +275,19 @@ export function useGameSetup() {
         )
         return
       }
+      // 版本对得上，再看房主放不放这台设备进来。放在取房间之前：不然客人看到的是
+      // 一句「房主还没同意这台设备加入」的红字报错，而不是「正在等他同意」。
+      const admission = await waitForAdmission()
+      if (admission !== 'approved') {
+        setServerUrl('')
+        setError(
+          admission === 'rejected'
+            ? '房主拒绝了这台设备加入。'
+            : '等了两分钟房主还没同意，可以让他打开「设置 → 联机」看看，然后再试。',
+        )
+        return
+      }
+
       const room = await api.get<RoomInfo>(`/sessions/by-code/${code}`)
       // 记住进过哪个房间：房主重启后这个码依然有效，断线重连时回填即可，
       // 不必再去问他要一遍。
