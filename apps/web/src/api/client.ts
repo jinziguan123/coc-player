@@ -124,6 +124,10 @@ async function requestAt<T>(base: string, path: string, init?: RequestInit): Pro
     } catch { /* use raw text */ }
     throw new Error(msg)
   }
+  // 204 没有响应体，直接 res.json() 会抛 SyntaxError。那种失败最难查：后端日志里
+  // 明明白白是 `204 No Content`，界面上却弹「操作失败」——删除其实已经成功了。
+  // `delete<T = void>` 的签名本来就预期这种情况，实现补上。
+  if (res.status === 204) return undefined as T
   return res.json()
 }
 
