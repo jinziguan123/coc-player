@@ -1370,6 +1370,13 @@ body {
 }
 .combo-option:hover,
 .combo-option[data-active='true'] { background: var(--color-bg-tertiary); }
+/* 旁注：候选值一眼认不出来时补一句（场景 ID → 场景名）。跟在值后面、更淡更小。 */
+.combo-option__hint {
+  margin-left: 0.5rem;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+}
 .combo-option:focus-visible {
   outline: 2px solid var(--color-text-accent);
   outline-offset: -2px;
@@ -2601,20 +2608,15 @@ body {
   align-items: center;
 }
 .combat-select {
-  appearance: none;
-  -webkit-appearance: none;
-  padding: 0.3rem 1.6rem 0.3rem 0.6rem;
+  /* 挂在 Radix SelectTrigger 上，只管尺寸——外观、内边距、右侧那个箭头都由它自己给。
+     从前这里是给原生 <select> 写的：appearance:none 抹掉系统外观、右边留 1.6rem 塞
+     一个自绘的 caret。原生的问题不在外观而在**弹层**：那一片是系统绘制的，羊皮纸主题
+     里会突兀地弹出一块深色菜单，跟站内其它下拉完全不是一路。 */
   min-width: 8.5rem;
   max-width: 15rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 4px;
+  height: auto;
+  padding: 0.3rem 0.6rem;
   font-size: 0.78rem;
-  font-family: var(--font-ui);
-  background: var(--color-input-bg);
-  color: var(--color-text-primary);
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
 .combat-select:hover:not(:disabled) {
   border-color: var(--color-accent);
@@ -2628,12 +2630,7 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.combat-select-caret {
-  position: absolute;
-  right: 0.45rem;
-  pointer-events: none;
-  color: var(--color-text-secondary);
-}
+
 
 /* 库存条目的小动作按钮：用 / 给 / 丢 */
 .inv-act {

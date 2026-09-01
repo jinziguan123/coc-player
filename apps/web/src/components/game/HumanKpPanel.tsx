@@ -34,6 +34,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { MultiSelect } from '@/components/ui/multi-select'
+import { KpInput } from './KpInput'
+import { catalogOptions } from './kpCatalogs'
 import { ACTION_LABELS, PROSE_ACTIONS, QUICK_ACTIONS, QUICK_IDS, type KpAction } from './kpActions'
 
 type PanelTab = 'tools' | 'advisor' | 'assets' | 'director' | 'source'
@@ -95,26 +97,6 @@ interface ModuleSource {
   maps: unknown[]
   rag_status: string
   chunks: Array<{ ordinal: number; scene_hint?: string | null; text: string }>
-}
-
-interface KpInputProps {
-  name: string
-  placeholder: string
-  list?: string
-  fields: Record<string, string>
-  onChange: (name: string, value: string) => void
-}
-
-function KpInput({ name, placeholder, list, fields, onChange }: KpInputProps) {
-  return (
-    <input
-      value={fields[name] || ''}
-      onChange={(event) => onChange(name, event.target.value)}
-      placeholder={placeholder}
-      list={list}
-      className="input min-w-0 flex-1 text-xs"
-    />
-  )
 }
 
 interface ActorSelectProps {
@@ -323,6 +305,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   const [fields, setFields] = useState<Record<string, string>>({})
   const [lastActionResult, setLastActionResult] = useState('')
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
+  const catalogs = catalogOptions(workspace)
   const [source, setSource] = useState<ModuleSource | null>(null)
   const [sourceView, setSourceView] = useState<'raw' | 'parsed'>('raw')
   const [sourceOpen, setSourceOpen] = useState(false)
@@ -924,7 +907,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               </div>
             )}
             {action === 'dialogue' && <>
-              <KpInput name="npc_id" placeholder="NPC 名称或 ID" list="kp-npcs" fields={fields} onChange={setField} />
+              <KpInput name="npc_id" placeholder="NPC 名称或 ID" options={catalogs.npcs} fields={fields} onChange={setField} />
               <textarea
                 value={fields.content || ''}
                 onChange={(event) => setField('content', event.target.value)}
@@ -1022,9 +1005,9 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               <KpInput name="success_loss" placeholder="成功损失，如 0" fields={fields} onChange={setField} /><KpInput name="failure_loss" placeholder="失败损失，如 1d6" fields={fields} onChange={setField} />
               <KpInput name="reason" placeholder="因何而检（玩家可见，空=用恐怖源）" fields={fields} onChange={setField} />
             </>}
-            {action === 'scene_change' && <KpInput name="scene_id" placeholder="场景 ID 或名称" list="kp-scenes" fields={fields} onChange={setField} />}
+            {action === 'scene_change' && <KpInput name="scene_id" placeholder="场景 ID 或名称" options={catalogs.scenes} fields={fields} onChange={setField} />}
             {(action === 'set_flag' || action === 'clear_flag') && <KpInput name="flag" placeholder="剧情标志" fields={fields} onChange={setField} />}
-            {action === 'handout' && <><GiScrollUnfurled size={16} /><KpInput name="id" placeholder="手书 ID" list="kp-handouts" fields={fields} onChange={setField} /></>}
+            {action === 'handout' && <><GiScrollUnfurled size={16} /><KpInput name="id" placeholder="手书 ID" options={catalogs.handouts} fields={fields} onChange={setField} /></>}
             {action === 'hp_change' && <><KpInput name="target" placeholder="角色名" fields={fields} onChange={setField} /><KpInput name="delta" placeholder="变化值，如 -3 或 2" fields={fields} onChange={setField} /><KpInput name="reason" placeholder="原因（可选）" fields={fields} onChange={setField} /></>}
             {action === 'start_combat' && <>
               <Swords size={16} />
@@ -1274,9 +1257,6 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
       )}
 
       {!collapsed && <>
-        <datalist id="kp-scenes">{workspace?.catalogs.scenes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</datalist>
-        <datalist id="kp-npcs">{workspace?.catalogs.npcs.map((item) => <option key={item.id} value={item.name}>{item.id}</option>)}</datalist>
-        <datalist id="kp-handouts">{workspace?.catalogs.handouts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</datalist>
       </>}
 
       {sourceOpen && !collapsed && (

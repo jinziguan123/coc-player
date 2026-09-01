@@ -6,6 +6,7 @@ import { ConfirmDialog } from '../ui/confirm-dialog'
 import { CharacterPortrait } from './CharacterPortrait'
 import { api } from '../../api/client'
 import type { CharacterExperience } from '@/features/characters/api'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 /** 模糊匹配：先看子串，再退化为「按顺序出现的子序列」（如「图使」命中「图书馆使用」）。 */
 function fuzzyMatch(query: string, target: string): boolean {
@@ -492,11 +493,20 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
                     <button className="inv-act" disabled={busy}
                       onClick={() => void post('use', { item_id: it.id })}>用</button>
                     {actions.teammates.length > 0 && (
-                      <select className="inv-act inv-give" disabled={busy} value=""
-                        onChange={(e) => { const to = e.target.value; if (to) void post('give', { item_id: it.id, to_character_id: to }) }}>
-                        <option value="">给…</option>
-                        {actions.teammates.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
-                      </select>
+                      <Select
+                        value=""
+                        disabled={busy}
+                        onValueChange={(to) => { if (to) void post('give', { item_id: it.id, to_character_id: to }) }}
+                      >
+                        <SelectTrigger className="inv-act inv-give" aria-label={`把${it.name}给队友`}>
+                          <SelectValue placeholder="给…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {actions.teammates.map((mate) => (
+                            <SelectItem key={mate.id} value={mate.id}>{mate.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     )}
                     <button className="inv-act inv-drop" disabled={busy}
                       onClick={() => void post('drop', { item_id: it.id })}>丢</button>

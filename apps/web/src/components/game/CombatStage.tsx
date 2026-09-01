@@ -14,6 +14,7 @@ import { CombatantCard } from './combat/CombatantCard'
 import { CombatResultReveal } from './combat/CombatResultReveal'
 import { InitiativeTrack } from './combat/InitiativeTrack'
 import { CombatGrid } from './combat/CombatGrid'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TurnBanner, useTurnBanner } from './combat/TurnBanner'
 
 // 类型 re-export：GameSessionPage / liveState.ts 的类型 import 走这里，契约不变。
@@ -411,18 +412,20 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
                     {actionMeta.target === 'enemy' ? '目标（敌方）' : '目标（己方）'}
                   </span>
                   <div className="combat-select-wrap">
-                    <select
-                      className="combat-select"
+                    <Select
                       value={effectiveTarget}
-                      onChange={(e) => setTargetId(e.target.value)}
+                      onValueChange={setTargetId}
                       disabled={candidates.length === 0}
                     >
-                      {candidates.length === 0 && <option value="">{actionMeta.target === 'enemy' ? '无存活敌方' : '无需处理'}</option>}
+                      <SelectTrigger className="combat-select" aria-label="选择目标">
+                        <SelectValue placeholder={actionMeta.target === 'enemy' ? '无存活敌方' : '无需处理'} />
+                      </SelectTrigger>
+                      <SelectContent>
                       {candidates.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}（{c.hp}/{c.max_hp}）</option>
+                        <SelectItem key={c.id} value={c.id}>{c.name}（{c.hp}/{c.max_hp}）</SelectItem>
                       ))}
-                    </select>
-                    <ChevronDown className="combat-select-caret" size={13} />
+                      </SelectContent>
+                    </Select>
                   </div>
                 </label>
               )}
@@ -431,15 +434,17 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
                   <label className="flex flex-col gap-1">
                     <span className="combat-field-label">武器</span>
                     <div className="combat-select-wrap">
-                      <select
-                        className="combat-select"
-                        value={weaponSel}
-                        onChange={(e) => setWeaponSel(e.target.value)}
-                      >
-                        {weaponOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-                        <option value={WEAPON_OTHER}>其它（手填）</option>
-                      </select>
-                      <ChevronDown className="combat-select-caret" size={13} />
+                      <Select value={weaponSel} onValueChange={setWeaponSel}>
+                        <SelectTrigger className="combat-select" aria-label="选择武器">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {weaponOptions.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                          ))}
+                          <SelectItem value={WEAPON_OTHER}>其它（手填）</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </label>
                   {weaponSel === WEAPON_OTHER && (
@@ -456,16 +461,19 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
                     <label className="flex flex-col gap-1">
                       <span className="combat-field-label">射击</span>
                       <div className="combat-select-wrap">
-                        <select
-                          className="combat-select"
+                        <Select
                           value={fireMode}
-                          onChange={(e) => setFireMode(e.target.value as 'single' | 'burst' | 'sweep')}
+                          onValueChange={(v) => setFireMode(v as 'single' | 'burst' | 'sweep')}
                         >
-                          <option value="single">单发</option>
-                          <option value="burst">连射3发（同目标）</option>
-                          <option value="sweep" disabled={candidates.length < 2}>扫射（每敌1发）</option>
-                        </select>
-                        <ChevronDown className="combat-select-caret" size={13} />
+                          <SelectTrigger className="combat-select" aria-label="射击模式">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                          <SelectItem value="single">单发</SelectItem>
+                          <SelectItem value="burst">连射3发（同目标）</SelectItem>
+                          <SelectItem value="sweep" disabled={candidates.length < 2}>扫射（每敌1发）</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </label>
                   )}

@@ -17,6 +17,7 @@ import {
   readAssets, readMythos, readRelations, readModuleHistory,
   type AssetsInfo, type Mythos, type Relation, type ModuleExperience,
 } from './CharacterExtraEditors'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface CharacterData {
   id: string
@@ -283,9 +284,14 @@ export function CharacterEditModal({
                 </label>
                 <label className="text-sm">
                   <span className="block mb-1" style={{ color: 'var(--color-text-secondary)' }}>状态</span>
-                  <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputCls} style={inputStyle}>
-                    {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  <Select value={status} onValueChange={setStatus}>
+                    <SelectTrigger className="w-full" aria-label="角色状态"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {STATUS_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
                 <div />
                 {VITAL_FIELDS.map((v) => (
