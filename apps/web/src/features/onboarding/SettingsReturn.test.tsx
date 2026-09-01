@@ -57,7 +57,9 @@ describe('设置页的新手团返回意图', () => {
     mockPost.mockResolvedValue({ success: true, message: '连接成功', latency_ms: 12 })
     renderSettings()
 
-    await user.click(await screen.findByRole('button', { name: '测试 测试模型' }))
+    // 测试连接收进了每行的「更多」菜单
+    await user.click(await screen.findByRole('button', { name: '测试模型 的更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '测试连接' }))
 
     await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/onboarding'))
   })
@@ -67,7 +69,9 @@ describe('设置页的新手团返回意图', () => {
     mockPost.mockResolvedValue({ success: false, message: '连接失败', latency_ms: 12 })
     renderSettings()
 
-    await user.click(await screen.findByRole('button', { name: '测试 测试模型' }))
+    // 测试连接收进了每行的「更多」菜单
+    await user.click(await screen.findByRole('button', { name: '测试模型 的更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '测试连接' }))
 
     expect(screen.queryByTestId('pathname')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'AI 配置' })).toBeInTheDocument()

@@ -13,6 +13,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApiKeyField } from './ApiKeyField'
 import { ModelNameField } from './ModelNameField'
+import { ModelRoles } from './ModelRoles'
+import { ProfileRow } from './ProfileRow'
 import { ImageProfilePanel } from './ImageProfilePanel'
 
 interface AIProfile {
@@ -28,6 +30,11 @@ interface AIProfile {
   context_window?: number
   thinking_disabled?: boolean
   reasoning_effort?: string
+}
+
+/** 岗位卡只要「是谁、跑的哪个模型」这两样。 */
+function roleHolder(p?: AIProfile) {
+  return p ? { id: p.id, name: p.name, model_name: p.model_name } : undefined
 }
 
 interface TestResult {
@@ -87,8 +94,6 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
   useEffect(() => {
     void fetchProfiles()
   }, [fetchProfiles])
-
-  const activeProfile = profiles.find((p) => p.is_active)
 
   const startCreate = () => {
     setEditingId('new')
@@ -247,198 +252,56 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
           页面级页签按内容宽度左对齐——tabs.tsx 默认的 flex-1 是给窄弹窗用的，
           铺满整行会把两个标签拉成两条大色块。 */}
       <Tabs defaultValue="chat">
-        <TabsList style={{ marginBottom: '1.25rem' }}>
-          <TabsTrigger value="chat" className="!flex-none !text-[length:var(--text-sm)] px-5">
-            对话模型
-          </TabsTrigger>
-          <TabsTrigger value="image" className="!flex-none !text-[length:var(--text-sm)] px-5">
-            生图模型
-          </TabsTrigger>
-        </TabsList>
+        {/* 页签钉在顶上。往下翻配置时它会跟着滚出视野，人就不知道自己在哪一页了，
+            要切还得先滚回去。「新增配置」并到同一行——它是这页唯一的新建入口，
+            跟页签一样属于「不随内容走」的那层。 */}
+        <div className="settings-tabs flex items-center justify-between gap-4">
+          <TabsList>
+            <TabsTrigger value="chat" className="!flex-none !text-[length:var(--text-sm)] px-5">
+              对话模型
+            </TabsTrigger>
+            <TabsTrigger value="image" className="!flex-none !text-[length:var(--text-sm)] px-5">
+              生图模型
+            </TabsTrigger>
+          </TabsList>
+          <button
+            className="btn-primary !px-3 !py-1.5 !text-[length:var(--text-xs)]"
+            style={{ flexShrink: 0 }}
+            onClick={startCreate}
+            disabled={editingId !== null}
+          >
+            新增配置
+          </button>
+        </div>
 
         <TabsContent value="chat" className="!p-0">
-      <div
-        style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: '1rem', marginBottom: '0.85rem',
+
+      {/* 三个岗位摆在最前：这一页的结构本就是「三个岗位、一批候选」。
+          此前它藏在每行三个指派按钮里，八条配置摊出二十四个按钮，而岗位统共只有三个。 */}
+      <ModelRoles
+        holders={{
+          narrator: roleHolder(profiles.find((p) => p.is_active)),
+          aide: roleHolder(profiles.find((p) => p.is_fast)),
+          reader: roleHolder(profiles.find((p) => p.is_vision)),
         }}
-      >
-        <p className="text-xs" style={{ color: 'var(--color-text-secondary)', margin: 0 }}>
-          游戏里主持人的叙述、NPC 的对话，以及骰子和规则的判定，都由这个模型生成。
-        </p>
-        <button
-          className="btn-primary !px-3 !py-1.5 !text-[length:var(--text-xs)]"
-          style={{ flexShrink: 0 }}
-          onClick={startCreate}
-          disabled={editingId !== null}
-        >
-          + 新增配置
-        </button>
-      </div>
+      />
 
-      {/* 当前激活配置状态 */}
-      <div
-        className="card"
-        style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}
-      >
-        <span
-          style={{
-            display: 'inline-block',
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: activeProfile ? 'var(--color-success)' : 'var(--color-danger)',
-            flexShrink: 0,
-          }}
-        />
-        <span style={{ fontSize: '0.875rem' }}>
-          {activeProfile ? (
-            <>
-              当前激活：
-              <strong>{activeProfile.name}</strong>
-              <span className="badge" style={{ marginLeft: '0.5rem' }}>
-                {activeProfile.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容'}
-              </span>
-              <span
-                style={{
-                  marginLeft: '0.5rem',
-                  color: 'var(--color-text-secondary)',
-                  fontSize: '0.8rem',
-                }}
-              >
-                {activeProfile.model_name}
-              </span>
-            </>
-          ) : (
-            <span style={{ color: 'var(--color-text-secondary)' }}>
-              还没有启用任何配置，请先添加一个并点「激活」
-            </span>
-          )}
-        </span>
-      </div>
-
-      {/* 配置列表 */}
       {profiles.length > 0 && (
-        <div
-          style={{
-            display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem',
-          }}
-        >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' }}>
           {profiles.map((p) => (
-            <div
+            <ProfileRow
               key={p.id}
-              className={`card ${p.is_active ? 'active-rail' : ''}`}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.75rem 1rem',
-                borderColor: p.is_active ? 'var(--color-accent)' : undefined,
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem',
-                  }}
-                >
-                  <strong style={{ fontSize: '0.9rem' }}>{p.name}</strong>
-                  <span className="badge">
-                    {p.protocol === 'anthropic' ? 'Anthropic' : 'OpenAI'}
-                  </span>
-                  {p.is_active && <span className="chip chip--success">已激活</span>}
-                  {p.is_fast && (
-                    <span
-                      className="chip chip--accent"
-                      title="裁定 planner、AI 队友、滚动摘要等结构化副任务走此配置；KP 叙事仍走激活配置"
-                    >
-                      快模型
-                    </span>
-                  )}
-                  {p.is_vision && (
-                    <span
-                      className="chip chip--accent"
-                      title="解析扫描件与图文模组时走此配置；带团仍走激活配置"
-                    >
-                      视觉模型
-                    </span>
-                  )}
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.8rem',
-                    color: 'var(--color-text-secondary)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {p.model_name}
-                  {p.base_url && ` · ${p.base_url}`}
-                </div>
-              </div>
-
-              {/* 操作区：「激活」是这里唯一有后果的主动作，保留实心按钮；
-                  其余降为 chip 级次要动作；删除单独走危险色。 */}
-              <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1">
-                {!p.is_active && (
-                  <button
-                    className="btn-primary !px-2.5 !py-1 !text-[length:var(--text-xs)]"
-                    onClick={() => handleActivate(p.id)}
-                    aria-label={`激活 ${p.name}`}
-                  >
-                    激活
-                  </button>
-                )}
-                <button
-                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
-                  onClick={() => handleToggleFast(p.id)}
-                  aria-label={`${p.is_fast ? '取消' : '设为'}快模型 ${p.name}`}
-                  title="快模型：裁定 planner、滚动摘要等结构化副任务改走此配置（KP 叙事与 AI 队友言行仍走激活配置）；再点一次取消"
-                >
-                  {p.is_fast ? '取消快模型' : '设为快模型'}
-                </button>
-                <button
-                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
-                  onClick={() => handleToggleVision(p.id)}
-                  aria-label={`${p.is_vision ? '取消' : '设为'}视觉模型 ${p.name}`}
-                  title="视觉模型：解析扫描件与图文模组时改走此配置（带团仍走激活配置），主模型是纯文本也不影响导模组；再点一次取消"
-                >
-                  {p.is_vision ? '取消视觉模型' : '设为视觉模型'}
-                </button>
-                <button
-                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"
-                  onClick={() => startEdit(p)}
-                  disabled={editingId !== null}
-                  aria-label={`编辑 ${p.name}`}
-                >
-                  编辑
-                </button>
-                <button
-                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors"
-                  onClick={() => handleDuplicate(p.id)}
-                  aria-label={`复制 ${p.name}`}
-                  title="复制一份此配置（含密钥），改个模型名即可做成快模型变体"
-                >
-                  复制
-                </button>
-                <button
-                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"
-                  onClick={() => handleTest(p.id)}
-                  disabled={testingId !== null}
-                  aria-label={`测试 ${p.name}`}
-                >
-                  {testingId === p.id ? '测试中…' : '测试'}
-                </button>
-                <button
-                  className="chip hover:!border-[var(--color-danger)] hover:!text-[var(--color-danger)] transition-colors"
-                  onClick={() => handleDelete(p.id, p.name)}
-                  aria-label={`删除 ${p.name}`}
-                >
-                  删除
-                </button>
-              </div>
-            </div>
+              profile={p}
+              busy={editingId !== null}
+              testing={testingId === p.id}
+              onAssignNarrator={() => void handleActivate(p.id)}
+              onToggleAide={() => void handleToggleFast(p.id)}
+              onToggleReader={() => void handleToggleVision(p.id)}
+              onEdit={() => startEdit(p)}
+              onDuplicate={() => void handleDuplicate(p.id)}
+              onTest={() => void handleTest(p.id)}
+              onDelete={() => void handleDelete(p.id, p.name)}
+            />
           ))}
         </div>
       )}

@@ -16,6 +16,12 @@ async function openImageTab(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('tab', { name: '生图模型' }))
 }
 
+/** 编辑、测试、删除都收进了每行的「更多」菜单，得先点开它。
+ *  此前它们是并排的七个 chip，八条配置摊出五十六个按钮。 */
+async function openRow(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole('button', { name: `${name} 的更多操作` }))
+}
+
 /** Modal 是无 role 的 portal 容器，用弹窗标题回溯到面板本身作为查询范围。 */
 async function findDialog(title: string | RegExp): Promise<HTMLElement> {
   const heading = await screen.findByRole('heading', { name: title })
@@ -83,14 +89,14 @@ describe('AI 配置面板', () => {
     expect(await screen.findByRole('tab', { name: '对话模型' })).toHaveAttribute(
       'data-state', 'active',
     )
-    expect(screen.getByRole('button', { name: '编辑 deepseek 主力' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'deepseek 主力 的更多操作' })).toBeInTheDocument()
     expect(screen.queryByText('ComfyUI（172.30.18.236）')).not.toBeInTheDocument()
 
     await openImageTab(user)
     expect(await screen.findByText('ComfyUI（172.30.18.236）')).toBeInTheDocument()
     expect(screen.getByText('http://172.30.18.236:8188')).toBeInTheDocument()
     // 对话配置整套都退场了，不是叠在下面
-    expect(screen.queryByRole('button', { name: '编辑 deepseek 主力' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'deepseek 主力 的更多操作' })).not.toBeInTheDocument()
   })
 
   it('没有生图配置时明确说明「不出图但不影响跑团」', async () => {
@@ -105,7 +111,8 @@ describe('AI 配置面板', () => {
   it('编辑弹窗把连接四件套收在同一页，密钥不再被高级配置隔开', async () => {
     const user = userEvent.setup()
     render(<AISettingsPanel />)
-    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+    await openRow(user, 'deepseek 主力')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
 
     const dialog = await findDialog('编辑配置')
     // 「连接」是默认页：名称/协议/地址/模型/密钥同屏可见
@@ -122,7 +129,8 @@ describe('AI 配置面板', () => {
     const user = userEvent.setup()
     mockPut.mockResolvedValue(chatProfile)
     render(<AISettingsPanel />)
-    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+    await openRow(user, 'deepseek 主力')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
 
     const dialog = await findDialog('编辑配置')
     await user.click(within(dialog).getByRole('tab', { name: '能力' }))
@@ -143,7 +151,8 @@ describe('AI 配置面板', () => {
     const user = userEvent.setup()
     mockPut.mockResolvedValue(chatProfile)
     render(<AISettingsPanel />)
-    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+    await openRow(user, 'deepseek 主力')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
 
     const dialog = await findDialog('编辑配置')
     await user.click(within(dialog).getByRole('tab', { name: '能力' }))
@@ -163,7 +172,8 @@ describe('AI 配置面板', () => {
     mockLists([claudeProfile], [imageProfile])
     mockPut.mockResolvedValue(claudeProfile)
     render(<AISettingsPanel />)
-    await user.click(await screen.findByRole('button', { name: '编辑 claude' }))
+    await openRow(user, 'claude')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
 
     const dialog = await findDialog('编辑配置')
     await user.click(within(dialog).getByRole('tab', { name: '能力' }))
@@ -185,7 +195,8 @@ describe('AI 配置面板', () => {
     const user = userEvent.setup()
     mockPut.mockResolvedValue(chatProfile)
     render(<AISettingsPanel />)
-    await user.click(await screen.findByRole('button', { name: '编辑 deepseek 主力' }))
+    await openRow(user, 'deepseek 主力')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
 
     const dialog = await findDialog('编辑配置')
     await user.click(within(dialog).getByRole('button', { name: '保存' }))

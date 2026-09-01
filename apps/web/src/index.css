@@ -1196,6 +1196,143 @@ body {
   outline: 2px solid var(--color-text-accent);
   outline-offset: -2px;
 }
+@media (prefers-reduced-motion: reduce) {
+  /* 「获取中…」那个转圈：文字已经说清在等什么，转不转都不影响理解 */
+  .btn-secondary .animate-spin { animation: none; }
+}
+
+/* ── AI 配置：岗位一览 ──────────────────────────────────────────────
+   三个岗位摊开摆着，各自管什么写在卡里。此前这三件事只以「激活 / 快模型 / 视觉模型」
+   的形式散在按钮上，解释藏在 title 属性里——鼠标停上去才看得见，等于没写。 */
+.role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1.1rem;
+}
+.role-card {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+}
+/* 空岗位不用强调色描边：它没在干活，不该跟正在工作的岗位抢注意力 */
+.role-card--vacant {
+  border-left-color: var(--color-border-strong);
+  background: none;
+}
+.role-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin-bottom: 0.3rem;
+}
+.role-card__label {
+  flex-shrink: 0;
+  color: var(--color-text-accent);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+}
+.role-card--vacant .role-card__label { color: var(--color-text-secondary); }
+.role-card__who {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.role-card__who--vacant { color: var(--color-text-secondary); font-weight: 400; }
+.role-card__duty {
+  margin: 0 0 0.3rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+.role-card__foot {
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 岗位徽章：与上面的卡同名，一眼能对上是谁在哪个岗 */
+.role-badge {
+  flex-shrink: 0;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 2px;
+  color: var(--color-text-accent);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+.role-badge--aide, .role-badge--reader {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+/* ── AI 配置：一条配置一行 ────────────────────────────────────────── */
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+}
+.profile-row--narrator { border-color: var(--color-accent); }
+/* 页签是 sticky 的，键盘 Tab 到被它盖住的行时浏览器只会把行滚到容器顶——正好在页签
+   底下。留出页签那么高的余量，焦点才落在看得见的地方。 */
+.profile-row { scroll-margin-top: 4.5rem; }
+.profile-row__main { flex: 1; min-width: 0; }
+.profile-row__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.15rem;
+}
+.profile-row__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-row__meta {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 地址退到更淡的一层：认配置靠模型名，地址只在对不上时才需要看 */
+.profile-row__url { opacity: 0.6; }
+.profile-row__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* 页签固定在顶上：往下翻配置时还看得见自己在哪一页，也不用滚回去切 */
+.settings-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  /* 间距必须走 padding 而不是 margin：外边距不带背景，滚上来的内容会从页签的上下缝里
+     穿过去。上下各向外扩一点再用负 margin 收回，把容器自身的内边距也一并盖住。 */
+  margin: -0.9rem 0 0.2rem;
+  padding: 0.9rem 0;
+  background: var(--color-bg-primary);
+}
+
 /* 模型名下拉：拉回上游清单后给它一个真的能点开的列表。
    原先用 <datalist>，它要点右侧那个箭头或先敲几个字才展开，等于没有；桌面版跑在
    WKWebView 里，支持还更不可靠。
@@ -1240,10 +1377,15 @@ body {
 .combo-toggle {
   position: absolute;
   top: 50%;
-  right: 0.4rem;
+  right: 0.25rem;
   transform: translateY(-50%);
   display: flex;
-  padding: 0.2rem;
+  align-items: center;
+  justify-content: center;
+  /* 图标才 14px，点击区得自己撑出来 */
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
   border: none;
   border-radius: 3px;
   background: none;
