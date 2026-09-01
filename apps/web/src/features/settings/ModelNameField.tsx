@@ -10,8 +10,14 @@
  * 下拉是自己做的，不用 `<datalist>`：那玩意儿要点右侧的小箭头、或者先敲几个字才展开，
  * 可发现性等于没有（实测清空输入框也不弹），而桌面版跑在 WKWebView 里支持还更不可靠。
  * 自己做还能顺带把「按已输入的内容过滤」做了——中转站动辄报上几百个模型。
+ *
+ * 浮层走 Radix Popover 的 Portal，不用 position:absolute。编辑配置那个表单是
+ * `maxHeight + overflowY` 的滚动容器，绝对定位的浮层会被祖先的 overflow 裁掉——
+ * 表现出来是下拉「被弹窗挡住」，而且只露得出字母序靠前的那几个（一堆 deepseek 排在
+ * qwen 前面，于是看着像上游只给了 deepseek，一输入 qwen 又冒出来了）。
  */
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
+import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { ChevronDown, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { localApi } from '@/api/client'
@@ -40,26 +46,12 @@ export function ModelNameField({
   // 只有用户在框里**动过手**才按内容过滤。不看框里有没有值：刚拉完清单时它八成已经
   // 填着当前配置的模型名，拿它去筛，一屏候选会只剩它自己——等于白拉。
   const [filtering, setFiltering] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
 
   const keyword = value.trim().toLowerCase()
   const shown = filtering && keyword
     ? models.filter((m) => m.toLowerCase().includes(keyword))
     : models
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
 
   const fetchModels = async () => {
     setLoading(true)
@@ -96,7 +88,7 @@ export function ModelNameField({
   }
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
+    <div>
       <div className="flex items-center justify-between mb-1">
         <label
           className="block text-sm font-semibold"
@@ -117,57 +109,75 @@ export function ModelNameField({
         </button>
       </div>
 
-      <div style={{ position: 'relative' }}>
-        <input
-          id={listId}
-          type="text"
-          className="input w-full"
-          style={models.length > 0 ? { paddingRight: '1.9rem' } : undefined}
-          placeholder={placeholder}
-          value={value}
-          role={models.length > 0 ? 'combobox' : undefined}
-          aria-expanded={models.length > 0 ? open : undefined}
-          aria-controls={models.length > 0 && open ? `${listId}-list` : undefined}
-          aria-autocomplete={models.length > 0 ? 'list' : undefined}
-          onChange={(e) => {
-            onChange(e.target.value)
-            setFiltering(true)
-            if (models.length > 0) setOpen(true)
-          }}
-          onFocus={() => { if (models.length > 0) setOpen(true) }}
-        />
-        {models.length > 0 && (
-          <button
-            type="button"
-            className="combo-toggle"
-            onClick={() => setOpen((v) => !v)}
-            aria-label={open ? '收起模型列表' : '展开模型列表'}
-            tabIndex={-1}
-          >
-            <ChevronDown size={14} aria-hidden="true" />
-          </button>
-        )}
-
-        {open && shown.length > 0 && (
-          <div id={`${listId}-list`} role="listbox" className="combo-list">
-            {shown.map((name) => (
+      <PopoverPrimitive.Root open={open} onOpenChange={setOpen} modal={false}>
+        <PopoverPrimitive.Anchor asChild>
+          <div ref={anchorRef} style={{ position: 'relative' }}>
+            <input
+              id={listId}
+              type="text"
+              className="input w-full"
+              style={models.length > 0 ? { paddingRight: '1.9rem' } : undefined}
+              placeholder={placeholder}
+              value={value}
+              role={models.length > 0 ? 'combobox' : undefined}
+              aria-expanded={models.length > 0 ? open : undefined}
+              aria-autocomplete={models.length > 0 ? 'list' : undefined}
+              onChange={(e) => {
+                onChange(e.target.value)
+                setFiltering(true)
+                if (models.length > 0) setOpen(true)
+              }}
+              onFocus={() => { if (models.length > 0) setOpen(true) }}
+            />
+            {models.length > 0 && (
               <button
-                key={name}
                 type="button"
-                role="option"
-                aria-selected={name === value}
-                data-active={name === value}
-                className="combo-option"
-                // onMouseDown 而不是 onClick：input 失焦会先触发外部点击关闭，
-                // 等到 click 时这个按钮已经不在了。
-                onMouseDown={(e) => { e.preventDefault(); pick(name) }}
+                className="combo-toggle"
+                onClick={() => setOpen((v) => !v)}
+                aria-label={open ? '收起模型列表' : '展开模型列表'}
+                tabIndex={-1}
               >
-                {name}
+                <ChevronDown size={14} aria-hidden="true" />
               </button>
-            ))}
+            )}
           </div>
+        </PopoverPrimitive.Anchor>
+
+        {shown.length > 0 && (
+          <PopoverPrimitive.Portal>
+            <PopoverPrimitive.Content
+              align="start"
+              side="bottom"
+              sideOffset={4}
+              collisionPadding={12}
+              className="combo-list z-[110] w-[var(--radix-popover-trigger-width)]"
+              // 别把焦点从输入框抢走——它是个能继续打字的 combobox，不是纯菜单
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onCloseAutoFocus={(e) => e.preventDefault()}
+              // 点回输入框或那个展开钮不算「点到别处」，否则会先关再开、闪一下
+              onInteractOutside={(e) => {
+                if (anchorRef.current?.contains(e.target as Node)) e.preventDefault()
+              }}
+            >
+              <div role="listbox" aria-label="可用模型">
+                {shown.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    role="option"
+                    aria-selected={name === value}
+                    data-active={name === value}
+                    className="combo-option"
+                    onClick={() => pick(name)}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </PopoverPrimitive.Content>
+          </PopoverPrimitive.Portal>
         )}
-      </div>
+      </PopoverPrimitive.Root>
 
       {models.length > 0 && (
         <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
