@@ -1457,11 +1457,16 @@ export function GameSessionPage() {
         {/* 3D 骰子投掷覆盖层：portal 到 body、fixed 铺满视口，挂载位置不影响呈现 */}
         <DiceRoller ref={diceRollerRef} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          {/* 返回收成图标贴在标题左边，像面包屑那样。它是「离开这一局」的导航，和右边
+              那排局内工具不是一回事；而带文字的按钮在三栏布局下要占掉近百像素，把标题、
+              身份、房间码一路挤到换行——中栏本来就只有 clamp(280px, 25vw, 420px)。 */}
           <button
             onClick={() => navigate('/game')}
-            className="btn-secondary btn-sm flex items-center gap-1 flex-shrink-0 whitespace-nowrap"
+            className="btn-secondary !px-1.5 !py-1 flex-shrink-0"
+            title="返回房间列表"
+            aria-label="返回房间列表"
           >
-            <GiReturnArrow /> 返回列表
+            <GiReturnArrow size={14} />
           </button>
           <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-accent)' }}>
             {currentSession.module_title || '游戏中'}

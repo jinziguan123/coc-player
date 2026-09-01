@@ -2390,7 +2390,11 @@ body {
    只抬 textarea 的高度，不去改整条 flex 链：试过让 .kp-console-body 的子元素统统
    flex:1 撑满，结果把本该收着的场景/NPC 列表也一并拉开了，面板直接崩版。
    32vh 在小窗口上也不会顶掉下面的发布按钮。 */
-.kp-composer-form--prose textarea { min-height: clamp(5rem, 32vh, 18rem); }
+.kp-composer-form--prose textarea {
+  /* 够写一段、不喧宾夺主。32vh 那版太贪：战斗轮里 KP 眼睛在棋盘上，右边杵着 270px
+     的空框子只是碍事。剩下的交给 resize-y——想写长的自己往下拖。 */
+  min-height: clamp(4.5rem, 19vh, 11rem);
+}
 .kp-composer-submit {
   display: flex;
   justify-content: flex-end;
@@ -4683,7 +4687,12 @@ select.input option {
    KP 控制台（334）+ 聊天栏（380）同时展开时中段仅 494px，棋盘只剩 148px，
    而 12 列棋盘至少要 312px——于是只看得见五列、底下挂一条横向滚动条。
    阈值 520 = 两列 320 + 棋盘起码 200。 */
-@container (max-width: 520px) {
+/* 让位阈值：中段窄于这个数就把卡片横排成一条，棋盘吃满整宽。
+   原先是 520px——太低了。两条卡列钉死 10rem，共 320px；棋盘要好看，十列怎么也得
+   500px 上下。并排放得下的中段至少要 850px，而真人 KP 局的中段只有 768px（右边还有
+   工作台），于是棋盘被压到 424px、格子缩到 41px：用户说的「战场变得很难看」就是这个。
+   卡列是辅助信息，棋盘才是战斗本身，宽度不够时该让的是前者。 */
+@container (max-width: 54rem) {
   .combat-mid { flex-direction: column; gap: 0.25rem; }
   .combat-sides {
     display: flex;

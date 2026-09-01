@@ -67,23 +67,35 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   const [moveMode, setMoveMode] = useState<'none' | 'move' | 'dash'>('none')
   useEffect(() => { setMoveMode('none') }, [combat.turn])   // 回合切换 → 退出移动模式
 
-  // 沉浸布局棋盘自适应格长：按中央区域可用宽高取 min，上限 64px；放不下时才交给 overflow 滚动。
+  // 棋盘自适应格长：按可用宽高取 min，放不下时才交给 overflow 滚动。
   // ResizeObserver 跟随窗口/侧栏折叠实时重算。
+  //
+  // 两种布局都要量。嵌入布局原先写死 46px：面板有 788px 宽，棋盘只画 460px，右边空着
+  // 三百多像素还嫌它小——格子不看容器，容器再宽也白搭。
   const boardAreaRef = useRef<HTMLDivElement>(null)
+  const embedAreaRef = useRef<HTMLDivElement>(null)
   const [fitCell, setFitCell] = useState(56)
+  const [embedCell, setEmbedCell] = useState(46)
   const gridCols = combat.grid?.cols ?? 0
   const gridRows = combat.grid?.rows ?? 0
   useEffect(() => {
-    if (!immersive || !gridCols || !gridRows) return
-    const el = boardAreaRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
+    if (!gridCols || !gridRows || typeof ResizeObserver === 'undefined') return
+    const el = immersive ? boardAreaRef.current : embedAreaRef.current
+    if (!el) return
     const measure = () => {
       const r = el.getBoundingClientRect()
       // 预留：横向滚动条余量 12px；纵向「战场」标签 + 移动按钮行约 40px
-      const c = Math.floor(Math.min((r.width - 12) / gridCols, (r.height - 40) / gridRows))
+      const byWidth = (r.width - 12) / gridCols
+      // 嵌入布局不按高度收：它在可滚动的面板里，纵向本来就能往下要地方；拿容器高度去
+      // 算只会把棋盘算成一条缝（面板高度是内容撑出来的，先有鸡还是先有蛋）。
+      const c = Math.floor(immersive
+        ? Math.min(byWidth, (r.height - 40) / gridRows)
+        : byWidth)
       // 下限 26：下限本身不能高到「反而放不下」——从前是 32，中段被挤到 148px 时
       // 12 列 ×32 = 384px 直接横向溢出，棋盘只剩五列可见（见 narrowRow 的注释）。
-      setFitCell(Math.max(26, Math.min(64, c)))
+      const next = Math.max(26, Math.min(immersive ? 64 : 56, c))
+      if (immersive) setFitCell(next)
+      else setEmbedCell(next)
     }
     measure()
     const ro = new ResizeObserver(measure)
@@ -594,10 +606,10 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
       <InitiativeTrack order={order} turn={combat.turn} myCharId={myCharId} />
 
       {/* 战场区（相对定位承载回合/轮次横幅覆盖层） */}
-      <div className="relative">
+      <div className="relative" ref={embedAreaRef}>
         <TurnBanner banner={banner} />
         {/* B1.5 方格战场：令牌 + 移动。移动模式仅本人回合可用。 */}
-        {gridSection(46)}
+        {gridSection(embedCell)}
         {/* B2 两栏参战方卡片（左己方 / 右敌方） */}
         {/* sideCol 返回的是「标题 + 卡片列」两段，得各自有个壳，否则四段会被两列网格拆散 */}
         <div className="grid grid-cols-2 gap-2 mt-2">
