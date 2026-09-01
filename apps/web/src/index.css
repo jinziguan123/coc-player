@@ -1164,11 +1164,9 @@ body {
    对局页顶栏一度并排挂着九个同样大小的按钮，性质完全不同却长得一模一样。
    常用的留外面，一局用不了一次的收进这里。 */
 .more-menu { position: relative; display: inline-flex; }
+/* 定位交给 Radix Popover，这里只管长相——绝对定位会被祖先的 overflow 裁掉，
+   AI 配置那份列表就在滚动容器里，菜单展开只露得出第一项。 */
 .more-menu-list {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
-  z-index: 40;
   min-width: 9.5rem;
   padding: 0.25rem;
   border: 1px solid var(--color-border-strong);

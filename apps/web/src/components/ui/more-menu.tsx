@@ -1,14 +1,20 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { MoreHorizontal } from 'lucide-react'
 
 /**
- * 顶栏的「更多」菜单。
+ * 「更多」菜单。
  *
  * 对局页顶栏一度并排挂着九个同样大小的 btn-xs：检索、战报、结束模组、成长、大地图、
  * 临场角色、风格、导览、面板开合。它们性质完全不同（查看 / 局面控制 / 房主设置 / 视图），
- * 却长得一模一样、挤成一堵墙——要找哪个都得逐个读一遍。
+ * 却长得一模一样、挤成一堵墙——要找哪个都得逐个读一遍。常用的留在外面，一局用不了一次
+ * 的收进这里。AI 配置那份列表同理：每行七个 chip，收成一个主动作加这一个菜单。
  *
- * 常用的留在外面，一局用不了一次的收进这里。
+ * 浮层走 Radix Popover 的 Portal，不用 position:absolute。绝对定位的浮层会被祖先的
+ * overflow 裁掉——AI 配置那份列表就在一个 `maxHeight + overflowY` 的滚动容器里，菜单
+ * 展开后只露得出第一项，剩下的全被切在容器边界外。Portal 到 body 才躲得开。
+ *
+ * 语义仍是 menu / menuitem：Radix Popover 只管定位与开合，ARIA 角色这里自己给。
  */
 export interface MoreMenuItem {
   label: string
@@ -25,42 +31,30 @@ export function MoreMenu({ items, label = '更多' }: {
   label?: string
 }) {
   const [open, setOpen] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const menuId = useId()
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
 
   if (items.length === 0) return null
 
   return (
-    <div ref={wrapRef} className="more-menu">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
+    <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
+      <PopoverPrimitive.Trigger
         className="btn-secondary btn-xs flex items-center gap-1"
         aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
         aria-label={label}
         title={label}
       >
         <MoreHorizontal size={13} aria-hidden="true" />
-      </button>
+      </PopoverPrimitive.Trigger>
 
-      {open && (
-        <div id={menuId} role="menu" className="more-menu-list">
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          role="menu"
+          align="end"
+          sideOffset={6}
+          // 留出边距，贴着视口边时 Radix 才会把它挪回来——最后一行的菜单本来会有一截
+          // 探到视口外，摆在那儿等于看不见
+          collisionPadding={12}
+          className="more-menu-list z-[110]"
+        >
           {items.map((item) => (
             <button
               key={item.label}
@@ -75,8 +69,8 @@ export function MoreMenu({ items, label = '更多' }: {
               {item.label}
             </button>
           ))}
-        </div>
-      )}
-    </div>
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   )
 }
