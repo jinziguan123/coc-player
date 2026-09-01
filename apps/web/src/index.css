@@ -1196,6 +1196,59 @@ body {
   outline: 2px solid var(--color-text-accent);
   outline-offset: -2px;
 }
+/* 模型名下拉：拉回上游清单后给它一个真的能点开的列表。
+   原先用 <datalist>，它要点右侧那个箭头或先敲几个字才展开，等于没有；桌面版跑在
+   WKWebView 里，支持还更不可靠。样式沿用上面的菜单语言，但要撑满输入框、能滚。 */
+.combo-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.combo-option {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--color-text-primary);
+  /* 模型名是标识符，等宽读起来才不会把 l 和 1 看混 */
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.combo-option:hover,
+.combo-option[data-active='true'] { background: var(--color-bg-tertiary); }
+.combo-option:focus-visible {
+  outline: 2px solid var(--color-text-accent);
+  outline-offset: -2px;
+}
+/* 输入框右侧那个展开钮，压在 input 上 */
+.combo-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  display: flex;
+  padding: 0.2rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.combo-toggle:hover { color: var(--color-text-primary); }
+
 /* 组与组之间一道细线：查看信息 / 局面控制 / 房主设置本就是三件事 */
 .more-menu-item--sep {
   margin-top: 0.25rem;
