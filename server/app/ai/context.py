@@ -1611,21 +1611,36 @@ def _assemble_kp_messages(
         # 反 tic 反馈环：往轮旁白作为 assistant 消息回灌，模型极易把自己的「不是X，是Y」对比句
         # 当成既定文风并放大（越滚越多）。测最近历史该句式密度，超阈值就在最终玩家输入前插一条
         # 强指令，明说这是待纠正的坏习惯、非既定文风——只在真滥用时施压，不滥用不打扰。
-        from app.ai.turn_validator import count_antithesis
+        from app.ai.turn_validator import (
+            EM_DASH_PER_KILO, count_antithesis, em_dash_density,
+        )
 
         recent_narration = "\n".join(
             e.content or "" for e in recent_pool if e.event_type == "narration"
         )
+        notes: list[str] = []
         tic_count = count_antithesis(recent_narration)
-        if tic_count >= ANTITHESIS_NUDGE_THRESHOLD and messages and messages[-1]["role"] == "user":
+        if tic_count >= ANTITHESIS_NUDGE_THRESHOLD:
+            notes.append(
+                f"前文你已用了约 {tic_count} 处「不是……，（而）是……」式的否定对比句。"
+                "这是你自己滚出来的坏习惯，不是本故事的既定文风，须立刻纠正："
+                "本轮起禁用该结构及其变体（「不是A是B」「与其说A不如说B」「这不是A，这是B」），"
+                "改用直陈句，多给具体的感官与动作细节让读者自行体会，句子长短交错，别通篇对仗。"
+            )
+        # 破折号同理，只是判据是密度不是次数——它有正当用法（语气中断、插入语），
+        # 按次数卡会误伤，按密度才分得出「用了」和「用滥了」。
+        dash = em_dash_density(recent_narration)
+        if dash >= EM_DASH_PER_KILO:
+            notes.append(
+                f"前文旁白平均每千字用了约 {dash:.0f} 个破折号，多数是「追加一句解释」的用法"
+                "（「他张了张嘴——作为乘务员，他认得出那块面板」）。这同样是写顺手带出来的"
+                "口头禅：本轮起把要补充的信息编进句子本身，或者另起一句写完整，"
+                "破折号只留给真正的语气中断与话被打断。"
+            )
+        if notes and messages and messages[-1]["role"] == "user":
             messages.insert(-1, {
                 "role": "system",
-                "content": (
-                    f"[文风纠偏] 前文你已用了约 {tic_count} 处「不是……，（而）是……」式的否定对比句。"
-                    "这是你自己滚出来的坏习惯，不是本故事的既定文风，须立刻纠正："
-                    "本轮起禁用该结构及其变体（「不是A是B」「与其说A不如说B」「这不是A，这是B」），"
-                    "改用直陈句，多给具体的感官与动作细节让读者自行体会，句子长短交错，别通篇对仗。"
-                ),
+                "content": "[文风纠偏] " + " ".join(notes),
             })
 
     return messages

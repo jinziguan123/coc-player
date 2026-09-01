@@ -287,6 +287,67 @@ def test_antithesis_nudge_absent_when_history_clean(db_factory):
     assert not _has_style_nudge(msgs)
 
 
+def _dash_narration_events(session_id, density: str):
+    """构造历史旁白：破折号密度分别在阈值之上/之下。
+
+    密度按每千字算，且要过 400 字的样本下限——短文本里一个破折号就能算出 5.0/千字，
+    那不作数。
+    """
+    # 一段约 100 字的底子，重复到四百字以上；heavy 每段带 1 个破折号（≈10/千字）。
+    unit_heavy = "他扣住拉杆，指腹压上冰凉的金属——那是他刚才没看清的那一根。烟从脚边翻上来，热浪贴着小腿爬。"
+    unit_light = "他扣住拉杆，指腹压上冰凉的金属，那是他刚才没看清的那一根。烟从脚边翻上来，热浪贴着小腿爬。"
+    unit = unit_heavy if density == "heavy" else unit_light
+    return [
+        EventLog(session_id=session_id, sequence_num=1, event_type="narration",
+                 content=unit * 10, actor_name="KP"),      # ×10 才过 400 字的密度下限
+        EventLog(session_id=session_id, sequence_num=2, event_type="action",
+                 content="我举起半截伞柄", actor_name="调查员"),
+    ]
+
+
+def test_破折号用滥了同样会被纠偏(db_factory):
+    """量过本机 400 段真实旁白：中位 6.3/千字、54% 的段落 ≥6、最高 12.6——几乎全是
+    「追加一句解释」的用法。否定对比那条治不到它，得单独按密度看。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _dash_narration_events(session.id, "heavy"))
+    assert _has_style_nudge(msgs)
+    assert "破折号" in msgs[-2]["content"]
+    assert msgs[-1]["role"] == "user"          # 纠偏紧贴玩家输入之前
+
+
+def test_破折号用得不多就不打扰(db_factory):
+    """它在中文里是合法修辞（语气中断、插入语），按次数卡会误伤，所以判据是密度。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _dash_narration_events(session.id, "light"))
+    assert not _has_style_nudge(msgs)
+
+
+def test_两种_tic_都超标时合并成一条纠偏(db_factory):
+    """别插两条 system——分量会互相稀释，也白占位置。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    mixed = ("他撞开门。不是推，是砸。空气不是冷，而是黏。那东西不是站着，是悬着。"
+             "他扣住拉杆——那是他刚才没看清的那一根。烟翻上来——热浪贴着小腿爬。" * 8)
+    events = [
+        EventLog(session_id=session.id, sequence_num=1, event_type="narration",
+                 content=mixed, actor_name="KP"),
+        EventLog(session_id=session.id, sequence_num=2, event_type="action",
+                 content="我举起半截伞柄", actor_name="调查员"),
+    ]
+    msgs = ctx.build_kp_context(session, module, hero, events)
+    nudges = [m for m in msgs if m.get("role") == "system" and "文风纠偏" in (m.get("content") or "")]
+    assert len(nudges) == 1
+    assert "否定对比" in nudges[0]["content"] and "破折号" in nudges[0]["content"]
+
+
+def test_短文本不按密度判(db_factory):
+    """两百字里出现一个破折号是 5.0/千字，看着超标，其实很正常。"""
+    from app.ai.turn_validator import em_dash_density
+    assert em_dash_density("他停下——回头。" * 3) == 0.0
+
+
 def test_flag_tag_regexes():
     """[SET_FLAG]/[CLEAR_FLAG] 正则正确抽取标志名。"""
     from app.services.chat_service import SET_FLAG_RE, CLEAR_FLAG_RE

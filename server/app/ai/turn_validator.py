@@ -42,6 +42,28 @@ def count_antithesis(text: str) -> int:
     return len(_ANTITHESIS_RE.findall(text or ""))
 
 
+#: 破折号密度阈值（每千字个数）。
+#:
+#: 拿本机 400 段真实旁白量过：中位 6.3、75 分位 8.0、90 分位 10.3、最高 12.6——
+#: 每千字 6 个就是每一百六十字一个，而且几乎全是「追加一句解释」的用法
+#: （「他张了张嘴——作为乘务员，他认得出那块面板」）。这是写顺手带出来的口头禅。
+#:
+#: 定在 75 分位而不是中位：破折号在中文里是合法修辞（语气中断、插入语），
+#: 卡到中位会有一半轮次触发，等于常驻指令，也就没有「按密度动态施压」可言了。
+EM_DASH_PER_KILO = 8.0
+
+#: 短文本算不出密度：两百字里出现一个破折号是 5.0/千字，看着超标，其实很正常。
+_DENSITY_MIN_CHARS = 400
+
+
+def em_dash_density(text: str) -> float:
+    """每千字破折号个数；文本太短时返回 0（样本不足，不作数）。"""
+    body = text or ""
+    if len(body) < _DENSITY_MIN_CHARS:
+        return 0.0
+    return body.count("——") / (len(body) / 1000)
+
+
 def _looks_suspicious(
     narration: str, plan: TurnPlan, turn_inputs: str = "", location_context: str = "",
 ) -> bool:
