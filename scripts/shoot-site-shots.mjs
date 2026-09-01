@@ -52,7 +52,28 @@ function hostSeat() {
   }
 }
 
+/** 真人 KP 那一局的 KP 席。介绍页要展示「AI 退到副手位」是什么样子，而 KP 席的
+ *  role 是 'kp' 不是 'human'，跟上面那条挑不到一块儿去。 */
+function kpSeat() {
+  const sql = `SELECT s.id || '|' || p.owner_token
+    FROM game_sessions s JOIN session_participants p ON p.session_id = s.id
+    WHERE p.role = 'kp' AND p.owner_token IS NOT NULL
+      AND s.kp_mode = 'human' AND s.status = 'active'
+    ORDER BY s.updated_at DESC LIMIT 1;`
+  try {
+    const out = execFileSync('sqlite3', [path.join(ROOT, 'server/trpg.db'), sql], {
+      encoding: 'utf8',
+    }).trim()
+    if (!out) return null
+    const [sessionId, token] = out.split('|')
+    return { sessionId, token }
+  } catch {
+    return null
+  }
+}
+
 const seat = hostSeat()
+const kp = kpSeat()
 
 /**
  * 介绍页里按 data-shot 引用的每一张。宽高与页面上写的 width/height 一一对应，
@@ -82,6 +103,22 @@ const PAGES = [
     dpr: 1.5,
     // 侧边栏收起。展开时它占掉 1/5 的宽，而截图要展示的是对局本身，不是导航。
     collapseSidebar: true,
+  },
+
+  // 真人 KP 视角：同一个游戏页，右边多一条工作台，AI 退到副手位。
+  // 挑最近动过的那局——它多半就是你正在带的，消息流也才有内容可看。
+  kp && {
+    // 只截工作台本身，不截整页：这张图要说的是「KP 的操作台长什么样」，而消息流有没有
+    // 内容全看这局跑到哪儿了——刚开的局截出来就是大半张空背景。
+    shot: 'kp-console', path: `/game/${kp.sessionId}`, w: 1400, h: 900,
+    token: kp.token,
+    waitUntil: 'domcontentloaded',
+    settle: 4000,
+    collapseSidebar: true,
+    element: '.kp-console-pane',
+    // 只要上半截到「发布叙事」为止。整条八百多像素高，配在文字旁边会瘦得像根柱子。
+    clipHeight: 400,
+    dpr: 1.5,
   },
 
   {
@@ -171,7 +208,16 @@ try {
       if (p.after) await p.after(page)
 
       const png = path.join(tmp, `${theme}-${p.shot}.png`)
-      await page.screenshot({ path: png })
+      if (p.element) {
+        const box = await page.locator(p.element).boundingBox()
+        if (!box) throw new Error(`截不到 ${p.element}：页面上没有这个元素`)
+        await page.screenshot({
+          path: png,
+          clip: { ...box, height: Math.min(box.height, p.clipHeight ?? box.height) },
+        })
+      } else {
+        await page.screenshot({ path: png })
+      }
       toWebp(png, path.join(OUT, `${theme}-${p.shot}.webp`))
       await ctx.close()
       made += 1
@@ -186,3 +232,4 @@ try {
 console.log(`\n共 ${made} 张，已写入 site/assets/shots/`)
 console.log('注意：截到的是这台机器上的真实数据。首页的「接着玩」只有本机存档里有开着的桌时才会出现。')
 if (!seat) console.log('跳过了游戏页：本机没有进行中的对局，或读不到 server/trpg.db。')
+if (!kp) console.log('跳过了真人 KP 页：本机没有进行中的真人 KP 对局。')

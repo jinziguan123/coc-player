@@ -649,9 +649,12 @@
       </figure>
       <p class="shot-cap">对局界面。空着的席位交给 AI 队友，各自行动、各自掷骰；队伍分头行动时，两条线分栏并排推进。</p>
 
-      <!-- 这块没有配图，所以不用 .feature 的两列栅格。但也不能任它铺满 1100px：
-           那样一行 69 个字，比旁边图文两列的 29 字长出一倍多，读起来费劲。 -->
-      <div class="feature-text" style="margin-top:44px;max-width:42rem">
+      <div class="feature flip" style="margin-top:44px">
+        <figure class="shot" style="margin-top:0">
+          <img src="assets/shots/gothic-kp-console.webp" data-shot="kp-console" width="450" height="600" loading="lazy"
+               alt="真人 KP 的工作台：顶部是主持与资料两个标签，下面是「待回收 1」和开放行动，再往下是叙事、NPC 台词、检定三个直达按钮加一个「更多」下拉，最下面是旁白输入框与发布按钮">
+        </figure>
+        <div class="feature-text">
         <h3>换你来当守秘人，AI 退到副手位</h3>
         <p>
           上面那张是玩家视角。建房时把守秘人选成真人，界面右边会多出一条工作台：旁白、NPC 台词、
@@ -664,6 +667,7 @@
           <li><svg class="icon"><use href="#i-check"/></svg><span>玩家席可以全交给 AI 队友——一个人也能把本子先跑一遍</span></li>
           <li><svg class="icon"><use href="#i-check"/></svg><span>暗骰结果只有你看得见，玩家那侧只知道「掷过了」</span></li>
         </ul>
+        </div>
       </div>
     </div>
   </section>
