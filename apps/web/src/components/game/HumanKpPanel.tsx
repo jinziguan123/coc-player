@@ -1,4 +1,4 @@
-import { type ComponentType, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react'
+import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api, getServerUrl } from '@/api/client'
 import { GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
@@ -34,20 +34,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { MultiSelect } from '@/components/ui/multi-select'
-
-type KpAction =
-  | 'narration'
-  | 'dialogue'
-  | 'dice_check'
-  | 'opposed_check'
-  | 'generic_roll'
-  | 'san_check'
-  | 'scene_change'
-  | 'set_flag'
-  | 'clear_flag'
-  | 'handout'
-  | 'hp_change'
-  | 'start_combat'
+import { ACTION_LABELS, PROSE_ACTIONS, QUICK_ACTIONS, QUICK_IDS, type KpAction } from './kpActions'
 
 type PanelTab = 'tools' | 'advisor' | 'assets' | 'director' | 'source'
 
@@ -281,29 +268,6 @@ interface Props {
   onCollapse?: () => void
 }
 
-const ACTION_LABELS: Record<KpAction, string> = {
-  narration: '发布叙事',
-  dialogue: 'NPC 台词',
-  dice_check: '发起检定',
-  opposed_check: '对抗检定',
-  generic_roll: '通用骰',
-  san_check: '理智检定',
-  scene_change: '切换场景',
-  set_flag: '推进标志',
-  clear_flag: '解除标志',
-  handout: '发放手书',
-  hp_change: '结算 HP',
-  start_combat: '开始战斗',
-}
-
-/** 跑团里九成操作就是这三件事，提出来做直达按钮；其余仍在「更多」下拉里，一个不少。 */
-// icon 同时收 lucide 组件与 react-icons 的 IconType，取二者都满足的最小形状
-const QUICK_ACTIONS: Array<{ id: KpAction; label: string; icon: ComponentType<{ size?: number }> }> = [
-  { id: 'narration', label: '叙事', icon: WandSparkles },
-  { id: 'dialogue', label: 'NPC 台词', icon: Bot },
-  { id: 'dice_check', label: '检定', icon: GiRollingDices },
-]
-const QUICK_IDS = new Set<KpAction>(QUICK_ACTIONS.map((item) => item.id))
 
 /**
  * 标签压成两层：一级只有「主持」和「资料」。
@@ -945,7 +909,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               </SelectContent>
             </Select>
           </div>
-          <div className="kp-composer-form flex flex-wrap gap-2">
+          <div className={`kp-composer-form flex flex-wrap gap-2${PROSE_ACTIONS.has(action) ? ' kp-composer-form--prose' : ''}`}>
             {action === 'narration' && (
               <div className="flex w-full items-start gap-2">
                 <textarea

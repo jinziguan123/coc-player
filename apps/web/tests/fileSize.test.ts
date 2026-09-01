@@ -31,7 +31,7 @@ const DEFAULT_MAX = 700
 const GRANDFATHERED: Record<string, number> = {
   'pages/GameSessionPage.tsx': 2480,
   'pages/CharacterPage.tsx': 1776,
-  'components/game/HumanKpPanel.tsx': 1477,
+  'components/game/HumanKpPanel.tsx': 1441,
   'pages/ModuleDetailPage.tsx': 1261,
   'pages/RoomLobbyPage.tsx': 1019,
   'pages/SettingsPage.tsx': 722,

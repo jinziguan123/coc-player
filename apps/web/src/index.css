@@ -2383,6 +2383,14 @@ body {
   background: color-mix(in srgb, var(--color-accent) 4%, transparent);
 }
 .kp-composer-form { padding: 0.5rem 0.45rem; }
+
+/* 旁白与 NPC 台词是「一整段文字」，框子得写得下。
+   原先固定两行高，而侧栏底下明明空着四五百像素——KP 写一段旁白要在两行里滚。
+
+   只抬 textarea 的高度，不去改整条 flex 链：试过让 .kp-console-body 的子元素统统
+   flex:1 撑满，结果把本该收着的场景/NPC 列表也一并拉开了，面板直接崩版。
+   32vh 在小窗口上也不会顶掉下面的发布按钮。 */
+.kp-composer-form--prose textarea { min-height: clamp(5rem, 32vh, 18rem); }
 .kp-composer-submit {
   display: flex;
   justify-content: flex-end;
