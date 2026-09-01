@@ -4958,3 +4958,28 @@ select.input option {
     box-shadow: 0 0 0 2px var(--color-accent), 0 0 16px 2px color-mix(in srgb, var(--color-accent) 40%, transparent);
   }
 }
+
+/* sonner 的关闭按钮自带一套浅色配色，在暗色主题下是个白点。按主题变量重上色，
+   并把它做大到能点得中——默认那个方框只有 20px。 */
+[data-sonner-toast] [data-close-button] {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+}
+[data-sonner-toast] [data-close-button]:hover {
+  border-color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* 大厅聊天是右侧浮层，不占布局宽度——好处是聊天再多也不把大厅顶长，代价是它会压住
+   底下贴右的东西：席位行最右的「移出」「删除」正好在它下面，房主点不到。
+   展开时让主内容整体让开它那一条；收起时内容照旧居中。
+
+   用 :has 而不是把开合状态回传给页面：浮层展开渲染 .chat-dock、收起渲染 .chat-token，
+   DOM 里本来就写着答案，再同步一份 React 状态是白搭一条线。 */
+@media (min-width: 60rem) {
+  .lobby-shell:has(.chat-dock) { padding-right: 21rem; }
+}

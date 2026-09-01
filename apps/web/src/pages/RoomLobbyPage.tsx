@@ -547,7 +547,7 @@ export function RoomLobbyPage() {
     // 从前这一层没有 min-h-0、中段也没有 overflow，内容一路外溢到 AppShell 的 main 去滚，
     // 于是角色卡一多，「开始游戏」就被顶到折线以下（实测已入座时内容 793px > 视口 720px）。
     // relative：聊天是浮层（absolute 右侧居中），它的定位原点就是这一层
-    <div className="relative flex h-full min-h-0 gap-0">
+    <div className="lobby-shell relative flex h-full min-h-0 gap-0">
       <div className="flex flex-col flex-1 min-w-0 min-h-0 max-w-3xl mx-auto w-full">
         <div className="flex flex-shrink-0 items-center gap-3 pb-2 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <button onClick={() => navigate('/game')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
@@ -714,8 +714,8 @@ export function RoomLobbyPage() {
                         title="移出该玩家（席位回到空席）"
                       >移出</button>
                     )}
-                    {/* 删座位：房主专用；不能删自己，也不能低于模组推荐下限（后端另有硬拦） */}
-                    {amHost && !p.is_mine && seats.length > Math.max(seatRange.min, 1) && (
+                    {/* 删座位：房主专用、不能删自己；下限对齐后端（留一个玩家席）——原先卡模组推荐人数，那是参考不是规矩 */}
+                    {amHost && !p.is_mine && seats.length > 1 && (
                       <button
                         onClick={() => void removeSeat(p.seat_order)}
                         disabled={busy}

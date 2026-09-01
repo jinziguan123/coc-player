@@ -35,7 +35,9 @@ const STICK_SLACK = 24
  * 悬浮聊天卡。高度写死在卡片上、日志内部滚动，所以它**完全不参与页面高度**，也不再
  * 占掉主栏一整条宽度——大厅真正要办的事（配座位、开局）拿回全部版面。
  */
-export function LobbyChatDock({ lines, typingName, canSpeak, onSend, onTyping, shifted, compact }: Props) {
+export function LobbyChatDock({
+  lines, typingName, canSpeak, onSend, onTyping, shifted, compact,
+}: Props) {
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== '0')
   const [draft, setDraft] = useState('')
   /** 收起期间新增的条数；展开即清零。 */
