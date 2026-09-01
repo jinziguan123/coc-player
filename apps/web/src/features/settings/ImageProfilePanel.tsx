@@ -10,6 +10,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ApiKeyField } from './ApiKeyField'
+import { ProfileRow } from './ProfileRow'
+import { Image as ImageIcon, SquarePen, Trash2 } from 'lucide-react'
 
 export interface ImageProfile {
   id: string
@@ -48,7 +50,11 @@ interface TestResult {
  * 而且 `image_model` 只在 OpenAI 协议下才会真正生效——用 Anthropic 跑团时填了也白填。
  * 拆开之后：用什么模型跑团，与用什么后端出图，互不相干。
  */
-export function ImageProfilePanel() {
+export function ImageProfilePanel({ openCreateAt = 0 }: {
+  /** 页签行那个「新增配置」按钮的计数。一变就打开新建表单——按钮在父组件那儿，
+   *  但表单在这儿。 */
+  openCreateAt?: number
+}) {
   const [profiles, setProfiles] = useState<ImageProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null) // null=列表, 'new'=新建
@@ -163,29 +169,38 @@ export function ImageProfilePanel() {
     }
   }
 
+  useEffect(() => {
+    if (openCreateAt > 0) startCreate()
+    // 只认计数变化；startCreate 每次渲染都是新函数，进依赖会变成一渲染就弹表单
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openCreateAt])
+
+  /** 岗位卡要知道现在谁在出图。 */
+  const active = profiles.find((p) => p.is_active)
+
   if (loading) return <p style={{ color: 'var(--color-text-secondary)' }}>加载中...</p>
 
   return (
     <div>
-      {/* 标题由所在的 tab 承担，这里不再重复一遍 */}
-      <div
-        style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          gap: '1rem', marginBottom: '0.85rem',
-        }}
-      >
-        <p className="text-xs" style={{ color: 'var(--color-text-secondary)', margin: 0 }}>
-          游戏中的场景插画、信件与道具图片由这个模型生成。它和对话模型是分开的，
-          可以各用各的服务。不填也能正常游戏，只是没有配图。
-        </p>
-        <button
-          className="btn-primary !px-3 !py-1.5 !text-[length:var(--text-xs)]"
-          style={{ flexShrink: 0 }}
-          onClick={startCreate}
-          disabled={editingId !== null}
-        >
-          + 新增配置
-        </button>
+      {/* 与对话页同一套语言：岗位摆在最前，说清它管什么、现在是谁。
+          生图只有一个岗位，卡也就一张——单张不撑满整行，见 .role-grid--single。 */}
+      <div className="role-grid role-grid--single">
+        <div className={`role-card${active ? '' : ' role-card--vacant'}`}>
+          <div className="role-card__head">
+            <span className="role-card__label">出图</span>
+            {active
+              ? <span className="role-card__who">{active.name}</span>
+              : <span className="role-card__who role-card__who--vacant">未指定</span>}
+          </div>
+          <p className="role-card__duty">场景插画、信件与道具图片</p>
+          <p className="role-card__foot">
+            {active
+              ? (active.backend === 'comfyui'
+                  ? active.comfyui_base_url || 'ComfyUI'
+                  : active.model || '（未填模型名）')
+              : '不指定就没有配图，不影响正常游戏'}
+          </p>
+        </div>
       </div>
 
       {profiles.length === 0 ? (
@@ -195,86 +210,45 @@ export function ImageProfilePanel() {
           </p>
         </div>
       ) : (
-        <div
-          style={{
-            display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem',
-          }}
-        >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' }}>
           {profiles.map((p) => (
-            <div
+            <ProfileRow
               key={p.id}
-              className={`card ${p.is_active ? 'active-rail' : ''}`}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                padding: '0.75rem 1rem',
-                borderColor: p.is_active ? 'var(--color-accent)' : undefined,
+              name={p.name}
+              highlighted={p.is_active}
+              menuLabel={`${p.name} 的更多操作`}
+              badges={
+                <>
+                  {p.is_active && <span className="role-badge">出图</span>}
+                  <span className="badge">{p.backend === 'comfyui' ? 'ComfyUI' : 'OpenAI'}</span>
+                </>
+              }
+              meta={p.backend === 'comfyui'
+                ? (p.comfyui_base_url || '（未填 ComfyUI 地址）')
+                : <>{p.model || '（未填模型名）'}{p.base_url && <span className="profile-row__url"> · {p.base_url}</span>}</>}
+              primary={p.is_active ? undefined : {
+                label: '设为出图',
+                onClick: () => void handleActivate(p.id),
+                disabled: editingId !== null,
+                title: editingId !== null ? '先保存或取消正在编辑的配置' : undefined,
+                ariaLabel: `让 ${p.name} 来出图`,
               }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem',
-                  }}
-                >
-                  <strong style={{ fontSize: '0.9rem' }}>{p.name}</strong>
-                  <span className="badge">
-                    {p.backend === 'comfyui' ? 'ComfyUI' : 'OpenAI'}
-                  </span>
-                  {p.is_active && <span className="chip chip--success">使用中</span>}
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.8rem',
-                    color: 'var(--color-text-secondary)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {p.backend === 'comfyui'
-                    ? p.comfyui_base_url || '（未填 ComfyUI 地址）'
-                    : `${p.model || '（未填模型名）'}${p.base_url ? ` · ${p.base_url}` : ''}`}
-                </div>
-              </div>
-
-              <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1">
-                {!p.is_active && (
-                  <button
-                    className="btn-primary !px-2.5 !py-1 !text-[length:var(--text-xs)]"
-                    onClick={() => handleActivate(p.id)}
-                    aria-label={`使用 ${p.name} 出图`}
-                  >
-                    使用
-                  </button>
-                )}
-                <button
-                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"
-                  onClick={() => startEdit(p)}
-                  disabled={editingId !== null}
-                  aria-label={`编辑 ${p.name}`}
-                >
-                  编辑
-                </button>
-                <button
-                  className="chip hover:!border-[var(--color-accent)] hover:!text-[var(--color-text-accent)] transition-colors disabled:opacity-40"
-                  onClick={() => handleTest(p.id)}
-                  disabled={testingId !== null}
-                  aria-label={`测试生图 ${p.name}`}
-                  title="真出一张图，确认这份配置能正常生成图片"
-                >
-                  {testingId === p.id ? '测试中…' : '测试生图'}
-                </button>
-                <button
-                  className="chip hover:!border-[var(--color-danger)] hover:!text-[var(--color-danger)] transition-colors"
-                  onClick={() => handleDelete(p.id, p.name)}
-                  aria-label={`删除 ${p.name}`}
-                >
-                  删除
-                </button>
-              </div>
-            </div>
+              menuItems={[
+                ...(editingId !== null ? [] : [{
+                  label: '编辑', icon: <SquarePen size={12} />, onClick: () => startEdit(p),
+                }]),
+                {
+                  label: testingId === p.id ? '测试中…' : '测试生图',
+                  icon: <ImageIcon size={12} />,
+                  onClick: () => void handleTest(p.id),
+                  title: '真出一张图，确认这份配置能正常生成图片',
+                },
+                {
+                  label: '删除', icon: <Trash2 size={12} />,
+                  onClick: () => void handleDelete(p.id, p.name), separated: true,
+                },
+              ]}
+            />
           ))}
         </div>
       )}

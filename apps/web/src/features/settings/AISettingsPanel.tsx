@@ -13,8 +13,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApiKeyField } from './ApiKeyField'
 import { ModelNameField } from './ModelNameField'
-import { ModelRoles } from './ModelRoles'
+import { ModelRoles, RoleBadge } from './ModelRoles'
 import { ProfileRow } from './ProfileRow'
+import { Copy, PlugZap, SquarePen, Trash2 } from 'lucide-react'
 import { ImageProfilePanel } from './ImageProfilePanel'
 
 interface AIProfile {
@@ -78,6 +79,9 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null) // null=列表, 'new'=新建
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
+  const [tab, setTab] = useState('chat')
+  /** 页签行那个「新增配置」要能指使生图面板开新建表单。计数一变就是「现在开」。 */
+  const [imageCreateAt, setImageCreateAt] = useState(0)
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
 
@@ -251,7 +255,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
       {/* 两类模型互不相干，各自独立成页：一次只看一套配置，不必在长页面里上下找。
           页面级页签按内容宽度左对齐——tabs.tsx 默认的 flex-1 是给窄弹窗用的，
           铺满整行会把两个标签拉成两条大色块。 */}
-      <Tabs defaultValue="chat">
+      <Tabs value={tab} onValueChange={setTab}>
         {/* 页签钉在顶上。往下翻配置时它会跟着滚出视野，人就不知道自己在哪一页了，
             要切还得先滚回去。「新增配置」并到同一行——它是这页唯一的新建入口，
             跟页签一样属于「不随内容走」的那层。 */}
@@ -267,7 +271,9 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
           <button
             className="btn-primary !px-3 !py-1.5 !text-[length:var(--text-xs)]"
             style={{ flexShrink: 0 }}
-            onClick={startCreate}
+            // 按钮在页签那一行，就得跟着页签走——否则站在「生图模型」页点它，
+            // 冒出来的是新建对话配置的表单。
+            onClick={() => (tab === 'chat' ? startCreate() : setImageCreateAt((n) => n + 1))}
             disabled={editingId !== null}
           >
             新增配置
@@ -291,16 +297,57 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
           {profiles.map((p) => (
             <ProfileRow
               key={p.id}
-              profile={p}
-              busy={editingId !== null}
-              testing={testingId === p.id}
-              onAssignNarrator={() => void handleActivate(p.id)}
-              onToggleAide={() => void handleToggleFast(p.id)}
-              onToggleReader={() => void handleToggleVision(p.id)}
-              onEdit={() => startEdit(p)}
-              onDuplicate={() => void handleDuplicate(p.id)}
-              onTest={() => void handleTest(p.id)}
-              onDelete={() => void handleDelete(p.id, p.name)}
+              name={p.name}
+              highlighted={p.is_active}
+              menuLabel={`${p.name} 的更多操作`}
+              badges={
+                <>
+                  {p.is_active && <RoleBadge role="narrator" />}
+                  {p.is_fast && <RoleBadge role="aide" />}
+                  {p.is_vision && <RoleBadge role="reader" />}
+                  {p.protocol === 'anthropic' && <span className="badge">Anthropic</span>}
+                </>
+              }
+              meta={<>{p.model_name}{p.base_url && <span className="profile-row__url"> · {p.base_url}</span>}</>}
+              primary={p.is_active ? undefined : {
+                label: '设为叙事',
+                onClick: () => void handleActivate(p.id),
+                disabled: editingId !== null,
+                title: editingId !== null ? '先保存或取消正在编辑的配置' : undefined,
+                ariaLabel: `让 ${p.name} 来叙事`,
+              }}
+              menuItems={[
+                {
+                  label: p.is_fast ? '不再当副手' : '设为副手模型',
+                  onClick: () => void handleToggleFast(p.id),
+                  title: '规划、AI 队友、滚动摘要这些幕后活改走这条；叙事仍走叙事模型',
+                },
+                {
+                  label: p.is_vision ? '不再当读图' : '设为读图模型',
+                  onClick: () => void handleToggleVision(p.id),
+                  title: '解析扫描件与图文模组时走这条；带团仍走叙事模型',
+                },
+                ...(editingId !== null ? [] : [{
+                  label: '编辑', icon: <SquarePen size={12} />, onClick: () => startEdit(p),
+                  separated: true,
+                }]),
+                {
+                  label: '复制一份',
+                  icon: <Copy size={12} />,
+                  onClick: () => void handleDuplicate(p.id),
+                  title: '连密钥一起复制，改个模型名就是一条新配置',
+                  separated: editingId !== null,
+                },
+                {
+                  label: testingId === p.id ? '测试中…' : '测试连接',
+                  icon: <PlugZap size={12} />,
+                  onClick: () => void handleTest(p.id),
+                },
+                {
+                  label: '删除', icon: <Trash2 size={12} />,
+                  onClick: () => void handleDelete(p.id, p.name), separated: true,
+                },
+              ]}
             />
           ))}
         </div>
@@ -513,7 +560,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
         </TabsContent>
 
         <TabsContent value="image" className="!p-0">
-          <ImageProfilePanel />
+          <ImageProfilePanel openCreateAt={imageCreateAt} />
         </TabsContent>
       </Tabs>
     </div>

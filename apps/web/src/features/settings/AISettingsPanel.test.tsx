@@ -90,11 +90,11 @@ describe('AI 配置面板', () => {
       'data-state', 'active',
     )
     expect(screen.getByRole('button', { name: 'deepseek 主力 的更多操作' })).toBeInTheDocument()
-    expect(screen.queryByText('ComfyUI（172.30.18.236）')).not.toBeInTheDocument()
+    expect(screen.queryAllByText('ComfyUI（172.30.18.236）')).toHaveLength(0)
 
     await openImageTab(user)
-    expect(await screen.findByText('ComfyUI（172.30.18.236）')).toBeInTheDocument()
-    expect(screen.getByText('http://172.30.18.236:8188')).toBeInTheDocument()
+    expect((await screen.findAllByText('ComfyUI（172.30.18.236）')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('http://172.30.18.236:8188').length).toBeGreaterThan(0)
     // 对话配置整套都退场了，不是叠在下面
     expect(screen.queryByRole('button', { name: 'deepseek 主力 的更多操作' })).not.toBeInTheDocument()
   })
@@ -218,12 +218,13 @@ describe('AI 配置面板', () => {
     render(<AISettingsPanel />)
     await openImageTab(user)
 
-    await user.click(await screen.findByRole('button', { name: /使用 ComfyUI（172.30.18.236） 出图/ }))
+    await user.click(await screen.findByRole('button', { name: /让 ComfyUI（172.30.18.236） 来出图/ }))
     await waitFor(() =>
       expect(mockPost).toHaveBeenCalledWith('/settings/ai/image-profiles/i1/activate'),
     )
 
-    await user.click(screen.getByRole('button', { name: /测试生图 ComfyUI/ }))
+    await openRow(user, 'ComfyUI（172.30.18.236）')
+    await user.click(await screen.findByRole('menuitem', { name: '测试生图' }))
     await waitFor(() =>
       expect(mockPost).toHaveBeenCalledWith('/settings/ai/image-profiles/i1/test'),
     )
@@ -233,7 +234,7 @@ describe('AI 配置面板', () => {
     const user = userEvent.setup()
     render(<AISettingsPanel />)
     await openImageTab(user)
-    await user.click(await screen.findByRole('button', { name: '+ 新增配置' }))
+    await user.click(await screen.findByRole('button', { name: '新增配置' }))
 
     const dialog = await findDialog('新增生图配置')
     // 默认 OpenAI 后端：填模型名与密钥，不该出现 ComfyUI 工作流框
