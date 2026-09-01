@@ -2269,6 +2269,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/ai/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Upstream Models
+         * @description 问上游有哪些模型可用。
+         *
+         *     模型名此前只能手打，而差一个横杠就是 404——报错还要等到真开团、KP 该说话的时候才
+         *     冒出来。两种协议都有标准的 `GET …/models`，填好地址和密钥就能问出来。
+         *
+         *     收的是**表单里当前的值**而不是 profile_id：新增配置时它还没存过，正是最需要这份
+         *     清单的时候。编辑态下前端本来就会把真实密钥取回表单（见 `/profiles/{id}/key`），
+         *     两种情形因此走同一条路。
+         *
+         *     不少中转站不实现这个端点，返回 404/501 是常态而非故障——照直说「这个服务没提供
+         *     清单，手填吧」，别让人以为是自己地址填错了。
+         */
+        post: operations["list_upstream_models_api_settings_ai_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/ai/profiles": {
         parameters: {
             query?: never;
@@ -3344,6 +3374,42 @@ export interface components {
              * @default false
              */
             spend: boolean;
+        };
+        /**
+         * ModelsProbe
+         * @description 问上游要模型清单时带的那点信息，取自表单当前的值。
+         */
+        ModelsProbe: {
+            /**
+             * Api Key
+             * @default
+             */
+            api_key: string;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Protocol
+             * @default openai
+             */
+            protocol: string;
+        };
+        /** ModelsResult */
+        ModelsResult: {
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Models
+             * @default []
+             */
+            models: string[];
+            /** Success */
+            success: boolean;
         };
         /** ModuleImageRegenerateRequest */
         ModuleImageRegenerateRequest: {
@@ -7984,6 +8050,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_upstream_models_api_settings_ai_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelsProbe"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsResult"];
                 };
             };
             /** @description Validation Error */

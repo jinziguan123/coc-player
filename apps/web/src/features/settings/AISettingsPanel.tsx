@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApiKeyField } from './ApiKeyField'
+import { ModelNameField } from './ModelNameField'
 import { ImageProfilePanel } from './ImageProfilePanel'
 
 interface AIProfile {
@@ -113,14 +114,21 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
     setForm(EMPTY_FORM)
   }
 
-  /** 掩码回填：列表接口恒掩码，要明文时才向后端单独取。 */
-  const revealKey = async (): Promise<string> => {
+  /** 取真实密钥。列表接口恒掩码，明文要向后端单独要。**不动表单**——
+   *  「获取可用模型」也要用它，那可不该顺手把密钥显示出来。 */
+  const secretKey = async (): Promise<string> => {
     if (editingId && editingId !== 'new' && form.api_key.includes('****')) {
       const res = await localApi.get<{ api_key: string }>(`/settings/ai/profiles/${editingId}/key`)
-      setForm((f) => ({ ...f, api_key: res.api_key }))
       return res.api_key
     }
     return form.api_key
+  }
+
+  /** 掩码回填：给「显示密钥」用，取到后填回表单。 */
+  const revealKey = async (): Promise<string> => {
+    const key = await secretKey()
+    setForm((f) => ({ ...f, api_key: key }))
+    return key
   }
 
   const handleDuplicate = async (id: string) => {
@@ -515,21 +523,14 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   </p>
                 </div>
 
-                <div>
-                  <label
-                    className="block text-sm font-semibold mb-1"
-                    style={{ fontSize: '0.85rem' }}
-                  >
-                    模型名称
-                  </label>
-                  <input
-                    type="text"
-                    className="input w-full"
-                    placeholder={info.modelPlaceholder}
-                    value={form.model_name}
-                    onChange={(e) => setForm({ ...form, model_name: e.target.value })}
-                  />
-                </div>
+                <ModelNameField
+                  protocol={form.protocol}
+                  baseUrl={form.base_url}
+                  value={form.model_name}
+                  placeholder={info.modelPlaceholder}
+                  onChange={(v) => setForm({ ...form, model_name: v })}
+                  resolveKey={secretKey}
+                />
 
                 <ApiKeyField
                   value={form.api_key}

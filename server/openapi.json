@@ -1792,6 +1792,54 @@
         "title": "LuckDecisionRequest",
         "type": "object"
       },
+      "ModelsProbe": {
+        "description": "问上游要模型清单时带的那点信息，取自表单当前的值。",
+        "properties": {
+          "api_key": {
+            "default": "",
+            "title": "Api Key",
+            "type": "string"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "protocol": {
+            "default": "openai",
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "title": "ModelsProbe",
+        "type": "object"
+      },
+      "ModelsResult": {
+        "properties": {
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "models": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "ModelsResult",
+        "type": "object"
+      },
       "ModuleImageRegenerateRequest": {
         "properties": {
           "field": {
@@ -9157,6 +9205,48 @@
           }
         },
         "summary": "Test Image Profile",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ai/models": {
+      "post": {
+        "description": "问上游有哪些模型可用。\n\n模型名此前只能手打，而差一个横杠就是 404——报错还要等到真开团、KP 该说话的时候才\n冒出来。两种协议都有标准的 `GET …/models`，填好地址和密钥就能问出来。\n\n收的是**表单里当前的值**而不是 profile_id：新增配置时它还没存过，正是最需要这份\n清单的时候。编辑态下前端本来就会把真实密钥取回表单（见 `/profiles/{id}/key`），\n两种情形因此走同一条路。\n\n不少中转站不实现这个端点，返回 404/501 是常态而非故障——照直说「这个服务没提供\n清单，手填吧」，别让人以为是自己地址填错了。",
+        "operationId": "list_upstream_models_api_settings_ai_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelsProbe"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Upstream Models",
         "tags": [
           "settings"
         ]

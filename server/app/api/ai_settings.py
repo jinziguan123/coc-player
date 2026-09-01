@@ -81,6 +81,20 @@ class TestResult(BaseModel):
     latency_ms: int = 0
 
 
+class ModelsProbe(BaseModel):
+    """问上游要模型清单时带的那点信息，取自表单当前的值。"""
+
+    protocol: str = "openai"
+    base_url: str = ""
+    api_key: str = ""
+
+
+class ModelsResult(BaseModel):
+    success: bool
+    models: list[str] = []
+    message: str = ""
+
+
 def _mask_key(key: str) -> str:
     if not key:
         return ""
@@ -319,6 +333,75 @@ async def test_profile(profile_id: str):
     except Exception as e:
         latency = int((time.time() - start) * 1000)
         return TestResult(success=False, message=str(e), latency_ms=latency)
+
+
+@router.post("/ai/models", response_model=ModelsResult)
+async def list_upstream_models(probe: ModelsProbe) -> ModelsResult:
+    """问上游有哪些模型可用。
+
+    模型名此前只能手打，而差一个横杠就是 404——报错还要等到真开团、KP 该说话的时候才
+    冒出来。两种协议都有标准的 `GET …/models`，填好地址和密钥就能问出来。
+
+    收的是**表单里当前的值**而不是 profile_id：新增配置时它还没存过，正是最需要这份
+    清单的时候。编辑态下前端本来就会把真实密钥取回表单（见 `/profiles/{id}/key`），
+    两种情形因此走同一条路。
+
+    不少中转站不实现这个端点，返回 404/501 是常态而非故障——照直说「这个服务没提供
+    清单，手填吧」，别让人以为是自己地址填错了。
+    """
+    base = (probe.base_url or "").strip().rstrip("/")
+    key = (probe.api_key or "").strip()
+    if probe.protocol == "anthropic":
+        base = base or "https://api.anthropic.com"
+        url = f"{base}/v1/models"
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    else:
+        # OpenAI 兼容侧 base_url 就是 API 根（该带 /v1 的用户自己带），与 _test_openai 同口径
+        base = base or "https://api.deepseek.com"
+        url = f"{base}/models"
+        headers = {"Authorization": f"Bearer {key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            payload = resp.json()
+    except httpx.TimeoutException:
+        return ModelsResult(success=False, message="连接超时")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (404, 405, 501):
+            return ModelsResult(
+                success=False,
+                message="这个服务没有提供模型清单接口，模型名请手动填写。",
+            )
+        return ModelsResult(success=False, message=_clean_http_error(e))
+    except Exception as e:  # noqa: BLE001 —— 网络层什么都可能抛，照直转述给用户
+        return ModelsResult(success=False, message=str(e))
+
+    models = _model_ids(payload)
+    if not models:
+        return ModelsResult(
+            success=False, message="上游返回了空清单，模型名请手动填写。",
+        )
+    return ModelsResult(success=True, models=models, message=f"找到 {len(models)} 个模型")
+
+
+def _model_ids(payload: object) -> list[str]:
+    """从上游响应里挑出模型 id。
+
+    OpenAI 与 Anthropic 都回 ``{"data": [{"id": …}]}``；有些中转站直接回一个数组，
+    元素可能是对象也可能就是字符串。全都认下来——这里宽容一点，总好过让用户对着
+    「空清单」猜是谁的问题。
+    """
+    rows = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return []
+    ids = []
+    for row in rows:
+        name = row if isinstance(row, str) else (row.get("id") if isinstance(row, dict) else None)
+        if isinstance(name, str) and name.strip():
+            ids.append(name.strip())
+    return sorted(set(ids))
 
 
 def _clean_http_error(e: httpx.HTTPStatusError) -> str:
