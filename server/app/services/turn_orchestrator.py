@@ -94,6 +94,7 @@ _scene_name = turn_context._scene_name
 _current_turn_events = turn_context._current_turn_events
 _shown_turn_dialogues = turn_context._shown_turn_dialogues
 _shown_turn_context = turn_context._shown_turn_context
+_settled_checks_context = turn_context._settled_checks_context
 commit_pending_travel = turn_context.commit_pending_travel
 _location_groups = turn_context._location_groups
 _augment_plan_with_backstage = turn_context._augment_plan_with_backstage
@@ -505,6 +506,7 @@ async def _run_generation(
         await _validate_and_patch_narration(
             llm, plan, result, event_order, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            settled_checks=_settled_checks_context(events),
             party_names=party_names, location_context=location_guard,
         )
         _persist_narration(db, session_id, result, event_order)
@@ -532,6 +534,7 @@ async def _run_generation(
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            settled_checks=_settled_checks_context(events),
             party_names=party_names, location_context=location_guard,
         )
         _persist_narration(db, session_id, result)
@@ -717,6 +720,7 @@ async def _run_split_narrations(
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            settled_checks=_settled_checks_context(events),
             # 取**全队**而非本组成员：别组的队友同样不能被代演
             party_names={player_char.name} | {t.name for t in (teammates or [])},
             location_context=(
@@ -1358,6 +1362,8 @@ async def _run_kp_turn(
                 turn_inputs=_shown_turn_context(events, party_ids),
                 party_names={player_char.name} | {t.name for t in (party_others or [])},
                 location_context=location_guard,
+                # 旁路本身就是「投骰之后的续写」，不给它骰子，写出检定所得必被判成代演
+                settled_checks=_settled_checks_context(events),
             )
             if validation is not None and validation.violated:
                 logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)

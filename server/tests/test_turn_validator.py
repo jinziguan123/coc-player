@@ -308,3 +308,37 @@ async def test_party_names_threaded_to_validator_prompt():
     joined = "\n".join(m["content"] for m in captured["m"])
     assert "沃什·帕杉德" in joined and "亨利·卡特" in joined
     assert "香澄澪" not in joined.split("【玩家一侧的角色名单】")[1].split("\n\n")[0]
+
+
+# ── 掷过的骰要告诉终检，否则「写出检定所得」会被判成代演 ──────────────
+
+def test_已结算的检定进入终检提示并给出豁免():
+    """线上实录：陈守一那局图书馆使用 37≤38 普通成功，旁白照实写了他翻到并读取登记簿，
+    终检以「代替玩家完成探索动作与信息获取」为由把整段改写掉了。
+
+    终检看不见骰子，只看得见玩家说了一句、KP 却写了一串动作——按它掌握的信息，判成
+    代演是合理的。缺的是「这串动作已经被一次检定授权过」这个事实。
+    """
+    plan = TurnPlan()
+    msgs = turn_validator.build_validator_messages(
+        plan, "他把登记簿翻回前几页，指腹停在一行褪色的字迹上。",
+        turn_inputs="[陈守一 行动] 我翻翻登记簿",
+        party_names={"陈守一"},
+        settled_checks="陈守一｜图书馆使用 检定（normal）：普通成功（成功 (37 ≤ 38)）",
+    )
+    joined = "\n".join(m["content"] for m in msgs)
+
+    assert "图书馆使用" in joined                      # 骰子进了提示
+    assert "已经掷过的检定" in joined
+    assert "被检定授权过的动作不算" in joined            # 豁免写明了
+    # 豁免只针对掷过的那些，没检定的信息获取仍算代演
+    assert "没有对应检定" in joined
+
+
+def test_没掷骰时不多塞这一段():
+    plan = TurnPlan()
+    msgs = turn_validator.build_validator_messages(
+        plan, "灯灭了。", turn_inputs="[陈守一 行动] 我等着",
+    )
+    # 查的是那一整块上下文没塞进去；豁免那句规则是常驻的，不掷骰时也在
+    assert "结果已定，写出它的成败" not in "\n".join(m["content"] for m in msgs)

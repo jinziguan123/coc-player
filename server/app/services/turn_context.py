@@ -144,6 +144,24 @@ def _shown_turn_context(events: list, party_char_ids: set[str]) -> str:
     return "\n".join(lines)
 
 
+def _settled_checks_context(events: list) -> str:
+    """本轮已经掷过的检定，供终检把「裁定结果」和「越权代演」区分开。
+
+    不给这个的话终检只看得到玩家说了什么，看不到骰子。于是「玩家宣言查登记簿 → 图书馆
+    使用检定通过 → KP 写他翻到并读出了哪几条」会被判成代演——理由是「替玩家完成了探索
+    动作与信息获取」。可那正是检定通过该有的结果，写出来是 KP 的本职。
+
+    线上实录：陈守一那局，图书馆使用 37≤38 普通成功，旁白照实写了他找到登记簿并读取，
+    终检把整段改写掉了。
+    """
+    lines = [
+        (getattr(event, "content", "") or "").strip()
+        for event in _current_turn_events(events or [])
+        if getattr(event, "event_type", None) == "dice"
+    ]
+    return "\n".join(line for line in lines if line)
+
+
 def commit_pending_travel(db: Session, session_id: str, turn: list | None = None) -> None:
     """把本回合已转正的『前往』动作落成确定性位置同步。
 
@@ -462,6 +480,7 @@ async def _validate_and_patch_narration(
     llm, plan: turn_planner.TurnPlan | None, result: list,
     event_order: list | None = None, seen_context: str = "", turn_inputs: str = "",
     on_start=None, party_names=None, location_context: str = "",
+    settled_checks: str = "",
 ) -> None:
     """校验本轮旁白是否违反裁定计划的硬约束（泄露 do_not_reveal / 汇报体+内部标识泄露），
     违反则用改写版本替换落库文本，防止违规内容永久留在会话记录里。
@@ -482,6 +501,9 @@ async def _validate_and_patch_narration(
         validator_kwargs["party_names"] = sorted(party_names)
     if location_context:
         validator_kwargs["location_context"] = location_context
+    if settled_checks:
+        # 掷过的骰要一并告诉它，否则「检定通过后写出所得」会被判成代演
+        validator_kwargs["settled_checks"] = settled_checks
     validation = await turn_validator.validate_turn_narration(
         llm, plan, result[0], on_start=on_start, **validator_kwargs,
     )

@@ -69,7 +69,7 @@ def _looks_suspicious(
 def build_validator_messages(
     plan: TurnPlan, narration: str, seen_context: str = "",
     turn_inputs: str = "", party_names: Iterable[str] | None = None,
-    location_context: str = "",
+    location_context: str = "", settled_checks: str = "",
 ) -> list[dict]:
     do_not_reveal = json.dumps(plan.safety.do_not_reveal, ensure_ascii=False)
     seen_block = (
@@ -80,6 +80,13 @@ def build_validator_messages(
         "\n\n【本轮已在界面展示的玩家/队友消息】（只能承接，不得复述、润色或代演）：\n"
         + turn_inputs.strip() + "\n"
     ) if turn_inputs.strip() else ""
+    # 没有这一段的话，终检只看得见玩家说了什么、看不见骰子——于是「宣言查登记簿 →
+    # 图书馆使用通过 → 写他翻到了哪几条」会被判成代演。那正是检定通过该有的结果。
+    checks_block = (
+        "\n\n【本轮已经掷过的检定】（结果已定，写出它的成败、以及角色为此做了什么、"
+        "因此看到或得到了什么，都是 KP 的本职）：\n"
+        + settled_checks.strip() + "\n"
+    ) if settled_checks.strip() else ""
     location_block = (
         "\n\n【系统确定的当前位置硬约束】（旁白发生地点必须与此一致，违反必须改写）：\n"
         + location_context.strip() + "\n"
@@ -110,7 +117,7 @@ def build_validator_messages(
                 "本轮必须对玩家保密的**隐藏真相**（其身份/本质/成因/幕后关联/后果，玩家须靠游戏"
                 "自行揭开）：\n"
                 f"{do_not_reveal}\n"
-                + party_block + seen_block + turn_block + location_block +
+                + party_block + seen_block + turn_block + checks_block + location_block +
                 "\n判定标准——**只拦「点破真相」，不拦「亲历现象」**：\n"
                 "· 违规 = 旁白**命名、点破或解释**了上述隐藏真相：直接说出它是什么/是谁/为何发生/"
                 "将导致什么；或让角色的内心「已然明白/认出」了这层真相（等于把答案塞进玩家脑子）；"
@@ -127,6 +134,10 @@ def build_validator_messages(
                 "或替他们补一次没发生过的观察（「他方才就注意到了」——那等于跳过检定直接把信息给了他）。"
                 "把玩家宣言的一个动作擅自扩写成一串新动作（只说「听听声音」却写成掏纸笔临摹、叩墙、"
                 "逐寸摸索）同样算。\n"
+                "   **被检定授权过的动作不算**：本轮掷过的检定（若上面列了），写角色为完成它"
+                "做了什么、以及因此看到或得到了什么，都是在叙述裁定结果，不是代演——检定通过却"
+                "不许写出所得，等于白掷。只有**没有对应检定**的信息获取，才算「替他补一次没发生"
+                "过的观察」。\n"
                 "   **下列不算代演，一律不要改**：伴随语气的姿态与小动作（摇一摇扇子、皱眉、屏住呼吸、"
                 "指节收紧）、环境作用在角色身上的感官与生理反应（凉意顺着指腹爬上来、耳鸣、汗毛立起）、"
                 "NPC 主动对角色作出的反应。判据是**有没有后果**——不改变位置、不产生新信息、"
@@ -150,6 +161,7 @@ async def validate_turn_narration(
     llm: Any, plan: TurnPlan | None, narration: str, seen_context: str = "",
     turn_inputs: str = "", on_start: Callable[[], None] | None = None,
     party_names: Iterable[str] | None = None, location_context: str = "",
+    settled_checks: str = "",
 ) -> TurnValidation | None:
     """校验一段已生成的旁白是否违反本轮裁定计划的硬约束，违反则给出改写版本。
 
@@ -170,7 +182,7 @@ async def validate_turn_narration(
 
     messages = build_validator_messages(
         plan, narration, seen_context, turn_inputs, party_names=party_names,
-        location_context=location_context,
+        location_context=location_context, settled_checks=settled_checks,
     )
     try:
         # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限会把 JSON 截成半截
