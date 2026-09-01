@@ -16,7 +16,7 @@ from app.services import (
     turn_context,
     turn_effects,
 )
-from app.services.event_protocol import event_to_chunk, make_chunk as _make_chunk
+from app.services.event_protocol import event_to_chunk, make_chunk as _make_chunk, split_ooc
 
 _resolve_opposed = dice_runtime._resolve_opposed
 _exec_generic_roll = dice_runtime._exec_generic_roll
@@ -59,11 +59,25 @@ async def execute_human_kp_action(
         content = str(payload.get("content") or "").strip()
         if not content:
             raise ValueError("叙事内容不能为空")
-        ev = session_service.add_event(
-            db, session_id, "narration", content, actor_name="KP",
-            metadata={"kp_manual": True},
-        )
-        return [event_to_chunk(ev)], "叙事已发布"
+        # 小括号里的话不算旁白，与玩家侧同一个约定（见 event_protocol.split_ooc）。
+        # KP 不占玩家席、没有发言框，此前想跟同桌说句「稍等，我翻一下本子」都没地方说，
+        # 只能混在旁白里发出去——那会被当成故事的一部分，还会进 KP 的上下文。
+        body, aside = split_ooc(content)
+        chunks = []
+        if body:
+            chunks.append(event_to_chunk(session_service.add_event(
+                db, session_id, "narration", body, actor_name="KP",
+                metadata={"kp_manual": True},
+            )))
+        if aside:
+            chunks.append(event_to_chunk(session_service.add_event(
+                db, session_id, "ooc", aside, actor_name="KP",
+            )))
+        if not chunks:
+            raise ValueError("叙事内容不能为空")
+        if not body:
+            return chunks, "场外发言已发出"
+        return chunks, "叙事已发布" if not aside else "叙事已发布，场外话另发了一条"
 
     if action == "dialogue":
         ref = str(payload.get("npc_id") or payload.get("actor_name") or "").strip()
@@ -79,20 +93,30 @@ async def execute_human_kp_action(
         )
         actor_id = str(npc.get("id")) if npc and npc.get("id") else None
         actor_name = str(npc.get("name") or ref) if npc else ref
+        # 台词里的小括号同样不算台词——「（他其实在说谎）」这种给同桌看的注解，
+        # 不该被 NPC 说出口，也不该进上下文当成他真讲过的话。
+        line, aside = split_ooc(content)
+        if not line:
+            raise ValueError("台词内容不能为空——整句都在小括号里的话，用叙事框发场外话")
         ev = session_service.add_event(
-            db, session_id, "dialogue", content,
+            db, session_id, "dialogue", line,
             actor_id=actor_id, actor_name=actor_name,
             metadata={"kp_manual": True},
         )
         if npc:
             _attach_npc_portrait(db, session_id, module, ev)
         metadata = {"portrait": (ev.metadata_ or {}).get("portrait")} if (ev.metadata_ or {}).get("portrait") else None
-        return [
+        chunks = [
             _make_chunk(
-                "dialogue", content, actor_name=actor_name, actor_id=actor_id,
+                "dialogue", line, actor_name=actor_name, actor_id=actor_id,
                 event_id=ev.id, metadata=metadata,
             )
-        ], "NPC 台词已发布"
+        ]
+        if aside:
+            chunks.append(event_to_chunk(session_service.add_event(
+                db, session_id, "ooc", aside, actor_name="KP",
+            )))
+        return chunks, "NPC 台词已发布" if not aside else "台词已发布，场外话另发了一条"
 
     if action == "dice_check":
         kv = {str(k): str(v) for k, v in payload.items() if v is not None}

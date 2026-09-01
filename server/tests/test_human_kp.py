@@ -346,3 +346,71 @@ def test_human_kp_check_hides_unmet_npc_but_keeps_true_name_in_receipt(tmp_path)
     assert payload["metadata"]["actor"] == npc_identity.UNKNOWN_LABEL
     assert "守门人" not in payload["content"]
     assert "守门人" in result          # KP 回执照旧
+
+
+# ── 小括号 = 场外，与玩家侧同一个约定 ──────────────────────────────────
+
+def test_kp_旁白里的小括号单独发成场外(tmp_path):
+    """KP 不占玩家席、没有发言框，此前想跟同桌说句话只能混在旁白里发。
+
+    那会被当成故事的一部分落进 narration，还会进 KP 的上下文——下一轮它可能把
+    「稍等我翻一下本子」当成剧情接着演。
+    """
+    db = _db(tmp_path)()
+    module, _hero, session = _seed(db)
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "narration",
+        {"content": "门厅的灯突然熄灭。（稍等，我翻一下本子）"},
+    ))
+
+    events = db.query(EventLog).filter(EventLog.session_id == session.id).all()
+    kinds = {e.event_type: e.content for e in events}
+    assert kinds["narration"] == "门厅的灯突然熄灭。"
+    assert kinds["ooc"] == "稍等，我翻一下本子"
+    assert len(chunks) == 2
+    assert "场外" in result
+
+
+def test_kp_整句都在括号里就只发场外(tmp_path):
+    db = _db(tmp_path)()
+    module, _hero, session = _seed(db)
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "narration", {"content": "（我去倒杯水，五分钟）"},
+    ))
+
+    events = db.query(EventLog).filter(EventLog.session_id == session.id).all()
+    assert [e.event_type for e in events] == ["ooc"]
+    assert events[0].content == "我去倒杯水，五分钟"
+    assert events[0].actor_name == "KP"
+    assert len(chunks) == 1
+    assert result == "场外发言已发出"
+
+
+def test_kp_没有括号时照旧只发旁白(tmp_path):
+    db = _db(tmp_path)()
+    module, _hero, session = _seed(db)
+    _chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "narration", {"content": "门厅的灯突然熄灭。"},
+    ))
+    events = db.query(EventLog).filter(EventLog.session_id == session.id).all()
+    assert [e.event_type for e in events] == ["narration"]
+    assert result == "叙事已发布"
+
+
+def test_NPC_台词里的括号是给同桌的注解不是台词(tmp_path):
+    """「（他其实在说谎）」不该被 NPC 说出口，也不该进上下文当成他真讲过的话。"""
+    db = _db(tmp_path)()
+    module, _hero, session = _seed(db)
+    npc = (module.npcs or [{}])[0]
+    ref = str(npc.get("name") or npc.get("id") or "")
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "dialogue",
+        {"npc_id": ref, "content": "我什么都没看见。（他其实在说谎）"},
+    ))
+
+    events = db.query(EventLog).filter(EventLog.session_id == session.id).all()
+    kinds = {e.event_type: e.content for e in events}
+    assert kinds["dialogue"] == "我什么都没看见。"
+    assert kinds["ooc"] == "他其实在说谎"
+    assert len(chunks) == 2
+    assert "场外" in result

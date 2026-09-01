@@ -2338,7 +2338,8 @@ export function GameSessionPage() {
         )}
         {isKp ? (
           <div className="chat-input-bar chat-input-bar--kp">
-            用右侧 KP 工作台推进本回合。你是 KP，不占玩家席，因此没有发言框。
+            用右侧 KP 工作台推进本回合。你是 KP，不占玩家席，所以没有单独的发言框——
+            想跟同桌说句场外的话，写在叙事框的（圆括号）里即可。
           </div>
         ) : (
         <div className="chat-input-bar">

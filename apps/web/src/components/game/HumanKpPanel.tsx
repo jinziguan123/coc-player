@@ -898,7 +898,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
                 <textarea
                   value={fields.content || ''}
                   onChange={(event) => setField('content', event.target.value)}
-                  placeholder="输入要发布给全桌的旁白"
+                  placeholder="输入要发布给全桌的旁白；（圆括号）内为场外，不进故事"
                   className="input min-h-16 min-w-0 flex-1 resize-y text-xs"
                 />
                 <button type="button" onClick={toggleDictation} className="btn-secondary !p-2" title="语音转文字">
