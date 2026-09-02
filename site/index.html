@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CoC Player —— AI 当守秘人的本地跑团桌面应用</title>
-<meta name="description" content="CoC Player 是一个本地优先的 AI 跑团桌面应用：AI 担任守秘人和 NPC，你可以独自开团，也可以在可信局域网里叫上朋友。数据和素材存在你自己的机器上。">
+<title>CoC Player：AI 当守秘人的本地跑团桌面应用</title>
+<meta name="description" content="CoC Player 是一个跑团桌面应用，AI 当守秘人和 NPC，一个人也能开团，也能叫上朋友一起。模组、角色卡和存档都留在你自己的电脑上。">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
-<meta property="og:title" content="CoC Player —— AI 当守秘人的本地跑团桌面应用">
-<meta property="og:description" content="AI 担任守秘人和 NPC，一个人也能开团。本地优先，数据存在自己机器上。macOS / Windows 桌面应用。">
+<meta property="og:title" content="CoC Player：AI 当守秘人的本地跑团桌面应用">
+<meta property="og:description" content="AI 当守秘人和 NPC，一个人也能开团。数据都留在自己电脑上。macOS / Windows 桌面应用。">
 <!-- 部署到正式域名后，把下面两行换成绝对地址，否则部分平台抓不到预览图 -->
 <meta property="og:image" content="assets/shots/gothic-home.webp">
 <meta name="twitter:card" content="summary_large_image">
@@ -506,10 +506,10 @@
       <h1>CoC Player</h1>
       <p class="sub">AI 当守秘人的本地跑团桌面应用</p>
       <p class="pitch">
-        AI 担任守秘人（KP）和所有 NPC，你一个人也能开一场团；
-        也可以在可信局域网里叫上朋友，空着的席位交给 AI 队友。
-        想自己带团就反过来——你当守秘人，AI 退到副手位递草稿。
-        模组、角色卡和游戏记录都存在你自己的机器上。
+        AI 当守秘人（KP），顺带演所有 NPC，所以一个人也开得了团。
+        叫上朋友也行，坐不满的席位给 AI 队友。
+        想自己带团就反过来，你当守秘人，AI 在旁边递草稿。
+        模组、角色卡和游戏记录都留在你自己的电脑上。
       </p>
 
       <div class="dl-row">
@@ -524,8 +524,8 @@
       </div>
       <p class="dl-meta" id="dl-meta"></p>
       <p class="dl-caveat">
-        <strong>装好还不能直接玩：</strong>你需要自备一个 AI 模型接口（OpenAI 兼容协议或 Anthropic 协议），
-        在应用的「设置 → AI 配置」里填好并测通。本项目不提供模型服务，也不代收费用。
+        <strong>装好还不能直接玩：</strong>得自己有一个 AI 模型接口（OpenAI 兼容或 Anthropic 协议都行），
+        在应用的「设置 → AI 配置」里填好、测通。本项目不提供模型，也不经手费用。
       </p>
       </div>
 
@@ -543,8 +543,8 @@
       <p class="eyebrow">Before you download</p>
       <h2>下载前先看这四件事</h2>
       <p class="section-lede">
-        装上之后还有两件事得你自己做：接一个模型，准备一个本子。
-        下面几条如果有一条不能接受，先别下。
+        装上之后还有两件事得你自己做：接一个模型，准备一个本子。另外两条是安全上的提醒。
+        有一条接受不了，就先别下。
       </p>
 
       <div class="notice">
@@ -552,8 +552,8 @@
         <div>
           <h3>要自备 AI 模型接口</h3>
           <p>
-            支持 OpenAI 兼容协议与 Anthropic 协议，模型、接口地址和上下文窗口都可以自己配。
-            密钥只存在本机的 <code>ai_settings.json</code>，不会上传到任何地方。模型调用产生的费用由你和模型服务商结算。
+            OpenAI 兼容协议和 Anthropic 协议都行，模型、接口地址、上下文窗口自己填。
+            密钥只存在本机的 <code>ai_settings.json</code> 里，不会传到任何地方。调用模型花的钱，你直接付给模型服务商，跟本项目没关系。
           </p>
         </div>
       </div>
@@ -563,9 +563,9 @@
         <div>
           <h3>安装包没有做代码签名和公证</h3>
           <p>
-            所以首次打开会被系统拦。macOS：在应用上<strong>右键 → 打开</strong>，再确认一次就行；
+            所以第一次打开会被系统拦下。macOS：在应用上<strong>右键 → 打开</strong>，再确认一次就行；
             Windows：SmartScreen 弹窗里点<strong>「更多信息」→「仍要运行」</strong>。
-            介意这一点的话，可以按仓库文档自己从源码构建。
+            不放心的话，照仓库文档自己从源码构建一份。
           </p>
         </div>
       </div>
@@ -575,9 +575,9 @@
         <div>
           <h3>只适用于本机和可信网络</h3>
           <p>
-            后端默认只监听回环地址，同一网络的其他设备也连不上；要让朋友加入，需要房主在「设置 → 联机」
-            里显式打开并重启应用。本项目<strong>没有账号体系，也没有传输加密</strong>，
-            请不要把它暴露到公网或做端口转发。
+            装好之后它只听本机，同一个 Wi-Fi 下的别的设备也连不上。要让朋友进来，房主得去「设置 → 联机」
+            里手动打开，再重启应用。它<strong>没有账号，也不加密传输</strong>，
+            别放到公网上，也别做端口转发。
           </p>
         </div>
       </div>
@@ -587,8 +587,8 @@
         <div>
           <h3>规则书和模组要你自己准备</h3>
           <p>
-            安装包里只随附项目原创的示例短团。你自己的规则书 PDF、模组和角色卡由你导入，
-            版权与授权也由你自己负责，详见
+            安装包里只带了一个项目自己写的示例短团。规则书 PDF、模组、角色卡都得你自己导入，
+            有没有权用也是你自己的事，详见
             <a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
           </p>
         </div>
@@ -609,32 +609,32 @@
         <div class="card">
           <svg class="icon"><use href="#i-sparkles"/></svg>
           <h3>AI 主持与 NPC</h3>
-          <p>AI 描述场景、扮演所有 NPC、决定何时该掷骰。叙述按 token 流式推送，长局会滚动生成剧情摘要，上下文有预算控制。</p>
+          <p>AI 描述场景、扮演所有 NPC、决定什么时候该掷骰。文字是一个词一个词出来的，不用等整段。局跑长了会自动写剧情摘要，免得模型忘了前面发生过什么。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-dice"/></svg>
           <h3>骰子不交给模型猜</h3>
-          <p>检定、理智、战斗、追逐都由确定性规则引擎结算，AI 只负责「要不要检定、多难」这类语义裁量。3D 骰子按预定结果真投。</p>
+          <p>掷出多少点是程序算的，不是模型编的。检定、理智、战斗、追逐都走规则引擎结算，AI 只决定「这里要不要检定、难度多少」。屏幕上的 3D 骰子会滚到算好的那个数上。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-scroll"/></svg>
           <h3>模组导入与 AI 解析</h3>
-          <p>支持文本、PDF、Word 和常见图片格式（图片需视觉模型）。AI 把本子拆成场景、NPC、线索和时间线，还能生成六边形沙盘。</p>
+          <p>文本、PDF、Word、图片都能传，图片要接视觉模型。AI 把本子拆成场景、NPC、线索和时间线，地图画成六边形沙盘。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-users"/></svg>
           <h3>车卡与角色管理</h3>
-          <p>CoC 七版车卡向导：掷骰或自定义属性、112 个职业、技能加点、背景与随身物品；也支持 Excel 导入和 AI 生成。</p>
+          <p>CoC 七版车卡向导：掷骰或手填属性、112 个职业、技能加点、背景与随身物品。有现成的卡就导 Excel，懒得动手就让 AI 生成一张。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-book"/></svg>
           <h3>规则书按需检索</h3>
-          <p>把规则书 PDF 拖进来，在本地建可检索索引。守秘人遇到拿不准的精确规则时会按需查阅原文再裁定，嵌入模型跑在本机。</p>
+          <p>把规则书 PDF 拖进来，它在本机建索引。AI 守秘人碰到拿不准的规则，先翻原文再裁定。建索引用的模型也跑在本机。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-network"/></svg>
           <h3>多人同桌</h3>
-          <p>多席位房间、房间码、等待大厅、真人认领席位，空位交给 AI 队友。同一局域网直连，或用内置的点对点直连组网。</p>
+          <p>建房拿房间码，朋友进大厅认领席位，没人坐的位子给 AI 队友。在同一个 Wi-Fi 下直接连；不在一块儿就用内置直连，发个邀请码过去。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-scroll"/></svg>
@@ -664,7 +664,7 @@
         <ul>
           <li><svg class="icon"><use href="#i-check"/></svg><span>卡住时让 AI 拟一段旁白草稿或给条裁定建议，采不采用你说了算</span></li>
           <li><svg class="icon"><use href="#i-check"/></svg><span>模组原文和规则书就地检索，不用切窗口翻本子</span></li>
-          <li><svg class="icon"><use href="#i-check"/></svg><span>玩家席可以全交给 AI 队友——一个人也能把本子先跑一遍</span></li>
+          <li><svg class="icon"><use href="#i-check"/></svg><span>玩家席可以全交给 AI 队友，一个人先把本子跑一遍也行</span></li>
           <li><svg class="icon"><use href="#i-check"/></svg><span>暗骰结果只有你看得见，玩家那侧只知道「掷过了」</span></li>
         </ul>
         </div>
@@ -678,7 +678,7 @@
       <div class="feature">
         <div class="feature-text">
           <h3>把本子交给 AI，拆成能跑的结构</h3>
-          <p>导入的模组会被解析成场景、NPC、线索与时间线；地点之间的通路生成为六边形沙盘，游戏里玩家只看得到已知晓的部分。</p>
+          <p>AI 把导入的模组拆成场景、NPC、线索和时间线，地点之间怎么走画成一张六边形沙盘。开局后玩家只看得见自己已经知道的那部分。</p>
           <ul>
             <li><svg class="icon"><use href="#i-check"/></svg><span>详情 / 关系图 / 时间线 / 沙盘 四种视图</span></li>
             <li><svg class="icon"><use href="#i-check"/></svg><span>含 NPC 秘密与真相的视图有剧透警告</span></li>
@@ -694,11 +694,11 @@
       <div class="feature flip">
         <div class="feature-text">
           <h3>这一桌的规矩，写下来给 AI 守秘人看</h3>
-          <p>这些「村规」逐项可调：大成功阈值、大失败口径、奖惩骰上限、临时疯狂门槛、要不要做成长检定。改动对所有用这套规则的房间生效。</p>
+          <p>这些「村规」每条都能改：大成功阈值、大失败口径、奖惩骰上限、临时疯狂门槛、要不要做成长检定。改动对所有用这套规则的房间生效。</p>
           <ul>
             <li><svg class="icon"><use href="#i-check"/></svg><span>改参数的项直接影响骰子结算</span></li>
             <li><svg class="icon"><use href="#i-check"/></svg><span>「桌面约定」是自由文本，只影响怎么演</span></li>
-            <li><svg class="icon"><use href="#i-check"/></svg><span>规则书 PDF 在本地建索引，仅支持含文字层的 PDF</span></li>
+            <li><svg class="icon"><use href="#i-check"/></svg><span>规则书 PDF 在本地建索引，纯扫描件不行，得能选中文字</span></li>
           </ul>
         </div>
         <figure class="shot" style="margin-top:0">
@@ -710,7 +710,7 @@
       <div class="feature">
         <div class="feature-text">
           <h3>六步车卡，或者让 AI 替你捏一个</h3>
-          <p>按 CoC 七版流程走完基本信息、属性、职业、技能、背景与随身物品；中途可以暂存草稿。已经有卡的话，直接导入 Excel 角色卡。</p>
+          <p>按 CoC 七版流程走完基本信息、属性、职业、技能、背景与随身物品；中途可以先存着，下次接着填。已经有卡的话，直接导入 Excel 角色卡。</p>
           <ul>
             <li><svg class="icon"><use href="#i-check"/></svg><span>112 个职业、52 件装备、106 件武器</span></li>
             <li><svg class="icon"><use href="#i-check"/></svg><span>年龄档修正、教育增强、派生值自动结算</span></li>
@@ -739,12 +739,12 @@
         <div class="card">
           <svg class="icon"><use href="#i-sparkles"/></svg>
           <h3>一个人也能开</h3>
-          <p>空着的席位交给 AI 队友，不必等人凑齐。他们各有性格与记忆，会自己行动、自己掷骰，也会记得你对他们说过什么。</p>
+          <p>空着的席位交给 AI 队友，不必等人凑齐。每个队友有自己的性格，会自己行动、自己掷骰，你跟他们说过的话，他们记得。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-scroll"/></svg>
           <h3>谁当守秘人，建房时定</h3>
-          <p>交给 AI，或者你自己来——选真人 KP 的话你只占守秘人席，朋友用房间码进来坐玩家席，AI 负责在你卡住时递草稿。</p>
+          <p>交给 AI，或者你自己来。选真人 KP 的话，你只占守秘人席，朋友用房间码进来坐玩家席，你卡住了 AI 递草稿。</p>
         </div>
         <div class="card">
           <svg class="icon"><use href="#i-network"/></svg>
@@ -754,7 +754,7 @@
         <div class="card">
           <svg class="icon"><use href="#i-laptop"/></svg>
           <h3>隔着网络</h3>
-          <p>房主开「内置直连」发一条邀请码，对方粘进「加入房间」就行，不用另外装联网工具，也不必做端口转发。双方都得用桌面版：隧道跑在应用外壳里，浏览器里没有它。</p>
+          <p>房主开「内置直连」发一条邀请码，对方粘进「加入房间」就行，不用另外装联网工具，也不必做端口转发。双方都得用桌面版，在浏览器里打开的那份没有这个功能。</p>
         </div>
       </div>
     </div>
@@ -773,11 +773,11 @@
         </div>
         <div class="step">
           <h3>接一个模型</h3>
-          <p>「设置 → AI 配置」新增一个 OpenAI 兼容或 Anthropic 配置，填好接口地址、密钥和模型名，点「测试」确认连通后激活。</p>
+          <p>在「设置 → AI 配置」新增一个 OpenAI 兼容或 Anthropic 配置，填接口地址、密钥和模型名，点「测试」，通了再启用。</p>
         </div>
         <div class="step">
           <h3>开第一场团</h3>
-          <p>回首页点「体验新手团」，十分钟走完一场微型调查；或者进「开始游戏」，用自己的模组和角色建房，把房间码发给朋友。建房那步还要选谁当守秘人：交给 AI，或者你自己上。</p>
+          <p>回首页点「体验新手团」，跟着走完一个小短团；或者进「开始游戏」，用自己的模组和角色建房，把房间码发给朋友。建房时还要选谁当守秘人，交给 AI 或者你自己上。</p>
         </div>
       </div>
 
@@ -795,7 +795,7 @@
       <p class="eyebrow">Where it stops</p>
       <h2>能力边界，先说清楚</h2>
       <p class="section-lede">
-        开源项目最怕的是宣传跑在实现前面。下面这些是当前版本明确做不到、或者还不稳的部分。
+        下面是这一版做不到、或者还不稳的地方，下载之前先看一眼。
       </p>
 
       <div class="ledger">
@@ -803,26 +803,26 @@
           <div>CoC 七版覆盖度</div>
           <div>
             <span class="tag">部分</span>
-            属性、建卡、技能与对抗检定、理智与疯狂发作、战斗、追逐、成长都由引擎确定性结算；
-            <strong>孤注一掷、花费幸运目前只有 AI 裁量，没有引擎强制</strong>；不定性疯狂与魔法尚未实现。
+            属性、建卡、技能与对抗检定、理智与疯狂发作、战斗、追逐、成长都由引擎按规则算；
+            <strong>孤注一掷、花费幸运目前只靠 AI 判断，引擎不管</strong>；不定性疯狂和魔法还没做。
             逐项对照见<a href="https://github.com/jinziguan123/coc-player/blob/master/docs/coc-rule-coverage.md" target="_blank" rel="noopener">规则覆盖矩阵</a>。
           </div>
         </div>
         <div class="ledger-row">
           <div>DnD</div>
-          <div><span class="tag muted">未实现</span>可以作为模组和角色的数据类型选，但完整规则引擎和游戏流程都还没做。</div>
+          <div><span class="tag muted">未实现</span>建模组和角色时能选上这个标签，但规则引擎和游戏流程都还没做。</div>
         </div>
         <div class="ledger-row">
           <div>叙事质量</div>
-          <div><span class="tag muted">看模型</span>模组解析、开场和长局叙事的质量，很大程度取决于你接的模型、上下文窗口和供应商兼容性。工具调用模式、战斗子代理、规则书检索和图片解析都需要按模型分别验证。</div>
+          <div><span class="tag muted">看模型</span>模组拆得好不好、开场和长局讲得怎么样，主要看你接的是什么模型、上下文窗口多大、服务商兼容得怎么样。换一个模型，工具调用、战斗、规则书检索、图片识别这几块都得重新试，不保证都好用。</div>
         </div>
         <div class="ledger-row">
           <div>桌面分发</div>
-          <div><span class="tag muted">未签名</span>没有代码签名、公证和自动更新。也没有做过公开渠道的恶意软件扫描流程，介意的话请从源码自行构建。</div>
+          <div><span class="tag muted">未签名</span>没有代码签名、公证，也没有自动更新。安装包没送去做过任何恶意软件扫描，不放心就从源码自己构建。</div>
         </div>
         <div class="ledger-row">
           <div>联机身份</div>
-          <div><span class="tag muted">轻量</span>局域网身份是本地生成的 <code>X-Player-Token</code>，只能用于可信网络里的轻量席位归属，不是认证。同一网络里知道地址和房间码的人就能读写房间、消耗房主配置的 AI 额度。</div>
+          <div><span class="tag muted">轻量</span>联机时的身份只是本机随机生成的一个令牌，用来记住谁坐哪个席位，不是登录验证。同一网络里知道地址和房间码的人都能进房间改东西，也能花房主的 AI 额度。</div>
         </div>
         <div class="ledger-row">
           <div>音频</div>
@@ -852,7 +852,7 @@
         <div class="card">
           <svg class="icon"><use href="#i-map"/></svg>
           <h3>代码地图</h3>
-          <p>一张可交互的架构图：从玩家动作到回合编排、规则引擎、AI 代理与模型调用，每个节点都能跳到对应源码。</p>
+          <p>一张能点的架构图：从玩家动作到回合编排、规则引擎、AI 代理、模型调用，每个节点都能跳到对应源码。</p>
           <p style="margin-top:12px"><a href="arch.html">查看架构图</a></p>
         </div>
         <div class="card">
@@ -869,9 +869,9 @@
           <h3>许可证与内容边界</h3>
           <p>
             项目代码采用 <a href="https://github.com/jinziguan123/coc-player/blob/master/LICENSE" target="_blank" rel="noopener">Apache License 2.0</a>。
-            这不自动授权规则书、商业模组、用户上传内容、字体、模型权重或其他第三方素材，
-            完整范围见<a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
-            你导入的内容，版权与授权由你自己负责；本应用提供的导入、解析、索引和生成能力不改变输入内容的版权归属。
+            许可只管代码，不包括规则书、商业模组、你上传的内容、字体、模型权重这些第三方素材，
+            范围见<a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
+            导进来的东西版权归谁还归谁，有没有权用是你自己的事；应用帮你解析、索引、生成，不会因此改变它的归属。
           </p>
         </div>
       </div>
@@ -885,8 +885,8 @@
       <div>
         <div class="wordmark" style="font-size:18px">CoC Player</div>
         <p style="margin:10px 0 0;max-width:340px">
-          本地优先的 AI 跑团桌面应用。适合本机游玩、开发测试和可信局域网联机，
-          没有账号体系，也没有传输加密，别拿它面向公网部署。
+          AI 当守秘人的跑团桌面应用，数据都在本机。自己玩、和朋友联机都行，
+          但它没有账号，也不加密传输，别放到公网上。
         </p>
       </div>
       <div>
