@@ -878,6 +878,7 @@ async def _process_commands(
                     chat_event_writer.persist_narration(
                         db, session_id, cont_result,
                         attach_npc_portraits=_attach_npc_portraits,
+                        model=chat_event_writer.model_name(llm),
                     )
                 _record_npc_say_memory(
                     db, session_id, game_session, module, cont_result[2], grp["members"],
@@ -905,6 +906,7 @@ async def _process_commands(
                 if cont_narration:
                     session_service.add_event(
                         db, session_id, "narration", cont_narration, actor_name="KP",
+                        metadata=chat_event_writer.model_meta(llm),
                     )
                 for npc_name, dialogue_text in cont_result[2]:
                     ev = session_service.add_event(

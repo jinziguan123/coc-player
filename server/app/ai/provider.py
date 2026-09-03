@@ -29,6 +29,25 @@ def strip_provider_keys(messages: list[dict]) -> list[dict]:
     return out
 
 
+def model_name(llm_or_agent) -> str | None:
+    """取一次生成所用的模型名，供落库时打在旁白 metadata 上（按模型分组统计文风）。
+
+    接受 Provider 本身，或包着 Provider 的 agent（BaseAgent.llm）。拿不到就返回 None，
+    调用方据此**不写键**，旧存档与测试里的假 llm 都走这条路。
+    """
+    for obj in (llm_or_agent, getattr(llm_or_agent, "llm", None)):
+        name = getattr(obj, "model", None)
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
+
+
+def model_meta(llm_or_agent) -> dict:
+    """旁白 metadata 里的模型戳：{"model": 名字}；拿不到模型名就给空 dict，不写键。"""
+    name = model_name(llm_or_agent)
+    return {"model": name} if name else {}
+
+
 @dataclass
 class ToolCall:
     """一次完整的工具调用（流式聚合完成后才产出，arguments 已解析为 dict）。"""

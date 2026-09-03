@@ -14,6 +14,7 @@ from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import KPAgent
 from app.ai.context import build_kp_context
 from app.ai.llm_factory import get_fast_llm, get_llm
+from app.ai.provider import model_name
 from app.ai.providers import openai_compat
 from app.ai.prompts.kp_system import (
     CHECK_REQUEST_PROMPT,
@@ -203,14 +204,19 @@ async def _finish_generation(db: Session, session_id: str, llm) -> None:
 
 def _persist_narration(
     db: Session, session_id: str, result: list, event_order: list | None = None,
+    *, llm=None,
 ) -> None:
-    """兼容入口；叙事清洗和落库由 chat_event_writer 负责。"""
+    """兼容入口；叙事清洗和落库由 chat_event_writer 负责。
+
+    ``llm`` 是生成这段旁白的 Provider（或包着它的 KPAgent），只用来取模型名打进 metadata。
+    """
     chat_event_writer.persist_narration(
         db,
         session_id,
         result,
         event_order,
         attach_npc_portraits=_attach_npc_portraits,
+        model=model_name(llm),
     )
 
 
@@ -499,7 +505,7 @@ async def _run_generation(
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
-            _persist_narration(db, session_id, result, event_order)
+            _persist_narration(db, session_id, result, event_order, llm=llm)
             _reorder_turn_events(db, session_id, event_order, base_seq)
             raise
         _record_turn_usage(db, game_session, llm, events, messages)   # validator 前，趁 last_usage 仍是主叙事那次
@@ -509,7 +515,7 @@ async def _run_generation(
             settled_checks=_settled_checks_context(events),
             party_names=party_names, location_context=location_guard,
         )
-        _persist_narration(db, session_id, result, event_order)
+        _persist_narration(db, session_id, result, event_order, llm=llm)
         _reorder_turn_events(db, session_id, event_order, base_seq)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
         _record_npc_say_memory(
@@ -528,7 +534,7 @@ async def _run_generation(
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
             # CancelledError(继承 BaseException) 与普通异常都先把已生成片段落库再上抛
-            _persist_narration(db, session_id, result)
+            _persist_narration(db, session_id, result, llm=llm)
             raise
         _record_turn_usage(db, game_session, llm, events, messages)   # validator 前，趁 last_usage 仍是主叙事那次
         await _validate_and_patch_narration(
@@ -537,7 +543,7 @@ async def _run_generation(
             settled_checks=_settled_checks_context(events),
             party_names=party_names, location_context=location_guard,
         )
-        _persist_narration(db, session_id, result)
+        _persist_narration(db, session_id, result, llm=llm)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
         _record_npc_say_memory(
             db, session_id, game_session, module, result[2],
@@ -715,7 +721,7 @@ async def _run_split_narrations(
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
-            _persist_narration(db, session_id, result)
+            _persist_narration(db, session_id, result, llm=llm)
             raise
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
@@ -727,7 +733,7 @@ async def _run_split_narrations(
                 location_guard if player_char.name in (grp.get("members") or []) else ""
             ),
         )
-        _persist_narration(db, session_id, result)
+        _persist_narration(db, session_id, result, llm=llm)
         # 世界记忆钩子 c：本组 NPC 台词记入其互动史（听众＝该组成员，信息不跨组共享）
         _record_npc_say_memory(
             db, session_id, game_session, module, result[2], grp["members"],
@@ -1353,7 +1359,7 @@ async def _run_kp_turn(
             ):
                 room_hub.broadcast(session_id, chunk)
         except asyncio.CancelledError:
-            _persist_narration(db, session_id, res)
+            _persist_narration(db, session_id, res, llm=llm)
             raise
         if location_guard:
             # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
@@ -1368,7 +1374,7 @@ async def _run_kp_turn(
             if validation is not None and validation.violated:
                 logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
                 res[0] = validation.corrected_narration
-        _persist_narration(db, session_id, res)
+        _persist_narration(db, session_id, res, llm=llm)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
         _record_npc_say_memory(
             db, session_id, game_session, module, res[2],
@@ -2174,9 +2180,9 @@ async def run_epilogue_generation(session_id: str) -> None:
             ):
                 room_hub.broadcast(session_id, chunk)
         except asyncio.CancelledError:
-            _persist_narration(db, session_id, res)
+            _persist_narration(db, session_id, res, llm=kp)
             raise
-        _persist_narration(db, session_id, res)
+        _persist_narration(db, session_id, res, llm=kp)
         world_state.set_key(db, db.get(GameSession, session_id), "epilogue_done", True)
         # 收场白落定之后再归档经历：这时故事真的讲完了，滚动摘要也已收进最后一批事件，
         # 写小传的素材最全。fail-open——归档失败不影响已经结束的会话。

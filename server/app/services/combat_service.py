@@ -21,6 +21,7 @@ from app.rules.coc import combat as engine
 from app.rules.coc import options as coc_options
 from app.rules.coc import positioning
 from app.rules.coc.weapons import WEAPON_CATEGORY_ORDER
+from app.ai.provider import model_meta
 from app.services import rule_options_service, session_service, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
@@ -279,7 +280,7 @@ async def start(db: Session, session_id: str, party: list[Character], enemies: l
     if agent and beats:
         prose = await agent.narrate(state, beats, scene_hint)
         if prose:
-            chunks.append(_combat_narration(db, session_id, prose))
+            chunks.append(_combat_narration(db, session_id, prose, agent))
     return state, chunks + drive_chunks
 
 
@@ -502,7 +503,7 @@ async def resolve_player_action(
     if agent and beats:
         prose = await agent.narrate(state, beats, scene_hint)
         if prose:
-            out.append(_combat_narration(db, session_id, prose))
+            out.append(_combat_narration(db, session_id, prose, agent))
     return out + chunks + drive_chunks
 
 
@@ -522,7 +523,7 @@ async def _begin_player_attack(
         if agent and (([summary] if summary else []) + drive_beats):
             prose = await agent.narrate(state, ([summary] if summary else []) + drive_beats, scene_hint)
             if prose:
-                out.append(_combat_narration(db, session_id, prose))
+                out.append(_combat_narration(db, session_id, prose, agent))
         return out + chunks + drive_chunks
 
     weapon = action.get("weapon") or actor.get("weapon") or "徒手格斗"
@@ -586,7 +587,7 @@ async def _begin_player_attack(
     if agent and beats:
         prose = await agent.narrate(state, beats, scene_hint)
         if prose:
-            narr.append(_combat_narration(db, session_id, prose))
+            narr.append(_combat_narration(db, session_id, prose, agent))
     return narr + out + drive_chunks
 
 
@@ -659,7 +660,7 @@ async def _begin_player_burst(
     if agent and beats:
         prose = await agent.narrate(state, beats, scene_hint)
         if prose:
-            narr.append(_combat_narration(db, session_id, prose))
+            narr.append(_combat_narration(db, session_id, prose, agent))
     return narr + out + drive_chunks
 
 
@@ -709,7 +710,7 @@ async def resolve_combat_roll(
     if agent and beats:
         prose = await agent.narrate(state, beats, scene_hint)
         if prose:
-            narr.append(_combat_narration(db, session_id, prose))
+            narr.append(_combat_narration(db, session_id, prose, agent))
     return narr + out + drive_chunks
 
 
@@ -806,7 +807,7 @@ async def _resolve_aoe_roll(
     if agent:
         prose = await agent.narrate(state, [beat], scene_hint)
         if prose:
-            narr.append(_combat_narration(db, session_id, prose))
+            narr.append(_combat_narration(db, session_id, prose, agent))
     return narr + out
 
 
@@ -885,7 +886,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
     if agent and beats:
         prose = await agent.narrate(state, beats, scene_hint)
         if prose:
-            narr.append(_combat_narration(db, session_id, prose))
+            narr.append(_combat_narration(db, session_id, prose, agent))
     return narr + out + drive_chunks
 
 
@@ -1194,9 +1195,15 @@ def _combat_line(db: Session, session_id: str, text: str) -> str:
     return _chunk("system", text, id=ev.id, metadata={"combat_log": True})
 
 
-def _combat_narration(db: Session, session_id: str, text: str) -> str:
-    """战斗子代理的一段叙述：落成 narration 事件（进历史/复盘），返回广播 chunk。"""
-    ev = session_service.add_event(db, session_id, "narration", text, actor_name="KP")
+def _combat_narration(db: Session, session_id: str, text: str, agent=None) -> str:
+    """战斗子代理的一段叙述：落成 narration 事件（进历史/复盘），返回广播 chunk。
+
+    ``agent`` 只用来取模型名打进 metadata["model"]（按模型分组统计文风）。
+    """
+    ev = session_service.add_event(
+        db, session_id, "narration", text, actor_name="KP",
+        metadata=model_meta(agent),
+    )
     return _chunk("narration_full", text, id=ev.id, actor_name="KP")
 
 

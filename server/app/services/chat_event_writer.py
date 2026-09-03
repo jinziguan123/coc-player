@@ -8,12 +8,14 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
+from app.ai.provider import model_meta, model_name  # noqa: F401  # kp_tool_loop 经本模块取用
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import session_service, world_memory
 
 logger = logging.getLogger(__name__)
+
 
 _FAKE_CHECK_RESULT_RE = re.compile(
     r"^[^\n]*?检定（(?:normal|hard|extreme|regular|常规|困难|极难)）\s*[:：]\s*"
@@ -186,8 +188,12 @@ def persist_narration(
     event_order: list | None = None,
     *,
     attach_npc_portraits: Callable[[Session, str, list], None] | None = None,
+    model: str | None = None,
 ) -> None:
     """落库 KP 这一轮产物，保留旁白与对话的交错顺序（与流式渲染一致）。
+
+    ``model`` 是生成这段旁白的模型名，打进每条旁白事件的 metadata["model"]，
+    供按模型分组统计文风（反 tic 反馈环的阈值靠这些历史旁白来定）。None 则不写键。
 
     用 result[3] 里记录的「对话插入偏移」把整段旁白切开、与对话交错落库；
     没有偏移信息（旧调用）时回退为「旁白整段在前、对话在后」。
@@ -224,6 +230,7 @@ def persist_narration(
         if t:
             ev = session_service.add_event(
                 db, session_id, "narration", t, actor_name="KP", group=_group_at(offset),
+                metadata={"model": model} if model else None,
             )
             _record(ev, offset)
 

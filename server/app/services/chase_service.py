@@ -15,6 +15,7 @@ from app.models.character import Character
 from app.models.chase_state import ChaseState
 from app.models.session import GameSession
 from app.rules.coc import chase as engine
+from app.ai.provider import model_meta
 from app.services import session_service
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
@@ -128,7 +129,10 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
             prose = await agent.narrate(
                 {"round": state["round"], "initiative": []}, [line], scene_hint)
             if prose:
-                pev = session_service.add_event(db, session_id, "narration", prose, actor_name="KP")
+                pev = session_service.add_event(
+                    db, session_id, "narration", prose, actor_name="KP",
+                    metadata=model_meta(agent),
+                )
                 chunks.insert(0, _chunk("narration_full", prose, id=pev.id, actor_name="KP"))
     return chunks
 
