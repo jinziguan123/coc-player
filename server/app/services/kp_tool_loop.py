@@ -39,6 +39,7 @@ from app.services import (
     rulebook_service,
     session_service,
     team_turn_service,
+    style_editor,
     turn_context,
     turn_effects,
 )
@@ -874,6 +875,7 @@ async def _process_commands(
                         group_label=label,
                     ):
                         yield chunk
+                    await style_editor.polish_result(llm, cont_result)   # 取消时不走，finally 落原文
                 finally:
                     chat_event_writer.persist_narration(
                         db, session_id, cont_result,
@@ -901,6 +903,7 @@ async def _process_commands(
                     kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
                 ):
                     yield chunk
+                await style_editor.polish_result(llm, cont_result)   # 取消时不走，finally 落原文
             finally:
                 cont_narration = cont_result[0].rstrip()
                 if cont_narration:

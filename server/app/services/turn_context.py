@@ -491,8 +491,23 @@ async def _validate_and_patch_narration(
     走「整段旁白 + 对话全部追加」的回退，旁白与气泡各自成堆、丢交错顺序，是用户可见的渲染 bug），
     改为按长度比例重映射偏移，保住交错顺序。
     """
-    if plan is None:
-        return
+    if plan is not None:
+        await _validate_only(
+            llm, plan, result, event_order, seen_context=seen_context, turn_inputs=turn_inputs,
+            on_start=on_start, party_names=party_names, location_context=location_context,
+            settled_checks=settled_checks,
+        )
+    # 去口癖编辑器：不依赖 plan，任何路径的落库版本都过一遍（fail-open，见 style_editor）。
+    from app.services import style_editor
+    await style_editor.polish_result(llm, result, event_order, on_start=on_start)
+
+
+async def _validate_only(
+    llm, plan: turn_planner.TurnPlan, result: list,
+    event_order: list | None = None, seen_context: str = "", turn_inputs: str = "",
+    on_start=None, party_names=None, location_context: str = "",
+    settled_checks: str = "",
+) -> None:
     validator_kwargs = {"seen_context": seen_context}
     if turn_inputs:
         validator_kwargs["turn_inputs"] = turn_inputs

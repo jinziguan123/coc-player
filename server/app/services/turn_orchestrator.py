@@ -15,6 +15,7 @@ from app.ai.agents.kp_agent import KPAgent
 from app.ai.context import build_kp_context
 from app.ai.llm_factory import get_fast_llm, get_llm
 from app.ai.provider import model_name
+from app.services import style_editor
 from app.ai.providers import openai_compat
 from app.ai.prompts.kp_system import (
     CHECK_REQUEST_PROMPT,
@@ -1374,6 +1375,7 @@ async def _run_kp_turn(
             if validation is not None and validation.violated:
                 logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
                 res[0] = validation.corrected_narration
+        await style_editor.polish_result(llm, res, on_start=_validator_note(session_id))
         _persist_narration(db, session_id, res, llm=llm)
         # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
         _record_npc_say_memory(
@@ -2182,6 +2184,7 @@ async def run_epilogue_generation(session_id: str) -> None:
         except asyncio.CancelledError:
             _persist_narration(db, session_id, res, llm=kp)
             raise
+        await style_editor.polish_result(kp, res, on_start=_validator_note(session_id))
         _persist_narration(db, session_id, res, llm=kp)
         world_state.set_key(db, db.get(GameSession, session_id), "epilogue_done", True)
         # 收场白落定之后再归档经历：这时故事真的讲完了，滚动摘要也已收进最后一批事件，
