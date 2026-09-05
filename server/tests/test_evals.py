@@ -232,9 +232,15 @@ class TestNarrationStyleVariety:
     def test_kp提示词含文风忌单一约束(self):
         from app.ai.prompts.kp_system import KP_SYSTEM_PROMPT
         p = KP_SYSTEM_PROMPT
-        assert "文风忌单一（硬规则）" in p          # 已提为顶层硬规则
+        assert "写现象，不写解读（硬规则）" in p    # 顶层硬规则，正面说要什么
+        assert "文学性" not in p                    # 「用富有文学性的语言」正是各种口头禅的来源，不许回来
         assert "否定式对比" in p and "而是" in p    # 点名了 tic
-        assert "整轮叙述至多用一次" in p            # 硬性上限（此前是「至多一次」的软约束）
+        assert "等变体）不用" in p                  # 直接不用：「至多一次」对小模型等于「每轮一次」
+        assert "至多用一次" not in p
+        assert "像是/仿佛" in p                     # 否定对比被压下去之后的头号口头禅也点了名
+        assert "「某种」「有什么东西」" in p           # 含混指代：人写 0.11/千字，KP 0.97
+        for kw in ("你以为", "当X还在", "如果说", "这意味着", "通常", "上一秒", "本质上是", "加引号", "顿号堆砌"):
+            assert kw in p, kw                       # 议论文腔目录（预防性，见 TIC_CATALOG）
 
 
 class TestPlayerControl:

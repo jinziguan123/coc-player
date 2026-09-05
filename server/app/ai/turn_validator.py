@@ -6,6 +6,8 @@ import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from dataclasses import dataclass
+
 from pydantic import BaseModel, ValidationError
 
 from app.ai.text_guard import has_near_duplicate_passages
@@ -44,24 +46,122 @@ def count_antithesis(text: str) -> int:
 
 #: 破折号密度阈值（每千字个数）。
 #:
-#: 拿本机 400 段真实旁白量过：中位 6.3、75 分位 8.0、90 分位 10.3、最高 12.6——
-#: 每千字 6 个就是每一百六十字一个，而且几乎全是「追加一句解释」的用法
-#: （「他张了张嘴——作为乘务员，他认得出那块面板」）。这是写顺手带出来的口头禅。
+#: 参照系是**人写的文本**，不是 AI 语料自己的分位数。本机 30 万字人写模组原文里破折号
+#: 0.85/千字，KP 旁白 6.1/千字（中位 6.3、75 分位 8.0），几乎全是「追加一句解释」的用法
+#: （「他张了张嘴——作为乘务员，他认得出那块面板」）。此前阈值取 AI 语料的 75 分位 8.0，
+#: 等于只在「比平时的 AI 还 AI」时才管，正常 AI 水平全放过；玩家仍觉得满篇 AI 味。
 #:
-#: 定在 75 分位而不是中位：破折号在中文里是合法修辞（语气中断、插入语），
-#: 卡到中位会有一半轮次触发，等于常驻指令，也就没有「按密度动态施压」可言了。
-EM_DASH_PER_KILO = 8.0
+#: 现取人写参照的两倍。这意味着小模型几乎每轮都会收到纠偏：可以接受——纠偏贴在玩家输入
+#: 前面、带具体计数，与埋在一万多字手册里的静态规则不是一回事。
+EM_DASH_PER_KILO = 2.0
 
-#: 短文本算不出密度：两百字里出现一个破折号是 5.0/千字，看着超标，其实很正常。
-_DENSITY_MIN_CHARS = 400
+#: 短文本算不出密度：阈值 2.0 下，五百字里一个破折号就是 2.0/千字，看着超标，其实很正常。
+#: 提到八百字，一处不算、两处才算。recent_pool 通常几千字，不受影响。
+_DENSITY_MIN_CHARS = 800
+
+
+def _per_kilo(text: str, hits: int) -> float:
+    """每千字命中数；文本太短时返回 0（样本不足，不作数）。"""
+    if len(text) < _DENSITY_MIN_CHARS:
+        return 0.0
+    return hits / (len(text) / 1000)
 
 
 def em_dash_density(text: str) -> float:
     """每千字破折号个数；文本太短时返回 0（样本不足，不作数）。"""
     body = text or ""
-    if len(body) < _DENSITY_MIN_CHARS:
-        return 0.0
-    return body.count("——") / (len(body) / 1000)
+    return _per_kilo(body, body.count("——"))
+
+
+# 揣测性比喻：「像……」「像是/仿佛……」引出的一句解读，是否定对比被反馈环压下去之后剩下的
+# 头号口头禅，用法几乎全是「感官细节 + 像 + 替玩家猜一层」（「呼吸声压低了半度，像是有什么
+# 东西正侧耳听着」「针脚细密，像在缝住什么不该漏出来的东西」）。
+# 裸「像」必须抓：本机语料里带「是」的形式只占一半（「像在确认」「像窗外那棵秃枝」漏掉一半）。
+# 排掉「画像/头像/影像/录像/塑像/佛像/神像/偶像/摄像/想像」和「像素/像片/像册/像样/像话/像机」
+# 这些非比喻用法（全库核过误报）；「好像」也排掉，那是拿不准的语气，不是比喻。
+_SIMILE_RE = re.compile(r"仿佛|如同|宛如|犹如|好似|(?<![画头影肖塑佛神偶群录摄想好])像(?![素片册样话章机])")
+
+#: 比喻密度阈值（每千字个数）。人写模组原文 0.92/千字，KP 旁白 4.85/千字；
+#: 与破折号同一口径，取人写参照的两倍。
+SIMILE_PER_KILO = 2.0
+
+
+# 含混指代：「某种」「有什么东西」。叙事文里「莫名其妙的比喻」的伴生形式——不肯把东西写实，
+# 拿一个模糊量词顶上（「某种更低沉的声音」「像有什么东西在管道里转了半个身」）。
+# 本机语料：人写模组原文合计 0.11/千字，KP 旁白 0.97/千字（某种 6 倍、有什么东西 20 倍）。
+# 拿知乎那份「AI 措辞清单」逐条量过：你以为/当X还在/如果说/意味着/通常/当当当排比/上一秒下一秒
+# 在旁白里全是 0，引号密度甚至低于人写；议论文的口癖不必搬进叙事手册，只加真出现的这一条。
+_VAGUE_RE = re.compile(r"某种|有什么东西|有东西")
+
+
+def count_vague(text: str) -> int:
+    """统计「某种 / 有什么东西」这类含混指代的次数（按次数不按密度，同否定对比）。"""
+    return len(_VAGUE_RE.findall(text or ""))
+
+
+# ── 口癖目录：预防性的，不看本机语料有没有出现过 ──────────────────────────────
+# 出处是那份流传很广的「AI 议论文措辞清单」（你以为…其实、当X还在…时Y已经、如果说…那么、
+# 这意味着、通常、硬/稳/踏实/残酷、当当当排比、上一秒下一秒、本质升华、引号与顿号堆砌）。
+# 这些多数是议论文口癖，叙事旁白里目前几乎是 0；但玩家明确要求杜绝，且它们没有正当的叙事
+# 用法，所以阈值极低（出现即报），静态手册里也点名禁用。有正当用法的（引号、顿号）按密度、
+# 拿人写模组原文的两倍做阈值（引号 1.18、顿号 1.89/千字）。
+# 之后再加口癖只在这张表加一行；context.py 的纠偏和 evals 的探针都从这里取。
+#
+# 字段：key、给模型看的名字、正则、阈值、判据（count=次数 / density=每千字）。
+@dataclass(frozen=True)
+class Tic:
+    key: str
+    label: str
+    pattern: re.Pattern
+    threshold: float
+    by_density: bool = False
+
+
+TIC_CATALOG: tuple[Tic, ...] = (
+    Tic("you_think", "「你以为…，其实/不，…」",
+        re.compile(r"以为[^。\n]{1,25}(?:[？?]\s*不[，,]|，其实|，实际上)"), 1),
+    Tic("while_still", "「当X还在…时，Y已经…」",
+        re.compile(r"当[^。，\n]{1,20}还在[^。\n]{1,25}(?:时|的时候)，[^。\n]{1,25}(?:已经|早已)"), 1),
+    Tic("if_say", "「如果说A，那么B」",
+        re.compile(r"如果说[^。\n]{1,30}，(?:那么|那)?"), 1),
+    Tic("means", "「这意味着…」",
+        re.compile(r"意味着"), 1),
+    Tic("usually", "「通常」",
+        re.compile(r"通常"), 1),
+    Tic("verdict_words", "拿「硬/稳/踏实/残酷」下评语",
+        re.compile(r"(?:结论|说法|事实|现实|答案|路)(?:很|更|太)?(?:硬|稳|残酷|踏实)|更残酷的|走得踏实|(?:很|更)稳的"), 1),
+    Tic("dang_parallel", "「当…，当…，当…」排比",
+        re.compile(r"当[^。\n]{2,30}，当[^。\n]{2,30}，当"), 1),
+    Tic("last_second", "「上一秒…下一秒…」",
+        re.compile(r"上一秒[^。\n]{1,30}下一秒"), 1),
+    Tic("essence", "「本质上是…」「归根结底」「是一场关于…的…」式升华",
+        re.compile(r"本质上|归根结底|说到底|是一场关于|从来不是[^。\n]{1,15}的问题"), 1),
+    # 有正当用法的两个：按密度，人写参照的两倍
+    Tic("scare_quotes", "给普通词加引号强调（≤6 字的短语）",
+        re.compile(r"[“\"‘「][^”\"’」\n]{1,6}[”\"’」]"), 2.5, by_density=True),
+    Tic("comma_pile", "顿号堆砌并列",
+        re.compile(r"、"), 4.0, by_density=True),
+)
+
+
+def catalog_hits(text: str) -> list[tuple[Tic, float]]:
+    """返回目录里达阈值的口癖及其计量（次数或每千字），供纠偏列举。文本太短时密度项不作数。"""
+    body = text or ""
+    hits: list[tuple[Tic, float]] = []
+    for tic in TIC_CATALOG:
+        n = len(tic.pattern.findall(body))
+        if not n:
+            continue
+        value = _per_kilo(body, n) if tic.by_density else float(n)
+        if value >= tic.threshold:
+            hits.append((tic, value))
+    return hits
+
+
+def simile_density(text: str) -> float:
+    """每千字「像是/仿佛」类比喻个数；文本太短时返回 0。"""
+    body = text or ""
+    return _per_kilo(body, len(_SIMILE_RE.findall(body)))
 
 
 def _looks_suspicious(

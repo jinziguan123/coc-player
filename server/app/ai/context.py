@@ -165,6 +165,8 @@ MAX_BACKSTAGE_IN_CONTEXT = 5
 # 末尾注入文风纠偏指令。KP 往轮旁白会作为 assistant 消息回灌，模型极易把自己的这个口头禅
 # 当成本故事既定文风并放大——静态系统提示压不过几十个现身说法的例子，故按密度动态施压。
 ANTITHESIS_NUDGE_THRESHOLD = 3
+# 同上，针对「某种 / 有什么东西」这类含混指代（人写文本同样长度里不到 1 处）。
+VAGUE_NUDGE_THRESHOLD = 3
 
 
 def _estimate_tokens(text: str) -> int:
@@ -316,7 +318,7 @@ def _format_turn_handoff(events: list, party_char_ids: set[str]) -> str:
         "NPC 的新反应/台词和必要裁定。\n"
         + "\n".join(lines)
         + "\n严禁复述其中任何台词，严禁重新描写或润色其中的玩家动作，也严禁为玩家补写未声明的"
-        "动作、姿势、表情、情绪、心理或决定。即使换词转述、扩成文学描写也算违规。"
+        "动作、姿势、表情、情绪、心理或决定。即使换词转述、扩成另一版描写也算违规。"
     )
 
 
@@ -1612,11 +1614,17 @@ def _assemble_kp_messages(
         # 当成既定文风并放大（越滚越多）。测最近历史该句式密度，超阈值就在最终玩家输入前插一条
         # 强指令，明说这是待纠正的坏习惯、非既定文风——只在真滥用时施压，不滥用不打扰。
         from app.ai.turn_validator import (
-            EM_DASH_PER_KILO, count_antithesis, em_dash_density,
+            EM_DASH_PER_KILO, SIMILE_PER_KILO, catalog_hits, count_antithesis, count_vague,
+            em_dash_density, simile_density,
         )
 
+        # 量的是 KP 自己写出来的全部文字：旁白 + NPC 台词。台词单独落成 dialogue 事件，
+        # 而破折号在台词里比在旁白里还密（本机 10.8 vs 6.1/千字），只量旁白会漏掉一半。
+        # 队友/玩家的台词不是 KP 写的：他们的事件 actor_id 是队伍里的角色 id，NPC 的为空。
         recent_narration = "\n".join(
-            e.content or "" for e in recent_pool if e.event_type == "narration"
+            e.content or "" for e in recent_pool
+            if e.event_type == "narration"
+            or (e.event_type == "dialogue" and e.actor_id not in party_char_ids)
         )
         notes: list[str] = []
         tic_count = count_antithesis(recent_narration)
@@ -1632,10 +1640,42 @@ def _assemble_kp_messages(
         dash = em_dash_density(recent_narration)
         if dash >= EM_DASH_PER_KILO:
             notes.append(
-                f"前文旁白平均每千字用了约 {dash:.0f} 个破折号，多数是「追加一句解释」的用法"
+                f"前文旁白平均每千字用了约 {dash:.1f} 个破折号（人写的文本不到 1 个），多数是「追加一句解释」的用法"
                 "（「他张了张嘴——作为乘务员，他认得出那块面板」）。这同样是写顺手带出来的"
                 "口头禅：本轮起把要补充的信息编进句子本身，或者另起一句写完整，"
                 "破折号只留给真正的语气中断与话被打断。"
+            )
+        # 「像是/仿佛……」同理。否定对比被压下去之后它成了头号口头禅（本机旁白里「像是」独占
+        # 七成），用法几乎全是「给完一处观察，再替玩家猜一层」，与否定对比是同一个病。
+        simile = simile_density(recent_narration)
+        if simile >= SIMILE_PER_KILO:
+            notes.append(
+                f"前文旁白平均每千字用了约 {simile:.1f} 处「像……」「像是/仿佛……」式的比喻"
+                "（人写的文本不到 1 处），多数是给完一处观察又替玩家猜一层"
+                "（「像是有人把话咽了回去」「像在缝住什么」）。这也是口头禅：本轮起观察给完就停，"
+                "把声音、形状、变化写具体，让玩家自己猜。本轮旁白和台词里不要出现"
+                "「像」「像是」「仿佛」「如同」「宛如」这些字。"
+            )
+        # 「某种 / 有什么东西」：不肯把东西写实，拿模糊量词顶上。按次数不按密度，同否定对比。
+        vague = count_vague(recent_narration)
+        if vague >= VAGUE_NUDGE_THRESHOLD:
+            notes.append(
+                f"前文你已用了约 {vague} 处「某种……」「有什么东西……」这类含混指代"
+                "（「某种更低沉的声音」「像有什么东西在管道里转了半个身」）。这是不肯写实的偷懒："
+                "本轮起要么写出它具体是什么声音、什么形状、多大、在哪，要么就只写角色确实感知到的那一点，"
+                "不要拿「某种」「什么东西」顶替。"
+            )
+        # 口癖目录（turn_validator.TIC_CATALOG）：议论文腔的句式，没有正当叙事用法，出现即报。
+        hits = catalog_hits(recent_narration)
+        if hits:
+            listing = "、".join(
+                (f"{tic.label}约每千字 {value:.1f} 处" if tic.by_density else f"{tic.label}{value:.0f} 处")
+                for tic, value in hits
+            )
+            notes.append(
+                f"前文还出现了这些句式：{listing}。"
+                "这些是议论文和营销文案的腔调，不是讲故事的人会说的话，本轮起一律不用："
+                "有话直说，并列的东西挑一两样写实，普通词不加引号。"
             )
         if notes and messages and messages[-1]["role"] == "user":
             messages.insert(-1, {

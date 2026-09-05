@@ -290,7 +290,7 @@ def test_antithesis_nudge_absent_when_history_clean(db_factory):
 def _dash_narration_events(session_id, density: str):
     """构造历史旁白：破折号密度分别在阈值之上/之下。
 
-    密度按每千字算，且要过 400 字的样本下限——短文本里一个破折号就能算出 5.0/千字，
+    密度按每千字算，且要过 800 字的样本下限——短文本里一个破折号就能算出 2.0/千字，
     那不作数。
     """
     # 一段约 100 字的底子，重复到四百字以上；heavy 每段带 1 个破折号（≈10/千字）。
@@ -299,7 +299,7 @@ def _dash_narration_events(session_id, density: str):
     unit = unit_heavy if density == "heavy" else unit_light
     return [
         EventLog(session_id=session_id, sequence_num=1, event_type="narration",
-                 content=unit * 10, actor_name="KP"),      # ×10 才过 400 字的密度下限
+                 content=unit * 20, actor_name="KP"),      # ×20 才过 800 字的密度下限
         EventLog(session_id=session_id, sequence_num=2, event_type="action",
                  content="我举起半截伞柄", actor_name="调查员"),
     ]
@@ -329,7 +329,7 @@ def test_两种_tic_都超标时合并成一条纠偏(db_factory):
     db = db_factory()
     module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
     mixed = ("他撞开门。不是推，是砸。空气不是冷，而是黏。那东西不是站着，是悬着。"
-             "他扣住拉杆——那是他刚才没看清的那一根。烟翻上来——热浪贴着小腿爬。" * 8)
+             "他扣住拉杆——那是他刚才没看清的那一根。烟翻上来——热浪贴着小腿爬。" * 12)
     events = [
         EventLog(session_id=session.id, sequence_num=1, event_type="narration",
                  content=mixed, actor_name="KP"),
@@ -343,9 +343,182 @@ def test_两种_tic_都超标时合并成一条纠偏(db_factory):
 
 
 def test_短文本不按密度判(db_factory):
-    """两百字里出现一个破折号是 5.0/千字，看着超标，其实很正常。"""
-    from app.ai.turn_validator import em_dash_density
+    """五百字里出现一个破折号是 2.0/千字，看着超标，其实很正常：不满八百字不算。"""
+    from app.ai.turn_validator import em_dash_density, simile_density
     assert em_dash_density("他停下——回头。" * 3) == 0.0
+    assert simile_density("门后有声音，像是有人在哭。" * 3) == 0.0
+    seven_hundred = "他扣住拉杆，指腹压上冰凉的金属，那是他刚才没看清的那一根。" * 24   # ≈700 字
+    assert em_dash_density(seven_hundred + "他停下——回头。") == 0.0
+
+
+def _simile_narration_events(session_id, density: str):
+    """构造历史旁白：比喻密度分别在阈值（2.0/千字，人写参照的两倍）之上/之下。
+
+    heavy 每约 110 字带 1 处「像是」≈9/千字；light 把揣测删掉只留现象。
+    """
+    unit_heavy = ("门缝里的呼吸声压低了半度，像是有什么东西正侧耳听着这边的动静。"
+                  "走廊深处又传来一声短促的叫喊，尾音断在砖墙里，像是有人把话咽了回去。"
+                  "地板下的震动一下，又一下，规律得像是某种催促。")
+    unit_light = ("门缝里的呼吸声压低了半度。隔了两息，又起来，比刚才更近。"
+                  "走廊深处又传来一声短促的叫喊，尾音断在砖墙里。"
+                  "地板下的震动一下，又一下，间隔越来越短。")
+    unit = unit_heavy if density == "heavy" else unit_light
+    return [
+        EventLog(session_id=session_id, sequence_num=1, event_type="narration",
+                 content=unit * 10, actor_name="KP"),      # ×10 才过 800 字的密度下限
+        EventLog(session_id=session_id, sequence_num=2, event_type="action",
+                 content="我举起半截伞柄", actor_name="调查员"),
+    ]
+
+
+def test_像是式比喻用滥了同样会被纠偏(db_factory):
+    """否定对比被压下去之后，「像是」成了头号口头禅（本机 281 处比喻词里占 202），
+    用法几乎全是「给完一处观察，再替玩家猜一层」。判据同破折号：密度，不是次数。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _simile_narration_events(session.id, "heavy"))
+    assert _has_style_nudge(msgs)
+    assert "像是/仿佛" in msgs[-2]["content"]
+    assert msgs[-1]["role"] == "user"
+
+
+def test_比喻用得不多就不打扰(db_factory):
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _simile_narration_events(session.id, "light"))
+    assert not _has_style_nudge(msgs)
+
+
+def _vague_narration_events(session_id, count_marker: str):
+    narr = {
+        "heavy": "空气里有某种甜腻的气味。水面上有什么东西在动。角落里传来某种低沉的响声。",   # 3 处
+        "light": "空气里有一股甜腻的、像烂苹果的气味。水面被什么撑起一道弧，又落下去。",         # 0 处
+    }[count_marker]
+    return [
+        EventLog(session_id=session_id, sequence_num=1, event_type="narration",
+                 content=narr, actor_name="KP"),
+        EventLog(session_id=session_id, sequence_num=2, event_type="action",
+                 content="我举起半截伞柄", actor_name="调查员"),
+    ]
+
+
+def test_含混指代用多了会被纠偏(db_factory):
+    """「某种」「有什么东西」是不肯写实的偷懒：人写模组原文 0.11/千字，KP 旁白 0.97。
+    按次数不按密度，与否定对比同一口径（阈值 3）。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _vague_narration_events(session.id, "heavy"))
+    assert _has_style_nudge(msgs)
+    assert "含混指代" in msgs[-2]["content"]
+
+
+def test_写实了就不打扰(db_factory):
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _vague_narration_events(session.id, "light"))
+    assert not _has_style_nudge(msgs)
+
+
+def _npc_dialogue_dash_events(session_id, speaker_actor_id):
+    """旁白干净，破折号全在台词里；台词归谁由 actor_id 决定（NPC 为空、队友是角色 id）。"""
+    clean_narr = "他扣住拉杆，指腹压上冰凉的金属，那是他刚才没看清的那一根。烟从脚边翻上来，热浪贴着小腿爬。" * 10
+    dashy_line = "别碰那根——我说别碰——你听见没有。" * 30       # ≈600 字，60 个破折号
+    return [
+        EventLog(session_id=session_id, sequence_num=1, event_type="narration",
+                 content=clean_narr, actor_name="KP"),
+        EventLog(session_id=session_id, sequence_num=2, event_type="dialogue",
+                 content=dashy_line, actor_name="乘务员", actor_id=speaker_actor_id),
+        EventLog(session_id=session_id, sequence_num=3, event_type="action",
+                 content="我举起半截伞柄", actor_name="调查员"),
+    ]
+
+
+def test_NPC台词里的破折号也计入密度(db_factory):
+    """台词是 KP 写的，单独落成 dialogue 事件；本机台词里破折号 10.8/千字，比旁白还密，只量旁白会漏掉一半。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _npc_dialogue_dash_events(session.id, None))
+    assert _has_style_nudge(msgs) and "破折号" in msgs[-2]["content"]
+
+
+def test_队友或玩家自己的台词不算_KP_的(db_factory):
+    """同一段带破折号的台词，若 actor_id 是队伍里的角色，就不是 KP 写的，不该拿来纠 KP。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    msgs = ctx.build_kp_context(session, module, hero, _npc_dialogue_dash_events(session.id, hero.id))
+    assert not _has_style_nudge(msgs)
+
+
+# ---------- 口癖目录（预防性：不看语料里有没有出现过） ----------
+
+_CATALOG_SAMPLES = {
+    "you_think": "你以为你在跟土地打交道？不，你是在跟气候赛跑。",
+    "while_still": "当德国的工程师还在验证传统底盘调校时，中国的工程师已经在做整车迭代。",
+    "if_say": "如果说德国工程师擅长把机器做到极致，那么中国工程师更擅长换掉这台机器。",
+    "means": "这意味着旧的秩序已经结束。",
+    "usually": "在市场下行周期，企业通常会收缩成本。",
+    "verdict_words": "这个结论很硬。给你一个更残酷的结论。",
+    "dang_parallel": "当算法捕捉意图，当大模型展现温度，当生成式AI延伸到代码，我们正站在门槛上。",
+    "last_second": "上一秒还在为需求文档绞尽脑汁，下一秒AI已经将草图转成了原型。",
+    "essence": "商业的本质上是一场关于熵减的长期对抗。",
+}
+
+
+def test_口癖目录逐条命中():
+    from app.ai.turn_validator import TIC_CATALOG, catalog_hits
+    assert {t.key for t in TIC_CATALOG} >= set(_CATALOG_SAMPLES)
+    for key, text in _CATALOG_SAMPLES.items():
+        assert key in {t.key for t, _ in catalog_hits(text)}, key
+
+
+def test_口癖目录不误伤平实叙事():
+    from app.ai.turn_validator import catalog_hits
+    clean = ("他把杯子放回桌上，没有再拿起来。窗外的雨停了，屋檐还在滴水。"
+             "她说「别碰那个」，声音不大。门牌上写着「三号」。" * 8)
+    assert catalog_hits(clean) == []
+
+
+def test_引号与顿号按密度_短文本不作数():
+    from app.ai.turn_validator import catalog_hits
+    piled = "数据、算法、模型、算力、场景、生态、闭环、护城河、飞轮。" * 40      # ≈1000 字，顿号 8/千字级
+    assert "comma_pile" in {t.key for t, _ in catalog_hits(piled)}
+    assert catalog_hits("数据、算法、模型、算力。") == []                         # 不满 800 字不算密度
+
+
+def test_议论文腔出现即纠偏(db_factory):
+    """目录里的句式没有正当叙事用法，历史里出现一次就在下一轮点名。"""
+    db = db_factory()
+    module, hero, session = _seed(db, scenes=[{"id": "hall", "name": "门厅", "description": "门厅"}])
+    events = [
+        EventLog(session_id=session.id, sequence_num=1, event_type="narration",
+                 content="你以为那只是风声？不，那是有人在墙里走。这意味着他们早就进来了。", actor_name="KP"),
+        EventLog(session_id=session.id, sequence_num=2, event_type="action",
+                 content="我举起半截伞柄", actor_name="调查员"),
+    ]
+    msgs = ctx.build_kp_context(session, module, hero, events)
+    assert _has_style_nudge(msgs)
+    note = msgs[-2]["content"]
+    assert "你以为" in note and "这意味着" in note and "一律不用" in note
+
+
+def test_vague_regex():
+    from app.ai.turn_validator import count_vague
+    assert count_vague("某种声音。有什么东西在动。水里有东西。") == 3
+    assert count_vague("一阵低沉的嗡鸣。水面被什么撑起一道弧。") == 0
+
+
+def test_simile_regex_只抓比喻不抓语气词():
+    from app.ai.turn_validator import _SIMILE_RE
+    hits = lambda s: len(_SIMILE_RE.findall(s))
+    assert hits("像是有人把话咽了回去") == 1
+    assert hits("规律得像某种催促一样") == 1
+    assert hits("仿佛隔着一层水") == 1
+    assert hits("针脚细密，像在缝住什么不该漏出来的东西") == 1   # 裸「像」：鬼屋那局漏抓的形式
+    assert hits("像窗外那棵秃枝在风里摆一下") == 1
+    assert hits("好像有东西在门后") == 0      # 拿不准的语气，不是比喻
+    assert hits("他的画像挂在墙上") == 0      # 名词里的「像」
+    assert hits("墙上挂着一张录像截图，像素很低") == 0
+    assert hits("这话说得不像话") == 0
 
 
 def test_flag_tag_regexes():
