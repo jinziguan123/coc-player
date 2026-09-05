@@ -14,7 +14,7 @@ from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import KPAgent
 from app.ai.context import build_kp_context
 from app.ai.llm_factory import get_fast_llm, get_llm
-from app.ai.provider import model_name
+from app.ai.provider import StreamStalled, model_name
 from app.services import style_editor
 from app.ai.providers import openai_compat
 from app.ai.prompts.kp_system import (
@@ -947,6 +947,8 @@ def _failure_notice(exc: BaseException) -> str:
     """
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return "（连不上模型服务——请检查网络或代理，然后重试）"
+    if isinstance(exc, StreamStalled):
+        return "（模型服务只回心跳不回内容，已放弃等待。多见于中转代理处理长请求出错：到设置页换直连端点后重试）"
     return "（KP 生成中断，请重试或继续输入）"
 
 

@@ -1,3 +1,5 @@
+import asyncio
+import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -27,6 +29,58 @@ def strip_provider_keys(messages: list[dict]) -> list[dict]:
             msg = {k: v for k, v in msg.items() if k not in _PROVIDER_ONLY_KEYS}
         out.append(msg)
     return out
+
+
+# ── SSE 流的「假活着」防护 ──────────────────────────────────────────────
+#
+# httpx 的读超时是「两次收到字节的间隔」。SSE 服务端和中转代理普遍每隔几秒发 ": keep-alive"
+# 注释行或空行，读超时被一续再续，永远不会触发；上游一旦挂起（响应头回了、正文再也不来），
+# 调用方的 await 就是无限期的。客户端不能把命交给对端：只有 ``data: `` 行才算活着，
+# 连续这么多秒没有数据行就判定挂起、抛错收场。
+#
+# 取 120s 而不是更短：推理模型在正文之前会先流 reasoning_content 增量，那也是数据行，
+# 所以正常思考不会误判；只有「什么数据都不给」才会撞上。
+#
+# 排查记录（2026-09-05 鬼屋一局「KP 正在思考」半小时）：一度怀疑就是这种挂起，抓包后发现
+# 数据行其实在流——是推理失控（200s 吐 3.1 万字 reasoning、正文 0 字），归 turn_planner 的
+# 墙钟预算管。这一层仍然留着：它管的是另一种同样无法从读超时看出来的故障。
+STREAM_STALL_SECONDS = 120.0
+
+
+class StreamStalled(RuntimeError):
+    """服务端回了响应头却迟迟不发数据行（只有心跳）。不是瞬时抖动，不重试。"""
+
+
+async def iter_sse_data_lines(resp, endpoint: str = "", stall_seconds: float | None = None):
+    """逐行读 SSE 响应，只产出 ``data: `` 行；连续 ``stall_seconds`` 没有数据行则抛 StreamStalled。
+
+    心跳/注释/空行被吞掉且**不续命**：代理挂起时正是靠它们把读超时续到永远。
+    ``stall_seconds`` 为 None 时读模块级 STREAM_STALL_SECONDS（便于测试与运行时调整）。
+    """
+    stall = STREAM_STALL_SECONDS if stall_seconds is None else stall_seconds
+    lines = resp.aiter_lines().__aiter__()
+    deadline = time.monotonic() + stall
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise StreamStalled(_stall_message(endpoint, stall))
+        try:
+            line = await asyncio.wait_for(lines.__anext__(), timeout=remaining)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            raise StreamStalled(_stall_message(endpoint, stall)) from None
+        if line.startswith("data: "):
+            deadline = time.monotonic() + stall
+            yield line
+
+
+def _stall_message(endpoint: str, stall: float) -> str:
+    where = f"（{endpoint}）" if endpoint else ""
+    return (
+        f"模型服务{where}回了响应头，但 {stall:.0f}s 内没有任何数据行（只有心跳），判定为挂起。"
+        "多见于中转代理对长请求处理出错：换直连端点或缩短上下文后重试。"
+    )
 
 
 def model_name(llm_or_agent) -> str | None:

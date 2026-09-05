@@ -9,7 +9,9 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.ai import usage_tracker
-from app.ai.provider import LLMProvider, StreamDelta, ToolCall, strip_provider_keys
+from app.ai.provider import (
+    LLMProvider, StreamDelta, ToolCall, iter_sse_data_lines, strip_provider_keys,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,9 +240,7 @@ class OpenAICompatProvider(LLMProvider):
                         except Exception:
                             pass
                     resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
+                    async for line in iter_sse_data_lines(resp, self._api_url):
                         data_str = line[6:]
                         if data_str == "[DONE]":
                             break
@@ -331,9 +331,7 @@ class OpenAICompatProvider(LLMProvider):
                 except Exception:
                     pass
                 raise RuntimeError(f"视觉接口返回 {resp.status_code}：{(resp.text or '')[:500]}")
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
+            async for line in iter_sse_data_lines(resp, self._api_url):
                 data_str = line[6:]
                 if data_str == "[DONE]":
                     break
@@ -379,9 +377,7 @@ class OpenAICompatProvider(LLMProvider):
                         except Exception:
                             pass
                     resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
+                    async for line in iter_sse_data_lines(resp, self._api_url):
                         data_str = line[6:]
                         if data_str == "[DONE]":
                             return

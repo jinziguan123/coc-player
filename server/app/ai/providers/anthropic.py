@@ -7,7 +7,9 @@ from collections.abc import AsyncIterator
 import httpx
 
 from app.ai import usage_tracker
-from app.ai.provider import CACHE_BLOCKS_KEY, LLMProvider, StreamDelta, ToolCall
+from app.ai.provider import (
+    CACHE_BLOCKS_KEY, LLMProvider, StreamDelta, ToolCall, iter_sse_data_lines,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,9 +248,7 @@ class AnthropicProvider(LLMProvider):
             "POST", self._api_url, headers=self._headers(), json=payload,
         ) as resp:
             resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
+            async for line in iter_sse_data_lines(resp, self._api_url):
                 data_str = line[6:]
                 if data_str.strip() == "[DONE]":
                     break
@@ -318,9 +318,7 @@ class AnthropicProvider(LLMProvider):
             "POST", self._api_url, headers=self._headers(), json=payload,
         ) as resp:
             resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
+            async for line in iter_sse_data_lines(resp, self._api_url):
                 data_str = line[6:]
                 if data_str.strip() == "[DONE]":
                     break

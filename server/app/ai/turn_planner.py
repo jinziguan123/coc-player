@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import copy
 import json
 import logging
@@ -911,15 +913,34 @@ def _extract_json_object(raw: Any, salvage_truncated: bool = False) -> dict | No
     return repaired
 
 
+#: 规划器的墙钟预算（秒）。规划器是可选环节：返回 None 就走旧流程，KP 照常叙事。
+#:
+#: 2026-09-05 鬼屋一局：推进后整局停在「KP 正在思考」半小时。抓包看 planner 那次调用：
+#: 服务端 0.5s 回响应头，随后 200s 内流出 3.1 万字 reasoning_content、正文 0 字，且越来越慢——
+#: 推理模型对这份 JSON 任务思考失控。同一份请求走 api.deepseek.com 直连 53s 返回；走中转代理时
+#: 连 thinking={"type":"disabled"} 都被代理吞掉，客户端关不了思考。所以这里必须自己设上限：
+#: 直连 53s 能回，取 120s 留足余量；超过就是失控，再等下去也不会有正文。
+PLANNER_TIMEOUT_SECONDS = 120.0
+
+
 async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
     try:
         # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限（原为 1200）会让
         # content 被 reasoning 耗空、返回空串（表现为「原始片段为空」）。交由服务端默认上限。
-        raw = await llm.complete(
-            messages,
-            temperature=0,
-            response_format={"type": "json_object"},
+        raw = await asyncio.wait_for(
+            llm.complete(
+                messages,
+                temperature=0,
+                response_format={"type": "json_object"},
+            ),
+            timeout=PLANNER_TIMEOUT_SECONDS,
         )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "KP 回合规划器 %.0fs 未完成，已回退旧流程（多为推理模型思考失控，或中转代理过慢；"
+            "把快模型槽位指向直连端点并关闭思考可根治）", PLANNER_TIMEOUT_SECONDS,
+        )
+        return None
     except Exception:
         logger.exception("KP 回合规划器调用失败，已回退旧流程")
         return None
