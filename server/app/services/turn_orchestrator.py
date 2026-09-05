@@ -397,6 +397,9 @@ async def _run_generation(
     # 通过 plan 参数传入 → 此处不重复调用。其他入口（run_travel_generation / _run_kp_turn 尾部）
     # 不传 plan → 这里现跑并记账（钩子 a），行为与前移前完全一致。开场（无事件）不跑。
     if plan is None and events:
+        # 调用方没带 plan（重新生成等路径）时在这里现跑一次 planner：也要打点，
+        # 否则这些路径的耗时只有一个合计、拆不出 planner 占了多少。
+        t_plan = time.monotonic(); u_plan = usage_tracker.snapshot()
         plan_messages = turn_planner.build_turn_plan_messages(
             game_session, module, player_char, events, teammates=teammates,
             rules_lookup_enabled=rules_enabled,
@@ -404,6 +407,10 @@ async def _run_generation(
             rule_options_block=rule_options_service.context_block(db, game_session),
         )
         plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
+        logger.info(
+            "耗时|planner（生成内） %.1fs（%s）session=%s",
+            time.monotonic() - t_plan, usage_tracker.fmt(usage_tracker.delta(u_plan)), session_id,
+        )
         planned_effects.enforce_plan_item_locations(
             plan, module, game_session.current_scene_id,
         )
@@ -2314,7 +2321,12 @@ async def run_regenerate_generation(session_id: str) -> None:
     # 三次重试。玩家点「重新生成」是明确的重试意图，网络多半也是这会儿刚好了，
     # 不清掉的话这一下会被自己的熔断短路——那就成了帮倒忙。
     openai_compat.reset_endpoint_health()
+    t_turn = time.monotonic()
+    t_drain = time.monotonic()
     await _drain_housekeeping(session_id)
+    drain_s = time.monotonic() - t_drain
+    if drain_s > 0.5:
+        logger.info("耗时|重新生成前等上轮收尾 %.1fs session=%s", drain_s, session_id)
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -2326,10 +2338,23 @@ async def run_regenerate_generation(session_id: str) -> None:
             db, session_id, exclude_id=game_session.player_character_id,
         )
         events = session_service.get_session_events(db, session_id)
+        t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
         await _run_generation(
             db, session_id, game_session, module, player_char, events,
             teammates=party_others,
         )
+        # 与常规回合同一套打点：「KP 叙事」含生成内 planner、工具循环、校验与编辑器；
+        # 各环节之和应约等于合计，对不上就是还有没埋点的地方在吃时间。
+        logger.info(
+            "耗时|重新生成 KP 叙事 %.1fs（%s）session=%s",
+            time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
+        )
+        turn_usage = usage_tracker.snapshot()
+        logger.info(
+            "耗时|重新生成合计 %.1fs（%s）session=%s",
+            time.monotonic() - t_turn, usage_tracker.fmt(turn_usage), session_id,
+        )
+        usage_tracker.warn_if_reasoning_dominates(turn_usage)
     except asyncio.CancelledError:
         logger.info("重新生成被取消: session=%s", session_id)
     except Exception:
