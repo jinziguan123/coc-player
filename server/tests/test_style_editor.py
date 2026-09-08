@@ -92,3 +92,18 @@ def test_主路径没有裁定计划也要过编辑器():
     result = [SHOT, SHOT, [], [], []]
     asyncio.run(_validate_and_patch_narration(llm, None, result))
     assert result[0] == CLEAN and len(llm.calls) == 1
+
+
+def test_剥掉被抄回来的输入标签():
+    """实测：模型把用户消息里的「【旁白全文】」当正文开头一起吐回（2026-09-06 第 177 段）。"""
+    assert style_editor._clean_output("【旁白全文】\n" + CLEAN) == CLEAN
+    assert style_editor._clean_output("【旁白全文】 改写后：" + CLEAN) == CLEAN
+    # 连清单也抄回来：从清单标签起整段砍掉
+    assert style_editor._clean_output(CLEAN + "\n\n【带口癖的句子】\n- 像是检查针脚") == CLEAN
+
+
+def test_标签残留或凭空多出全角方括号就保留原文():
+    assert asyncio.run(style_editor.polish_narration(_FakeLLM(reply=CLEAN + "（见【旁白全文】）"), SHOT)) is None
+    assert asyncio.run(style_editor.polish_narration(_FakeLLM(reply=CLEAN.replace("才开口。", "才开口。【注：已去比喻】")), SHOT)) is None
+    # 标签在开头会被清洗掉，随后正常通过
+    assert asyncio.run(style_editor.polish_narration(_FakeLLM(reply="【旁白全文】\n" + CLEAN), SHOT)) == CLEAN

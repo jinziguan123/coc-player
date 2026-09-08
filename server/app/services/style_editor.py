@@ -39,8 +39,14 @@ EDITOR_SYSTEM_PROMPT = (
     "只改标出的句子，其余句子逐字保留。改法：删掉比喻和揣测，只留角色确实看到、听到、摸到的现象；"
     "若比喻承载了线索，把线索写成可观察的具体现象（声音、形状、方位、变化）；"
     "破折号后的内容编进句子或另起一句；否定对比只说是什么；「某种」「什么东西」换成具体的名物，换不出就删。"
-    "不加新内容，不增删段落，不改人名与专名，不解释，不加引号或括号。只输出改好的全文。"
+    "不加新内容，不增删段落，不改人名与专名，不解释，不加引号或括号。"
+    "只输出改好的正文本身：不要输出任何标题、标签、说明，也不要把「带口癖的句子」清单抄回来。"
 )
+
+# 我们在用户消息里用这两个标签分隔正文与清单；模型有时把第一个标签当正文开头一起吐回来
+# （实测 2026-09-06：落库旁白以「【旁白全文】」开头）。清洗时剥掉，校验时若还残留就拒绝。
+_INPUT_LABELS = ("【旁白全文】", "【带口癖的句子】")
+_LEADING_LABEL_RE = re.compile(r"^(?:【[^】]{1,12}】|(?:改写后|改好的全文|修改后|正文)\s*[:：])\s*")
 
 
 def tic_score(text: str) -> int:
@@ -64,9 +70,18 @@ def flagged_sentences(text: str) -> list[str]:
 
 def _clean_output(raw: str) -> str:
     text = (raw or "").strip()
-    # 去掉可能包上来的代码栏和「改写后：」一类前缀
+    # 去掉可能包上来的代码栏
     text = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", text).strip()
-    text = re.sub(r"^(?:改写后|改好的全文|修改后)\s*[:：]\s*", "", text).strip()
+    # 模型把清单也抄回来了：从清单标签起整段砍掉
+    cut = text.find("【带口癖的句子】")
+    if cut >= 0:
+        text = text[:cut].rstrip()
+    # 开头的标签/「改写后：」一类前缀（可能叠着来，循环剥）
+    while True:
+        stripped = _LEADING_LABEL_RE.sub("", text, count=1).strip()
+        if stripped == text:
+            break
+        text = stripped
     return text
 
 
@@ -79,9 +94,13 @@ def _acceptable(old: str, new: str) -> bool:
         return False
     if tic_score(new) >= tic_score(old):
         return False
-    # 原文没有方括号标记，改写也不该凭空多出来（模型有时会把指令格式学进去）
-    if "[" not in old and "[" in new:
+    # 输入里的分隔标签绝不能出现在正文里
+    if any(label in new for label in _INPUT_LABELS):
         return False
+    # 原文没有方括号标记，改写也不该凭空多出来（模型有时会把指令格式或我们的标签学进去）
+    for bracket in ("[", "【"):
+        if bracket not in old and bracket in new:
+            return False
     return True
 
 
