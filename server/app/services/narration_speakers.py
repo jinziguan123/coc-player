@@ -69,6 +69,16 @@ _TRAILING_SAY_VERB_RE = re.compile(
 # 说话人后置且用代词时的兜底署名（判不出具名 NPC 时，用代词也好过把台词混进旁白）。
 _PRONOUN_SPEAKERS = ("她", "他", "它", "您", "咱")
 
+#: 候选说话人里不该出现的副词/否定词/时间词：「她方才说“…”」剥掉「说」剩「她方才」，从右取 2 字
+#: 得到「方才」，它像个人名（两个汉字、没有虚词字符），其实是副词。鬼屋一局实测四处误判：
+#: 「方才」「她讲」「她把」「话里始终没有」全被当成了说话人，气泡挂着这些名字。
+_NON_NAME_WORDS = (
+    "方才", "刚才", "刚刚", "随即", "接着", "然后", "于是", "忽然", "突然", "始终", "没有",
+    "仍旧", "依旧", "这时", "那时", "时候", "一直", "总是", "只是", "还是", "又是",
+)
+#: 候选开头不能是代词：「她讲」「她把」不是名字。
+_CANDIDATE_LEAD_PRONOUNS = set("她他它你我您咱其")
+
 
 
 def strip_speaker_prefix(text: str, speaker: str) -> str:
@@ -183,7 +193,12 @@ class SpeakerResolver:
         return None
 
     def _generic_prefix_speaker(self, s: str) -> str | None:
-        """无名角色说话前缀的右剥离式解析（见 _GENERIC_SPEAK_VERBS 注释）。"""
+        """无名角色说话前缀的右剥离式解析（见 _GENERIC_SPEAK_VERBS 注释）。
+
+        只认两种形状：行尾有说话动词，或行尾有冒号。二者皆无（「她讲“那本书”」「话里始终
+        没有“孩子”」）不是说话前缀，引号里是被提及的词，留旁白。
+        """
+        has_colon = s.rstrip(" \t").endswith(("：", ":"))
         base = s.rstrip("：:，, \t")
         verb_matched = False
         # 从最长动词开始、可连续剥离：「低声说」要整个拿掉，不能只剥「说」留下「低声」。
@@ -193,6 +208,8 @@ class SpeakerResolver:
                 verb_matched = True
                 break
         if not base:
+            return None
+        if not verb_matched and not has_colon:
             return None
         # 第一轮：优先认「老板娘玛莎」「护士长」这类以明确身份词开头的组合称呼；
         # 第二轮：退回最短的可用候选（玛莎/护工/男人）。
@@ -207,7 +224,9 @@ class SpeakerResolver:
                 return known
             if not world_memory.is_plausible_npc_name(candidate):
                 continue
-            if candidate[0] in _GENERIC_LEAD_REJECT:
+            if candidate[0] in _GENERIC_LEAD_REJECT or candidate[0] in _CANDIDATE_LEAD_PRONOUNS:
+                continue
+            if any(word in candidate for word in _NON_NAME_WORDS):
                 continue
             prev = base[start - 1] if start > 0 else ""
             if not verb_matched:

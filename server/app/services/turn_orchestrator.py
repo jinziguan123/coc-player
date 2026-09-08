@@ -1295,6 +1295,35 @@ def _group_label_for_focus(
     return groups[0]["label"] if groups else ""
 
 
+#: 申请检定轮里允许保留的旁白长度：一句「她的针脚没有停」当引子无妨，再长就是在替骰子写结果。
+_CHECK_REQUEST_LEAD_MAX_CHARS = 60
+
+
+def _check_request_narration_keep(res: list) -> bool:
+    """申请检定轮的 KP 产物要不要保留旁白部分（指令 res[1] 不受影响，照常处理）。
+
+    留：没写旁白；KP 明说这次免检（那就是它的裁定）；旁白很短（一句引子）。
+    丢：旁白很长——不管有没有带指令，长旁白都是在骰子落定前替玩家演结果；丢掉之后若也没有
+    指令，下游的确定性兜底会补挂检定，玩家点的那一下仍有归宿。
+    """
+    narration = (res[0] or "").strip()
+    if not narration:
+        return True
+    if any(phrase in narration for phrase in planned_effects._NO_CHECK_PHRASES):
+        return True
+    if len(narration) <= _CHECK_REQUEST_LEAD_MAX_CHARS:
+        return True
+    has_directive = bool(
+        command_protocol.DICE_CHECK_RE.search(res[1] or "")
+        or command_protocol.OPPOSED_CHECK_RE.search(res[1] or "")
+    )
+    logger.info(
+        "申请检定轮丢弃了 %d 字旁白（%s指令）：骰子未定先写揣测，既泄结果又与续写重复",
+        len(narration), "带" if has_directive else "无",
+    )
+    return False
+
+
 async def _run_kp_turn(
     db, session_id, game_session, module, player_char, party_others, user_prompt: str,
     then_team_turn: list[Character] | None = None,
@@ -1363,14 +1392,28 @@ async def _run_kp_turn(
         messages.append({"role": "user", "content": user_prompt})
 
         res = ["", "", [], [], []]
+        # 申请检定轮先攒着不广播：KP 该只回一行指令，小模型却常在前面先写一段揣测性旁白
+        # （「心里有个影子若隐若现地晃着」），既提前泄了骰子还没定的结果、又和骰后续写重复，
+        # 还把气泡渲染搅乱。看完整产物再定去留（见 _check_request_narration_keep）。
+        hold = requested_check is not None
+        held: list = []
         try:
             async for chunk in _stream_narration_filtered(
                 kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
             ):
-                room_hub.broadcast(session_id, chunk)
+                if hold:
+                    held.append(chunk)
+                else:
+                    room_hub.broadcast(session_id, chunk)
         except asyncio.CancelledError:
             _persist_narration(db, session_id, res, llm=llm)
             raise
+        if hold:
+            if _check_request_narration_keep(res):
+                for chunk in held:
+                    room_hub.broadcast(session_id, chunk)
+            else:
+                res[0], res[2], res[3], res[4] = "", [], [], []
         if location_guard:
             # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
             validation = await turn_context.turn_validator.validate_turn_narration(
