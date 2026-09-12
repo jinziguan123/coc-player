@@ -1340,7 +1340,7 @@ export function GameSessionPage() {
   })
 
   return (
-    <div className="game-session-layout flex h-full gap-4">
+    <div className="game-session-layout flex flex-col h-full">
       {sceneBackdrop && (
         <div className="scene-backdrop" aria-hidden="true">
           <div className="scene-backdrop__img" style={{ backgroundImage: `url("${sceneBackdrop}")` }} />
@@ -1348,6 +1348,8 @@ export function GameSessionPage() {
       )}
       {sceneVeil && <div className="scene-veil" aria-hidden="true" />}
       {battleVeil && <div className="scene-veil" aria-hidden="true" />}
+      {/* 舞台行：战场 / 叙事流 / 角色卡横向并列。KP 控制台不在这一行里——它是底部坞，见下。 */}
+      <div className="gsl-stage flex flex-1 min-h-0 gap-4">
       {/* 沉浸战斗布局：战斗激活时战场占左侧约 2/3（棋盘居中放大、参战卡环绕、动作区钉底），
           聊天整列收成右侧栏（组件不动、仅收窄），完全可用；战斗结束自动回到单列。 */}
       {immersiveOn && combat && (
@@ -2368,8 +2370,6 @@ export function GameSessionPage() {
         </aside>
       )}
 
-      {/* KP 控制台侧栏：与叙事流并列而非争抢竖向空间。
-          收起后留一颗圆 token（与聊天侧栏同一套交互与视觉），偏好存 localStorage。 */}
       {isKp && kpCollapsed && (
         <div className="side-token-rail">
           <button
@@ -2382,8 +2382,14 @@ export function GameSessionPage() {
           </button>
         </div>
       )}
+      </div>
+
+      {/* KP 控制台：**底部坞**，横贯整个舞台宽度。
+          曾经是右侧一条窄栏，代价是叙事输入框只有不到 300px——而写旁白是 KP 最高频的产出，
+          在那么窄的框里写一段话很难受。挪到底部之后输入框有上千像素，监控列也能在它左边
+          铺开，与舞台上下分工：上面是这一局的样子，下面是你要做的事。 */}
       {isKp && !kpCollapsed && (
-        <aside className={`kp-console-pane flex-shrink-0${immersiveOn ? '' : ' kp-console-pane--wide'}`}>
+        <aside className="kp-console-dock flex-shrink-0">
           <HumanKpPanel
             sessionId={currentSession.id}
             turnReady={turnState?.ready === true}

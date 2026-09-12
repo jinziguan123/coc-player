@@ -2410,23 +2410,67 @@ body {
  *
  * 沉浸战斗布局下不启用：那时已经是「战场 | 聊天 | 控制台」三栏并列，再宽会把战场挤掉。
  */
-.kp-console-pane--wide { width: clamp(300px, 34vw, 620px); }
-/* 分栏容器本身也要能撑满并让内部滚动，否则两栏一样长、页面整体出滚动条 */
+/**
+ * ===== KP 控制台：底部坞 =====
+ *
+ * 曾经是右侧一条 ~370px 的窄栏，里面「态势列 → 动作芯片 → 输入框」竖着排下去。
+ * 代价是叙事输入框只有不到 300px 宽——而写旁白是 KP 最高频的产出，在那么窄的框里
+ * 写一段话很难受；监控列也只能压在芯片上面，两者都不舒展。
+ *
+ * 改成横贯舞台的底部坞之后：输入框宽度以千计，监控列在它左边独立成栏，
+ * 与上方舞台形成上下分工——上面是这一局的样子，下面是你要做的事。
+ */
+.kp-console-dock {
+  /* 高度要装得下两张调查员卡（四人桌再多就滚）。压太矮的话监控列一次只露一个人，
+     等于又回到「要看第二个人得翻」的老问题。 */
+  height: clamp(280px, 36vh, 460px);
+  min-height: 0;
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+}
+.kp-console-dock .kp-console { flex: 1; min-height: 0; }
+
+/* 分栏容器：坞里恒为左右两栏（宽度不再是问题）；仍留竖排分支给别处复用。 */
 .kp-console-split { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .kp-situation { display: flex; flex-direction: column; }
 
-@media (min-width: 1440px) {
-  .kp-console-pane--wide .kp-console-split { flex-direction: row; align-items: stretch; gap: 0.5rem; }
-  .kp-console-pane--wide .kp-situation {
-    width: 246px;
-    flex-shrink: 0;
-    overflow-y: auto;              /* 人多时自己滚，不顶着右边一起长 */
-    border-right: 1px solid var(--color-border);
-    border-bottom: none;
+.kp-console-dock .kp-console-split { flex-direction: row; align-items: stretch; gap: 0.6rem; }
+/**
+ * 态势列在坞里走「宽而矮」，不是「窄而高」。
+ *
+ * 竖着单列排的话，一张调查员卡 155px 高，坞里只放得下一张半——等于又回到「要看第二个人
+ * 得翻」的老问题，而那正是监控列要解决的事。坞有一千四百像素宽，横向有的是地方：
+ * 加宽到 430px 排成两列，四人桌一眼看全，输入框仍有九百多。
+ */
+.kp-console-dock .kp-situation {
+  width: 430px;
+  flex-shrink: 0;
+  overflow-y: auto;              /* 五人以上才需要滚 */
+  border-right: 1px solid var(--color-border);
+  border-bottom: none;
+}
+.kp-console-dock .kp-monitor { display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
+.kp-console-dock .kp-monitor-label { grid-column: 1 / -1; }
+.kp-console-dock .kp-console-body { flex: 1; min-width: 0; }
+/* 坞里横向有的是地方：芯片摊开、输入框长高，不必再压到最紧 */
+.kp-console-dock .kp-composer-actions .kp-quick-action { padding: 0.24rem 0.55rem; }
+.kp-console-dock .kp-composer-form--prose textarea { min-height: 5.5rem; }
+/* 竖向反过来要省：坞的高度有限，调查员卡压紧一档才装得下两张 */
+.kp-console-dock .kp-monitor { gap: 0.25rem; padding: 0.35rem 0.4rem 0.4rem; }
+.kp-console-dock .kp-mon { padding: 0.3rem 0.4rem 0.28rem; }
+.kp-console-dock .kp-mon-head { margin-bottom: 0.2rem; }
+.kp-console-dock .kp-mon-acts { margin-top: 0.25rem; }
+
+/* 窄屏（<1100px）退回竖排：横向摆不下两栏时，硬摆只会把两边都挤瘪 */
+@media (max-width: 1100px) {
+  .kp-console-dock { height: clamp(260px, 42vh, 480px); }
+  .kp-console-dock .kp-console-split { flex-direction: column; }
+  .kp-console-dock .kp-situation {
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
   }
-  .kp-console-pane--wide .kp-console-body { flex: 1; min-width: 0; }
-  /* 两栏时动作芯片有地方摊开了，不必再压到最紧 */
-  .kp-console-pane--wide .kp-composer-actions .kp-quick-action { padding: 0.24rem 0.5rem; }
 }
 
 /* ===== 场景速查：本场线索 + 还没放出去的地点 ===== */
