@@ -57,6 +57,7 @@ import { SessionStyleModal } from '../components/game/SessionStyleModal'
 import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntry, type CombatResultView } from '../components/game/CombatStage'
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
+import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { Modal } from '../components/ui/modal'
 import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
@@ -2382,12 +2383,17 @@ export function GameSessionPage() {
         </div>
       )}
       {isKp && !kpCollapsed && (
-        <aside className="kp-console-pane flex-shrink-0">
+        <aside className={`kp-console-pane flex-shrink-0${immersiveOn ? '' : ' kp-console-pane--wide'}`}>
           <HumanKpPanel
             sessionId={currentSession.id}
             turnReady={turnState?.ready === true}
             variant="sidebar"
             onCollapse={() => setKpCollapsed(true)}
+            aside={<KpSceneBrief
+              sessionId={currentSession.id}
+              places={locations}
+              onDone={() => setRefreshTick((x) => x + 1)}
+            />}
           />
         </aside>
       )}

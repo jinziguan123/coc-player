@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { api, getServerUrl } from '@/api/client'
 import { GiFootTrip, GiPadlock, GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
@@ -38,10 +38,11 @@ import { KpInput } from './KpInput'
 import { catalogOptions } from './kpCatalogs'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { KpPartyMonitor } from './KpPartyMonitor'
+import { KpSubTabs } from './KpSubTabs'
 import { useDragResize } from '@/components/ui/useDragResize'
 import { useDictation } from './useDictation'
 import { useSlashCommands } from './useSlashCommands'
-import { ACTION_CHIPS, ACTION_LABELS, PROSE_ACTIONS, type KpAction } from './kpActions'
+import { ACTION_CHIPS, ACTION_LABELS, PROSE_ACTIONS, REFERENCE_IDS, type KpAction } from './kpActions'
 
 type PanelTab = 'tools' | 'advisor' | 'assets' | 'director' | 'source'
 
@@ -236,6 +237,9 @@ interface Props {
    *  侧栏形态下收起由外层的窄条接管，面板不再自绘收起按钮。 */
   variant?: 'inline' | 'sidebar'
   onCollapse?: () => void
+  /** 场景速查等由外层提供的附属块（需要局内地点表，那份数据在页面上）。
+   *  宽屏下它与监控列同列，窄屏下顺次堆在写作台之上。 */
+  aside?: ReactNode
 }
 
 
@@ -246,13 +250,6 @@ interface Props {
  * 且个个同等份量——可 KP 九成时间只待在主持页，另外四个是**查阅**，不是并列的工作台。
  * 平铺的结果是主持这一档被另外四个稀释掉了。
  */
-const REFERENCE_TABS: Array<{ id: PanelTab; label: string; icon: typeof WandSparkles }> = [
-  { id: 'advisor', label: '参谋', icon: Bot },
-  { id: 'assets', label: '配图与队友', icon: Image },
-  { id: 'director', label: '导演台', icon: NotebookPen },
-  { id: 'source', label: '模组资料', icon: BookOpen },
-]
-const REFERENCE_IDS = new Set<PanelTab>(REFERENCE_TABS.map((t) => t.id))
 
 function imageUrl(src: string): string {
   if (/^https?:\/\//i.test(src)) return src
@@ -279,7 +276,7 @@ function highlightText(text: string, query: string) {
   ))
 }
 
-export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline', onCollapse }: Props) {
+export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline', onCollapse, aside }: Props) {
   const sidebar = variant === 'sidebar'
   // 侧栏形态没有「内联收起」这回事——整栏的显隐由外层窄条控制，此处恒展开。
   const [collapsedInline, setCollapsedInline] = useState(false)
@@ -733,34 +730,24 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
         </div>
       )}
 
-      {/* 监控列：全队 HP/SAN/MP 常驻。只在「主持」档下出现——翻资料时它就是干扰了。
+      {/* 分栏：宽屏「看的」在左、「做的」在右；窄屏顺次堆叠。见 index.css */}
+      <div className="kp-console-split">
+      {/* 态势列：全队体征 + 场景速查，只在「主持」档出现——翻资料时它就是干扰。
           行内动作走 adoptToTools（填进表单、不直接发出），裁定权仍在 KP 手里。 */}
       {!collapsed && tab === 'tools' && (
-        <KpPartyMonitor party={party} onPrefill={(next, fields) => adoptToTools(next, fields)} />
+        <div className="kp-situation">
+          <KpPartyMonitor party={party} onPrefill={(next, fields) => adoptToTools(next, fields)} />
+          {aside}
+        </div>
       )}
-
       {/* 资料的二级标签：只在「资料」这一档下出现 */}
       {!collapsed && REFERENCE_IDS.has(tab) && (
-        <div className="kp-subtabs">
-          {REFERENCE_TABS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                setTab(id)
-                setLastRefTab(id)
-                if (id === 'source') {
-                  if (sourceOpen) setSourceOpen(false)
-                  else void openModuleSource()
-                }
-              }}
-              className={`kp-subtab inline-flex items-center gap-1 whitespace-nowrap ${tab === id ? 'kp-subtab--active' : ''}`}
-              aria-pressed={tab === id}
-            >
-              <Icon size={12} /> {label}
-            </button>
-          ))}
-        </div>
+        <KpSubTabs tab={tab} onPick={(id) => {
+          setTab(id)
+          setLastRefTab(id)
+          // 「模组资料」那一档配的是悬浮窗，再点一次即收起
+          if (id === 'source') { if (sourceOpen) setSourceOpen(false); else void openModuleSource() }
+        }} />
       )}
 
       {/* 侧栏形态：抬头与回合条常驻，其下整体滚动 */}
@@ -1325,6 +1312,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
           </div>
         </div>
       )}
+      </div>
       </div>
     </section>
   )

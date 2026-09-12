@@ -2401,6 +2401,67 @@ body {
   border-bottom: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-accent) 4%, transparent);
 }
+/**
+ * ===== 控制台在宽屏下改两栏 =====
+ *
+ * 单列时「态势列 → 14 个动作芯片 → 输入框」竖着排下去，矮一点的屏就要滚动才够得着输入框——
+ * 而那三样 KP 是同时要用的。可用宽度够时改成左右分栏：左边是**看**的（体征、线索、
+ * 还能放出去的地点），右边是**做**的（选动作、写、发）。
+ *
+ * 沉浸战斗布局下不启用：那时已经是「战场 | 聊天 | 控制台」三栏并列，再宽会把战场挤掉。
+ */
+.kp-console-pane--wide { width: clamp(300px, 34vw, 620px); }
+/* 分栏容器本身也要能撑满并让内部滚动，否则两栏一样长、页面整体出滚动条 */
+.kp-console-split { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.kp-situation { display: flex; flex-direction: column; }
+
+@media (min-width: 1440px) {
+  .kp-console-pane--wide .kp-console-split { flex-direction: row; align-items: stretch; gap: 0.5rem; }
+  .kp-console-pane--wide .kp-situation {
+    width: 246px;
+    flex-shrink: 0;
+    overflow-y: auto;              /* 人多时自己滚，不顶着右边一起长 */
+    border-right: 1px solid var(--color-border);
+    border-bottom: none;
+  }
+  .kp-console-pane--wide .kp-console-body { flex: 1; min-width: 0; }
+  /* 两栏时动作芯片有地方摊开了，不必再压到最紧 */
+  .kp-console-pane--wide .kp-composer-actions .kp-quick-action { padding: 0.24rem 0.5rem; }
+}
+
+/* ===== 场景速查：本场线索 + 还没放出去的地点 ===== */
+.kp-brief {
+  padding: 0.4rem 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.kp-brief-label {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.2em;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.25rem;
+}
+.kp-brief-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.22rem 0.35rem;
+  font-size: var(--text-2xs);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--color-text-primary);
+}
+.kp-brief-row + .kp-brief-row { margin-top: 2px; }
+.kp-brief-row--act {
+  border-color: var(--color-border);
+  background: var(--color-input-bg);
+  transition: border-color 0.15s;
+}
+.kp-brief-row--act:hover:not(:disabled) { border-color: var(--color-accent); }
+.kp-brief-row--act:disabled { opacity: 0.5; }
+.kp-brief-tag { font-size: 0.5625rem; letter-spacing: 0.06em; color: var(--color-text-secondary); }
+.kp-brief-row--act:hover .kp-brief-tag--act { color: var(--color-text-accent); }
+
 /* ===== 监控列：全队生命体征常驻 =====
    此前 KP 要看第二个人的血量得在队伍条里切过去，而「谁快死了、谁理智见底」是他每分钟
    都要知道的事。 */

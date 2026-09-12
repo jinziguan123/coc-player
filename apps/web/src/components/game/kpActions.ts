@@ -5,7 +5,7 @@
  * 新文件，不是把那个数字调大。
  */
 import type { ComponentType } from 'react'
-import { Bot, WandSparkles } from 'lucide-react'
+import { BookOpen, Bot, Image, NotebookPen, WandSparkles, type LucideIcon } from 'lucide-react'
 import {
   GiBrain, GiCancel, GiCheckMark, GiCrossedSwords, GiFootTrip, GiHeartPlus,
   GiPadlock, GiRollingDices, GiScrollUnfurled, GiTheaterCurtains,
@@ -95,3 +95,16 @@ export const ACTION_COMMANDS: Array<{ cmd: string; action: KpAction; hint: strin
 
 /** 旁白与 NPC 台词是「一整段文字」，输入框得写得下；检定那种一行一格的表单撑开只会空旷。 */
 export const PROSE_ACTIONS = new Set<KpAction>(['narration', 'dialogue'])
+
+/** 「资料」档下的二级标签。放这儿而不是放组件文件里：与 kpCatalogs 同一个理由——
+ *  组件文件里混着导出常量，热更新会退化成整页刷新。 */
+export type ReferenceTab = 'advisor' | 'assets' | 'director' | 'source'
+
+export const REFERENCE_TABS: Array<{ id: ReferenceTab; label: string; icon: LucideIcon }> = [
+  { id: 'advisor', label: '参谋', icon: Bot },
+  { id: 'assets', label: '配图与队友', icon: Image },
+  { id: 'director', label: '导演台', icon: NotebookPen },
+  { id: 'source', label: '模组资料', icon: BookOpen },
+]
+
+export const REFERENCE_IDS = new Set<string>(REFERENCE_TABS.map((t) => t.id))

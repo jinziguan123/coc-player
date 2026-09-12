@@ -31,8 +31,8 @@ const DEFAULT_MAX = 700
 const GRANDFATHERED: Record<string, number> = {
   'pages/GameSessionPage.tsx': 2410,   // 局内三份远端数据已搬进 features/game-session/useSessionResources.ts
   'pages/CharacterPage.tsx': 1776,
-  // 语音转文字 → useDictation；资料悬浮窗的拖拽缩放 → ui/useDragResize
-  'components/game/HumanKpPanel.tsx': 1332,
+  // 语音转文字 → useDictation；悬浮窗拖拽缩放 → ui/useDragResize；二级标签 → KpSubTabs
+  'components/game/HumanKpPanel.tsx': 1320,
   'pages/ModuleDetailPage.tsx': 1261,
   'pages/RoomLobbyPage.tsx': 1019,
   'pages/SettingsPage.tsx': 722,
