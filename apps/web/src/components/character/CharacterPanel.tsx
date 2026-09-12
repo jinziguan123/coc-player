@@ -7,6 +7,8 @@ import { CharacterPortrait } from './CharacterPortrait'
 import { api } from '../../api/client'
 import type { CharacterExperience } from '@/features/characters/api'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { GameVitalBar } from './GameVitalBar'
+export { GameVitalBar, StatBar } from './GameVitalBar'
 
 /** 模糊匹配：先看子串，再退化为「按顺序出现的子序列」（如「图使」命中「图书馆使用」）。 */
 function fuzzyMatch(query: string, target: string): boolean {
@@ -86,45 +88,7 @@ const BACKSTORY_SECTIONS: { key: string; label: string }[] = [
   { key: 'traits', label: '特点' },
 ]
 
-/** 要害条：数值抬到 text-base 等宽，是角色卡上最该被一眼读到的东西。
- *  tone 区分 HP（血酒红）与 SAN/MP（琥珀），低于三成一律转告警红。 */
-function StatBar({ label, current, max, tone = 'var(--color-accent)' }: {
-  label: string; current: number; max: number; tone?: string
-}) {
-  const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0
-  const isLow = pct < 30
-  return (
-    <div className="mb-2">
-      <div className="flex items-baseline justify-between mb-1">
-        <span
-          className="tracking-wider"
-          style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
-        >
-          {label}
-        </span>
-        <span
-          className="font-mono tabular-nums font-bold"
-          style={{
-            fontSize: 'var(--text-base)',
-            lineHeight: 1.1,
-            color: isLow ? 'var(--color-danger)' : 'var(--color-text-primary)',
-          }}
-        >
-          {current}
-          <span style={{ fontSize: 'var(--text-2xs)', fontWeight: 400, color: 'var(--color-text-secondary)' }}>
-            /{max}
-          </span>
-        </span>
-      </div>
-      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-sunken)' }}>
-        <div
-          className="h-full rounded-full stat-bar-fill"
-          style={{ width: `${pct}%`, background: isLow ? 'var(--color-danger)' : tone }}
-        />
-      </div>
-    </div>
-  )
-}
+
 
 function InfoRow({ label, value }: { label: string; value: string | number }) {
   if (!value && value !== 0) return null
@@ -224,10 +188,10 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
         </div>
       </div>
 
-      <div className={`rounded ${vitalFlash}`} style={{ padding: '2px' }}>
-        {hp && <StatBar label="HP" current={hp.current} max={hp.max} tone="var(--color-danger-deep)" />}
-        {san && <StatBar label="SAN" current={san.current} max={san.max} />}
-        {mp && <StatBar label="MP" current={mp.current} max={mp.max} />}
+      <div className={`game-vital-group ${vitalFlash}`}>
+        {hp && <GameVitalBar type="hp" current={hp.current} max={hp.max} />}
+        {san && <GameVitalBar type="san" current={san.current} max={san.max} />}
+        {mp && <GameVitalBar type="mp" current={mp.current} max={mp.max} />}
       </div>
 
       {/* 派生数值与雷达图并排（窄栏下自动堆成上下两行） */}
@@ -670,7 +634,7 @@ function ProfileTab({ character }: { character: CharacterData }) {
 
 export function CharacterPanel({ character, onSkillCheck, inventoryActions, sessionId, refreshKey }: CharacterPanelProps) {
   return (
-    <Tabs defaultValue="基本信息" className="flex flex-col h-full">
+    <Tabs defaultValue="基本信息" className="flex flex-col h-full game-info">
       <TabsList>
         {TAB_KEYS.map((t) => (
           <TabsTrigger key={t} value={t}>{t}</TabsTrigger>

@@ -67,3 +67,49 @@ describe('技能页申请检定', () => {
     expect(calls).toEqual([['侦查', '报纸的日期']])
   })
 })
+
+describe('CharacterPanel 游戏化 HUD 属性条 (HP / SAN / MP)', () => {
+  const characterWithVitals = {
+    ...baseCharacter,
+    system_data: {
+      hitPoints: { current: 13, max: 13 },
+      sanity: { current: 54, max: 99 },
+      magicPoints: { current: 11, max: 11 },
+    },
+  }
+
+  it('正确渲染 HP、SAN、MP 及其专属中文标识与当前/最大数值', () => {
+    render(<CharacterPanel character={characterWithVitals} />)
+
+    expect(screen.getByText('HP')).toBeInTheDocument()
+    expect(screen.getByText('生命')).toBeInTheDocument()
+    expect(screen.getByText('SAN')).toBeInTheDocument()
+    expect(screen.getByText('理智')).toBeInTheDocument()
+    expect(screen.getByText('MP')).toBeInTheDocument()
+    expect(screen.getByText('魔法')).toBeInTheDocument()
+
+    expect(screen.getByText('13')).toBeInTheDocument()
+    expect(screen.getByText('/13')).toBeInTheDocument()
+    expect(screen.getByText('54')).toBeInTheDocument()
+    expect(screen.getByText('/99')).toBeInTheDocument()
+    expect(screen.getByText('11')).toBeInTheDocument()
+    expect(screen.getByText('/11')).toBeInTheDocument()
+  })
+
+  it('低值时触发对应的游戏化警示微标（危 / 狂 / 竭）', () => {
+    const dangerCharacter = {
+      ...baseCharacter,
+      system_data: {
+        hitPoints: { current: 2, max: 12 },   // < 30%
+        sanity: { current: 15, max: 80 },    // < 30%
+        magicPoints: { current: 1, max: 10 }, // < 20%
+      },
+    }
+    render(<CharacterPanel character={dangerCharacter} />)
+
+    expect(screen.getByText('危')).toBeInTheDocument()
+    expect(screen.getByText('狂')).toBeInTheDocument()
+    expect(screen.getByText('竭')).toBeInTheDocument()
+  })
+})
+

@@ -4379,6 +4379,261 @@ select.input option {
   100% { box-shadow: none; }
 }
 
+/* ===== 角色卡游戏化属性条 (HP / SAN / MP) ===== */
+.game-vital-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.1rem 0;
+  font-family: var(--font-game);
+}
+
+.game-vital-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-family: var(--font-game);
+}
+
+/* 顶部信息行：标签 + 辅助名 + 警示微标 + 数值 */
+.game-vital-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  line-height: 1.1;
+  font-family: var(--font-game);
+}
+
+.game-vital-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-family: var(--font-game);
+}
+
+.game-vital-title-group .chip {
+  font-family: var(--font-game);
+}
+
+/* 标签比注解重一档：扫视时先抓到 HP/SAN/MP，「生命/理智/魔法」只是注解 */
+.game-vital-label {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--color-text-primary) 72%, transparent);
+  line-height: 1;
+}
+
+.game-vital-sublabel {
+  font-family: var(--font-game);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  opacity: 0.72;
+}
+
+/* 右侧数值排版：与左侧标签之间留出呼吸位，窄栏下也不会挤成一坨 */
+.game-vital-values {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  display: flex;
+  align-items: baseline;
+  padding-left: 0.6rem;
+  flex-shrink: 0;
+}
+
+.game-vital-cur {
+  font-weight: 700;
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  transition: color 0.25s ease;
+}
+
+.game-vital-cur--low {
+  color: var(--color-danger) !important;
+}
+
+.game-vital-max {
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  opacity: 0.75;
+}
+/* ── 槽体：凹进面板的压痕（哥特=蚀刻黄铜槽，羊皮纸=纸上压印） ────────────────
+   三条的配色差异全部收敛到 --vital-tone 一个变量，槽体/填充/警示的写法只有一份。 */
+.game-vital-track {
+  position: relative;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--color-border);
+  /* 上沿吃光、槽底回一点反光：两条内阴影就够撑出「凹下去」的体积 */
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.42),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+/* 刻度：四等分分隔，只压在槽体上半部。
+   刻意压到几乎看不见——细密刻线在深色空槽上会连成一排亮点，条子看着就脏了；
+   这里只要「扫一眼知道过没过半」，凑近才该注意到它的存在。 */
+.game-vital-track::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0 calc(25% - 1px),
+    var(--vital-tick) calc(25% - 1px) 25%
+  );
+  -webkit-mask-image: linear-gradient(180deg, #000 0 48%, transparent 48%);
+  mask-image: linear-gradient(180deg, #000 0 48%, transparent 48%);
+}
+
+:root {
+  --vital-tick: rgba(212, 162, 78, 0.10);
+}
+
+:root[data-theme="parchment"] {
+  --vital-tick: rgba(90, 60, 20, 0.16);
+}
+
+:root[data-theme="parchment"] .game-vital-track {
+  background: rgba(120, 92, 48, 0.12);
+  border-color: var(--color-border);
+  /* 纸不反光：只留压痕的深边，去掉槽底那道亮线 */
+  box-shadow: inset 0 1px 2px rgba(90, 60, 20, 0.22);
+}
+
+/* 缓动残影层（Ghost Bar）：受击瞬间露出的一截旧血条 */
+.game-vital-ghost {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--vital-tone) 34%, transparent);
+  transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* 主填充条：纵向渐变给出圆柱受光，右端一道亮边当「液面前沿」 */
+.game-vital-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  border-radius: 1px;
+  /* 白只掺一点点：9px 高的条子里顶部高光要占掉一成多，混多了整条会被提亮成糖果色，
+     暗黑哥特就没了。主体必须是 tone 本身，上下缘只做微弱的体积暗示。 */
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--vital-tone) 93%, #ffffff) 0%,
+    var(--vital-tone) 52%,
+    color-mix(in srgb, var(--vital-tone) 72%, #000000) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--vital-tone) 76%, #ffffff),
+    1px 0 4px color-mix(in srgb, var(--vital-tone) 50%, transparent);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 三条的专属色：血 / 铜锈 / 幽紫。
+   刻意**不复用** --color-accent 与 --color-text-secondary：前者是全站强调色（边框、标题、
+   按钮、骰子都在用），SAN 挂上它会和界面其它金色糊成一片，语义上也不对——金是「珍贵」不是
+   「理智」；后者本就是无色相的灰，混一点蓝只会得到一根死气沉沉的脏灰条。
+   三色按同一套规矩取：**低明度、够饱和**、彼此色相拉开——像暗色宝石（石榴石/孔雀石/紫水晶），
+   而不是水粉画。中明度中饱和是最难看的那一档：既不浓烈也不沉静，在深底上显得发灰发粉。
+   SAN 取铜锈青还有个用处——低值时转血红，「从冷静到疯狂」的色相位移自己就把话说了。 */
+:root {
+  --vital-hp: #7b1f2b;    /* 石榴：干涸的血，不是砖红 */
+  --vital-san: #1a6355;   /* 孔雀石：铜锈的冷绿 */
+  --vital-mp: #522f78;    /* 紫水晶：神秘学的传统色 */
+}
+
+:root[data-theme="parchment"] {
+  /* 浅纸底上要压得更深才立得住，仍是同三个色相 */
+  --vital-hp: #6e1423;
+  --vital-san: #14544a;
+  --vital-mp: #452a63;
+}
+
+.game-vital-ghost--hp,
+.game-vital-fill--hp {
+  --vital-tone: var(--vital-hp);
+}
+
+.game-vital-ghost--san,
+.game-vital-fill--san {
+  --vital-tone: var(--vital-san);
+}
+
+.game-vital-ghost--mp,
+.game-vital-fill--mp {
+  --vital-tone: var(--vital-mp);
+}
+
+/* 羊皮纸下的填充是「墨水填格」：纸面不反光，改用边缘加深模拟墨晕 */
+:root[data-theme="parchment"] .game-vital-fill {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--vital-tone) 96%, #ffffff) 0%,
+    var(--vital-tone) 62%,
+    color-mix(in srgb, var(--vital-tone) 86%, #000000) 100%
+  );
+  box-shadow:
+    inset 0 -1px 0 color-mix(in srgb, var(--vital-tone) 70%, #000000),
+    1px 0 3px color-mix(in srgb, var(--vital-tone) 40%, transparent);
+}
+
+/* 低值预警：本色压暗 + 血色辉光呼吸。
+   刻意**不把三条一起改成红**——那样 SAN 和 MP 会糊成同一根红条，一眼分不出是哪项见了底。
+   危险信号已由数值变红、危/狂/竭 微标和这圈血光给足；条子自己保住色相，只往暗里走，
+   像烛火退到快灭的那一档。 */
+.game-vital-fill--low {
+  --vital-tone: color-mix(in srgb, var(--vital-own) 74%, #000000);
+  animation: vitalLowPulse 1.9s ease-in-out infinite;
+}
+
+.game-vital-fill--hp.game-vital-fill--low {
+  --vital-own: var(--vital-hp);
+}
+
+.game-vital-fill--san.game-vital-fill--low {
+  --vital-own: var(--vital-san);
+}
+
+.game-vital-fill--mp.game-vital-fill--low {
+  --vital-own: var(--vital-mp);
+}
+
+@keyframes vitalLowPulse {
+  0%, 100% {
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--vital-tone) 76%, #ffffff),
+      0 0 3px color-mix(in srgb, var(--color-danger) 40%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--vital-tone) 76%, #ffffff),
+      0 0 10px color-mix(in srgb, var(--color-danger) 80%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-vital-fill--low {
+    animation: none;
+  }
+  .game-vital-fill,
+  .game-vital-ghost {
+    transition: none;
+  }
+}
+
 /* ===== 战斗 HUD 面板质感：双线描边 + 四角琥珀角饰（纯 CSS，不引资源文件） ===== */
 .combat-hud {
   border: 1px solid var(--color-border-strong) !important;
