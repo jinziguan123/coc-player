@@ -58,6 +58,9 @@ import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntr
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
+import { KpPartyMonitor } from '../components/game/KpPartyMonitor'
+import { usePartyVitals } from '@/features/game-session/usePartyVitals'
+import { useKpPrefill } from '../stores/kpPrefill'
 import { Modal } from '../components/ui/modal'
 import { GiReturnArrow, GiRollingDices, GiScrollUnfurled, GiTreasureMap, GiEnvelope, GiNewspaper, GiNotebook, GiPapers, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
@@ -329,6 +332,23 @@ export function GameSessionPage() {
   const [showSearch, setShowSearch] = useState(false)
   // 回合确认制：本回合各真人的确认进度
   const [turnState, setTurnState] = useState<{ confirmed_ids: string[]; total: number; ready: boolean } | null>(null)
+  // —— 值班台监控列：全队体征 + 信号 ——
+  // 左侧栏常驻显示「谁还剩多少血 / 理智松没松」，动作或消息到达时重拉，扣血要尽快上卡。
+  const kpSeats = currentSession?.participants?.map((p) => ({
+    character_id: p.character_id ?? null,
+    character_name: p.character_name ?? null,
+    role: p.role,
+  }))
+  const [kpVitalsTick, setKpVitalsTick] = useState(0)
+  useEffect(() => {
+    if (isKp) setKpVitalsTick((t) => t + 1)
+  }, [messages.length, refreshTick, isKp])
+  const kpParty = usePartyVitals(isKp ? kpSeats : undefined, kpVitalsTick)
+  // 信号：与原型同一组——回合待办、战斗归属、理智告急。
+  const kpPendingCount = turnState ? Math.max(0, turnState.total - turnState.confirmed_ids.length) : 0
+  const kpTurnName = combat?.order.find((c) => c.id === combat.turn)?.name
+  const kpSanDanger = kpParty.some((a) => a.san && a.san.max > 0 && a.san.current / a.san.max < 0.3)
+  const currentSceneName = locations.find((l) => l.current)?.name || currentSession?.current_scene_id || ''
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -539,7 +559,12 @@ export function GameSessionPage() {
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
-  const immersiveOn = !!combat && battleLayout === 'immersive' && wideViewport
+  // —— 真人 KP 值班台：主台在「叙事 / 战术」间切换 ——
+  // 原型里开战即切战术台（KP 不该在打起来之后还要自己去按一下），之后仍可手动切回叙事看流。
+  const [kpStage, setKpStage] = useState<'narrative' | 'tactical'>('narrative')
+  useEffect(() => { if (combat) setKpStage('tactical') }, [combat])
+  // KP 席由 kpStage 决定沉浸战场；玩家席沿用 battleLayout 偏好。
+  const immersiveOn = !!combat && (isKp ? kpStage === 'tactical' : battleLayout === 'immersive') && wideViewport
   // 聊天侧栏折叠：折叠后战场更大；期间到达的新消息计入未读徽标（展开即清）。
   const [chatCollapsed, setChatCollapsed] = useState(false)
   // KP 控制台侧栏折叠：跨会话记住偏好（KP 常年开着，玩家看不到这一栏）
@@ -1339,6 +1364,11 @@ export function GameSessionPage() {
     return next
   })
 
+  // —— 值班台形态（真人 KP 席 + 宽视口）——
+  // 对应原型 /lab/kp：左列监控常驻、主台在叙事/战术间切换、写作台沉底。
+  // 玩家席与窄视口维持原布局——监控与场景速查仍由坞内的态势列提供。
+  const desk = isKp && wideViewport
+
   return (
     <div className="game-session-layout flex flex-col h-full">
       {sceneBackdrop && (
@@ -1348,40 +1378,9 @@ export function GameSessionPage() {
       )}
       {sceneVeil && <div className="scene-veil" aria-hidden="true" />}
       {battleVeil && <div className="scene-veil" aria-hidden="true" />}
-      {/* 舞台行：战场 / 叙事流 / 角色卡横向并列。KP 控制台不在这一行里——它是底部坞，见下。 */}
-      <div className="gsl-stage flex flex-1 min-h-0 gap-4">
-      {/* 沉浸战斗布局：战斗激活时战场占左侧约 2/3（棋盘居中放大、参战卡环绕、动作区钉底），
-          聊天整列收成右侧栏（组件不动、仅收窄），完全可用；战斗结束自动回到单列。 */}
-      {immersiveOn && combat && (
-        <div className="battle-stage-pane flex-1 min-w-0 flex flex-col min-h-0">
-          <CombatStage
-            combat={combat} myCharId={myCharId} sessionId={currentSession.id}
-            pendingReaction={pendingReaction} log={combatLog} result={combatResult}
-            myWeapons={myWeapons} battleMap={battleMap} canSetToken={isKp}
-            layout="immersive"
-            onToggleLayout={() => setBattleLayout('classic')}
-          />
-        </div>
-      )}
-      {/* 聊天侧栏折叠后的把手：一颗圆 token（与大厅聊天同一套视觉语言），
-          从前是一条 2.4rem 的窄板 + lucide 面板图标，既看不出是什么、也和全站不搭。 */}
-      {immersiveOn && chatCollapsed && (
-        <div className="side-token-rail">
-          <button onClick={toggleChatCollapsed} className="side-token" title="展开聊天侧栏">
-            <GiTalk size={19} aria-hidden="true" />
-            {chatUnread > 0 && <span className="side-token-dot">{chatUnread > 99 ? '99+' : chatUnread}</span>}
-          </button>
-        </div>
-      )}
-      <div
-        className={`flex-col relative ${immersiveOn
-          ? (chatCollapsed ? 'hidden' : 'flex flex-shrink-0 chat-side-pane')
-          : 'flex flex-1 min-w-0'}`}
-        style={immersiveOn && !chatCollapsed ? { width: 'clamp(280px, 25vw, 420px)' } : undefined}
-      >
-        {/* 3D 骰子投掷覆盖层：portal 到 body、fixed 铺满视口，挂载位置不影响呈现 */}
-        <DiceRoller ref={diceRollerRef} />
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+
+      {/* 顶栏工具行：从聊天列提上来横贯整页——沉浸战斗收栏时它不该跟着消失（含 KP 值班条） */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
           {/* 返回收成图标贴在标题左边，像面包屑那样。它是「离开这一局」的导航，和右边
               那排局内工具不是一回事；而带文字的按钮在三栏布局下要占掉近百像素，把标题、
               身份、房间码一路挤到换行——中栏本来就只有 clamp(280px, 25vw, 420px)。 */}
@@ -1407,6 +1406,36 @@ export function GameSessionPage() {
             >
               房间码 {currentSession.room_code} <Copy size={11} />
             </button>
+          )}
+          {/* 值班条附加物（真人 KP）：场景定位串 + 主台「叙事 / 战术」切换，对应原型顶栏 */}
+          {isKp && (
+            <>
+              <span className="kp-locus" title="当前场景">
+                场景 <b>{currentSceneName || '—'}</b>
+                {combat && <> · 战斗 第 <b>{combat.round}</b> 轮</>}
+              </span>
+              <span className="kp-modes" role="group" aria-label="主台模式">
+                <button
+                  type="button"
+                  className={`kp-mode ${kpStage === 'narrative' ? 'kp-mode--on' : ''}`}
+                  onClick={() => setKpStage('narrative')}
+                  aria-pressed={kpStage === 'narrative'}
+                >
+                  <GiQuillInk size={13} /> 叙事
+                </button>
+                <button
+                  type="button"
+                  className={`kp-mode ${kpStage === 'tactical' ? 'kp-mode--on' : ''}`}
+                  onClick={() => setKpStage('tactical')}
+                  disabled={!combat}
+                  aria-pressed={kpStage === 'tactical'}
+                  style={!combat ? { opacity: 0.4 } : undefined}
+                  title={combat ? '整段主台切到战术棋盘' : '开战后才能进战术台'}
+                >
+                  <GiCrossedSwords size={13} /> 战术
+                </button>
+              </span>
+            </>
           )}
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <ContextUsageBadge sessionId={currentSession.id} refreshKey={messages.length} paused={streaming} />
@@ -1511,6 +1540,67 @@ export function GameSessionPage() {
             )}
           </div>
         </div>
+
+      {/* 舞台行：战场 / 叙事流 / 角色卡横向并列。KP 控制台不在这一行里——它是底部坞，见下。 */}
+      <div className="gsl-stage flex flex-1 min-h-0 gap-4">
+      {/* 值班台监控列：真人 KP 席 + 宽视口时左侧常驻全队体征与信号（对应原型 /lab/kp 的左列）。
+          玩家与窄屏不渲染——窄屏下体征仍由坞内态势列提供。 */}
+      {desk && (
+        <aside className="kp-desk-rail" aria-label="值班台监控">
+          <section className="kp-desk-section">
+            <KpPartyMonitor party={kpParty} onPrefill={(a, f) => useKpPrefill.getState().ask(a, f)} />
+          </section>
+          <section className="kp-desk-section">
+            <div className="kp-desk-label">信号</div>
+            <div className="flex flex-col gap-1">
+              <div className={`kp-signal ${kpPendingCount ? 'kp-signal--alert' : ''}`}>
+                <span className="kp-dot" />
+                {kpPendingCount ? `${kpPendingCount} 人还没交这一回合` : '本回合没有待办'}
+              </div>
+              <div className={`kp-signal ${combat ? 'kp-signal--alert' : ''}`}>
+                <span className="kp-dot" />
+                {combat ? `战斗中 · 轮到 ${kpTurnName || '—'}` : '未开战'}
+              </div>
+              {kpSanDanger && (
+                <div className="kp-signal kp-signal--alert">
+                  <span className="kp-dot" />有人理智濒临崩溃
+                </div>
+              )}
+            </div>
+          </section>
+        </aside>
+      )}
+      {/* 沉浸战斗布局：战斗激活时战场占左侧约 2/3（棋盘居中放大、参战卡环绕、动作区钉底），
+          聊天整列收成右侧栏（组件不动、仅收窄），完全可用；战斗结束自动回到单列。 */}
+      {immersiveOn && combat && (
+        <div className="battle-stage-pane flex-1 min-w-0 flex flex-col min-h-0">
+          <CombatStage
+            combat={combat} myCharId={myCharId} sessionId={currentSession.id}
+            pendingReaction={pendingReaction} log={combatLog} result={combatResult}
+            myWeapons={myWeapons} battleMap={battleMap} canSetToken={isKp}
+            layout="immersive"
+            onToggleLayout={() => (isKp ? setKpStage('narrative') : setBattleLayout('classic'))}
+          />
+        </div>
+      )}
+      {/* 聊天侧栏折叠后的把手：一颗圆 token（与大厅聊天同一套视觉语言），
+          从前是一条 2.4rem 的窄板 + lucide 面板图标，既看不出是什么、也和全站不搭。 */}
+      {immersiveOn && chatCollapsed && (
+        <div className="side-token-rail">
+          <button onClick={toggleChatCollapsed} className="side-token" title="展开聊天侧栏">
+            <GiTalk size={19} aria-hidden="true" />
+            {chatUnread > 0 && <span className="side-token-dot">{chatUnread > 99 ? '99+' : chatUnread}</span>}
+          </button>
+        </div>
+      )}
+      <div
+        className={`flex-col relative ${immersiveOn
+          ? (chatCollapsed ? 'hidden' : 'flex flex-shrink-0 chat-side-pane')
+          : 'flex flex-1 min-w-0'}`}
+        style={immersiveOn && !chatCollapsed ? { width: 'clamp(280px, 25vw, 420px)' } : undefined}
+      >
+        {/* 3D 骰子投掷覆盖层：portal 到 body、fixed 铺满视口，挂载位置不影响呈现 */}
+        <DiceRoller ref={diceRollerRef} />
         {showRecap && <RecapModal sessionId={currentSession.id} onClose={() => setShowRecap(false)} />}
         {showGrowth && myCharId && (
           <GrowthModal sessionId={currentSession.id} characterId={myCharId} onClose={() => setShowGrowth(false)} />
@@ -1538,7 +1628,7 @@ export function GameSessionPage() {
             onJump={jumpToEvent}
           />
         )}
-        {currentSession.participants && currentSession.participants.length > 1 && (
+        {currentSession.participants && currentSession.participants.length > 1 && !desk && (
           <div data-tour="party" className="pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
             <PartyRoster
               participants={currentSession.participants}
@@ -2147,7 +2237,7 @@ export function GameSessionPage() {
             battleMap={battleMap}
             canSetToken={isKp}
             layout="inline"
-            onToggleLayout={wideViewport ? () => setBattleLayout('immersive') : undefined}
+            onToggleLayout={wideViewport ? () => (isKp ? setKpStage('tactical') : setBattleLayout('immersive')) : undefined}
           />
         )}
         {chase && (
@@ -2378,20 +2468,32 @@ export function GameSessionPage() {
           </button>
         </div>
       )}
+      {/* 场景速查：值班台下叙事模式把它摆上主台右侧（战术模式这块位置让给棋盘——原型同款） */}
+      {desk && !immersiveOn && (
+        <aside className="kp-desk-brief">
+          <KpSceneBrief
+            sessionId={currentSession.id}
+            places={locations}
+            onDone={() => setRefreshTick((x) => x + 1)}
+          />
+        </aside>
+      )}
       </div>
 
       {/* KP 控制台：**底部坞**，横贯整个舞台宽度。
           曾经是右侧一条窄栏，代价是叙事输入框只有不到 300px——而写旁白是 KP 最高频的产出，
           在那么窄的框里写一段话很难受。挪到底部之后输入框有上千像素，监控列也能在它左边
-          铺开，与舞台上下分工：上面是这一局的样子，下面是你要做的事。 */}
+          铺开，与舞台上下分工：上面是这一局的样子，下面是你要做的事。
+          值班台形态下监控列与场景速查已上主台，坞里只留写作台（hideSituation）。 */}
       {isKp && !kpCollapsed && (
-        <aside className="kp-console-dock flex-shrink-0">
+        <aside className={`kp-console-dock flex-shrink-0${desk ? ' kp-console-dock--lean' : ''}`}>
           <HumanKpPanel
             sessionId={currentSession.id}
             turnReady={turnState?.ready === true}
             variant="sidebar"
             onCollapse={() => setKpCollapsed(true)}
-            aside={<KpSceneBrief
+            hideSituation={desk}
+            aside={desk ? undefined : <KpSceneBrief
               sessionId={currentSession.id}
               places={locations}
               onDone={() => setRefreshTick((x) => x + 1)}

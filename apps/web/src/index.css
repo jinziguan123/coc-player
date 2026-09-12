@@ -2506,6 +2506,103 @@ body {
 .kp-brief-tag { font-size: 0.5625rem; letter-spacing: 0.06em; color: var(--color-text-secondary); }
 .kp-brief-row--act:hover .kp-brief-tag--act { color: var(--color-text-accent); }
 
+/* ===== 真人 KP 值班台布局（对应原型 /lab/kp，lab.css 的 kl-* 扶正） =====
+   值班台形态 = 真人 KP 席 + 宽视口（见 GameSessionPage 的 desk）。
+   三件事按原型复刻：
+   - 态势常驻：左列监控卡 + 信号灯，主台切到战术也不走；
+   - 主台按模式重组：叙事=聊天流+场景速查右侧栏；战术=沉浸战场整段接管（棋盘右侧仍有聊天侧栏）；
+   - 写作台沉底：坞只留抬头/回合条/写作台，态势列已由左列接管（hideSituation）。 */
+.kp-desk-rail {
+  width: 272px;
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);
+}
+.kp-desk-section { display: flex; flex-direction: column; gap: 0.5rem; }
+/* 与原型 kl-section-label 同款：小号字距 + 延伸的隔线 */
+.kp-desk-label {
+  font-size: 0.625rem;
+  letter-spacing: 0.22em;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.kp-desk-label::after { content: ''; flex: 1; height: 1px; background: var(--color-border); }
+/* 监控卡进左列：纵向单列、卡片松开一档（坞里的两列网格是为矮空间让路的，侧栏没这个约束） */
+.kp-desk-rail .kp-monitor { flex-direction: column; padding: 0; border-bottom: none; gap: 0.45rem; }
+.kp-desk-rail .kp-monitor-label {
+  font-size: 0.625rem; letter-spacing: 0.22em; color: var(--color-text-secondary);
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.kp-desk-rail .kp-monitor-label::after { content: ''; flex: 1; height: 1px; background: var(--color-border); }
+.kp-desk-rail .kp-mon { padding: 0.55rem 0.6rem 0.5rem; }
+.kp-desk-rail .kp-mon-head { margin-bottom: 0.35rem; }
+.kp-desk-rail .kp-mon .game-vital-track { height: 6px; }
+.kp-desk-rail .kp-mon .game-vital-item + .game-vital-item { margin-top: 0.2rem; }
+.kp-desk-rail .kp-mon-acts { margin-top: 0.45rem; }
+
+/* 信号灯：与原型 kl-signal 一致——点灯 + 告警脉冲 */
+.kp-signal {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.6875rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.kp-signal--alert {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-text-accent);
+}
+.kp-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.kp-signal--alert .kp-dot { animation: kp-desk-pulse 1.8s ease-in-out infinite; }
+@keyframes kp-desk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* 场景速查列：叙事模式上主台右侧，sticky 顶格跟滚 */
+.kp-desk-brief {
+  width: 244px;
+  flex-shrink: 0;
+  min-width: 0;
+  align-self: flex-start;
+  position: sticky;
+  top: 0;
+}
+.kp-desk-brief .kp-brief { padding: 0 0 0.25rem; border-bottom: none; }
+
+/* 操作台：态势列已被左列接管，坞只留写作台 → 高度从 36vh 收紧一档 */
+.kp-console-dock--lean { height: clamp(230px, 30vh, 380px); }
+
+/* 顶栏值班条附加物：场景定位串 + 主台分段切换 */
+.kp-locus {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-locus b { color: var(--color-text-accent); font-weight: 500; }
+.kp-modes { display: inline-flex; border: 1px solid var(--color-border-strong); border-radius: 4px; overflow: hidden; }
+.kp-mode {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  background: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.kp-mode + .kp-mode { border-left: 1px solid var(--color-border); }
+.kp-mode:hover { color: var(--color-text-primary); }
+.kp-mode--on { background: var(--color-accent); color: var(--color-on-accent); }
+.kp-mode--on:hover { color: var(--color-on-accent); }
+
+
 /* ===== 监控列：全队生命体征常驻 =====
    此前 KP 要看第二个人的血量得在队伍条里切过去，而「谁快死了、谁理智见底」是他每分钟
    都要知道的事。 */

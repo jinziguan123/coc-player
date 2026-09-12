@@ -37,6 +37,7 @@ import { MultiSelect } from '@/components/ui/multi-select'
 import { KpInput } from './KpInput'
 import { catalogOptions } from './kpCatalogs'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
+import { useKpPrefill } from '@/stores/kpPrefill'
 import { KpPartyMonitor } from './KpPartyMonitor'
 import { KpSubTabs } from './KpSubTabs'
 import { useDragResize } from '@/components/ui/useDragResize'
@@ -240,6 +241,8 @@ interface Props {
   /** 场景速查等由外层提供的附属块（需要局内地点表，那份数据在页面上）。
    *  宽屏下它与监控列同列，窄屏下顺次堆在写作台之上。 */
   aside?: ReactNode
+  /** 值班台形态：监控列与场景速查由页面左侧栏接管，坞里只保留写作台，不再重复渲染。 */
+  hideSituation?: boolean
 }
 
 
@@ -276,7 +279,7 @@ function highlightText(text: string, query: string) {
   ))
 }
 
-export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline', onCollapse, aside }: Props) {
+export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline', onCollapse, aside, hideSituation = false }: Props) {
   const sidebar = variant === 'sidebar'
   // 侧栏形态没有「内联收起」这回事——整栏的显隐由外层窄条控制，此处恒展开。
   const [collapsedInline, setCollapsedInline] = useState(false)
@@ -294,8 +297,9 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   // 体征重拉的时机：KP 每发一个动作（可能扣血扣 SAN）、以及一回合收口时
   const [vitalsTick, setVitalsTick] = useState(0)
   useEffect(() => { setVitalsTick((t) => t + 1) }, [turnReady])
-  // 全队生命体征：KP 每分钟都要知道谁快死了、谁理智见底，不该藏在角色卡里一次只看一个
-  const party = usePartyVitals(workspace?.catalogs.characters?.map(
+  // 全队生命体征：KP 每分钟都要知道谁快死了、谁理智见底，不该藏在角色卡里一次只看一个。
+  // 值班台形态（hideSituation）下这份数据由页面左侧栏的监控列负责，坞里不再重复拉取。
+  const party = usePartyVitals(hideSituation ? undefined : workspace?.catalogs.characters?.map(
     (c) => ({ character_id: c.id, character_name: c.name, role: 'human' }),
   ), vitalsTick)
   // 斜杠命令：叙事框里打 / 直接切动作，手不离键盘（见 useSlashCommands）
@@ -601,6 +605,16 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
 
   const signals = workspace?.signals
   // 常驻信号灯的内容：只留「此刻确实成立」的那几条，没有信号就整条不出现。
+  // 值班台监控列的预填请求：左侧栏 KpPartyMonitor 发来「对谁做什么」→ 走 adoptToTools
+  // 把动作与参数填进写作台，KP 过目后再发（沿用「采纳建议」那条路，不是直接广播）。
+  const prefillReq = useKpPrefill((s) => s.request)
+  useEffect(() => {
+    if (!prefillReq) return
+    adoptToTools(prefillReq.action, prefillReq.fields)
+    useKpPrefill.getState().consume()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- adoptToTools 每次渲染都是新引用
+  }, [prefillReq])
+
   const signalChips: Array<{ key: string; label: string; tone: string }> = []
   if (signals?.stuck) {
     signalChips.push({
@@ -733,8 +747,9 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
       {/* 分栏：宽屏「看的」在左、「做的」在右；窄屏顺次堆叠。见 index.css */}
       <div className="kp-console-split">
       {/* 态势列：全队体征 + 场景速查，只在「主持」档出现——翻资料时它就是干扰。
-          行内动作走 adoptToTools（填进表单、不直接发出），裁定权仍在 KP 手里。 */}
-      {!collapsed && tab === 'tools' && (
+          行内动作走 adoptToTools（填进表单、不直接发出），裁定权仍在 KP 手里。
+          值班台形态下这列由页面左侧栏接管，坞里不再渲染。 */}
+      {!collapsed && tab === 'tools' && !hideSituation && (
         <div className="kp-situation">
           <KpPartyMonitor party={party} onPrefill={(next, fields) => adoptToTools(next, fields)} />
           {aside}
