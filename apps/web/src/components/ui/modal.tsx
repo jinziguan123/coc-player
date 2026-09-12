@@ -37,14 +37,18 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Dismiss on mousedown target only. If the panel recenters after content changes
+  // (e.g. a tab switch), a click can be dispatched on the backdrop even though the
+  // press started inside; the mousedown target is captured before that reflow.
   return createPortal(
     <div
       className="fixed inset-0 z-[100] modal-backdrop"
-      onClick={onClose}
+      onMouseDown={(event) => { if (event.button === 0 && event.target === event.currentTarget) onClose() }}
     >
       <div
         className={`fixed flex justify-center ${align === 'top' ? 'items-start' : 'items-center'}`}
         style={{ top: 0, bottom: 0, left, right: 0, paddingTop: align === 'top' ? '10vh' : undefined }}
+        onMouseDown={(event) => { if (event.button === 0 && event.target === event.currentTarget) onClose() }}
       >
         <div
           className={`modal-panel w-full ${widthClass} mx-4 rounded-lg overflow-hidden ${padded ? 'p-5' : ''}`}

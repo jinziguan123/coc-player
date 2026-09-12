@@ -35,7 +35,7 @@ export function GameEntryChooser({
       role="dialog"
       aria-modal="true"
       aria-label="选择开始方式"
-      onClick={onClose}
+      onMouseDown={(event) => { if (event.button === 0 && event.target === event.currentTarget) onClose() }}
     >
       <div className="entry-choices" onClick={(e) => e.stopPropagation()}>
         <button className="entry-card" onClick={onCreate} style={{ '--enter-delay': '40ms' } as React.CSSProperties}>

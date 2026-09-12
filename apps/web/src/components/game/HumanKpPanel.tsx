@@ -1386,7 +1386,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
           role="dialog"
           aria-modal="true"
           aria-label={`${lookupScope === 'module' ? '模组原文' : '规则书'}检索结果`}
-          onMouseDown={(event) => { if (event.target === event.currentTarget) setLookupOpen(false) }}
+          onMouseDown={(event) => { if (event.button === 0 && event.target === event.currentTarget) setLookupOpen(false) }}
         >
           <div className="w-full max-w-3xl overflow-hidden rounded-md" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-strong)', boxShadow: '0 6px 18px var(--shadow-color-strong)' }}>
             <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: 'var(--color-border)' }}>
