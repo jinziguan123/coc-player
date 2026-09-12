@@ -296,7 +296,10 @@ def _combat_meta(state: dict) -> dict:
                    "pos": p.get("pos"), "mov": int(p.get("mov") or _DEFAULT_MOV),
                    "move_left": int(p.get("move_left") or 0),
                    # P2 正交条件（grappled/disarmed）与瞄准态 → 前端 HUD 徽标（被擒/缴械/瞄准中）
-                   "conditions": list(p.get("conditions") or []), "aim": bool(p.get("aim"))}
+                   "conditions": list(p.get("conditions") or []), "aim": bool(p.get("aim")),
+                   # 战棋轮廓（KP 挑的剪影）→ 前端画令牌。缺省由前端按阵营回落，
+                   # 因为这里没有任何「这是人还是东西」的信息可供推断。
+                   "figure": p.get("figure") or ""}
                   for p in state.get("initiative") or []],
         # 断线重连恢复：若正等某真人反应，带上 pending_reaction 让前端重弹反应提示。
         "pending_reaction": state.get("pending_reaction"),

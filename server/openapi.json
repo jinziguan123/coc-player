@@ -1485,7 +1485,9 @@
               "hp_change",
               "start_combat",
               "unlock_place",
-              "move_actor"
+              "move_actor",
+              "set_battle_map",
+              "set_token"
             ],
             "title": "Action",
             "type": "string"

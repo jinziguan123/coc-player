@@ -438,6 +438,7 @@ def list_known_locations(
                 party_at.setdefault(sid, []).append(name)
     # 调查板红线：**已发现**的线索（clue_ledger）按其模组定义的 location 挂到地点上。
     # 只含玩家已触碰的线索——未发现的绝不上板（不剧透）。
+    battle_maps = (session.world_state or {}).get("battle_maps") or {}
     ledger = (session.world_state or {}).get("clue_ledger") or {}
     clue_by_id = {c.get("id"): c for c in (getattr(module, "clues", None) or []) if c.get("id")}
     clues_at: dict[str, list[dict]] = {}
@@ -469,6 +470,10 @@ def list_known_locations(
             # 一段），而配图生成后是回写进 scene.image 的，这份数据一直都在。
             # 本函数的 cur 取的是**查看者自己**的角色位置，分头行动时各人也就各看各的场景。
             "image": s.get("image") or "",
+            # 战场底图（俯视战术图）：与 image 是两回事——image 是这地方「看起来什么样」，
+            # 用作氛围底；battle_map 是「打起来时的地面」，铺在方格战场下面。存在会话里
+            # 而不是模组里：同一个模组的两局可以各配各的图，也不该让局内操作改写模组。
+            "battle_map": battle_maps.get(sid) or None,
         })
     out.sort(key=lambda x: (not x["current"], not x["visited"], x["id"]))
     return out

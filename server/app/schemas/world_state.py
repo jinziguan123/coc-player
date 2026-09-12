@@ -50,6 +50,9 @@ class WorldStateSchema(BaseModel):
     # 「已经问过要不要去」，是建议卡的幂等真源；借它来解锁的话，这个地方以后再也弹不出
     # 建议卡了。两件事该各记各的。
     kp_revealed: list = Field(default_factory=list)
+    # 场景 id → 战场底图 {"url", "level"}。存会话不存模组：同一模组的两局可以各配各的图，
+    # 局内操作也不该改写模组本身。
+    battle_maps: dict = Field(default_factory=dict)
     # 规划器裁定要揭示、但还没落到台账的线索（planned_effects 落实后清空）
     pending_clue_reveals: dict = Field(default_factory=dict)
 

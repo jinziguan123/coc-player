@@ -119,6 +119,6 @@ class KpActionRequest(BaseModel):
     action: Literal[
         "narration", "dialogue", "dice_check", "opposed_check", "generic_roll", "san_check",
         "scene_change", "set_flag", "clear_flag", "handout", "hp_change",
-        "start_combat", "unlock_place", "move_actor",
+        "start_combat", "unlock_place", "move_actor", "set_battle_map", "set_token",
     ]
     payload: dict = Field(default_factory=dict)

@@ -524,3 +524,89 @@ def test_kp_move_actor_rejects_bad_input(tmp_path):
         asyncio.run(execute_human_kp_action(
             db, session.id, session, module, "move_actor", {"scene_id": "s2"},
         ))
+
+
+def test_kp_set_battle_map_lands_on_session_not_module(tmp_path):
+    """底图存会话：同一模组的两局各配各的图，局内操作也不该改写模组本身。"""
+    from app.services import navigation_service
+
+    db = _db(tmp_path)()
+    module, hero, session = _seed_two_scenes(db)
+
+    _chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "set_battle_map",
+        {"scene_id": "s2", "url": "/api/images/x.jpg", "level": "strong"},
+    ))
+
+    db.refresh(session)
+    assert "已更新" in result
+    assert session.world_state["battle_maps"]["s2"] == {
+        "url": "/api/images/x.jpg", "level": "strong",
+    }
+    assert module.scenes[1].get("battle_map") is None   # 模组没被写脏
+    # /locations 把它带给前端（KP 与玩家同一份）
+    locs = navigation_service.list_known_locations(module, session, reveal_all=True)
+    assert next(x for x in locs if x["id"] == "s2")["battle_map"]["level"] == "strong"
+
+
+def test_kp_set_battle_map_empty_url_removes_it(tmp_path):
+    db = _db(tmp_path)()
+    module, _hero, session = _seed_two_scenes(db)
+    asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "set_battle_map",
+        {"scene_id": "s2", "url": "/api/images/x.jpg"},
+    ))
+    db.refresh(session)
+
+    _chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "set_battle_map",
+        {"scene_id": "s2", "url": ""},
+    ))
+
+    db.refresh(session)
+    assert "撤下" in result and "s2" not in session.world_state["battle_maps"]
+
+
+def test_kp_set_token_persists_figure_and_broadcasts(tmp_path):
+    """轮廓是桌面状态，要随战斗广播发给全桌——只有 KP 自己看得见没有意义。"""
+    from app.services import combat_service
+
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+    # 直接建战斗态，不走 KP 的 start_combat 动作——那条路要 AI 布阵，这里只要一个场上的敌人。
+    combat_service.start_combat(
+        db, session.id,
+        [combat_service._char_participant(hero, "player", is_human=True)],
+        [combat_service._npc_participant(
+            {"id": "guard", "name": "守门人", "attributes": {"DEX": 40, "CON": 50, "SIZ": 60},
+             "skills": {"格斗(斗殴)": 30}, "weapon": "徒手格斗"}, "enemy")],
+    )
+    # expire 而不是 refresh：combat_state 是关系属性，refresh 只重载列，
+    # 关系仍挂着开战前的 None。
+    db.expire_all()
+
+    state = combat_service.get_combat(session)
+    victim = next(p for p in state["initiative"] if p["side"] == "enemy")
+
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "set_token",
+        {"combatant_id": victim["id"], "figure": "tentacle"},
+    ))
+
+    db.expire_all()
+    after = combat_service.get_combat(session)
+    assert next(p for p in after["initiative"] if p["id"] == victim["id"])["figure"] == "tentacle"
+    assert "战棋已更换" in result
+    order = chunks[0].as_wire()["metadata"]["order"]
+    assert next(p for p in order if p["id"] == victim["id"])["figure"] == "tentacle"
+
+
+def test_kp_set_token_rejects_when_not_in_combat(tmp_path):
+    db = _db(tmp_path)()
+    module, _hero, session = _seed(db)
+
+    with pytest.raises(ValueError, match="没有进行中的战斗"):
+        asyncio.run(execute_human_kp_action(
+            db, session.id, session, module, "set_token",
+            {"combatant_id": "whoever", "figure": "tentacle"},
+        ))

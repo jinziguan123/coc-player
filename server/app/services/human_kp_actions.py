@@ -9,6 +9,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.registry import get_engine
 from app.services import (
+    combat_service,
     dice_runtime,
     human_kp_service,
     illustration_service,
@@ -207,7 +208,74 @@ async def execute_human_kp_action(
             str(payload.get("scene_id") or payload.get("scene") or "").strip(),
         )
 
+    if action == "set_battle_map":
+        return _exec_set_battle_map(
+            db, game_session, module,
+            str(payload.get("scene_id") or "").strip(),
+            str(payload.get("url") or "").strip(),
+            str(payload.get("level") or "normal").strip(),
+        )
+
+    if action == "set_token":
+        return _exec_set_token(
+            db, session_id, game_session,
+            str(payload.get("combatant_id") or "").strip(),
+            str(payload.get("figure") or "").strip(),
+        )
+
     raise ValueError(f"不支持的 KP 动作：{action}")
+
+
+def _exec_set_battle_map(
+    db: Session, game_session: GameSession, module: Module,
+    scene_id: str, url: str, level: str,
+) -> tuple[list[str], str]:
+    """给某个场景配一张战场底图（空 url 即撤掉）。
+
+    不广播事件：底图换没换不是剧情，玩家下次拉 /locations 就拿到了。
+    """
+    scene = _find_scene(module, scene_id) if scene_id else None
+    sid = str(scene.get("id")) if scene else (scene_id or game_session.current_scene_id or "")
+    if not sid:
+        raise ValueError("没有指定场景")
+    if level not in ("faint", "normal", "strong"):
+        level = "normal"
+    ws = dict(game_session.world_state or {})
+    maps = dict(ws.get("battle_maps") or {})
+    if url:
+        maps[sid] = {"url": url, "level": level}
+    else:
+        maps.pop(sid, None)
+    ws["battle_maps"] = maps
+    game_session.world_state = ws
+    db.commit()
+    return [], "战场底图已更新" if url else "战场底图已撤下"
+
+
+def _exec_set_token(
+    db: Session, session_id: str, game_session: GameSession, combatant_id: str, figure: str,
+) -> tuple[list[str], str]:
+    """给某个参战方挑一枚战棋轮廓。
+
+    机器猜不出「不明存在」长什么样——`initiative` 上只有名字与阵营，没有任何「这是人
+    还是东西」的信息。所以这一下由 KP 点，结果存进战斗态、随战斗广播发给全桌：
+    轮廓是桌面状态，不能只有 KP 自己看得见。
+    """
+    if not combatant_id or not figure:
+        raise ValueError("参战方与轮廓都不能为空")
+    state = combat_service.get_combat(game_session)
+    if not state:
+        raise ValueError("当前没有进行中的战斗")
+    hit = next(
+        (p for p in (state.get("initiative") or []) if str(p.get("id")) == combatant_id),
+        None,
+    )
+    if hit is None:
+        raise ValueError("这个参战方不在场上")
+    hit["figure"] = figure
+    combat_service._save_combat(db, session_id, state)
+    return [combat_service._combat_state_chunk(state)], \
+        f"{hit.get('name') or combatant_id} 的战棋已更换"
 
 
 def _find_scene(module: Module, ref: str) -> dict | None:
