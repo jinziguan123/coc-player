@@ -8,7 +8,7 @@ import type { ComponentType } from 'react'
 import { BookOpen, Bot, Image, NotebookPen, WandSparkles, type LucideIcon } from 'lucide-react'
 import {
   GiBrain, GiCancel, GiCheckMark, GiCrossedSwords, GiFootTrip, GiHeartPlus,
-  GiPadlock, GiRollingDices, GiScrollUnfurled, GiTheaterCurtains,
+  GiPadlock, GiRollingDices, GiScrollUnfurled, GiSkullCrossedBones, GiTheaterCurtains,
 } from 'react-icons/gi'
 
 export type KpAction =
@@ -24,6 +24,7 @@ export type KpAction =
   | 'handout'
   | 'hp_change'
   | 'start_combat'
+  | 'end_combat'
   | 'unlock_place'
   | 'move_actor'
 
@@ -40,6 +41,7 @@ export const ACTION_LABELS: Record<KpAction, string> = {
   handout: '发放手书',
   hp_change: '结算 HP',
   start_combat: '开始战斗',
+  end_combat: '结束战斗',
   unlock_place: '解锁地点',
   move_actor: '移动角色',
 }
@@ -66,6 +68,7 @@ export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon
   { id: 'move_actor', label: '移动角色', icon: GiFootTrip },
   { id: 'hp_change', label: '结算 HP', icon: GiHeartPlus },
   { id: 'start_combat', label: '开战', icon: GiCrossedSwords },
+  { id: 'end_combat', label: '结束战斗', icon: GiSkullCrossedBones },
   { id: 'set_flag', label: '推进标志', icon: GiCheckMark },
   { id: 'clear_flag', label: '解除标志', icon: GiCancel },
 ]
@@ -89,6 +92,7 @@ export const ACTION_COMMANDS: Array<{ cmd: string; action: KpAction; hint: strin
   { cmd: '移动', action: 'move_actor', hint: '把某人挪到另一个地点' },
   { cmd: 'hp', action: 'hp_change', hint: '结算伤害或治疗' },
   { cmd: '开战', action: 'start_combat', hint: '进入战斗轮' },
+  { cmd: '结束', action: 'end_combat', hint: '结束当前战斗' },
   { cmd: '标志', action: 'set_flag', hint: '推进剧情标志' },
   { cmd: '解除', action: 'clear_flag', hint: '解除剧情标志' },
 ]

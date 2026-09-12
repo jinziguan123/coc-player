@@ -195,6 +195,12 @@ async def execute_human_kp_action(
         )
         return chunks, "已切入结构化战斗"
 
+    if action == "end_combat":
+        # 战斗的机械收场（击溃/全灭）由结算自动判定；这一条给 KP 主观收尾：
+        # 敌人逃了、谈和了、或这一架不值得再打下去——结果摘要落 world_state.combat_result，
+        # 收尾行与 combat_end 广播由 _end_combat 一并产出，前端据 combat_end 退出战术台。
+        return combat_service.end_combat(db, session_id, "manual"), "战斗已结束"
+
     if action == "unlock_place":
         return _exec_unlock_place(
             db, session_id, game_session, module,

@@ -1159,6 +1159,21 @@ def add_combatant(db: Session, session_id: str, spec: dict, side: str = "enemy")
     return state
 
 
+def end_combat(
+    db: Session, session_id: str, outcome: str = "manual",
+) -> list[str]:
+    """真人 KP 手动结束战斗：清战斗态、落结果摘要（world_state.combat_result），返回收尾 chunks。
+
+    战斗的机械收场（打输/打赢/一方全灭）走 drive_npcs 自动判定；这里是 KP 的主观裁定：
+    敌人逃了、谈和了、或这一架不值得再打下去——都由 KP 一句「结束战斗」收束。
+    """
+    session = db.get(GameSession, session_id)
+    state = get_combat(session)
+    if not state:
+        raise ValueError("当前没有进行中的战斗")
+    return _end_combat(db, session_id, state, outcome)
+
+
 def _combat_summary(state: dict, outcome: str) -> dict:
     parts = state.get("initiative") or []
     return {
@@ -1186,7 +1201,7 @@ def _end_combat(db: Session, session_id: str, state: dict, outcome: str) -> list
     session.world_state = ws
     db.commit()
     label = {"players_win": "战斗结束：敌方被击溃。", "players_defeated": "战斗结束：调查员一方倒下。",
-             "no_combatants": "战斗结束。"}.get(outcome, "战斗结束。")
+             "no_combatants": "战斗结束。", "manual": "战斗结束（KP 宣布收场）。"}.get(outcome, "战斗结束。")
     return [_combat_line(db, session_id, label), _chunk("combat_end", label, metadata=summary)]
 
 

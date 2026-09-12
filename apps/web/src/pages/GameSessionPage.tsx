@@ -1529,7 +1529,7 @@ export function GameSessionPage() {
                 <PanelRightOpen size={13} />
               </button>
             )}
-            {immersiveOn && (
+            {immersiveOn && !isKp && (
               <button
                 onClick={toggleChatCollapsed}
                 className="btn-secondary btn-xs flex items-center gap-1"
@@ -1584,8 +1584,9 @@ export function GameSessionPage() {
         </div>
       )}
       {/* 聊天侧栏折叠后的把手：一颗圆 token（与大厅聊天同一套视觉语言），
-          从前是一条 2.4rem 的窄板 + lucide 面板图标，既看不出是什么、也和全站不搭。 */}
-      {immersiveOn && chatCollapsed && (
+          从前是一条 2.4rem 的窄板 + lucide 面板图标，既看不出是什么、也和全站不搭。
+          真人 KP 值班台的战术模式整段都是战场，没有聊天侧栏，这个把手不出现。 */}
+      {immersiveOn && chatCollapsed && !isKp && (
         <div className="side-token-rail">
           <button onClick={toggleChatCollapsed} className="side-token" title="展开聊天侧栏">
             <GiTalk size={19} aria-hidden="true" />
@@ -1593,14 +1594,18 @@ export function GameSessionPage() {
           </button>
         </div>
       )}
+      {/* 3D 骰子投掷覆盖层：portal 到 body、fixed 铺满视口，挂载位置不影响呈现。
+          放在条件外面——值班台战术模式整列不渲染时它也必须继续挂着（战斗里掷骰动画不能停）。 */}
+      <DiceRoller ref={diceRollerRef} />
+      {/* 值班台战术模式：整段主台都是战场，聊天列整个不渲染（KP 要看叙事流就切回叙事）。
+          玩家与叙事模式照旧：收成侧栏 / 折叠把手那一套只在玩家侧保留。 */}
+      {!(isKp && immersiveOn) && (
       <div
         className={`flex-col relative ${immersiveOn
           ? (chatCollapsed ? 'hidden' : 'flex flex-shrink-0 chat-side-pane')
           : 'flex flex-1 min-w-0'}`}
         style={immersiveOn && !chatCollapsed ? { width: 'clamp(280px, 25vw, 420px)' } : undefined}
       >
-        {/* 3D 骰子投掷覆盖层：portal 到 body、fixed 铺满视口，挂载位置不影响呈现 */}
-        <DiceRoller ref={diceRollerRef} />
         {showRecap && <RecapModal sessionId={currentSession.id} onClose={() => setShowRecap(false)} />}
         {showGrowth && myCharId && (
           <GrowthModal sessionId={currentSession.id} characterId={myCharId} onClose={() => setShowGrowth(false)} />
@@ -2397,6 +2402,7 @@ export function GameSessionPage() {
         </div>
         )}
       </div>
+      )}
 
       {/* 角色卡侧栏：沉浸战斗布局下暂时隐藏（参战卡已带 HP/状态，屏幕让给战场与聊天）。
           窄屏改为覆盖式抽屉 —— 此前窄屏直接 display:none，玩家在手机上完全看不到

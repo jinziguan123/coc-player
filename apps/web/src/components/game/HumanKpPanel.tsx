@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { api, getServerUrl } from '@/api/client'
-import { GiFootTrip, GiPadlock, GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
+import { GiFootTrip, GiPadlock, GiRollingDices, GiScrollUnfurled, GiSkullCrossedBones } from 'react-icons/gi'
 import {
   BookOpen,
   Bot,
@@ -443,7 +443,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
     const payload = Object.fromEntries(
       Object.entries(nextFields).filter(([, value]) => value.trim()),
     )
-    if (await postAction(action, payload, `${ACTION_LABELS[action]}已发布`)) {
+    const doneText = action === 'end_combat' ? '战斗已结束' : `${ACTION_LABELS[action]}已发布`
+    if (await postAction(action, payload, doneText)) {
       // 连续 NPC 台词时保留说话人，只清空上一句正文。
       setFields(action === 'dialogue' ? { npc_id: fields.npc_id || '' } : {})
     }
@@ -927,6 +928,14 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               />
               <KpInput name="trigger" placeholder="开战原因（可选）" fields={fields} onChange={setField} />
             </>}
+            {/* 结束战斗：主观收尾动作，没有参数——机械收场（击溃/全灭）走自动结算，
+                这一条给 KP 主观裁定：敌人逃了、谈和了、或这一架不值得再打下去。 */}
+            {action === 'end_combat' && (
+              <div className="flex w-full items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <GiSkullCrossedBones size={14} className="flex-shrink-0" style={{ color: 'var(--color-danger)' }} />
+                <span>结束当前战斗：清出战场、落一条结果摘要，全桌回到叙事。战斗的收场（击溃 / 全灭）本会自动判定，这条用于 KP 主观叫停。</span>
+              </div>
+            )}
             {/* 解锁地点：此前只有「绕着写一句旁白去碰关键词匹配」这一条路，碰不碰得上全看措辞 */}
             {action === 'unlock_place' && <>
               <GiPadlock size={16} />

@@ -657,6 +657,27 @@ def test_combat_ends_when_enemy_down(db_factory, monkeypatch):
     assert any(c.type == "combat_end" for c in chunks)
 
 
+def test_kp_end_combat_clears_state_and_records_manual_summary(db_factory):
+    """真人 KP 手动结束战斗：清战斗态、落 manual 摘要、产出 combat_end 广播；无战斗时明确报错。"""
+    db = db_factory()
+    sid, hero = _seed(db)
+    enemy = {"id": "npc_fugitive", "name": "逃兵", "attributes": {"DEX": 40, "CON": 50, "SIZ": 60},
+             "skills": {"格斗(斗殴)": 30}, "weapon": "徒手格斗"}
+    _, _ = _start(db, sid, hero, enemy)
+    assert combat_service.get_combat(db.get(GameSession, sid)) is not None
+
+    chunks = combat_service.end_combat(db, sid)
+    session = db.get(GameSession, sid)
+    assert combat_service.get_combat(session) is None
+    assert session.world_state.get("combat_result", {}).get("outcome") == "manual"
+    end = [c for c in chunks if c.type == "combat_end"]
+    assert end and "KP 宣布收场" in end[0].content
+
+    # 战斗已经结束，再调一次不该静默成功
+    with pytest.raises(ValueError):
+        combat_service.end_combat(db, sid)
+
+
 def test_combat_result_folds_into_kp_context(db_factory):
     """战斗结果摘要注入主 KP 上下文（只给结论、供续写余波）。"""
     from app.ai.context import build_kp_context
