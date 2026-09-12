@@ -83,6 +83,22 @@ export function isOut(c: Combatant): boolean {
   return c.status === 'dead' || c.status === 'fled'
 }
 
+/**
+ * 从当前行动者数到我，中间还隔着几个人（环形，跳过已出局者）。
+ *
+ * 给玩家看「再过 N 个就到你」用——比单说「轮到某某」有用：玩家据此决定现在能不能
+ * 腾手去翻角色卡。0 表示轮到我自己（或算不出来，调用方据此不显示）。
+ */
+export function turnsUntil(order: Combatant[], activeId: string | null, myId: string | null): number {
+  if (!activeId || !myId) return 0
+  const alive = order.filter((c) => !isOut(c))
+  const from = alive.findIndex((c) => c.id === activeId)
+  const mine = alive.findIndex((c) => c.id === myId)
+  // 当前行动者已出局（刚被打死、广播还没跟上）或我已出局 → 数不出距离，不显示
+  if (from < 0 || mine < 0) return 0
+  return mine >= from ? mine - from : alive.length - from + mine
+}
+
 export function pctOf(c: Combatant): number {
   return c.max_hp > 0 ? Math.max(0, Math.min(100, (c.hp / c.max_hp) * 100)) : 0
 }

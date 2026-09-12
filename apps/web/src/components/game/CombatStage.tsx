@@ -5,10 +5,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
-import { GiContract, GiCrossedSwords, GiExpand, GiRollingDices, GiRun, GiScrollUnfurled } from 'react-icons/gi'
+import { GiContract, GiCrossedSwords, GiExpand, GiHourglass, GiRollingDices, GiRun, GiScrollUnfurled } from 'react-icons/gi'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { CombatLogEntry, CombatResultView, CombatState, Combatant, PendingReaction } from './combat/types'
-import { ACTIONS, REACTION_META, UNARMED, WEAPON_OTHER, isOut, type ActionKey } from './combat/meta'
+import { ACTIONS, REACTION_META, UNARMED, WEAPON_OTHER, isOut, turnsUntil, type ActionKey } from './combat/meta'
 import { useHpDiff } from './combat/useHpDiff'
 import { CombatantCard } from './combat/CombatantCard'
 import { CombatResultReveal } from './combat/CombatResultReveal'
@@ -328,9 +328,22 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
     </>
   )
 
+  /**
+   * 行动区的三种状态，玩家一眼要能分清自己「该动 / 该应 / 在等」。
+   *
+   * 此前三者挤在同一处、同样的小字：轮到你时只是多出一排按钮，被 NPC 打了要选闪避时
+   * 也只是多一行提示。而回合横幅只闪 1.8 秒——那会儿玩家要是正在读叙事或翻角色卡，
+   * 错过就再没有持续的信号告诉他「在等你」。所以给行动区一个常驻的状态外观。
+   */
+  const zoneState = (rollForMe || reactionForMe) ? 'urgent' : myTurn ? 'mine' : 'waiting'
+  // 还要等几个人才轮到我（环形、跳过出局者，见 meta.turnsUntil）
+  const myWaitDepth = zoneState === 'waiting'
+    ? turnsUntil(order, active?.id ?? null, myCharId)
+    : 0
+
   // B4 反应提示 / B5 主动动作栏 / 等待提示（两种布局都钉在舞台底部）。
   const actionZone = (
-    <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+    <div className={`combat-zone combat-zone--${zoneState} mt-2 pt-2`}>
         {pendingRoll ? (
           rollForMe ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -354,7 +367,8 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
         ) : pendingReaction ? (
           reactionForMe ? (
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs" style={{ color: 'var(--color-text-primary)' }}>
+              {/* 被打了要立刻决定，整条战斗流程停在这儿等你——这是全场最该抢注意力的一刻 */}
+              <span className="combat-zone-title combat-zone-title--urgent">
                 {pendingReaction.attacker_name} 用 {pendingReaction.weapon} 攻击你，如何应对？
               </span>
               <div className="flex flex-wrap items-center gap-2">
@@ -383,6 +397,7 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
           )
         ) : myTurn ? (
           <div className="flex flex-col gap-2">
+            <span className="combat-zone-title combat-zone-title--mine">轮到你行动</span>
             {/* 动作选择：一排 gi 图标按钮 */}
             <div className="flex flex-wrap items-center gap-1.5">
               {(Object.keys(ACTIONS) as ActionKey[]).map((k) => {
@@ -414,6 +429,10 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
                 <label className="flex flex-col gap-1">
                   <span className="combat-field-label">
                     {actionMeta.target === 'enemy' ? '目标（敌方）' : '目标（己方）'}
+                    {/* 点战场上的敌人即可选中——这个能力一直有，只是没人告诉过玩家 */}
+                    {actionMeta.target === 'enemy' && (
+                      <em className="combat-field-hint">或直接点战场上的敌人</em>
+                    )}
                   </span>
                   <div className="combat-select-wrap">
                     <Select
@@ -497,8 +516,13 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
             </div>
           </div>
         ) : (
-          <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            战斗中 · 轮到 {active?.name ?? '……'}
+          <div className="combat-zone-wait">
+            <GiHourglass size={13} aria-hidden="true" />
+            <span>轮到 {active?.name ?? '……'} 行动</span>
+            {/* 「还差几个」比单说轮到谁有用：玩家据此决定现在能不能腾手去翻角色卡 */}
+            {myWaitDepth > 0 && (
+              <span className="combat-zone-wait-depth">再过 {myWaitDepth} 个就到你</span>
+            )}
           </div>
         )}
     </div>

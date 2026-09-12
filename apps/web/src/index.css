@@ -2824,6 +2824,70 @@ body {
 }
 
 /* 战斗面板选择器：去掉原生箭头、自绘 caret，与暗色主题一致的更精致下拉。 */
+/**
+ * ===== 玩家行动区的三种状态 =====
+ *
+ * 「该我动 / 该我应 / 在等别人」此前挤在同一处、同样的小字：轮到你时只是多出一排按钮，
+ * 被 NPC 打了要选闪避时也只是多一行提示。而回合横幅只闪 1.8 秒——那会儿玩家要是正在
+ * 读叙事或翻角色卡，错过就再没有持续的信号告诉他「在等你」。
+ *
+ * 所以给行动区一个**常驻**的状态外观：等待时安静得几乎不存在，轮到你时亮起来，
+ * 要你反应时（整条战斗流程停在这儿等你）才动用脉冲。
+ */
+.combat-zone {
+  border-top: 1px solid var(--color-border);
+  transition: border-color 0.25s, background 0.25s;
+}
+.combat-zone--waiting { opacity: 0.82; }
+.combat-zone--mine {
+  border-top-color: var(--color-accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 9%, transparent), transparent 3.5rem);
+}
+.combat-zone--urgent {
+  border-top-color: var(--color-danger);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-danger) 14%, transparent), transparent 4rem);
+  animation: combatUrgent 1.5s ease-in-out infinite;
+}
+@keyframes combatUrgent {
+  0%, 100% { border-top-color: var(--color-danger); }
+  50% { border-top-color: color-mix(in srgb, var(--color-danger) 35%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .combat-zone--urgent { animation: none; }
+}
+
+.combat-zone-title {
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+}
+.combat-zone-title--mine { color: var(--color-text-accent); }
+.combat-zone-title--urgent { color: var(--color-danger); font-weight: 600; }
+
+.combat-zone-wait {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+/* 「再过 N 个就到你」：玩家据此决定现在能不能腾手去翻角色卡 */
+.combat-zone-wait-depth {
+  margin-left: auto;
+  font-size: var(--text-2xs);
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+/* 「或直接点战场上的敌人」——这个能力一直有，只是没人告诉过玩家 */
+.combat-field-hint {
+  font-style: normal;
+  margin-left: 0.35rem;
+  opacity: 0.65;
+}
+
 .combat-field-label {
   font-size: 0.66rem;
   letter-spacing: 0.04em;
