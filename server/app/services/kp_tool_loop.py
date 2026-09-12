@@ -93,6 +93,19 @@ _travel_suggest_event = turn_effects.travel_suggest_event
 _set_path_block = turn_effects.set_path_block
 
 
+#: 这些展示卡要等本轮所有叙事都播完才露面。
+#:
+#: 「要不要去【某地】」是给玩家的**行动提示**，不是叙事的一部分。工具调用发生在流式过程中，
+#: 模型常写到段落中间就把它调了（提示词写明「放在回复末尾」也不听），于是卡片插进旁白里，
+#: 把一段话截成两半、NPC 的台词被挤到卡片后面（实测截图即此形态）。
+#: 扣到末尾统一放：屏幕顺序与落库顺序都干净，也不必指望模型守规矩。
+_DEFERRED_CARD_KINDS = frozenset({"travel_suggest"})
+
+
+def _is_deferred_card(chunk) -> bool:
+    return ((getattr(chunk, "metadata", None) or {}).get("kind")) in _DEFERRED_CARD_KINDS
+
+
 def _rule_lookup_passages(
     db: Session, query: str, rule_system: str, game_session: GameSession | None = None,
 ) -> str:
@@ -544,6 +557,7 @@ async def _run_kp_agent_loop(
     messages = list(messages)  # loop 会往里回注消息，不污染调用方的列表
     did_check = False
     natural_end = False
+    deferred_cards: list = []      # 押后到本轮末尾再放的展示卡（见 _DEFERRED_CARD_KINDS）
     # 工具轮次与用到的工具：这一段现已是整个回合最贵的部分（实测一轮 5 次调用、输入 57.1k）。
     # 轮次是乘数——每轮都要把累积消息整份重发、模型每轮再思考一遍。不记下「几轮、哪些工具」，
     # 就只能看到「KP 叙事 95.7s」而不知道是谁把它拖长的。
@@ -620,6 +634,12 @@ async def _run_kp_agent_loop(
                 did_check = True
             outcome = await execute_tool(tc)
             for chunk in outcome.chunks:
+                if _is_deferred_card(chunk):
+                    # 押后到本轮末尾（见 _DEFERRED_CARD_KINDS）。**刻意不记 event_order**：
+                    # 没进重排清单的事件会被 reorder_turn_events 追加到本轮最后，
+                    # 于是落库顺序与这里的屏幕顺序自然一致，不用另写一套排序。
+                    deferred_cards.append(chunk)
+                    continue
                 # 记录该工具事件在广播时的旁白偏移，供收尾把它重排回旁白中的正确位置
                 if event_order is not None:
                     _record_chunk_event(event_order, chunk, len(result[0]))
@@ -631,6 +651,8 @@ async def _run_kp_agent_loop(
                 suspended = True
         if suspended:
             _log_rounds()
+            for card in deferred_cards:
+                yield card
             return
         # 调过工具就必须再跑一轮，哪怕只是为了确认「没有更多工具了」——那一轮往往几乎不产
         # 文本，屏幕上只剩一个不动的脉冲点。这里说明一句正在做什么；下一轮一有正文到达，
@@ -666,6 +688,9 @@ async def _run_kp_agent_loop(
             _merge_step_result(result, step)
             raise
         _merge_step_result(result, step)
+
+    for card in deferred_cards:
+        yield card
 
 
 def _group_label_for_text(groups: list[dict] | None, text: str) -> str | None:

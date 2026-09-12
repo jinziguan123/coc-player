@@ -112,6 +112,11 @@ class _RecordingExecutor:
         return self.outcomes.get(call.name, kp_tools.ToolOutcome("ok"))
 
 
+async def _drain(agen) -> list:
+    """把异步生成器收成列表（本文件另有同名不同签名的 _collect_loop，勿混用）。"""
+    return [c async for c in agen]
+
+
 async def _run_loop(llm, executor, plan=None, max_steps=6, messages=None) -> tuple[list, list[str]]:
     result = ["", "", [], [], []]
     chunks = [
@@ -740,3 +745,91 @@ def test_no_wait_note_when_suspended():
     _result, chunks = asyncio.run(_run_loop(llm, executor))
 
     assert _housekeeping_notes(chunks) == []
+
+
+# ── 「要不要去某地」的卡片押后到本轮末尾 ────────────────────────────────────
+
+
+def _card(kind: str = "travel_suggest", content: str = "要前往【老房子】吗？"):
+    return chat_service._make_chunk(
+        "system", content, metadata={"kind": kind, "scene_id": "s2"}, event_id="ev-card",
+    )
+
+
+def _chunk_kinds(chunks) -> list[str]:
+    """把广播序列压成可读形状：文本记 'text'，卡片记其 kind。"""
+    out = []
+    for c in chunks:
+        if isinstance(c, str):
+            out.append("text")
+        else:
+            out.append(((getattr(c, "metadata", None) or {}).get("kind")) or getattr(c, "type", "?"))
+    return out
+
+
+def test_前往建议卡押后到本轮末尾():
+    """模型常写到段落中间就调 travel_suggest（提示词要求放末尾也不听），卡片于是插进旁白里
+    把话截断。押后之后，它必须落在本轮最后一段文字之后。"""
+    llm = _FakeToolLLM([
+        [_text("诺特摊开信封。"), _call("travel_suggest", {"scene_id": "s2"})],
+        [_text("他抬头看你。")],
+    ])
+    executor = _RecordingExecutor({
+        "travel_suggest": kp_tools.ToolOutcome("已挂卡", chunks=[_card()]),
+    })
+    result, chunks = asyncio.run(_run_loop(llm, executor))
+
+    kinds = _chunk_kinds(chunks)
+    assert "travel_suggest" in kinds
+    assert kinds.index("travel_suggest") == len(kinds) - 1     # 排在所有广播之后
+    assert result[0].endswith("他抬头看你。")                   # 押后不影响叙事聚合
+
+
+def test_押后的卡不进重排清单():
+    """不记 event_order → reorder_turn_events 会把它追加到本轮最后，
+    落库顺序因此与屏幕顺序一致，不必另写一套排序。"""
+    llm = _FakeToolLLM([
+        [_text("一段旁白。"), _call("travel_suggest", {"scene_id": "s2"})],
+        [_text("又一段。")],
+    ])
+    executor = _RecordingExecutor({
+        "travel_suggest": kp_tools.ToolOutcome("已挂卡", chunks=[_card()]),
+    })
+    order: list = []
+    result = ["", "", [], [], []]
+    asyncio.run(_drain(chat_service._run_kp_agent_loop(
+        llm, [{"role": "system", "content": "KP"}], result, executor, event_order=order,
+    )))
+    assert [eid for _off, eid in order] == []      # 卡片没进清单
+
+
+def test_挂起时押后的卡照样放出来():
+    """本轮因待投骰而挂起 → 也要把卡片放出去，否则它就永远不出现了。"""
+    llm = _FakeToolLLM([
+        [_text("你俯身细看。"), _call("travel_suggest", {"scene_id": "s2"}), _call("dice_check", {"skill": "侦查"})],
+    ])
+    executor = _RecordingExecutor({
+        "travel_suggest": kp_tools.ToolOutcome("已挂卡", chunks=[_card()]),
+        "dice_check": kp_tools.ToolOutcome("pending", suspend=True),
+    })
+    _result, chunks = asyncio.run(_run_loop(llm, executor))
+
+    kinds = _chunk_kinds(chunks)
+    assert kinds[-1] == "travel_suggest"
+
+
+def test_其它工具卡不受影响():
+    """只押后行动提示卡；骰子、检定请求这类要留在叙事的对应位置。"""
+    dice = chat_service._make_chunk("dice", "侦查 55", metadata={"kind": "dice"}, event_id="ev-d")
+    llm = _FakeToolLLM([
+        [_text("前半。"), _call("set_flag", {"flag": "f1"})],
+        [_text("后半。")],
+    ])
+    executor = _RecordingExecutor({"set_flag": kp_tools.ToolOutcome("ok", chunks=[dice])})
+    order: list = []
+    result = ["", "", [], [], []]
+    chunks = asyncio.run(_drain(chat_service._run_kp_agent_loop(
+        llm, [{"role": "system", "content": "KP"}], result, executor, event_order=order,
+    )))
+    assert [eid for _off, eid in order] == ["ev-d"]            # 照常进重排清单
+    assert _chunk_kinds(chunks).index("dice") < len(chunks) - 1  # 不在末尾
