@@ -46,6 +46,10 @@ class WorldStateSchema(BaseModel):
     # —— 世界可达性与剧情闸（world_memory / navigation_service 读写）——
     blocked_scenes: dict = Field(default_factory=dict)      # 场景 id → 封路理由
     travel_suggested: list = Field(default_factory=list)    # KP 挂过「要前往 X 吗」的场景 id
+    # 真人 KP 在工作台上手动公开的地点。**与 travel_suggested 分开存**：那一条的语义是
+    # 「已经问过要不要去」，是建议卡的幂等真源；借它来解锁的话，这个地方以后再也弹不出
+    # 建议卡了。两件事该各记各的。
+    kp_revealed: list = Field(default_factory=list)
     # 规划器裁定要揭示、但还没落到台账的线索（planned_effects 落实后清空）
     pending_clue_reveals: dict = Field(default_factory=dict)
 

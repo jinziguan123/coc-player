@@ -211,6 +211,11 @@ def _relative_carriage_mentions(by_id: dict, event) -> set[str]:
     }
 
 
+def kp_revealed_ids(session: GameSession) -> set:
+    """真人 KP 手动公开过的场景 id（world_state.kp_revealed）。"""
+    return {str(sid) for sid in ((session.world_state or {}).get("kp_revealed") or []) if sid}
+
+
 def known_scene_ids(module, session: GameSession, events: list | None = None) -> set:
     """已知地点 = 已访问/当前所在 ∪ 玩家可见叙事中被提及过的场景。
 
@@ -225,6 +230,8 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
     # 匹配场景名（卡片措辞一改，或场景名与关键词对不上，地点就会莫名其妙地消失）。
     suggested = set((session.world_state or {}).get("travel_suggested") or [])
     known.update(suggested)
+    # 真人 KP 在工作台上点过「解锁地点」的，同样是确定性记录，与建议卡等价。
+    known.update(kp_revealed_ids(session))
     visible_events = [
         event for event in (events or [])
         if getattr(event, "event_type", None) in ("narration", "dialogue", "action", "system")
@@ -405,10 +412,12 @@ def list_known_locations(
     # 玩家收到邀请却在地图上找不到入口，只会以为系统坏了。门禁防的是「还没听说过的
     # 地方提前曝光」，而这个地方 KP 自己说破了，剧透早已发生。
     suggested = set((session.world_state or {}).get("travel_suggested") or [])
+    # KP 手动公开的地点同样解除层级门禁：他自己说破了，再藏着只剩坏处。
+    revealed = suggested | kp_revealed_ids(session)
 
     def _unlocked(sid: str) -> bool:
         parent = hex_map.scene_parent(by_id.get(sid))
-        return not parent or parent in visited or sid == cur or sid in suggested
+        return not parent or parent in visited or sid == cur or sid in revealed
 
     known = {
         sid for sid in known_scene_ids(module, session, events)

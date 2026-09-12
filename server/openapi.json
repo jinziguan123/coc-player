@@ -1483,7 +1483,9 @@
               "clear_flag",
               "handout",
               "hp_change",
-              "start_combat"
+              "start_combat",
+              "unlock_place",
+              "move_actor"
             ],
             "title": "Action",
             "type": "string"

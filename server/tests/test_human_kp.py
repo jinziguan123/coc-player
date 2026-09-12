@@ -414,3 +414,113 @@ def test_NPC_台词里的括号是给同桌的注解不是台词(tmp_path):
     assert kinds["ooc"] == "他其实在说谎"
     assert len(chunks) == 2
     assert "场外" in result
+
+
+def _seed_two_scenes(db):
+    """两个场景：一个是起点，另一个玩家还不知道——用来验「解锁」与「移动」。"""
+    module = Module(
+        title="解锁测试", description="两节车厢。", rule_system="coc",
+        scenes=[
+            {"id": "s1", "title": "1 号车厢", "name": "1 号车厢"},
+            {"id": "s2", "title": "2 号车厢", "name": "2 号车厢"},
+        ],
+        npcs=[],
+    )
+    hero = Character(name="调查员", rule_system="coc", is_player=True, skills={"侦查": 60})
+    db.add_all([module, hero])
+    db.commit()
+    session = session_service.create_session(
+        db, module.id, [{"character_id": hero.id, "role": "human", "is_primary": True}],
+        creator_token="kp-token", kp_mode="human",
+    )
+    if not session_service.lobby_gaps(db, session.id):
+        session_service.start_game(db, session.id, "kp-token")
+    return module, hero, session
+
+
+def test_kp_unlock_place_reveals_scene_to_players(tmp_path):
+    """解锁前玩家看不见，解锁后看得见——此前 KP 只能绕着写旁白去碰关键词匹配。"""
+    from app.services import navigation_service
+
+    db = _db(tmp_path)()
+    module, _hero, session = _seed_two_scenes(db)
+    assert "s2" not in navigation_service.known_scene_ids(module, session, [])
+
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "unlock_place", {"scene_id": "s2"},
+    ))
+
+    db.refresh(session)
+    assert "s2" in navigation_service.known_scene_ids(module, session, [])
+    assert "2 号车厢" in result
+    # 地图上凭空多一个地点而没有交代，玩家只会当成 bug → 必须落一条可见事件
+    assert chunks and "2 号车厢" in chunks[0].as_wire()["content"]
+
+
+def test_kp_unlock_place_is_idempotent_and_keeps_suggestion_slot_free(tmp_path):
+    """重复解锁不重复记；且不写 travel_suggested——那是建议卡的幂等位，占了卡就再也弹不出来。"""
+    from app.services import world_memory
+
+    db = _db(tmp_path)()
+    module, _hero, session = _seed_two_scenes(db)
+    asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "unlock_place", {"scene_id": "s2"},
+    ))
+    db.refresh(session)
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "unlock_place", {"scene_id": "s2"},
+    ))
+
+    db.refresh(session)
+    assert session.world_state["kp_revealed"] == ["s2"]
+    assert chunks == [] and "早已" in result
+    assert not world_memory.travel_suggested(session.world_state, "s2")
+
+
+def test_kp_unlock_place_accepts_scene_name_and_rejects_unknown(tmp_path):
+    db = _db(tmp_path)()
+    module, _hero, session = _seed_two_scenes(db)
+
+    _chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "unlock_place", {"scene_id": "2 号车厢"},
+    ))
+    assert "2 号车厢" in result
+
+    with pytest.raises(ValueError, match="找不到这个地点"):
+        asyncio.run(execute_human_kp_action(
+            db, session.id, session, module, "unlock_place", {"scene_id": "不存在"},
+        ))
+
+
+def test_kp_move_actor_relocates_and_reveals_destination(tmp_path):
+    """KP 挪人是裁定结果（被拖走/传送/昏迷后醒在别处），不该被前往那套闸拦下。"""
+    from app.services import navigation_service
+
+    db = _db(tmp_path)()
+    module, hero, session = _seed_two_scenes(db)
+
+    chunks, result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "move_actor",
+        {"character_id": hero.id, "scene_id": "s2"},
+    ))
+
+    db.refresh(session)
+    assert navigation_service.get_party_locations(session).get(hero.id) == "s2"
+    # 人都在那儿了，地图上还藏着目的地没有意义
+    assert "s2" in navigation_service.known_scene_ids(module, session, [])
+    assert hero.name in result and chunks
+
+
+def test_kp_move_actor_rejects_bad_input(tmp_path):
+    db = _db(tmp_path)()
+    module, hero, session = _seed_two_scenes(db)
+
+    with pytest.raises(ValueError, match="找不到目的地"):
+        asyncio.run(execute_human_kp_action(
+            db, session.id, session, module, "move_actor",
+            {"character_id": hero.id, "scene_id": "s9"},
+        ))
+    with pytest.raises(ValueError, match="没有指定要移动谁"):
+        asyncio.run(execute_human_kp_action(
+            db, session.id, session, module, "move_actor", {"scene_id": "s2"},
+        ))

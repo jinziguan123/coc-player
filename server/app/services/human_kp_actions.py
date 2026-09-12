@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.registry import get_engine
@@ -12,6 +13,7 @@ from app.services import (
     human_kp_service,
     illustration_service,
     kp_actions,
+    navigation_service,
     session_service,
     turn_context,
     turn_effects,
@@ -192,4 +194,96 @@ async def execute_human_kp_action(
         )
         return chunks, "已切入结构化战斗"
 
+    if action == "unlock_place":
+        return _exec_unlock_place(
+            db, session_id, game_session, module,
+            str(payload.get("scene_id") or payload.get("scene") or "").strip(),
+        )
+
+    if action == "move_actor":
+        return _exec_move_actor(
+            db, session_id, game_session, module,
+            str(payload.get("character_id") or payload.get("char_id") or "").strip(),
+            str(payload.get("scene_id") or payload.get("scene") or "").strip(),
+        )
+
     raise ValueError(f"不支持的 KP 动作：{action}")
+
+
+def _find_scene(module: Module, ref: str) -> dict | None:
+    """按 id 或名字找场景。KP 表单里两种都可能填进来（下拉给 id，手打给名字）。"""
+    ref = str(ref or "").strip()
+    if not ref:
+        return None
+    for s in (module.scenes or []):
+        if str(s.get("id") or "") == ref:
+            return s
+    for s in (module.scenes or []):
+        if str(s.get("name") or "") == ref:
+            return s
+    return None
+
+
+def _exec_unlock_place(
+    db: Session, session_id: str, game_session: GameSession, module: Module, ref: str,
+) -> tuple[list[str], str]:
+    """把一个地点对玩家公开：从此出现在大地图上，可以前往。
+
+    此前这件事只有两条路径：玩家走到过，或者某段**玩家可见**的叙述恰好提到了它
+    （见 navigation_service.known_scene_ids）。真人 KP 想直接放一个地方出来，只能
+    绕着写一句旁白去碰关键词匹配——碰不碰得上全看措辞。这里给他一个确定性的开关。
+    """
+    scene = _find_scene(module, ref)
+    if scene is None:
+        raise ValueError("找不到这个地点")
+    sid = str(scene.get("id") or "")
+    ws = dict(game_session.world_state or {})
+    revealed = list(ws.get("kp_revealed") or [])
+    name = str(scene.get("name") or sid)
+    if sid in revealed:
+        return [], f"{name} 早已对玩家公开"
+    revealed.append(sid)
+    ws["kp_revealed"] = revealed
+    game_session.world_state = ws
+    db.commit()
+    # 落一条玩家可见的系统事件：地图上凭空多出一个地点而没有任何交代，
+    # 玩家只会以为是 bug。
+    return [event_to_chunk(session_service.add_event(
+        db, session_id, "system", f"地图上多了一处去向：{name}",
+        actor_name="KP", metadata={"kp_manual": True, "unlocked_scene": sid},
+    ))], f"{name} 已对玩家公开"
+
+
+def _exec_move_actor(
+    db: Session, session_id: str, game_session: GameSession, module: Module,
+    char_id: str, ref: str,
+) -> tuple[list[str], str]:
+    """把某个角色挪到另一个场景（KP 侧的强制移动）。
+
+    玩家自己走是「前往」，要过封路、连通性这些闸；KP 挪人是裁定结果——被拖走、被传送、
+    昏迷后醒在别处——不该被同一套闸拦下。所以这里直接写落点，不走 travel 那条链。
+    目的地顺带对玩家公开：人都在那儿了，地图上还藏着它没有意义。
+    """
+    scene = _find_scene(module, ref)
+    if scene is None:
+        raise ValueError("找不到目的地")
+    if not char_id:
+        raise ValueError("没有指定要移动谁")
+    char = db.get(Character, char_id)
+    if char is None:
+        raise ValueError("找不到这个角色")
+    sid = str(scene.get("id") or "")
+    name = str(scene.get("name") or sid)
+    navigation_service.set_char_location(db, session_id, char_id, sid)
+    db.refresh(game_session)
+    ws = dict(game_session.world_state or {})
+    revealed = list(ws.get("kp_revealed") or [])
+    if sid not in revealed:
+        revealed.append(sid)
+        ws["kp_revealed"] = revealed
+        game_session.world_state = ws
+        db.commit()
+    return [event_to_chunk(session_service.add_event(
+        db, session_id, "system", f"{char.name} 现在在{name}。",
+        actor_name="KP", metadata={"kp_manual": True, "moved_to": sid, "char_id": char_id},
+    ))], f"{char.name} 已移动到 {name}"
