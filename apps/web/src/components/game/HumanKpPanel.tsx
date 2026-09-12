@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api, getServerUrl } from '@/api/client'
 import { GiFootTrip, GiPadlock, GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
@@ -36,6 +36,9 @@ import {
 import { MultiSelect } from '@/components/ui/multi-select'
 import { KpInput } from './KpInput'
 import { catalogOptions } from './kpCatalogs'
+import { usePartyVitals } from '@/features/game-session/usePartyVitals'
+import { KpPartyMonitor } from './KpPartyMonitor'
+import { useDragResize } from '@/components/ui/useDragResize'
 import { useDictation } from './useDictation'
 import { useSlashCommands } from './useSlashCommands'
 import { ACTION_CHIPS, ACTION_LABELS, PROSE_ACTIONS, type KpAction } from './kpActions'
@@ -291,6 +294,13 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   const [lastActionResult, setLastActionResult] = useState('')
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const catalogs = catalogOptions(workspace)
+  // 体征重拉的时机：KP 每发一个动作（可能扣血扣 SAN）、以及一回合收口时
+  const [vitalsTick, setVitalsTick] = useState(0)
+  useEffect(() => { setVitalsTick((t) => t + 1) }, [turnReady])
+  // 全队生命体征：KP 每分钟都要知道谁快死了、谁理智见底，不该藏在角色卡里一次只看一个
+  const party = usePartyVitals(workspace?.catalogs.characters?.map(
+    (c) => ({ character_id: c.id, character_name: c.name, role: 'human' }),
+  ), vitalsTick)
   // 斜杠命令：叙事框里打 / 直接切动作，手不离键盘（见 useSlashCommands）
   const slash = useSlashCommands({
     text: fields.content || '',
@@ -301,8 +311,11 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   const [sourceOpen, setSourceOpen] = useState(false)
   const [sourceQuery, setSourceQuery] = useState('')
   const [sourceTargetOrdinal, setSourceTargetOrdinal] = useState<number | null>(null)
-  const [sourcePosition, setSourcePosition] = useState({ x: 0, y: 0 })
-  const [sourceSize, setSourceSize] = useState({ width: 640, height: 680 })
+  // 资料悬浮窗的拖动与缩放：与 KP 业务无关的通用行为，见 ui/useDragResize
+  const {
+    position: sourcePosition, size: sourceSize,
+    drag: sourceDrag, resize: sourceResize, reset: resetSourceWindow,
+  } = useDragResize({ width: 640, height: 680 })
   const [notes, setNotes] = useState('')
   const [draftInstruction, setDraftInstruction] = useState('')
   const [draft, setDraft] = useState('')
@@ -321,14 +334,6 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
     (chunk) => setFields((current) => ({ ...current, content: `${current.content || ''}${chunk}` })),
   )
   const sourceChunkRefs = useRef<Record<number, HTMLDivElement | null>>({})
-  const sourceDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
-  const sourceResizeRef = useRef<{
-    startX: number
-    startY: number
-    width: number
-    height: number
-    originX: number
-  } | null>(null)
 
   const refreshWorkspace = async () => {
     try {
@@ -357,59 +362,6 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
     }
   }
 
-  const onSourceDragStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest('button, input')) return
-    event.currentTarget.setPointerCapture(event.pointerId)
-    sourceDragRef.current = {
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: sourcePosition.x,
-      originY: sourcePosition.y,
-    }
-  }
-
-  const onSourceDragMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = sourceDragRef.current
-    if (!drag) return
-    setSourcePosition({
-      x: drag.originX + event.clientX - drag.startX,
-      y: drag.originY + event.clientY - drag.startY,
-    })
-  }
-
-  const onSourceDragEnd = () => {
-    sourceDragRef.current = null
-  }
-
-  const onSourceResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.stopPropagation()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    sourceResizeRef.current = {
-      startX: event.clientX,
-      startY: event.clientY,
-      width: sourceSize.width,
-      height: sourceSize.height,
-      originX: sourcePosition.x,
-    }
-  }
-
-  const onSourceResizeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const resize = sourceResizeRef.current
-    if (!resize) return
-    const maxWidth = typeof window === 'undefined' ? 960 : Math.max(360, window.innerWidth - 32)
-    const maxHeight = typeof window === 'undefined' ? 900 : Math.max(320, window.innerHeight - 96)
-    const width = Math.min(maxWidth, Math.max(360, resize.width + event.clientX - resize.startX))
-    const height = Math.min(maxHeight, Math.max(320, resize.height + event.clientY - resize.startY))
-    setSourceSize({ width, height })
-    setSourcePosition((current) => ({
-      ...current,
-      x: resize.originX + width - resize.width,
-    }))
-  }
-
-  const onSourceResizeEnd = () => {
-    sourceResizeRef.current = null
-  }
 
   useEffect(() => {
     void refreshWorkspace()
@@ -421,13 +373,12 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
 
   useEffect(() => {
     sourceChunkRefs.current = {}
-    setSourcePosition({ x: 0, y: 0 })
-    setSourceSize({ width: 640, height: 680 })
+    resetSourceWindow()
     setSourceQuery('')
     setSourceTargetOrdinal(null)
     setSource(null)
     setSourceOpen(false)
-  }, [sessionId])
+  }, [sessionId, resetSourceWindow])
 
   useEffect(() => {
     if (!sourceOpen || sourceView !== 'parsed' || sourceTargetOrdinal === null) return
@@ -469,6 +420,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
       const response = await api.post<{ result?: string }>(`/sessions/${sessionId}/kp/action`, { action: nextAction, payload })
       const result = response.result || success
       setLastActionResult(result)
+      setVitalsTick((t) => t + 1)   // 动作可能改了血量/理智，监控列跟着刷
       toast.success(success)
       return result
     } catch (error) {
@@ -779,6 +731,12 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
             <Send size={13} /> {busy === 'end-turn' ? '处理中…' : '开放行动'}
           </button>
         </div>
+      )}
+
+      {/* 监控列：全队 HP/SAN/MP 常驻。只在「主持」档下出现——翻资料时它就是干扰了。
+          行内动作走 adoptToTools（填进表单、不直接发出），裁定权仍在 KP 手里。 */}
+      {!collapsed && tab === 'tools' && (
+        <KpPartyMonitor party={party} onPrefill={(next, fields) => adoptToTools(next, fields)} />
       )}
 
       {/* 资料的二级标签：只在「资料」这一档下出现 */}
@@ -1231,10 +1189,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
           <div
             className="flex cursor-move touch-none items-center gap-2 border-b px-3 py-2"
             style={{ borderColor: 'var(--color-border)' }}
-            onPointerDown={onSourceDragStart}
-            onPointerMove={onSourceDragMove}
-            onPointerUp={onSourceDragEnd}
-            onPointerCancel={onSourceDragEnd}
+            {...sourceDrag}
+            onPointerCancel={sourceDrag.onPointerUp}
             title="拖动资料窗"
           >
             <Move size={14} style={{ color: 'var(--color-text-secondary)' }} />
@@ -1325,10 +1281,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
           </div>
           <div
             className="absolute bottom-1 right-1 flex h-5 w-5 cursor-se-resize touch-none items-end justify-end"
-            onPointerDown={onSourceResizeStart}
-            onPointerMove={onSourceResizeMove}
-            onPointerUp={onSourceResizeEnd}
-            onPointerCancel={onSourceResizeEnd}
+            {...sourceResize}
+            onPointerCancel={sourceResize.onPointerUp}
             title="调整资料窗大小"
             aria-label="调整资料窗大小"
           >
