@@ -562,7 +562,45 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
         </div>
   )
 
-  // ===== 沉浸布局：战场为主（棋盘居中放大、先攻轨横贯顶、参战卡列环绕、动作区钉底） =====
+  /**
+   * 沉浸布局的左列：**按先攻顺序排成一竖列的参战方卡**。
+   *
+   * 此前是「横排先攻芯片 + 我方/敌方两列卡片」，同一件事说了两遍：芯片给顺序、卡片给状态，
+   * 而顺序在两列卡里根本看不出来（敌我各排各的）。合并之后一列就同时是先攻轨和状态卡，
+   * 棋盘两侧也不必再各留 160px 给卡列。
+   *
+   * 竖向还有个横排给不了的好处：一行放得下名字、血槽和「下一个」。序列本来就是时间顺序，
+   * 竖着读天然对。
+   */
+  // 「下一个」＝当前之后第一个未出局者（环形）。玩家最常问的一句话，标出来省得自己数。
+  const turnIdx = order.findIndex((c) => c.id === combat.turn)
+  const nextIdx = turnIdx < 0 ? -1 : (() => {
+    for (let k = 1; k <= order.length; k++) {
+      const i = (turnIdx + k) % order.length
+      if (!isOut(order[i])) return i
+    }
+    return -1
+  })()
+
+  const initiativeColumn = (
+    <div className="combat-rail">
+      <div className="combat-label">先攻序</div>
+      <div className="combat-rail-list chat-scroll">
+        {order.map((c, i) => (
+          <div key={c.id} className={`combat-rail-item${i === nextIdx ? ' combat-rail-item--next' : ''}`}>
+            <CombatantCard
+              c={c}
+              mine={!!(myCharId && c.id === myCharId)}
+              active={c.id === combat.turn}
+              diff={diffs[c.id]}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  // ===== 沉浸布局：战场为主（棋盘居中放大、先攻序竖列在左、行动面板在右） =====
   if (immersive) {
     return (
       <div className="card combat-hud combat-stage--immersive !px-3 !py-2.5">
@@ -578,28 +616,21 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
         </div>
         {/* 结算回显：钉在舞台顶部 */}
         {result && <div className="flex-shrink-0"><CombatResultReveal result={result} order={order} /></div>}
-        {/* B1 先攻轨：横贯顶部 */}
-        <div className="flex-shrink-0">
-          <InitiativeTrack order={order} turn={combat.turn} myCharId={myCharId} />
-        </div>
-        {/* 中段：己方卡列（左）| 棋盘居中放大 | 敌方卡列（右）；回合横幅覆盖顶部。
-            窄中段时（见 index.css 的 @container）自动改成「卡片横排一条 + 棋盘占满整宽」——
-            两条 160px 卡列不让位的话，被压扁的只会是棋盘，它是这里唯一可伸缩的东西。 */}
+        {/* 中段三列：先攻序（左）| 棋盘（中，尽量大）| 行动面板（右）。回合横幅覆盖顶部。
+            窄中段时（见 index.css 的 @container）退回竖排——三列摆不下时硬摆，
+            被压扁的只会是棋盘，而它是这里唯一真正需要空间的东西。 */}
         <div className="combat-mid">
           <TurnBanner banner={banner} />
-          {/* display:contents（宽）/ flex（窄）：同一份 DOM 走两套排布，不做条件渲染 */}
-          <div className="combat-sides">
-            <div className="combat-side">{sideCol('我方', allies)}</div>
-            <div className="combat-side combat-side--enemy">{sideCol('敌方', enemies, true)}</div>
-          </div>
+          {initiativeColumn}
           <div ref={boardAreaRef} className="combat-board chat-scroll">
             {combat.grid
               ? gridSection(fitCell)
               : <div className="text-xs text-center py-6" style={{ color: 'var(--color-text-secondary)' }}>本场战斗没有方格战场</div>}
           </div>
+          {/* 行动面板从底部挪到右列：它和「轮到谁」是同一件事，挨着先攻序与棋盘才读得顺；
+              钉在底部时，玩家的视线要从棋盘一路跳到屏幕最下沿再跳回来。 */}
+          <div className="combat-actions">{actionZone}</div>
         </div>
-        {/* 动作栏/反应区/掷伤害 + 战斗日志：钉在舞台底部 */}
-        <div className="flex-shrink-0">{actionZone}</div>
         {logDrawer}
       </div>
     )

@@ -5368,6 +5368,57 @@ select.input option {
 }
 /* display:contents → 两个 .combat-side 直接成为 .combat-mid 的 flex 项；
    order 把棋盘夹在中间（DOM 顺序是 我方→敌方→棋盘，便于窄态直接成条） */
+/**
+ * ===== 沉浸布局的三列：先攻序 | 棋盘 | 行动面板 =====
+ *
+ * 先攻序与参战方卡合并成一竖列。此前是「横排先攻芯片 + 我方/敌方两列卡片」，
+ * 同一件事说了两遍：芯片给顺序、卡片给状态，而顺序在两列卡里根本看不出来（敌我各排各的）。
+ * 合并之后一列同时承担两件事，棋盘两侧也不必再各留一条。
+ *
+ * 宽度接着上面那条教训：卡列钉死 10rem 曾把棋盘压到 41px 一格。这里两条侧列都用
+ * clamp 让位，棋盘永远 flex:1 优先吃剩下的。
+ */
+.combat-rail {
+  /* 棋盘留着旧排布的 order:2（那时两侧是我方/敌方卡列），所以这里得显式站位 */
+  order: 1;
+  width: clamp(8.5rem, 14vw, 11rem);
+  flex-shrink: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.combat-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+/* 「下一个」：左缘一道琥珀短线。不写字——竖列里每多一个字都要占掉卡片的宽度 */
+.combat-rail-item { position: relative; }
+.combat-rail-item--next::before {
+  content: '';
+  position: absolute;
+  left: -0.3rem; top: 25%; bottom: 25%;
+  width: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+
+/* 行动面板：从舞台底部挪到右列。它和「轮到谁」是同一件事，挨着先攻序与棋盘才读得顺；
+   钉在底部时玩家的视线要从棋盘一路跳到屏幕最下沿再跳回来。 */
+.combat-actions {
+  order: 3;
+  width: clamp(11rem, 18vw, 15rem);
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+/* 右列里没有横向余地：动作按钮与目标各自换行排，别硬挤成一条 */
+.combat-actions .combat-select { width: 100%; }
+.combat-actions label { width: 100%; }
+
 .combat-sides { display: contents; }
 .combat-side {
   display: flex;
@@ -5403,6 +5454,18 @@ select.input option {
    卡列是辅助信息，棋盘才是战斗本身，宽度不够时该让的是前者。 */
 @container (max-width: 54rem) {
   .combat-mid { flex-direction: column; gap: 0.25rem; }
+  /* 三列摆不下时退回竖排：先攻序横过来成一条，行动面板落回底部，棋盘吃满整宽。
+     同上：卡列是辅助信息，棋盘才是战斗本身，宽度不够时该让的是前者。 */
+  .combat-rail {
+    width: auto;
+    flex-shrink: 0;
+    max-height: 7rem;
+  }
+  .combat-rail-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+  .combat-rail-list > * { width: 9rem; flex-shrink: 0; }
+  .combat-rail-item--next::before { left: 0; top: auto; bottom: -0.15rem; width: auto; right: 0; height: 2px; }
+  .combat-board { order: 0; }
+  .combat-actions { width: auto; order: 4; }
   .combat-sides {
     display: flex;
     gap: 0.75rem;
