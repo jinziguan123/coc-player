@@ -544,7 +544,42 @@ async def _exec_hp_change(
             logger.exception("重伤体质检定失败（忽略，不阻塞结算）: char=%s", char.id)
     # 通知前端刷新角色卡（HP/状态已变）——与 inventory_update 同一套刷新机制。
     chunks.append(_make_chunk("character_update", metadata={"char_id": char.id}))
+    chunks.extend(_sync_combatant_hp(db, session_id, char))
     return chunks
+
+
+def _sync_combatant_hp(db: Session, session_id: str, char: Character) -> list[str]:
+    """把角色卡上刚改过的 HP/状态同步回**进行中的战斗态**，并广播新战斗态。
+
+    战斗面板画的是 `combat_state.initiative[].hp`，不是角色卡。而这条 HP 结算路径
+    （KP 手动扣血、AI KP 的 [HP_CHANGE]）此前只写角色表——于是战斗中 KP 扣了血，
+    角色卡和监控列都变了，棋盘上那个人还是满血，一路错到战斗结束。
+
+    战斗内的攻击走 combat_service.apply_damage，那条路两边都写，所以一直是对的；
+    只有这条外部结算漏了。不在战斗中、或这个人不在场上，都是 no-op。
+    """
+    from app.services import combat_service
+
+    session = db.get(GameSession, session_id)
+    if session is None:
+        return []
+    state = combat_service.get_combat(session)
+    if not state:
+        return []
+    hit = next(
+        (p for p in (state.get("initiative") or []) if str(p.get("id")) == char.id),
+        None,
+    )
+    if hit is None:
+        return []
+    hp = (char.system_data or {}).get("hitPoints") or {}
+    hit["hp"] = int(hp.get("current") or 0)
+    if hit.get("max_hp"):                       # 角色卡的 max 为准（成长可能改过）
+        hit["max_hp"] = int(hp.get("max") or hit["max_hp"])
+    # 状态用参战方自己的枚举：角色卡的 active/ok 在战斗态里一律记作 ok
+    hit["status"] = "ok" if char.status in ("active", "ok") else char.status
+    combat_service._save_combat(db, session_id, state)
+    return [combat_service._combat_state_chunk(state)]
 
 
 async def _exec_dice_check(

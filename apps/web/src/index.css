@@ -5271,6 +5271,24 @@ select.input option {
 /* 氛围底以对局布局为定位基准（布局本身默认 static，不给它 relative 的话
    inset:0 会去贴更外层的祖先，尺寸与位置全错）；内容整体抬到氛围底之上。 */
 .game-session-layout { position: relative; }
+
+/**
+ * 舞台行必须裁剪。
+ *
+ * KP 控制台改成底部坞之后，舞台能用的高度少了三百来像素；而内嵌的战斗卡（棋盘 + 参战方
+ * 卡片）本身就有五百多像素高，装不下时会**溢出到坞上面去**——而 --surface-1 带透明度，
+ * 于是坞底下透出半截战斗卡，看起来像两层叠在一起。flex 项默认不裁剪内容，得自己说。
+ *
+ * 弹窗与下拉都走 createPortal 挂在 body 层（见本文件 5299 行附近的说明），不会被这里切掉。
+ */
+.gsl-stage { overflow: hidden; }
+
+/* 装不下时战斗卡自己滚，而不是溢出去压别人。immersive 布局自带高度约束，不受此限。 */
+.gsl-stage .combat-hud:not(.combat-stage--immersive) {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .game-session-layout > *:not(.scene-backdrop) { position: relative; z-index: 1; }
 
 /* 满铺：氛围底挂在 .game-session-layout 上，而 .app-main 有 p-6 的内边距，于是背景四周

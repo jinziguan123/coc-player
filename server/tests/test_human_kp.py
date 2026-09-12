@@ -612,3 +612,56 @@ def test_kp_set_token_rejects_when_not_in_combat(tmp_path):
             db, session.id, session, module, "set_token",
             {"combatant_id": "whoever", "figure": "tentacle"},
         ))
+
+
+def test_kp_hp_change_syncs_into_active_combat(tmp_path):
+    """KP 手动扣血要同步到战斗态。
+
+    战斗面板画的是 combat_state.initiative[].hp 而不是角色卡；这条路径此前只写角色表，
+    于是战斗中扣完血，角色卡变了、棋盘上那个人还是满血，一路错到战斗结束。
+    """
+    from app.services import combat_service
+
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+    # _seed 的角色只有技能没有 system_data，HP 会是 0——这条用例要的是「扣血前后的差」
+    hero.system_data = {"hitPoints": {"current": 10, "max": 10}}
+    db.add(hero); db.commit()
+    combat_service.start_combat(
+        db, session.id,
+        [combat_service._char_participant(hero, "player", is_human=True)],
+        [combat_service._npc_participant(
+            {"id": "guard", "name": "守门人", "attributes": {"DEX": 40, "CON": 50, "SIZ": 60},
+             "skills": {"格斗(斗殴)": 30}, "weapon": "徒手格斗"}, "enemy")],
+    )
+    db.expire_all()
+    before = next(p for p in combat_service.get_combat(session)["initiative"] if p["id"] == hero.id)
+    full_hp = before["hp"]
+
+    chunks, _result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "hp_change",
+        {"target": hero.name, "delta": "-2", "reason": "被门夹了"},
+    ))
+
+    db.expire_all()
+    after = next(p for p in combat_service.get_combat(session)["initiative"] if p["id"] == hero.id)
+    assert after["hp"] == full_hp - 2
+    # 还要广播新战斗态，否则前端要等下一次推进才看得到
+    wires = [c.as_wire() for c in chunks]
+    assert any(w["type"] == "combat_state" for w in wires)
+    order = next(w for w in wires if w["type"] == "combat_state")["metadata"]["order"]
+    assert next(p for p in order if p["id"] == hero.id)["hp"] == full_hp - 2
+
+
+def test_kp_hp_change_outside_combat_is_untouched(tmp_path):
+    """不在战斗中时不该凭空冒出 combat_state 广播。"""
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+    hero.system_data = {"hitPoints": {"current": 10, "max": 10}}
+    db.add(hero); db.commit()
+
+    chunks, _result = asyncio.run(execute_human_kp_action(
+        db, session.id, session, module, "hp_change", {"target": hero.name, "delta": "-1"},
+    ))
+
+    assert chunks and not any(c.as_wire()["type"] == "combat_state" for c in chunks)
