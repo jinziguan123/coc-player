@@ -9,6 +9,7 @@ import {
   resolveActorKind,
   selectCombatLog,
   selectCombatResult,
+  sessionForRoute,
   splitOOC,
   stripCommandTags,
 } from './derive'
@@ -260,5 +261,25 @@ describe('sceneBackdropOf', () => {
     expect(sceneBackdropOf([场景图('a', '/api/images/a.jpg')], [别处('a')])).toBe('')
     // 图还在生成：只有占位没有 url
     expect(sceneBackdropOf([{ metadata: { icat: 'scene', scene_id: 'a' } }], [在('a')])).toBe('')
+  })
+})
+
+describe('sessionForRoute', () => {
+  const 局 = (id: string) => ({ id, player_character_id: 'c1' })
+
+  it('id 对得上才认这一份', () => {
+    const s = 局('s1')
+    expect(sessionForRoute(s, 's1')).toBe(s)
+  })
+
+  it('store 里残留的是上一局 → 当作还没加载', () => {
+    // 真实触发路径：从「鬼屋」退出去进「常暗之箱」，store 里的 currentSession 还是鬼屋，
+    // 新页面首帧照它算出的 myCharId 是上一局自己的角色，角色卡会去拉一个本局不存在的人。
+    expect(sessionForRoute(局('鬼屋'), '常暗之箱')).toBeNull()
+  })
+
+  it('没有会话 / 没有路由参数都当作还没加载', () => {
+    expect(sessionForRoute(null, 's1')).toBeNull()
+    expect(sessionForRoute(局('s1'), undefined)).toBeNull()
   })
 })

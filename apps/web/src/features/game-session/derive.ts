@@ -21,6 +21,21 @@ export const OOC_RE = /（[^（）]*）|\([^()]*\)/g
 const HTML_TAG_RE =
   /<\/?(?:b|i|u|s|em|strong|br|p|span|div|h[1-6]|ul|ol|li|code|pre|blockquote|hr|a)\b[^>]*>/gi
 
+/**
+ * 存档隔离的第一道闸：store 里的 `currentSession` 是**全局单例**，切存档时上一局的会话对象
+ * 还原样留在里面，而新页面的第一帧就已经在用它派生 `myCharId` / `isKp` / 场景 id 了。
+ *
+ * 所以只认 id 与路由参数对得上的那一份，对不上就当成「还没加载」——页面自有「加载中」分支。
+ * 少了这道闸，进真人 KP 局的首帧会拿上一局自己的角色去拉角色卡，那条请求晚一步返回，
+ * 就把已经算对的空值覆盖掉，角色卡从此钉在一个本局根本不存在的人身上。
+ */
+export function sessionForRoute<T extends { id: string }>(
+  stored: T | null | undefined, routeId: string | undefined,
+): T | null {
+  if (!stored || !routeId || stored.id !== routeId) return null
+  return stored
+}
+
 /** NPC 名字 → 稳定色相，保证同一 NPC 每次颜色一致。 */
 export function npcHue(name?: string): number {
   let h = 0

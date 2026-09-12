@@ -29,7 +29,7 @@ const DEFAULT_MAX = 700
  * 每一条都欠着一次拆分；拆完请把数字调下来，别留着当额度用。
  */
 const GRANDFATHERED: Record<string, number> = {
-  'pages/GameSessionPage.tsx': 2480,
+  'pages/GameSessionPage.tsx': 2410,   // 局内三份远端数据已搬进 features/game-session/useSessionResources.ts
   'pages/CharacterPage.tsx': 1776,
   'components/game/HumanKpPanel.tsx': 1421,
   'pages/ModuleDetailPage.tsx': 1261,

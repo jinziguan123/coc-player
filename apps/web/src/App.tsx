@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom'
 import { AppShell } from './components/layout/AppShell'
 import { Toaster } from './components/ui/toaster'
 import './index.css'
@@ -16,6 +16,18 @@ const GameSessionPage = lazy(() => import('./pages/GameSessionPage').then((m) =>
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage').then((m) => ({ default: m.RoomLobbyPage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const OnboardingPage = lazy(() => import('./features/onboarding/OnboardingPage').then((m) => ({ default: m.OnboardingPage })))
+
+/**
+ * 按存档号重挂游戏页。
+ *
+ * 同一条路由换参数时 React 会复用同一个组件实例，`/game/A` → `/game/B` 于是把上一局的
+ * 战斗态、待决检定、正在看的角色卡、已知地点等几十个 state 原样带进下一局。这些状态没有
+ * 一个是跨存档通用的，与其在页面里逐个手动清空（漏一个就是一处串味），不如让它按存档重挂。
+ */
+function GameSessionRoute() {
+  const { sessionId } = useParams<{ sessionId: string }>()
+  return <GameSessionPage key={sessionId} />
+}
 
 function PageFallback() {
   return (
@@ -41,7 +53,7 @@ export default function App() {
             <Route path="game" element={<GamePage />} />
             <Route path="onboarding" element={<OnboardingPage />} />
             <Route path="room/:sessionId" element={<RoomLobbyPage />} />
-            <Route path="game/:sessionId" element={<GameSessionPage />} />
+            <Route path="game/:sessionId" element={<GameSessionRoute />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

@@ -397,9 +397,12 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
   const [fetched, setFetched] = useState<InvItem[] | null>(null)
   useEffect(() => {
     if (!sessionId || !character.id) { setFetched(null); return }
+    let stale = false
     api.get<{ items: InvItem[] }>(`/sessions/${sessionId}/inventory?char_id=${character.id}`)
-      .then((r) => setFetched(r.items || []))
+      .then((r) => { if (!stale) setFetched(r.items || []) })
       .catch(() => {})
+    // 换人/换存档时作废在途请求：晚到的旧响应会把别人的背包挂到这张卡上。
+    return () => { stale = true }
   }, [sessionId, character.id, refreshKey])
 
   const post = async (path: string, body: Record<string, unknown>) => {

@@ -16,6 +16,7 @@ import {
   resolveActorKind,
   selectCombatLog,
   selectCombatResult,
+  sessionForRoute,
   splitOOC,
   stripCommandTags,
 } from '@/features/game-session/derive'
@@ -64,22 +65,11 @@ import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
 import { useRepairableImage, type ModuleImageKind } from '../components/module/ModuleImage'
 import { useSyncBackOnVisit } from '../features/characters/useSyncBack'
+import {
+  useKnownLocations, useMyWeapons, usePanelCharacter,
+  type KnownLocation,
+} from '@/features/game-session/useSessionResources'
 
-interface KnownLocation {
-  id: string; name: string; current: boolean; visited: boolean
-  connections?: string[]; party?: string[]
-  clues?: { id: string; name: string; status: string }[]
-  // 沙盘坐标与地貌。parent＝这一格属于哪个子沙盘（空＝顶层）；各层坐标空间彼此独立，
-  // 丢了它，子层的格子会拿着子层坐标画进顶层，两层直接叠在一起。
-  map?: { q: number; r: number; biome: string; parent?: string } | null
-  known?: boolean                                        // KP 上帝视角下玩家是否已知
-  image?: string                                         // 场景配图（氛围底的色调来源）
-  sceneId?: string
-  nodeKind?: 'scene' | 'terrain'
-}
-interface MapNodePayload {
-  id: string; q: number; r: number; biome: string; scene_id?: string | null; parent?: string
-}
 
 // 距底多少像素以内算「已经在最新处」。留一点余量：markdown 渲染完成后高度会有零点几像素的
 // 抖动，卡死 0 会让按钮在贴底时忽隐忽现。
@@ -214,17 +204,6 @@ interface EndVoteState {
 
 /** 连射结果卡：一轮多枪逐发列出（命中/伤害/换目标惩罚骰），整体一次性展示（不逐发 3D 骰）。 */
 
-interface Character {
-  id: string
-  name: string
-  module_id: string
-  base_attributes: Record<string, number>
-  skills: Record<string, number>
-  system_data: Record<string, unknown>
-  backstory: string
-  status: string
-}
-
 interface ChunkPayload {
   /** 后端 room_events.py 登记的类型集合（经 OpenAPI 生成）。用具体联合而不是 string，
    *  下面的分发才能靠 switch 的 never 分支保证「新增事件必须被处理」。 */
@@ -245,13 +224,14 @@ export function GameSessionPage() {
   const location = useLocation()
   const isNew = (location.state as { isNew?: boolean })?.isNew
   const {
-    currentSession, messages, addMessage, removeMessage, updateMessage, patchMessageMetadata, clearMessages,
+    currentSession: storedSession, messages, addMessage, removeMessage, updateMessage, patchMessageMetadata, clearMessages,
     setCurrentSession, loadHistory, loadOlderEvents,
     hasMoreHistory, loadingOlder,
     startStreamMessage, appendToStream, endStream,
   } = useSessionStore()
+  // 只认路由指向的那一局，不认 store 里残留的上一局（见 derive.sessionForRoute）。
+  const currentSession = sessionForRoute(storedSession, sessionId)
 
-  const [panelChar, setPanelChar] = useState<Character | null>(null)
   const [panelCharId, setPanelCharId] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
   // 新手引导：本机从未看过时自动弹一次（intro，从第一页走）；之后从顶栏那个问号重开时直接
@@ -273,11 +253,7 @@ export function GameSessionPage() {
   // 待决的幸运询价。**独立 state，不进消息流**——它是「当前状态」而非聊天记录，
   // 塞进 messages 会被 loadHistory 的整体替换冲掉，还会把首屏标志顶掉（见 lib/roomSync.ts）。
   const [luckOffer, setLuckOffer] = useState<LuckSnapshot | null>(null)
-  const [locations, setLocations] = useState<KnownLocation[]>([])
-  const [mapNodes, setMapNodes] = useState<MapNodePayload[]>([])
-  const [mapBackdrop, setMapBackdrop] = useState('')     // 沙盘氛围底图（模组里生成的那张俯视图）
   const [mapTab, setMapTab] = useState<'sandbox' | 'board'>('sandbox')  // 大地图页签：沙盘/调查板
-  const [canGodView, setCanGodView] = useState(false)         // 真人 KP 席位（服务端判定）
   const [playerView, setPlayerView] = useState(false)         // KP 切「玩家视角」预览迷雾
   // 乐观 pending：check_request 刚到时 world_state.pending_checks 还没刷新（要等 done→refetch），
   // 若此时按 pending_checks 判定会先显示「已投骰」再翻成「投骰」按钮。用本地集先认它是待投，消除闪烁。
@@ -305,6 +281,13 @@ export function GameSessionPage() {
   // 独自开团 → 发送即推进（判定见 derive.isSoloTable）。KP 席不适用：他走右侧工作台。
   const soloTable = !isKp && !!currentSession && isSoloTable(currentSession.participants)
   const shownCharId = panelCharId ?? myCharId
+  // 三份跟着角色/存档走的远端数据。切存档时作废在途请求的规矩统一在那个文件里，
+  // 见 features/game-session/useSessionResources.ts。
+  const panelChar = usePanelCharacter(shownCharId, refreshTick)
+  const myWeapons = useMyWeapons(myCharId, refreshTick)
+  const { locations, mapNodes, mapBackdrop, canGodView } = useKnownLocations({
+    sessionId, myCharId, sceneId: currentSession?.current_scene_id, refreshTick,
+  })
   // 会话载入完、且确认自己是玩家（非 KP）后再跑导览——KP 席不需要这套玩家侧操作说明。
   // 导览要高亮角色卡，先把面板打开，否则那一步没东西可指。
   const runGameTour = useCallback(() => {
@@ -899,48 +882,6 @@ export function GameSessionPage() {
     return () => { cancelled = true; ac.abort() }
   }, [sessionId])
 
-  useEffect(() => {
-    if (shownCharId) {
-      api.get<Character>(`/characters/${shownCharId}`).then(setPanelChar)
-    } else {
-      setPanelChar(null)
-    }
-  }, [shownCharId, refreshTick])
-
-  // 我的武器栏（战斗武器选择器用）：拳头默认由前端补，其余从角色卡 system_data.weapons 取。
-  const [myWeapons, setMyWeapons] = useState<{ name: string; dam?: string }[]>([])
-  useEffect(() => {
-    if (!myCharId) { setMyWeapons([]); return }
-    api.get<Character>(`/characters/${myCharId}`)
-      .then((c) => {
-        const ws = (c.system_data?.weapons as { name?: string; dam?: string }[] | undefined) || []
-        setMyWeapons(ws.filter((w) => w?.name).map((w) => ({ name: String(w.name), dam: w.dam })))
-      })
-      .catch(() => setMyWeapons([]))
-  }, [myCharId, refreshTick])
-
-  // 已知地点：前往后/生成结束刷新。真人 KP 返回全图（god_view）。
-  //
-  // 原来只在展开大地图时才拉（`if (!showBigMap) return`），现在改为常驻——场景氛围底要靠
-  // 它拿「**我自己**所在场景」及其配图：分头行动时各人所在地不同，会话的 current_scene_id
-  // 只是房主锚点，照它渲染会让分头的队友都看到房主那间屋子。存量存档也只有这里取得到图
-  // （配图回写在 scene.image，而聊天流里那条「抵达」插图消息可能不在已加载的分页里）。
-  //
-  // refreshTick 这个依赖是必需的、不能为了省一次请求删掉：客人自己「前往」时只改
-  // party_locations，不动 current_scene_id（那只在主角移动时同步），光靠场景 id 变化
-  // 这条副作用不会重跑，客人的背景会一直停在旧场景。抵达叙述结束时 refreshTick 会 +1。
-  // 代价可接受：实测取全量事件 + 算地点在 70 条事件的会话上约 1ms，2000 条外推约 30ms，
-  // 相对一回合几十秒的 LLM 调用可以忽略。
-  useEffect(() => {
-    if (!sessionId) return
-    const q = myCharId ? `?char_id=${myCharId}` : ''
-    api.get<{ locations: KnownLocation[]; map_nodes?: MapNodePayload[]; god_view?: boolean; map_backdrop?: string }>(`/sessions/${sessionId}/locations${q}`)
-      .then((r) => {
-        setLocations(r.locations || []); setMapNodes(r.map_nodes || [])
-        setCanGodView(!!r.god_view); setMapBackdrop(r.map_backdrop || '')
-      })
-      .catch(() => { setLocations([]); setMapNodes([]); setCanGodView(false); setMapBackdrop('') })
-  }, [sessionId, myCharId, currentSession?.current_scene_id, refreshTick])
 
   // 局内沙盘拖拽（真人 KP 专属）：单格移动立即落库并广播，撞格等非法情形由后端拒绝。
   // 走 PATCH /modules/{id}/scene-map 而不是整体保存模组——局内 KP 只该改位置，
