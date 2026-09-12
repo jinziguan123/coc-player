@@ -16,6 +16,7 @@ import { InitiativeRail } from './combat/InitiativeRail'
 import { FocusPanel } from './combat/FocusPanel'
 import { FigurePickerPopover } from './combat/FigurePickerPopover'
 import { CombatGrid } from './combat/CombatGrid'
+import { useCombatSelection } from './combat/useCombatSelection'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TurnBanner, useTurnBanner } from './combat/TurnBanner'
 
@@ -62,8 +63,6 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   const iAmGrappled = !!(me && (me.conditions || []).includes('grappled'))
   const iAmBurning = !!(me && (me.conditions || []).includes('burning'))
 
-  const [action, setAction] = useState<ActionKey>('attack')
-  const [targetId, setTargetId] = useState<string>('')
   const [weaponSel, setWeaponSel] = useState<string>(UNARMED)
   const [weaponCustom, setWeaponCustom] = useState<string>('')
   const [fireMode, setFireMode] = useState<'single' | 'burst' | 'sweep'>('single')   // 连发射击模式
@@ -73,10 +72,7 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   // 方格移动模式：'move' 常规（⌈mov/2⌉，可再攻击）/ 'dash' 冲刺（满 mov，独占回合）/ 'none'
   const [moveMode, setMoveMode] = useState<'none' | 'move' | 'dash'>('none')
   useEffect(() => { setMoveMode('none') }, [combat.turn])   // 回合切换 → 退出移动模式
-  // 焦点单位：右侧面板显示谁。缺省跟着当前行动者走，点先攻序或棋盘可切过去看别人。
-  const [focusPick, setFocusPick] = useState<string>('')
   const [figureFor, setFigureFor] = useState<Combatant | null>(null)   // 正在换轮廓的参战方
-  useEffect(() => { setFocusPick('') }, [combat.turn])      // 回合一换，焦点回到当前行动者
 
   // 棋盘自适应格长：按可用宽高取 min，放不下时才交给 overflow 滚动。
   // ResizeObserver 跟随窗口/侧栏折叠实时重算。
@@ -134,14 +130,10 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
     }
   }, [weaponOptions, weaponSel])
 
-  const focus = order.find((c) => c.id === focusPick) || active
-  const focusId = focus?.id ?? ''
-  const setFocusId = (id: string) => setFocusPick(id === focusId ? '' : id)
-
-  // 当前动作的目标候选（按 target 类型）。
+  // 「选中」只有一份：焦点面板显示谁、棋盘准星瞄谁、目标下拉选谁（见 combat/useCombatSelection）。
+  const { action, candidates, effectiveTarget, focus, focusId, setFocusId, attackTarget, selectTarget, pickAction } =
+    useCombatSelection(order, combat.turn, enemyTargets, woundedAllies)
   const actionMeta = ACTIONS[action]
-  const candidates = actionMeta.target === 'enemy' ? enemyTargets : actionMeta.target === 'ally' ? woundedAllies : []
-  const effectiveTarget = candidates.some((c) => c.id === targetId) ? targetId : (candidates[0]?.id ?? '')
 
   type ActionBody = { type: string; target_id?: string; weapon?: string; kind?: string; defense?: string; shots?: string[] }
   const curWeapon = weaponSel === WEAPON_OTHER ? weaponCustom.trim() : weaponSel
@@ -242,8 +234,8 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
     if (moveMode !== 'none') return
     // 轮到我时点敌人＝选攻击目标（原行为）；其余一律切焦点面板——
     // 此前非我回合点棋子毫无反应，而 KP 整场都在「非我回合」。
-    if (myTurn && c.side === 'enemy' && !isOut(c)) { setAction('attack'); setTargetId(c.id); return }
-    setFocusPick((cur) => (cur === c.id ? '' : c.id))
+    if (myTurn && c.side === 'enemy' && !isOut(c)) { attackTarget(c.id); return }
+    setFocusId(c.id)
   }
 
   // 两段式投骰：我攻击命中后要亲自掷伤害。
@@ -421,7 +413,7 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
                 return (
                   <button
                     key={k}
-                    onClick={() => setAction(k)}
+                    onClick={() => pickAction(k)}
                     className="text-xs !px-2 !py-1 rounded inline-flex items-center gap-1 transition-colors"
                     style={{
                       border: on ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
@@ -448,7 +440,7 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
                   <div className="combat-select-wrap">
                     <Select
                       value={effectiveTarget}
-                      onValueChange={setTargetId}
+                      onValueChange={selectTarget}
                       disabled={candidates.length === 0}
                     >
                       <SelectTrigger className="combat-select" aria-label="选择目标">
