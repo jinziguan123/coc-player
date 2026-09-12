@@ -4691,7 +4691,154 @@ select.input option {
   color: var(--color-text-accent);
 }
 
-/* ===== 战棋令牌 ===== */
+/* ===== 战场地面 =====
+ *
+ * 一张 12×8 的网格里九成格子是空的。以前用均匀实线画满整幅，读起来像表格；
+ * 现在是「交点点阵 + 每 5 格一道重线 + 一盏跟着人走的灯」，空格的视觉重量降了一个
+ * 数量级，而 5 格重线让数距离以段计——它不是装饰，是在替人算格数。
+ * 坐标尺（A–L / 1–8）让网格线真正有用：能直接说「挪到 F4」。
+ */
+.combat-field-wrap {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  gap: 0.25rem;
+  width: max-content;
+  margin: 0 auto;
+}
+.combat-ruler-corner { grid-area: 1 / 1; }
+.combat-ruler {
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  opacity: 0.55;
+}
+.combat-ruler--x { grid-area: 1 / 2; }
+.combat-ruler--x span { display: grid; place-items: center; }
+.combat-ruler--y { grid-area: 2 / 1; flex-direction: column; }
+.combat-ruler--y span { display: grid; place-items: center; width: 1.1rem; }
+
+.combat-field {
+  --cf-shade: rgba(0, 0, 0, 0.6);
+  --cf-mark: color-mix(in srgb, var(--color-text-secondary) 52%, transparent);
+  --cf-glow: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  grid-area: 2 / 2;
+  position: relative;
+  overflow: hidden;
+  /* 隔离：底图层用了 mix-blend 之外的合成，也避免内部图层影响外部面板 */
+  isolation: isolate;
+  /* 古地图式双线框：外粗内细、中间留一道缝。很便宜的一处特征，
+     它让这块区域读起来是「一张画出来的图」，而不是一个 div。 */
+  border: 1px solid var(--color-border-strong);
+  box-shadow: inset 0 0 0 3px var(--color-bg-secondary), inset 0 0 0 4px var(--color-border);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-bg-tertiary) 85%, transparent),
+    var(--color-bg-secondary) 70%);
+}
+/* 羊皮纸主题要另定一套：「压暗边缘」在暗色里是加黑，在浅色里必须是加**暖褐**——
+   照搬会得到米色叠米色，等于什么都没画。灯光同理：暗色里是发光，浅色里是纸面亮斑。 */
+:root[data-theme="parchment"] .combat-field {
+  --cf-shade: rgba(86, 56, 20, 0.42);
+  --cf-mark: color-mix(in srgb, #6b4f2a 55%, transparent);
+  --cf-glow: rgba(255, 248, 230, 0.62);
+  background: linear-gradient(180deg, #e3d5ba, #d9c9a9 78%);
+}
+
+.combat-dots {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--cf-mark) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--cf-mark) 1px, transparent 1px),
+    radial-gradient(circle at center, var(--cf-mark) 1.2px, transparent 1.3px);
+}
+.combat-light { position: absolute; inset: 0; pointer-events: none; }
+.combat-vignette {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  box-shadow: inset 0 0 calc(var(--cf-cell) * 2) calc(var(--cf-cell) * 0.55) var(--cf-shade);
+}
+
+/* 俯视战术底图。压制力度要足：光靠 filter 压不住「这张图有多少细节在抢注意力」——
+   实测拿一张人物插画当底图，脸和衣褶的对比度一路盖过棋子，战术图直接失效。
+   所以再叠一层同色帘子，保证无论生成出什么，棋子永远是画面上最响的东西。 */
+.combat-art {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  filter: saturate(0.32) brightness(0.55) contrast(0.85) blur(0.4px);
+}
+:root[data-theme="parchment"] .combat-art { filter: saturate(0.25) contrast(0.78) sepia(0.45); }
+.combat-art::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: var(--color-bg-secondary);
+  opacity: 0.35;
+}
+:root[data-theme="parchment"] .combat-art::after { opacity: 0.4; }
+/* 三档浓淡：图越规整越能放开，图越跑偏越要压。浅底上同样的透明度更抢眼，各给一套。 */
+.combat-art--faint { opacity: 0.28; }
+.combat-art--normal { opacity: 0.6; }
+.combat-art--strong { opacity: 0.9; }
+.combat-art--strong::after { opacity: 0.18; }
+:root[data-theme="parchment"] .combat-art--faint { opacity: 0.22; }
+:root[data-theme="parchment"] .combat-art--normal { opacity: 0.45; }
+:root[data-theme="parchment"] .combat-art--strong { opacity: 0.72; }
+/* 有底图时格线反而要更实：它得压过图上的纹理才数得清格子 */
+.combat-field--art .combat-dots { opacity: 0.85; }
+.combat-field--art .combat-light { opacity: 0.3; }
+
+/* ===== 战棋（微缩模型） =====
+ *
+ * 剪影与底座的透视故意不一致：底座俯视、小人平视。真实的战棋摆拍就是这样——
+ * 强行统一成一个正圆，就退回成了 Web 头像（那正是这一版要换掉的东西）。
+ */
+.mini { position: relative; display: block; background: none; border: none; }
+.mini-fig {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  line-height: 0;
+  /* 两层阴影：贴地的硬阴影给「站着」，扩散的软阴影给体积 */
+  filter:
+    drop-shadow(0 1px 0 color-mix(in srgb, var(--cf-shade) 90%, transparent))
+    drop-shadow(0 3px 4px var(--cf-shade));
+}
+.mini-base-wrap { position: absolute; left: 50%; transform: translateX(-50%); line-height: 0; }
+.mini-base { overflow: visible; }
+.mini-base-fill { fill: color-mix(in srgb, currentColor 22%, var(--color-bg-card)); stroke: none; }
+.mini-name {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 0.5625rem;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-bg-card) 82%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+  pointer-events: none;
+}
+.mini--out { opacity: 0.42; filter: saturate(0.3); }
+.mini--out .mini-name { text-decoration: line-through; }
+/* 当前行动者：地面上一圈缓慢的呼吸光。只给一个人，多了就不叫强调。 */
+.mini--turn .mini-base { filter: drop-shadow(0 0 6px color-mix(in srgb, currentColor 65%, transparent)); }
+.mini--turn .mini-fig { animation: miniBreathe 2.6s ease-in-out infinite; }
+@keyframes miniBreathe {
+  0%, 100% { filter: drop-shadow(0 1px 0 var(--cf-shade)) drop-shadow(0 3px 4px var(--cf-shade)); }
+  50% { filter: drop-shadow(0 1px 0 var(--cf-shade)) drop-shadow(0 3px 4px var(--cf-shade)) drop-shadow(0 0 7px color-mix(in srgb, currentColor 75%, transparent)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mini--turn .mini-fig { animation: none; }
+}
+
+/* ===== 战棋令牌（旧圆牌，保留给尚未迁移的调用方） ===== */
 .combat-token { transition: border-color 0.2s, opacity 0.3s, filter 0.3s; }
 /* 当前行动者：呼吸式脉冲光环（颜色由令牌行内 --token-glow 提供，随阵营变） */
 .token-active { animation: tokenPulse 1.7s ease-in-out infinite; }

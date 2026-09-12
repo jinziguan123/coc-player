@@ -6,13 +6,12 @@ import { toast } from 'sonner'
 import { api, connectSSE, getServerUrl } from '../api/client'
 import { runLiveSession } from '@/lib/liveSession'
 import { HistorySearchModal } from '../components/game/HistorySearchModal'
-import { getSceneBackdropEnabled } from '@/lib/theme'
+import { useSceneVisuals } from '@/features/game-session/useSceneVisuals'
 import {
   buildPartyByName,
   fmtTime,
   isSoloTable,
   npcHue,
-  sceneBackdropOf,
   resolveActorKind,
   selectCombatLog,
   selectCombatResult,
@@ -488,25 +487,11 @@ export function GameSessionPage() {
   // 切会话时重置场景基线，避免跨会话误触发暗幕
   useEffect(() => { prevSceneId.current = undefined; setSceneVeil(false) }, [sessionId])
 
-  // 场景氛围底：拿当前场景那张配图当底色来源（重度模糊压暗后铺满，见 index.css）。选图逻辑
-  // 在 derive.sceneBackdropOf；这里只负责开关、拼服务器前缀，以及告诉 CSS 底铺上没有。
-  const [backdropOn, setBackdropOn] = useState(() => getSceneBackdropEnabled())
-  useEffect(() => {
-    const sync = () => setBackdropOn(getSceneBackdropEnabled())
-    window.addEventListener('focus', sync)          // 从设置页切回来即时生效
-    return () => window.removeEventListener('focus', sync)
-  }, [])
-  const sceneBackdrop = useMemo(() => {
-    if (!backdropOn) return ''
-    const raw = sceneBackdropOf(messages, locations)
-    if (!raw) return ''
-    return /^https?:\/\//i.test(raw) ? raw : `${getServerUrl()}${raw}`
-  }, [backdropOn, messages, locations])
-  // 沙盘氛围底图：模组里生成的那张俯视图，局内大地图同样垫在网格之下。
-  const sandboxBackdropUrl = useMemo(() => {
-    if (!mapBackdrop) return undefined
-    return /^https?:\/\//i.test(mapBackdrop) ? mapBackdrop : `${getServerUrl()}${mapBackdrop}`
-  }, [mapBackdrop])
+  // 局内三张图（场景氛围底 / 战场底图 / 沙盘氛围底）：来源与用途各不相同，
+  // 派生规则集中在 features/game-session/useSceneVisuals.ts。
+  const { sceneBackdrop, battleMap, sandboxBackdropUrl } = useSceneVisuals({
+    messages, locations, mapBackdrop,
+  })
   // 氛围底真的铺上了才给正文加护读底：没图（未配生图 / 还在生成）时保持原有的透明观感。
   useEffect(() => {
     const root = document.documentElement
@@ -1374,6 +1359,7 @@ export function GameSessionPage() {
             log={combatLog}
             result={combatResult}
             myWeapons={myWeapons}
+            battleMap={battleMap}
             layout="immersive"
             onToggleLayout={() => setBattleLayout('classic')}
           />
@@ -2160,6 +2146,7 @@ export function GameSessionPage() {
           <CombatStage
             combat={combat} myCharId={myCharId} sessionId={currentSession.id}
             pendingReaction={pendingReaction} log={combatLog} result={combatResult} myWeapons={myWeapons}
+            battleMap={battleMap}
             layout="inline"
             onToggleLayout={wideViewport ? () => setBattleLayout('immersive') : undefined}
           />

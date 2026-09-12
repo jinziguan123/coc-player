@@ -19,6 +19,8 @@ export interface Combatant {
   pos?: { x: number; y: number } | null   // 方格坐标
   mov?: number            // 移动力（格/轮）
   move_left?: number      // 本回合剩余移动预算
+  /** 战棋剪影 key（KP 经 set_token 选定）。空＝按阵营回落，见 combat/figures.ts。 */
+  figure?: string
 }
 
 // 方格战场（尺寸 + 障碍/掩体）。MVP 只用 cols/rows/cell_m。

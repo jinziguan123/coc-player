@@ -36,6 +36,24 @@ export function sessionForRoute<T extends { id: string }>(
   return stored
 }
 
+/**
+ * 取「**查看者自己所在**场景」的战场底图。
+ *
+ * 与 sceneBackdropOf 同一条取法：分头行动时各人所在地不同，会话的 current_scene_id
+ * 只是房主锚点，照它取会让分头的队友都用到房主那间屋子的图。
+ *
+ * 相对路径补服务器前缀（联机走隧道时前端与后端不同源），已是绝对地址的原样返回。
+ */
+export function battleMapOf(
+  locations: { current: boolean; battle_map?: { url: string; level: string } | null }[],
+  serverUrl: string,
+): { url: string; level: string } | null {
+  const here = locations.find((l) => l.current)?.battle_map
+  if (!here?.url) return null
+  const url = /^https?:\/\//i.test(here.url) ? here.url : `${serverUrl}${here.url}`
+  return { url, level: here.level || 'normal' }
+}
+
 /** NPC 名字 → 稳定色相，保证同一 NPC 每次颜色一致。 */
 export function npcHue(name?: string): number {
   let h = 0

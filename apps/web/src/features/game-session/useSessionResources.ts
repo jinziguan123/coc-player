@@ -32,6 +32,9 @@ export interface KnownLocation {
   map?: { q: number; r: number; biome: string; parent?: string } | null
   known?: boolean                                        // KP 上帝视角下玩家是否已知
   image?: string                                         // 场景配图（氛围底的色调来源）
+  // 战场底图（俯视战术图）：与 image 是两回事——image 是「这地方看起来什么样」，
+  // 用作氛围底；battle_map 是「打起来时的地面」，铺在方格战场下面。
+  battle_map?: { url: string; level: string } | null
   sceneId?: string
   nodeKind?: 'scene' | 'terrain'
 }

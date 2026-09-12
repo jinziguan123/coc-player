@@ -23,7 +23,7 @@ export type {
   CombatLogEntry, CombatResultView, Combatant, CombatStatus,
 } from './combat/types'
 
-export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log, result, myWeapons = [], layout = 'inline', onToggleLayout }: {
+export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log, result, myWeapons = [], layout = 'inline', onToggleLayout, battleMap }: {
   combat: CombatState
   myCharId: string | null
   sessionId: string
@@ -33,6 +33,8 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   myWeapons?: { name: string; dam?: string }[]
   layout?: 'inline' | 'immersive'    // inline=聊天流底部嵌入卡片；immersive=沉浸战场（棋盘居中放大）
   onToggleLayout?: () => void        // 布局切换回调；未传则不显示切换按钮（如窄视口）
+  /** 当前场景的战场底图（world_state.battle_maps，经 /locations 下发）。KP 与玩家同一份。 */
+  battleMap?: { url: string; level: string } | null
 }) {
   const immersive = layout === 'immersive'
   const order = combat.order
@@ -304,6 +306,8 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
         onCellMove={doMove}
         onPieceClick={onPieceClick}
         cell={cellPx}
+        backdrop={battleMap?.url || ''}
+        backdropLevel={battleMap?.level || 'normal'}
       />
     </div>
   )

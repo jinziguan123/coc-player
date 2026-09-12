@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  battleMapOf,
   buildPartyByName,
   fmtTime,
   isSoloTable,
@@ -281,5 +282,43 @@ describe('sessionForRoute', () => {
   it('没有会话 / 没有路由参数都当作还没加载', () => {
     expect(sessionForRoute(null, 's1')).toBeNull()
     expect(sessionForRoute(局('s1'), undefined)).toBeNull()
+  })
+})
+
+describe('battleMapOf', () => {
+  const 有图 = (current: boolean, url: string, level = 'normal') =>
+    ({ current, battle_map: { url, level } })
+
+  it('只取自己所在场景那张，不被别处的图串台', () => {
+    const out = battleMapOf(
+      [有图(false, '/api/images/a.jpg'), 有图(true, '/api/images/b.jpg')], 'http://h',
+    )
+    expect(out).toEqual({ url: 'http://h/api/images/b.jpg', level: 'normal' })
+  })
+
+  it('分头行动：同一份地点表，两个查看者各看各的', () => {
+    // 后端按查看者自己的角色位置算 current，所以这里只需验「认 current」
+    const 地点 = (cur: string) => [
+      { current: cur === 'a', battle_map: { url: '/a.jpg', level: 'faint' } },
+      { current: cur === 'b', battle_map: { url: '/b.jpg', level: 'strong' } },
+    ]
+    expect(battleMapOf(地点('a'), '')?.url).toBe('/a.jpg')
+    expect(battleMapOf(地点('b'), '')?.level).toBe('strong')
+  })
+
+  it('没配图 / 不在任何场景 → null，退回纯色地面', () => {
+    expect(battleMapOf([], 'http://h')).toBeNull()
+    expect(battleMapOf([{ current: true }], 'http://h')).toBeNull()
+    expect(battleMapOf([{ current: true, battle_map: null }], 'http://h')).toBeNull()
+    expect(battleMapOf([{ current: false, battle_map: { url: '/a.jpg', level: '' } }], '')).toBeNull()
+  })
+
+  it('绝对地址原样返回，相对路径才补前缀', () => {
+    expect(battleMapOf([有图(true, 'https://cdn/x.jpg')], 'http://h')?.url).toBe('https://cdn/x.jpg')
+    expect(battleMapOf([有图(true, '/x.jpg')], 'http://h')?.url).toBe('http://h/x.jpg')
+  })
+
+  it('level 缺省补 normal——旧数据只存过 url', () => {
+    expect(battleMapOf([有图(true, '/x.jpg', '')], '')?.level).toBe('normal')
   })
 })
