@@ -87,9 +87,19 @@ export function pctOf(c: Combatant): number {
   return c.max_hp > 0 ? Math.max(0, Math.min(100, (c.hp / c.max_hp) * 100)) : 0
 }
 
-// 阵营取色：己方琥珀 / 盟友淡琥珀 / 敌方血红。全走 CSS 变量，两主题自适应。
+/**
+ * 阵营取色：己方冷调 / 盟友冷灰 / 敌方血红。
+ *
+ * 曾经是「己方 --color-accent、敌方 --color-danger」。在暗色主题下那是「琥珀 vs 血红」，
+ * 分得很开；可到了羊皮纸主题，这两个变量分别是 #8b2500 和 #8b0000——棋子上一个
+ * rgb(139,37,0) 一个 rgb(139,0,0)，**肉眼分不出敌我**。在别处这只是配色偏好，
+ * 在战棋图上是功能故障：分清敌我是这张图存在的理由。
+ *
+ * 所以改成按**冷暖**分而不是按「两种红」分——冷暖对比在任何主题、任何尺寸下都读得出。
+ * 具体色值按主题定在 index.css（--combat-friend / --combat-ally / --combat-foe）。
+ */
 export function sideColor(c: Combatant): string {
-  if (c.side === 'enemy') return 'var(--color-danger)'
-  if (c.side === 'ally') return 'color-mix(in srgb, var(--color-accent) 62%, var(--color-text-secondary))'
-  return 'var(--color-accent)'
+  if (c.side === 'enemy') return 'var(--combat-foe)'
+  if (c.side === 'ally') return 'var(--combat-ally)'
+  return 'var(--combat-friend)'
 }

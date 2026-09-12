@@ -278,6 +278,13 @@ def _exec_set_token(
         f"{hit.get('name') or combatant_id} 的战棋已更换"
 
 
+def _scene_label(scene: dict) -> str:
+    """场景的显示名。**title 在前**：模组导入器写的是 title，`name` 只是部分模组才有的
+    别名——只认 name 的话，玩家看到的会是「地图上多了一处去向：scene_5」这种 id。
+    与 navigation_service.list_known_locations 的取法保持一致。"""
+    return str(scene.get("title") or scene.get("name") or scene.get("id") or "")
+
+
 def _find_scene(module: Module, ref: str) -> dict | None:
     """按 id 或名字找场景。KP 表单里两种都可能填进来（下拉给 id，手打给名字）。"""
     ref = str(ref or "").strip()
@@ -287,7 +294,7 @@ def _find_scene(module: Module, ref: str) -> dict | None:
         if str(s.get("id") or "") == ref:
             return s
     for s in (module.scenes or []):
-        if str(s.get("name") or "") == ref:
+        if _scene_label(s) == ref or str(s.get("name") or "") == ref:
             return s
     return None
 
@@ -307,7 +314,7 @@ def _exec_unlock_place(
     sid = str(scene.get("id") or "")
     ws = dict(game_session.world_state or {})
     revealed = list(ws.get("kp_revealed") or [])
-    name = str(scene.get("name") or sid)
+    name = _scene_label(scene)
     if sid in revealed:
         return [], f"{name} 早已对玩家公开"
     revealed.append(sid)
@@ -341,7 +348,7 @@ def _exec_move_actor(
     if char is None:
         raise ValueError("找不到这个角色")
     sid = str(scene.get("id") or "")
-    name = str(scene.get("name") or sid)
+    name = _scene_label(scene)
     navigation_service.set_char_location(db, session_id, char_id, sid)
     db.refresh(game_session)
     ws = dict(game_session.world_state or {})

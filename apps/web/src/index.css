@@ -42,6 +42,13 @@
 
   /* —— 抽出的“散落硬编码深色值”，两主题各给一份，避免切换后破面 —— */
   --color-input-bg: rgba(0, 0, 0, 0.28);                 /* 输入框 / Select 触发器底 */
+
+  /* 战斗阵营色（棋子 / 先攻轨 / 参战方卡共用）。**按冷暖分，不按两种红分**——
+     见 combat/meta.sideColor：照搬 accent / danger 的话，羊皮纸主题下己方 #8b2500 与
+     敌方 #8b0000 在小尺寸上分不出来，而分清敌我是战棋图存在的理由。 */
+  --combat-friend: #9dc3e6;
+  --combat-ally: #8aa6b8;
+  --combat-foe: #d9646c;
   --sidebar-bg: linear-gradient(180deg, #12151d 0%, #0d1016 100%);
   --sidebar-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
   --shadow-color: rgba(0, 0, 0, 0.35);                   /* 卡片 / 气泡投影 */
@@ -133,6 +140,11 @@
 
   /* 覆盖抽出的硬编码深色 —— 换成暖褐 / 浅色 */
   --color-input-bg: rgba(255, 255, 255, 0.4);
+
+  /* 浅底上要压深才看得清：蓝取墨蓝、红取深血红 */
+  --combat-friend: #2f4d70;
+  --combat-ally: #4d6274;
+  --combat-foe: #8f1d20;
   --sidebar-bg: linear-gradient(180deg, #e8dcc8 0%, #ddd0b5 100%);
   --sidebar-shadow: 2px 0 8px rgba(90, 60, 20, 0.06);
   --shadow-color: rgba(90, 60, 20, 0.1);
@@ -2389,7 +2401,41 @@ body {
   border-bottom: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-accent) 4%, transparent);
 }
+/* 14 个动作全平铺在一条窄栏里，芯片得收紧一档才不至于占掉半屏 */
+.kp-composer-actions .kp-quick-action { padding: 0.2rem 0.42rem; gap: 0.22rem; }
+
 .kp-composer-form { padding: 0.5rem 0.45rem; }
+
+/* ===== 斜杠命令面板 =====
+   浮在叙事框上方（而不是下方）：输入框已经贴着「发布」按钮，面板往下开会盖住出口。 */
+.kp-narration-wrap { position: relative; }
+.kp-slash {
+  position: absolute;
+  left: 0; bottom: calc(100% + 0.3rem);
+  width: 100%;
+  max-height: 13rem;
+  overflow-y: auto;
+  z-index: 30;
+  padding: 0.2rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.kp-slash-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.28rem 0.4rem;
+  border-radius: 3px;
+  font-size: var(--text-2xs);
+  text-align: left;
+  color: var(--color-text-secondary);
+}
+.kp-slash-row--on { background: var(--color-bg-card); color: var(--color-text-primary); }
+.kp-slash-cmd { font-family: var(--font-mono); color: var(--color-text-accent); }
+.kp-slash-hint { margin-left: auto; opacity: 0.7; white-space: nowrap; }
 
 /* 旁白与 NPC 台词是「一整段文字」，框子得写得下。
    原先固定两行高，而侧栏底下明明空着四五百像素——KP 写一段旁白要在两行里滚。

@@ -420,9 +420,11 @@ def _seed_two_scenes(db):
     """两个场景：一个是起点，另一个玩家还不知道——用来验「解锁」与「移动」。"""
     module = Module(
         title="解锁测试", description="两节车厢。", rule_system="coc",
+        # 刻意只给 title 不给 name：模组导入器写的就是 title，而只认 name 的代码
+        # 会把「2 号车厢」显示成 id（线上实测踩过）。
         scenes=[
-            {"id": "s1", "title": "1 号车厢", "name": "1 号车厢"},
-            {"id": "s2", "title": "2 号车厢", "name": "2 号车厢"},
+            {"id": "s1", "title": "1 号车厢"},
+            {"id": "s2", "title": "2 号车厢"},
         ],
         npcs=[],
     )

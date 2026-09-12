@@ -1,7 +1,7 @@
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api, getServerUrl } from '@/api/client'
-import { GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
+import { GiFootTrip, GiPadlock, GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
 import {
   BookOpen,
   Bot,
@@ -36,7 +36,9 @@ import {
 import { MultiSelect } from '@/components/ui/multi-select'
 import { KpInput } from './KpInput'
 import { catalogOptions } from './kpCatalogs'
-import { ACTION_LABELS, PROSE_ACTIONS, QUICK_ACTIONS, QUICK_IDS, type KpAction } from './kpActions'
+import { useDictation } from './useDictation'
+import { useSlashCommands } from './useSlashCommands'
+import { ACTION_CHIPS, ACTION_LABELS, PROSE_ACTIONS, type KpAction } from './kpActions'
 
 type PanelTab = 'tools' | 'advisor' | 'assets' | 'director' | 'source'
 
@@ -224,23 +226,6 @@ interface LookupHit {
   ordinal?: number
 }
 
-interface SpeechRecognitionResultEventLike {
-  results: ArrayLike<{ 0: { transcript: string } }>
-}
-
-interface SpeechRecognitionLike {
-  lang: string
-  interimResults: boolean
-  continuous: boolean
-  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null
-  onerror: (() => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-}
-
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike
-
 interface Props {
   sessionId: string
   turnReady?: boolean
@@ -306,6 +291,11 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   const [lastActionResult, setLastActionResult] = useState('')
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const catalogs = catalogOptions(workspace)
+  // 斜杠命令：叙事框里打 / 直接切动作，手不离键盘（见 useSlashCommands）
+  const slash = useSlashCommands({
+    text: fields.content || '',
+    onPick: (next) => { setAction(next); setFields({}) },
+  })
   const [source, setSource] = useState<ModuleSource | null>(null)
   const [sourceView, setSourceView] = useState<'raw' | 'parsed'>('raw')
   const [sourceOpen, setSourceOpen] = useState(false)
@@ -326,8 +316,10 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   const [imagePrompt, setImagePrompt] = useState('')
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewSuggestionKey, setPreviewSuggestionKey] = useState('')
-  const [dictating, setDictating] = useState(false)
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  // 语音转文字：与工作台其余部分无耦合，逻辑在 useDictation
+  const { dictating, toggle: toggleDictation } = useDictation(
+    (chunk) => setFields((current) => ({ ...current, content: `${current.content || ''}${chunk}` })),
+  )
   const sourceChunkRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const sourceDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const sourceResizeRef = useRef<{
@@ -421,7 +413,6 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
 
   useEffect(() => {
     void refreshWorkspace()
-    return () => recognitionRef.current?.stop()
   }, [sessionId])
 
   useEffect(() => {
@@ -503,38 +494,6 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
       // 连续 NPC 台词时保留说话人，只清空上一句正文。
       setFields(action === 'dialogue' ? { npc_id: fields.npc_id || '' } : {})
     }
-  }
-
-  const toggleDictation = () => {
-    if (dictating) {
-      recognitionRef.current?.stop()
-      return
-    }
-    const speechWindow = window as Window & {
-      SpeechRecognition?: SpeechRecognitionCtor
-      webkitSpeechRecognition?: SpeechRecognitionCtor
-    }
-    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
-    if (!Recognition) {
-      toast.error('当前浏览器不支持语音转文字')
-      return
-    }
-    const recognition = new Recognition()
-    recognition.lang = 'zh-CN'
-    recognition.interimResults = false
-    recognition.continuous = true
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results).map((result) => result[0].transcript).join('')
-      setFields((current) => ({
-        ...current,
-        content: `${current.content || ''}${transcript}`,
-      }))
-    }
-    recognition.onerror = () => { setDictating(false); toast.error('语音识别中断') }
-    recognition.onend = () => setDictating(false)
-    recognitionRef.current = recognition
-    setDictating(true)
-    recognition.start()
   }
 
   const generateDraft = async () => {
@@ -860,45 +819,32 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               从前它们是三块各自漂浮的元素，KP 得自己把「我在干什么」拼起来。
               切动作只换输入区的形态，不换页面。 */}
           <div className="kp-composer">
-          {/* 高频三件事做直达按钮，其余收进「更多」——此前 12 个动作平铺在一个下拉里，
-              每发一句旁白都要「开下拉→找条目→填表」。 */}
+          {/* 全部动作平铺，一个不藏。此前只有三件事是直达按钮，其余九个压在「更多…」
+              下拉里——而那九个里有「发手书」「切场景」「开战」这种并不冷门的动作。
+              跑团时眼睛在桌上、手在键盘上，多一次下拉就是多一次找。 */}
           <div className="kp-composer-actions">
-            {QUICK_ACTIONS.map(({ id, label, icon: Icon }) => (
+            {ACTION_CHIPS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => { setAction(id); setFields({}) }}
                 aria-pressed={action === id}
+                title={ACTION_LABELS[id]}
                 className={`kp-quick-action ${action === id ? 'kp-quick-action--on' : ''}`}
               >
                 <Icon size={13} /> {label}
               </button>
             ))}
-            <Select value={action} onValueChange={(value) => { setAction(value as KpAction); setFields({}) }}>
-              <SelectTrigger
-                className="w-auto min-w-24 text-xs"
-                aria-label="更多 KP 动作"
-                style={QUICK_IDS.has(action)
-                  ? undefined
-                  : { borderColor: 'var(--color-accent)', color: 'var(--color-text-accent)' }}
-              >
-                {/* 当前动作已在直达按钮里时，下拉只作为「更多」入口，不重复显示同一个标签 */}
-                {QUICK_IDS.has(action) ? <span>更多…</span> : <SelectValue />}
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(ACTION_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
           <div className={`kp-composer-form flex flex-wrap gap-2${PROSE_ACTIONS.has(action) ? ' kp-composer-form--prose' : ''}`}>
             {action === 'narration' && (
-              <div className="flex w-full items-start gap-2">
+              <div className="kp-narration-wrap flex w-full items-start gap-2">
+                {slash.palette}
                 <textarea
                   value={fields.content || ''}
                   onChange={(event) => setField('content', event.target.value)}
-                  placeholder="输入要发布给全桌的旁白；（圆括号）内为场外，不进故事"
+                  onKeyDown={(event) => { slash.onKeyDown(event) }}
+                  placeholder="输入要发布给全桌的旁白；打 / 唤起命令；（圆括号）内为场外，不进故事"
                   className="input min-h-16 min-w-0 flex-1 resize-y text-xs"
                 />
                 <button type="button" onClick={toggleDictation} className="btn-secondary !p-2" title="语音转文字">
@@ -1020,6 +966,17 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
                 className="min-w-48 flex-1"
               />
               <KpInput name="trigger" placeholder="开战原因（可选）" fields={fields} onChange={setField} />
+            </>}
+            {/* 解锁地点：此前只有「绕着写一句旁白去碰关键词匹配」这一条路，碰不碰得上全看措辞 */}
+            {action === 'unlock_place' && <>
+              <GiPadlock size={16} />
+              <KpInput name="scene_id" placeholder="要对玩家公开的地点" options={catalogs.scenes} fields={fields} onChange={setField} />
+            </>}
+            {/* 移动角色：玩家自己走要过封路与连通性的闸，KP 挪人是裁定结果，不走那条链 */}
+            {action === 'move_actor' && <>
+              <GiFootTrip size={16} />
+              <KpInput name="character_id" placeholder="移动谁" options={catalogs.characters} fields={fields} onChange={setField} />
+              <KpInput name="scene_id" placeholder="挪到哪里" options={catalogs.scenes} fields={fields} onChange={setField} />
             </>}
           </div>
           {/* 主按钮单独一行、靠右：它是这条流水线的出口，文案随当前动作变 */}
