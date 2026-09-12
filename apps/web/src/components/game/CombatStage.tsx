@@ -1,7 +1,6 @@
-// 战斗面板主容器：顶部条（轮次徽章/收起）+ 结算回显 + 先攻轨 + 方格战场 + 参战方卡片
-// + 反应/两段掷伤害/主动动作栏 + 战斗日志抽屉。子组件拆在 ./combat/ 目录。
-// 两种布局：inline（聊天流底部的嵌入卡片，现状）/ immersive（沉浸战场：棋盘居中放大、
-// 先攻轨横贯顶部、己方卡列左、敌方卡列右、动作区钉底）。交互逻辑与 API 契约两种布局完全共用。
+// 战斗面板主容器。子组件拆在 ./combat/，交互逻辑与 API 契约两种布局完全共用。
+// immersive：先攻序竖列在左 | 棋盘居中放大 | 焦点单位面板在右。
+// inline（聊天流里的嵌入卡片）：横排先攻轨 + 敌我两列卡 + 动作区钉底（窄列摆不下三列）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -10,9 +9,12 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { CombatLogEntry, CombatResultView, CombatState, Combatant, PendingReaction } from './combat/types'
 import { ACTIONS, REACTION_META, UNARMED, WEAPON_OTHER, isOut, turnsUntil, type ActionKey } from './combat/meta'
 import { useHpDiff } from './combat/useHpDiff'
-import { CombatantCard } from './combat/CombatantCard'
+import { SideColumn } from './combat/SideColumn'
 import { CombatResultReveal } from './combat/CombatResultReveal'
 import { InitiativeTrack } from './combat/InitiativeTrack'
+import { InitiativeRail } from './combat/InitiativeRail'
+import { FocusPanel } from './combat/FocusPanel'
+import { FigurePickerPopover } from './combat/FigurePickerPopover'
 import { CombatGrid } from './combat/CombatGrid'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TurnBanner, useTurnBanner } from './combat/TurnBanner'
@@ -23,7 +25,7 @@ export type {
   CombatLogEntry, CombatResultView, Combatant, CombatStatus,
 } from './combat/types'
 
-export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log, result, myWeapons = [], layout = 'inline', onToggleLayout, battleMap }: {
+export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log, result, myWeapons = [], layout = 'inline', onToggleLayout, battleMap, canSetToken = false }: {
   combat: CombatState
   myCharId: string | null
   sessionId: string
@@ -35,6 +37,8 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   onToggleLayout?: () => void        // 布局切换回调；未传则不显示切换按钮（如窄视口）
   /** 当前场景的战场底图（world_state.battle_maps，经 /locations 下发）。KP 与玩家同一份。 */
   battleMap?: { url: string; level: string } | null
+  /** KP 席才给「换战棋轮廓」的入口（走 set_token）。 */
+  canSetToken?: boolean
 }) {
   const immersive = layout === 'immersive'
   const order = combat.order
@@ -69,6 +73,10 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   // 方格移动模式：'move' 常规（⌈mov/2⌉，可再攻击）/ 'dash' 冲刺（满 mov，独占回合）/ 'none'
   const [moveMode, setMoveMode] = useState<'none' | 'move' | 'dash'>('none')
   useEffect(() => { setMoveMode('none') }, [combat.turn])   // 回合切换 → 退出移动模式
+  // 焦点单位：右侧面板显示谁。缺省跟着当前行动者走，点先攻序或棋盘可切过去看别人。
+  const [focusPick, setFocusPick] = useState<string>('')
+  const [figureFor, setFigureFor] = useState<Combatant | null>(null)   // 正在换轮廓的参战方
+  useEffect(() => { setFocusPick('') }, [combat.turn])      // 回合一换，焦点回到当前行动者
 
   // 棋盘自适应格长：按可用宽高取 min，放不下时才交给 overflow 滚动。
   // ResizeObserver 跟随窗口/侧栏折叠实时重算。
@@ -125,6 +133,10 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
       setWeaponSel(UNARMED)
     }
   }, [weaponOptions, weaponSel])
+
+  const focus = order.find((c) => c.id === focusPick) || active
+  const focusId = focus?.id ?? ''
+  const setFocusId = (id: string) => setFocusPick(id === focusId ? '' : id)
 
   // 当前动作的目标候选（按 target 类型）。
   const actionMeta = ACTIONS[action]
@@ -215,9 +227,23 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
     }
   }
   // 点棋子：非移动模式下点敌方棋子 = 选为攻击目标（与目标下拉双向同步）。
+  /** 换战棋轮廓：落进 combat_state 并广播全桌，不是只有 KP 自己看得见。 */
+  const setToken = async (c: Combatant, figure: string) => {
+    try {
+      await api.post(`/sessions/${sessionId}/kp/action`, {
+        action: 'set_token', payload: { combatant_id: c.id, figure },
+      })
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '换轮廓失败')
+    }
+  }
+
   const onPieceClick = (c: Combatant) => {
     if (moveMode !== 'none') return
-    if (c.side === 'enemy' && !isOut(c)) { setAction('attack'); setTargetId(c.id) }
+    // 轮到我时点敌人＝选攻击目标（原行为）；其余一律切焦点面板——
+    // 此前非我回合点棋子毫无反应，而 KP 整场都在「非我回合」。
+    if (myTurn && c.side === 'enemy' && !isOut(c)) { setAction('attack'); setTargetId(c.id); return }
+    setFocusPick((cur) => (cur === c.id ? '' : c.id))
   }
 
   // 两段式投骰：我攻击命中后要亲自掷伤害。
@@ -313,21 +339,6 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
   )
 
   // B2 参战方卡片列（我方 / 敌方），带 HP 动画（B3）。
-  const sideCol = (label: string, list: Combatant[], alignRight = false) => (
-    <>
-      <div className={`combat-label${alignRight ? ' combat-label--right' : ''}`}>{label}</div>
-      {list.length === 0
-        ? <div className={`combat-side-empty${alignRight ? ' combat-label--right' : ''}`}>无</div>
-        : (
-          <div className="combat-side-list">
-            {list.map((c) => (
-              <CombatantCard key={c.id} c={c} mine={!!(myCharId && c.id === myCharId)} active={c.id === combat.turn} diff={diffs[c.id]} />
-            ))}
-          </div>
-        )}
-    </>
-  )
-
   /**
    * 行动区的三种状态，玩家一眼要能分清自己「该动 / 该应 / 在等」。
    *
@@ -572,34 +583,6 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
    * 竖向还有个横排给不了的好处：一行放得下名字、血槽和「下一个」。序列本来就是时间顺序，
    * 竖着读天然对。
    */
-  // 「下一个」＝当前之后第一个未出局者（环形）。玩家最常问的一句话，标出来省得自己数。
-  const turnIdx = order.findIndex((c) => c.id === combat.turn)
-  const nextIdx = turnIdx < 0 ? -1 : (() => {
-    for (let k = 1; k <= order.length; k++) {
-      const i = (turnIdx + k) % order.length
-      if (!isOut(order[i])) return i
-    }
-    return -1
-  })()
-
-  const initiativeColumn = (
-    <div className="combat-rail">
-      <div className="combat-label">先攻序</div>
-      <div className="combat-rail-list chat-scroll">
-        {order.map((c, i) => (
-          <div key={c.id} className={`combat-rail-item${i === nextIdx ? ' combat-rail-item--next' : ''}`}>
-            <CombatantCard
-              c={c}
-              mine={!!(myCharId && c.id === myCharId)}
-              active={c.id === combat.turn}
-              diff={diffs[c.id]}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-
   // ===== 沉浸布局：战场为主（棋盘居中放大、先攻序竖列在左、行动面板在右） =====
   if (immersive) {
     return (
@@ -621,7 +604,10 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
             被压扁的只会是棋盘，而它是这里唯一真正需要空间的东西。 */}
         <div className="combat-mid">
           <TurnBanner banner={banner} />
-          {initiativeColumn}
+          <InitiativeRail
+            order={order} turn={combat.turn} myCharId={myCharId}
+            focusId={focusId} onFocus={setFocusId}
+          />
           <div ref={boardAreaRef} className="combat-board chat-scroll">
             {combat.grid
               ? gridSection(fitCell)
@@ -629,7 +615,23 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
           </div>
           {/* 行动面板从底部挪到右列：它和「轮到谁」是同一件事，挨着先攻序与棋盘才读得顺；
               钉在底部时，玩家的视线要从棋盘一路跳到屏幕最下沿再跳回来。 */}
-          <div className="combat-actions">{actionZone}</div>
+          <div className="combat-actions chat-scroll">
+            <FocusPanel
+              c={focus} isTurn={focus?.id === combat.turn}
+              mine={!!(myCharId && focus?.id === myCharId)}
+              diff={focus ? diffs[focus.id] : undefined}
+              onChangeFigure={canSetToken ? setFigureFor : undefined}
+            >
+              {actionZone}
+            </FocusPanel>
+            {figureFor && (
+              <FigurePickerPopover
+                c={figureFor}
+                onClose={() => setFigureFor(null)}
+                onPick={(key) => { void setToken(figureFor, key); setFigureFor(null) }}
+              />
+            )}
+          </div>
         </div>
         {logDrawer}
       </div>
@@ -680,8 +682,12 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
         {/* B2 两栏参战方卡片（左己方 / 右敌方） */}
         {/* sideCol 返回的是「标题 + 卡片列」两段，得各自有个壳，否则四段会被两列网格拆散 */}
         <div className="grid grid-cols-2 gap-2 mt-2">
-          <div className="flex min-w-0 flex-col gap-1.5">{sideCol('我方', allies)}</div>
-          <div className="flex min-w-0 flex-col gap-1.5">{sideCol('敌方', enemies, true)}</div>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <SideColumn label="我方" list={allies} myCharId={myCharId} turn={combat.turn} diffs={diffs} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <SideColumn label="敌方" list={enemies} myCharId={myCharId} turn={combat.turn} diffs={diffs} alignRight />
+          </div>
         </div>
       </div>
 

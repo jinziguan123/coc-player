@@ -1355,14 +1355,9 @@ export function GameSessionPage() {
       {immersiveOn && combat && (
         <div className="battle-stage-pane flex-1 min-w-0 flex flex-col min-h-0">
           <CombatStage
-            combat={combat}
-            myCharId={myCharId}
-            sessionId={currentSession.id}
-            pendingReaction={pendingReaction}
-            log={combatLog}
-            result={combatResult}
-            myWeapons={myWeapons}
-            battleMap={battleMap}
+            combat={combat} myCharId={myCharId} sessionId={currentSession.id}
+            pendingReaction={pendingReaction} log={combatLog} result={combatResult}
+            myWeapons={myWeapons} battleMap={battleMap} canSetToken={isKp}
             layout="immersive"
             onToggleLayout={() => setBattleLayout('classic')}
           />
@@ -2150,6 +2145,7 @@ export function GameSessionPage() {
             combat={combat} myCharId={myCharId} sessionId={currentSession.id}
             pendingReaction={pendingReaction} log={combatLog} result={combatResult} myWeapons={myWeapons}
             battleMap={battleMap}
+            canSetToken={isKp}
             layout="inline"
             onToggleLayout={wideViewport ? () => setBattleLayout('immersive') : undefined}
           />

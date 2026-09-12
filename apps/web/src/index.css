@@ -5391,19 +5391,158 @@ select.input option {
 .combat-rail-list {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.2rem;
   overflow-y: auto;
   min-height: 0;
 }
-/* 「下一个」：左缘一道琥珀短线。不写字——竖列里每多一个字都要占掉卡片的宽度 */
-.combat-rail-item { position: relative; }
-.combat-rail-item--next::before {
-  content: '';
-  position: absolute;
-  left: -0.3rem; top: 25%; bottom: 25%;
-  width: 2px;
+/* 一行只放「谁、还剩多少、下一个是谁」。详情交给右边的焦点面板——
+   把参战方卡整张塞进侧列的话，四个人就吃掉四百像素，棋盘直接被挤瘪。 */
+.combat-rail-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.32rem 0.4rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  text-align: left;
+  overflow: hidden;
+  transition: background 0.15s, border-color 0.15s;
+}
+.combat-rail-row:hover { background: var(--surface-2); }
+.combat-rail-row--active {
+  background: var(--surface-3);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+.combat-rail-row--focus { border-color: var(--color-border-strong); background: var(--surface-2); }
+.combat-rail-row--passed { opacity: 0.5; }
+.combat-rail-row--out { opacity: 0.35; }
+.combat-rail-row--out .combat-rail-name { text-decoration: line-through; }
+.combat-rail-row--mine .combat-rail-name { color: var(--color-text-accent); }
+
+.combat-rail-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.combat-rail-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-text-primary);
+}
+.combat-rail-next {
+  font-size: 0.5rem;
+  letter-spacing: 0.06em;
+  padding: 0 0.2rem;
+  border: 1px solid var(--color-border);
   border-radius: 2px;
-  background: color-mix(in srgb, var(--color-accent) 70%, transparent);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+.combat-rail-hp { font-family: var(--font-mono); color: var(--color-text-secondary); flex-shrink: 0; }
+/* 血槽压在行底：不占行高，扫一眼就知道谁快没了 */
+.combat-rail-bar {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 2px;
+  opacity: 0.75;
+  transition: width 0.3s ease;
+}
+
+/* ===== 焦点单位面板 =====
+   上一版这块直接塞了玩家的行动栏，于是 KP 看到一片空白——他没有角色，行动栏对他
+   永远不成立。这块本该对谁都有内容：它回答「这个单位是什么状态」，
+   「我能对他做什么」是它下面那一段的事，有就显示、没有就不显示。 */
+.combat-focus { display: flex; flex-direction: column; gap: 0.35rem; }
+.combat-focus-empty { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.combat-focus-card {
+  position: relative;
+  border: 1px solid var(--color-border-strong);
+  border-left: 3px solid var(--side-color, var(--color-border-strong));
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  padding: 0.5rem 0.55rem;
+}
+.combat-focus-head { display: flex; align-items: center; gap: 0.45rem; }
+.combat-focus-fig { line-height: 0; flex-shrink: 0; }
+.combat-focus-name {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 0.9375rem;
+  line-height: 1.15;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.combat-focus-sub { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.combat-focus-hp { display: flex; align-items: baseline; gap: 0.25rem; margin-top: 0.4rem; }
+.combat-focus-hp-num { font-family: var(--font-mono); font-size: 1.25rem; line-height: 1; }
+.combat-focus-hp-max { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--color-text-secondary); }
+.combat-focus-hp-track {
+  flex: 1;
+  height: 4px;
+  margin-left: 0.3rem;
+  border-radius: 2px;
+  background: var(--color-input-bg);
+  overflow: hidden;
+}
+.combat-focus-hp-track > span { display: block; height: 100%; transition: width 0.3s ease; }
+.combat-focus-meta {
+  display: flex; flex-wrap: wrap; gap: 0.25rem;
+  margin-top: 0.4rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.combat-focus-meta > span { display: inline-flex; align-items: center; gap: 0.2rem; }
+.combat-focus-figbtn {
+  display: flex; align-items: center; justify-content: center; gap: 0.3rem;
+  width: 100%;
+  margin-top: 0.45rem;
+  padding: 0.22rem;
+  font-size: var(--text-2xs);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
+  transition: color 0.15s, border-color 0.15s;
+}
+.combat-focus-figbtn:hover { color: var(--color-text-accent); border-color: var(--color-border-strong); }
+
+/* 轮廓选择器：平铺全部候选。轮廓是看图挑的，缩成一行文字就白挑了。 */
+.combat-figpick {
+  margin-top: 0.4rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.combat-figpick-head {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.4rem;
+  font-size: var(--text-2xs);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+.combat-figpick-head button { color: var(--color-text-secondary); line-height: 1; padding: 0 0.15rem; }
+.combat-figpick-head button:hover { color: var(--color-text-accent); }
+.combat-figpick-body { max-height: 15rem; overflow-y: auto; padding: 0.25rem 0.4rem 0.4rem; }
+.combat-figpick-group {
+  font-size: 0.5rem; letter-spacing: 0.18em;
+  color: var(--color-text-secondary);
+  margin: 0.35rem 0 0.2rem;
+}
+.combat-figpick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.2rem; }
+.combat-figpick-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 0.25rem 0.1rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 0.5rem;
+  color: var(--color-text-secondary);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.combat-figpick-cell:hover { background: var(--surface-3); color: var(--color-text-primary); }
+.combat-figpick-cell--on {
+  border-color: var(--color-accent);
+  color: var(--color-text-accent);
+  background: var(--surface-3);
 }
 
 /* 行动面板：从舞台底部挪到右列。它和「轮到谁」是同一件事，挨着先攻序与棋盘才读得顺；
@@ -5463,7 +5602,6 @@ select.input option {
   }
   .combat-rail-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
   .combat-rail-list > * { width: 9rem; flex-shrink: 0; }
-  .combat-rail-item--next::before { left: 0; top: auto; bottom: -0.15rem; width: auto; right: 0; height: 2px; }
   .combat-board { order: 0; }
   .combat-actions { width: auto; order: 4; }
   .combat-sides {
