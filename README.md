@@ -101,6 +101,22 @@ server/.venv/bin/pytest -q
 cd server && .venv/bin/python -m evals.run --smoke
 ```
 
+## 日志与耗时排查
+
+应用日志同时写 stdout 和 `logs/` 目录（开发态 `server/logs/`，桌面构建在应用数据目录的
+`logs/`）：
+
+- `app.log`：全部应用日志，按 5 MB × 3 份轮转；
+- `timing.log`：只留各环节的「耗时|…」行与「本回合 N% 的输出是模型思考」告警，
+  排查「一个回合为什么慢」直接看这一个文件即可。
+
+日志目录可用 `LOG_DIR` 覆盖；日志级别由 `LOG_LEVEL` 控制（默认 INFO，设成 WARNING 会连耗时行
+一起静音，排查期间别调）。桌面构建由 Tauri 拉起的后端 stdout 不落到
+`~/Library/Logs/com.trpgplayer.app/TRPG Player.log`，以文件日志为准。
+
+终检与去口癖默认先用「副手」快模型，结果不可用（解析失败、改写稿为空/长度失真、口癖没减少）
+时自动回退叙事模型；想全部走叙事模型，在 `.env` 设 `CHECKS_USE_FAST_MODEL=false` 后重启。
+
 ## 联机
 
 后端**默认只监听本机**，同一网络里的其他设备也连不上。要让朋友加入：

@@ -209,3 +209,96 @@ def test_no_warning_without_output():
     from app.ai import usage_tracker
 
     usage_tracker.warn_if_reasoning_dominates({"completion_tokens": 0, "reasoning_tokens": 0})
+
+
+# ── 落盘：打包版 stdout 不落文件，timing.log 是排查「为什么这么慢」的入口 ──────────
+
+
+@pytest.fixture
+def file_logs(tmp_path, monkeypatch):
+    """把落盘目录换到临时目录，测真实的文件写入；退出时把 handler 指回原目录。"""
+    import app.main as main
+
+    with monkeypatch.context() as m:
+        m.setattr(main.settings, "log_dir", tmp_path / "logs")
+        main._configure_app_logging()
+        yield tmp_path / "logs"
+    # 上下文退出后 settings.log_dir 已复原；再配一次，免得后续用例往已删除的临时目录里写。
+    main._configure_app_logging()
+
+
+def _flush_app_files() -> None:
+    for handler in logging.getLogger("app").handlers:
+        if getattr(handler, "_coc_file_handler", False):
+            handler.flush()
+
+
+def _read(path) -> str:
+    return path.read_text("utf-8") if path.exists() else ""
+
+
+def test_logs_land_in_app_and_timing_files(file_logs):
+    """全量日志进 app.log；timing.log 只留耗时/思考告警，排查时不必在几千行里翻。"""
+    logging.getLogger("app.services.turn_orchestrator").info(
+        "耗时|planner %.1fs session=%s", 1.5, "s1")
+    logging.getLogger("app.services.turn_context").info("普通日志不该进 timing.log")
+    _flush_app_files()
+
+    app_text = _read(file_logs / "app.log")
+    timing_text = _read(file_logs / "timing.log")
+    assert "耗时|planner 1.5s" in app_text
+    assert "普通日志不该进 timing.log" in app_text
+    assert "耗时|planner 1.5s" in timing_text
+    assert "普通日志不该进 timing.log" not in timing_text
+
+
+def test_reasoning_warning_lands_in_timing_file(file_logs):
+    """「本回合 92% 的输出是思考」这条告警和耗时行同样关键，也要进 timing.log。"""
+    from app.ai import usage_tracker
+
+    usage_tracker.warn_if_reasoning_dominates(
+        {"completion_tokens": 8300, "reasoning_tokens": 7100},
+    )
+    _flush_app_files()
+    assert "本回合" in _read(file_logs / "timing.log")
+
+
+def test_reconfiguring_same_dir_does_not_duplicate_lines(file_logs):
+    """重复配置（测试、reload）不能装两套 handler，否则每行写两遍。"""
+    import app.main as main
+
+    logger = logging.getLogger("app.services.turn_orchestrator")
+    logger.info("耗时|第一次")
+    _flush_app_files()
+    main._configure_app_logging()          # 同一目录，重复调用
+    logger.info("耗时|第二次")
+    _flush_app_files()
+
+    timing_text = _read(file_logs / "timing.log")
+    assert timing_text.count("耗时|第一次") == 1
+    assert timing_text.count("耗时|第二次") == 1
+    file_handlers = [
+        h for h in logging.getLogger("app").handlers
+        if getattr(h, "_coc_file_handler", False)
+    ]
+    assert len(file_handlers) == 2
+
+
+def test_file_logging_failure_falls_back_to_console(app_log, tmp_path, monkeypatch):
+    """落盘目录不可写时降级为只写控制台，不能拖垮启动，也不能留下半套 handler。"""
+    import app.main as main
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("read-only")
+
+    with monkeypatch.context() as m:
+        m.setattr(main.settings, "log_dir", tmp_path / "logs")
+        m.setattr(main, "_add_file_handlers", _boom)
+        main._configure_app_logging()
+
+    assert "无法写入" in _text(app_log)
+    assert not [
+        h for h in logging.getLogger("app").handlers
+        if getattr(h, "_coc_file_handler", False)
+    ]
+    main._configure_app_logging()          # 恢复原目录，别影响后续用例

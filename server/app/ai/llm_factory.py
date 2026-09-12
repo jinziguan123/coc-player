@@ -4,11 +4,16 @@
 为兼容既有导入，仍从此处再导出 OpenAICompatProvider。
 """
 
+import logging
+
 from app.ai import profile_store
 from app.ai.provider import LLMProvider
 from app.ai.providers.openai_compat import OpenAICompatProvider
+from app.config import settings
 
-__all__ = ["get_llm", "get_fast_llm", "OpenAICompatProvider"]
+logger = logging.getLogger(__name__)
+
+__all__ = ["get_llm", "get_fast_llm", "check_llm_pair", "OpenAICompatProvider"]
 
 
 def _provider_from_profile(profile) -> LLMProvider:
@@ -58,6 +63,7 @@ def get_fast_llm() -> LLMProvider:
     """结构化副任务（planner / 滚动摘要 / 幕后推演 / 生图与地图提示词）用的「快模型」。
 
     设置页可把某个配置标记为快模型（is_fast）；未标记时回落到主模型（行为与从前一致）。
+    终检与去口癖也会先走它，改写不达标再回退主模型（见 ``check_llm_pair``）。
 
     判据是**产出会不会原样摆在玩家面前**：会的一律走主模型——KP 叙事、NPC 台词，
     以及 **AI 队友的言行**（他们和真人玩家发一样的气泡，吃同样的文笔与分寸感；
@@ -68,6 +74,28 @@ def get_fast_llm() -> LLMProvider:
     if not profile:
         return get_llm()
     return _provider_from_profile(profile)
+
+
+def check_llm_pair(main_llm: LLMProvider) -> tuple[LLMProvider, LLMProvider | None]:
+    """终检/去口癖这类「先快后主」任务的两个模型：返回 ``(首选, 回退)``。
+
+    回退为 ``None`` 表示「只跑一次主模型」——没单独配快模型、开关关掉、或读取配置失败时
+    都是这个口径。**绝不能把同一份请求对同一个模型发两遍**：那既不会更快，还会让一次检查
+    变成两次调用。调用方拿到 ``None`` 就当普通单模型路径走。
+
+    为什么这两步可以先用快模型：它们都是「判断题 + 定点改写」，不是 KP 那种要文笔的
+    创作；快模型槽位通常关着思考，而这两步实测各要 20~40s。回退条件由调用方定，
+    但都必须是确定性的（解析失败、改写稿为空/长度失真/口癖没减少），不能靠感觉。
+    """
+    if not settings.checks_use_fast_model:
+        return main_llm, None
+    try:
+        if profile_store.load_fast_profile() is None:
+            return main_llm, None
+        return get_fast_llm(), main_llm
+    except Exception:  # noqa: BLE001 — 取快模型失败不该让检查本身失败
+        logger.exception("解析快模型失败，终检/去口癖回落叙事模型")
+        return main_llm, None
 
 
 def get_vision_llm() -> LLMProvider:

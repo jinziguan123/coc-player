@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # 默认 INFO：回合耗时、配图完成、生成取消这些运行信息本就是给人看的。
     # 嫌吵可在 .env 设 LOG_LEVEL=WARNING。
     log_level: str = "INFO"
+    # 应用日志落盘目录（LOG_DIR 可覆盖）。开发态在 server/logs/，打包态在 app-data/logs/，
+    # 与数据库、素材同处。app.log 收全部应用日志；timing.log 只收「耗时|…」与思考占比告警，
+    # 方便直接对账「一个回合慢在哪一段」——此前日志只进 stdout，打包版那个文件恒为空。
+    log_dir: Path = _BASE / "logs"
+    # 终检/去口癖这类「检查与改写」任务是否先用快模型、不可用再回退叙事模型。
+    # 默认开启：快模型槽位通常关思考，这两步能省下每次 20~40s；设为 false 全部走叙事模型。
+    checks_use_fast_model: bool = True
 
     # extra="ignore"：.env 里的历史遗留变量（如已废弃的 OPENAI_API_KEY）不该让进程起不来。
     # pydantic-settings 默认是 forbid，于是从仓库根启动后端会崩在一句难懂的校验错误上；

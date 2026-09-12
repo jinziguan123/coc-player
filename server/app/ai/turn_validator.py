@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -279,6 +280,91 @@ def build_validator_messages(
     ]
 
 
+async def _validate_once(
+    llm: Any, plan: TurnPlan, narration: str, *,
+    seen_context: str, turn_inputs: str, party_names: Iterable[str] | None,
+    location_context: str, settled_checks: str,
+) -> TurnValidation | None:
+    """调一次校验模型并解析；失败返回 None，由调用方决定要不要回退叙事模型。"""
+    messages = build_validator_messages(
+        plan, narration, seen_context, turn_inputs, party_names=party_names,
+        location_context=location_context, settled_checks=settled_checks,
+    )
+    try:
+        # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限会把 JSON 截成半截
+        # 字符串（线上「Unterminated string」正是如此）。交服务端默认上限，complete 已内部流式。
+        raw = await llm.complete(
+            messages,
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+    except Exception:
+        logger.exception("KP 回合校验器调用失败")
+        return None
+
+    # 稳健抠 JSON（剥围栏 / 夹带文字 / 已是 dict），比裸 json.loads 抗造；抠不出按失败处理。
+    data = _extract_json_object(raw)
+    if data is None:
+        logger.warning("KP 回合校验器输出无法解析：%s", str(raw)[:200])
+        return None
+    try:
+        return TurnValidation.model_validate(data)
+    except ValidationError as exc:
+        logger.warning("KP 回合校验器输出不符合 schema：%s", exc)
+        return None
+
+
+def _fallback_reason(
+    result: TurnValidation | None, narration: str, plan: TurnPlan,
+) -> str | None:
+    """快模型这次结果不可用吗？返回可读原因；``None`` = 可用，不必回退。
+
+    判据全部是确定性的，不猜「它判得对不对」：
+      · 没结果（调用/解析/schema 失败）；
+      · 判了违规却没给改写稿；
+      · 判了违规却一字未改；
+      · 改写稿长度失真（<0.5× 或 >2× 原文，多半是截断、扩写或答非所问）；
+      · 判「无违规」但隐藏真相的原文整句出现在旁白里——这是最危险的一类漏判，
+        能用字符串匹配兜住就兜住。
+    除此之外判「无违规」时直接采信：快模型对**改写后**的漏判无法靠确定性检查发现，
+    这是本方案已知的代价；真在意，把 ``CHECKS_USE_FAST_MODEL`` 关掉即可全部回到叙事模型。
+    """
+    if result is None:
+        return "调用或解析失败"
+    if not result.violated:
+        leaked = [
+            str(secret).strip() for secret in (plan.safety.do_not_reveal or [])
+            if str(secret).strip() and str(secret).strip() in narration
+        ]
+        if leaked:
+            return f"判无违规，但隐藏真相原文出现在旁白里（{leaked[0][:20]}…）"
+        return None
+    corrected = result.corrected_narration.strip()
+    if not corrected:
+        return "判了违规却没给改写稿"
+    if corrected == narration.strip():
+        return "判了违规却一字未改"
+    ratio = len(corrected) / max(1, len(narration))
+    if not (0.5 <= ratio <= 2.0):
+        return f"改写稿长度失真（{ratio:.2f}×）"
+    return None
+
+
+def _verdict_label(result: TurnValidation | None) -> str:
+    if result is None:
+        return "无结果，放行原文"
+    return "判违规并改写" if result.violated else "无违规"
+
+
+def _keep_original_when_empty(
+    result: TurnValidation | None, narration: str,
+) -> TurnValidation | None:
+    if result is not None and result.violated and not result.corrected_narration.strip():
+        # 兜底：模型判定违规却没给改写文本时，别把旁白整段清空
+        result.corrected_narration = narration
+    return result
+
+
 async def validate_turn_narration(
     llm: Any, plan: TurnPlan | None, narration: str, seen_context: str = "",
     turn_inputs: str = "", on_start: Callable[[], None] | None = None,
@@ -294,6 +380,10 @@ async def validate_turn_narration(
     ``on_start`` 在**确定要真的调一次 LLM 时**才触发（短路掉的绝大多数轮次不触发），
     调用方据此告诉玩家这段静默在做什么——这一步发生在叙事流已经停下之后，不说明的话
     界面上只剩一个不动的脉冲点。
+
+    **模型选择**：默认先用快模型（``check_llm_pair``）；结果不可用（调用/解析失败、
+    判违规却没改写、改写稿长度失真）才回退叙事模型重跑一次。没单独配快模型或
+    ``CHECKS_USE_FAST_MODEL=false`` 时只跑一次叙事模型，绝不把同一份请求发两遍。
     """
     if plan is None or llm is None or not narration.strip():
         return None
@@ -302,34 +392,35 @@ async def validate_turn_narration(
     if on_start is not None:
         on_start()
 
-    messages = build_validator_messages(
-        plan, narration, seen_context, turn_inputs, party_names=party_names,
-        location_context=location_context, settled_checks=settled_checks,
+    from app.ai.llm_factory import check_llm_pair
+
+    first_llm, fallback_llm = check_llm_pair(llm)
+    kwargs = {
+        "seen_context": seen_context,
+        "turn_inputs": turn_inputs,
+        "party_names": party_names,
+        "location_context": location_context,
+        "settled_checks": settled_checks,
+    }
+    if fallback_llm is None:
+        t0 = time.monotonic()
+        result = await _validate_once(first_llm, plan, narration, **kwargs)
+        logger.info("耗时|终检 %.1fs（%s）", time.monotonic() - t0, _verdict_label(result))
+        return _keep_original_when_empty(result, narration)
+
+    t0 = time.monotonic()
+    first = await _validate_once(first_llm, plan, narration, **kwargs)
+    first_s = time.monotonic() - t0
+    reason = _fallback_reason(first, narration, plan)
+    if reason is None:
+        logger.info("耗时|终检 快模型 %.1fs（%s）", first_s, _verdict_label(first))
+        return _keep_original_when_empty(first, narration)
+
+    logger.info("耗时|终检 快模型 %.1fs 不可用（%s），回退叙事模型重跑", first_s, reason)
+    t1 = time.monotonic()
+    result = await _validate_once(fallback_llm, plan, narration, **kwargs)
+    logger.info(
+        "耗时|终检 叙事模型回退 %.1fs（%s）",
+        time.monotonic() - t1, _verdict_label(result),
     )
-    try:
-        # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限会把 JSON 截成半截
-        # 字符串（线上「Unterminated string」正是如此）。交服务端默认上限，complete 已内部流式。
-        raw = await llm.complete(
-            messages,
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
-    except Exception:
-        logger.exception("KP 回合校验器调用失败，按放行处理")
-        return None
-
-    # 稳健抠 JSON（剥围栏 / 夹带文字 / 已是 dict），比裸 json.loads 抗造；抠不出按放行处理。
-    data = _extract_json_object(raw)
-    if data is None:
-        logger.warning("KP 回合校验器输出无法解析，按放行处理：%s", str(raw)[:200])
-        return None
-    try:
-        result = TurnValidation.model_validate(data)
-    except ValidationError as exc:
-        logger.warning("KP 回合校验器输出不符合 schema，按放行处理：%s", exc)
-        return None
-
-    if result.violated and not result.corrected_narration.strip():
-        # 兜底：模型判定违规却没给改写文本时，别把旁白整段清空
-        result.corrected_narration = narration
-    return result
+    return _keep_original_when_empty(result, narration)

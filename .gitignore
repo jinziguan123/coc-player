@@ -22,6 +22,8 @@ server/models/
 server/seed/
 # 评估 scorecard 运行产物（本地对比用，不入库；fixtures/ 入库）
 server/evals/results/
+# 应用日志落盘目录（app.log / timing.log，运行时产物，不入库）
+server/logs/
 
 .env
 # 含 AI 密钥，不入库（密钥应从 .env / 设置页注入）

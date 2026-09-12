@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Callable
 
 from app.ai.turn_validator import (
@@ -104,15 +105,8 @@ def _acceptable(old: str, new: str) -> bool:
     return True
 
 
-async def polish_narration(
-    llm, narration: str, *, on_start: Callable[[], None] | None = None,
-) -> str | None:
-    """返回去掉口癖的旁白；不需要改或改不好时返回 None（调用方保留原文）。"""
-    flagged = flagged_sentences(narration)
-    if not flagged:
-        return None
-    if on_start is not None:
-        on_start()
+async def _polish_once(llm, narration: str, flagged: list[str]) -> str | None:
+    """调一次编辑器；改写没通过确定性校验就返回 None，由调用方决定是否回退。"""
     listing = "\n".join(f"- {s}" for s in flagged)
     messages = [
         {"role": "system", "content": EDITOR_SYSTEM_PROMPT},
@@ -121,13 +115,57 @@ async def polish_narration(
     try:
         raw = await llm.complete(messages, temperature=0)
     except Exception:
-        logger.exception("去口癖编辑器调用失败，保留原文")
+        logger.exception("去口癖编辑器调用失败")
         return None
     new = _clean_output(raw)
     if not _acceptable(narration, new):
-        logger.info("去口癖改写未通过校验，保留原文（原 %d 处 → 改后 %d 处，长度比 %.2f）",
+        logger.info("去口癖改写未通过校验（原 %d 处 → 改后 %d 处，长度比 %.2f）",
                     tic_score(narration), tic_score(new), len(new) / max(1, len(narration)))
         return None
+    return new
+
+
+async def polish_narration(
+    llm, narration: str, *, on_start: Callable[[], None] | None = None,
+) -> str | None:
+    """返回去掉口癖的旁白；不需要改或改不好时返回 None（调用方保留原文）。
+
+    **模型选择**：默认先用快模型（``check_llm_pair``）；调用失败、或改写没通过
+    ``_acceptable``（长度失真、口癖没减少、标签残留等）才回退叙事模型重跑一次。
+    没单独配快模型或 ``CHECKS_USE_FAST_MODEL=false`` 时只跑一次叙事模型，不会发两遍。
+    """
+    flagged = flagged_sentences(narration)
+    if not flagged:
+        return None
+    if on_start is not None:
+        on_start()
+
+    from app.ai.llm_factory import check_llm_pair
+
+    first_llm, fallback_llm = check_llm_pair(llm)
+    if fallback_llm is None:
+        t0 = time.monotonic()
+        new = await _polish_once(first_llm, narration, flagged)
+        logger.info(
+            "耗时|去口癖 %.1fs（%s）",
+            time.monotonic() - t0, "已改写" if new is not None else "未通过，保留原文",
+        )
+        return new
+
+    t0 = time.monotonic()
+    new = await _polish_once(first_llm, narration, flagged)
+    first_s = time.monotonic() - t0
+    if new is not None:
+        logger.info("耗时|去口癖 快模型 %.1fs（已改写）", first_s)
+        return new
+
+    logger.info("耗时|去口癖 快模型 %.1fs 未通过校验，回退叙事模型重跑", first_s)
+    t1 = time.monotonic()
+    new = await _polish_once(fallback_llm, narration, flagged)
+    logger.info(
+        "耗时|去口癖 叙事模型回退 %.1fs（%s）",
+        time.monotonic() - t1, "已改写" if new is not None else "仍未通过，保留原文",
+    )
     return new
 
 

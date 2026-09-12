@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,9 +19,52 @@ from app.services.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
+#: 落盘日志文件名与轮转上限。app.log 收全部应用日志；timing.log 只收回合耗时与思考占比
+#: 告警——玩家说「感觉最近很慢」时，直接看这一个文件就能对账各阶段，不必在几千行里翻。
+APP_LOG_NAME = "app.log"
+TIMING_LOG_NAME = "timing.log"
+_LOG_MAX_BYTES = 5 * 1024 * 1024
+_LOG_BACKUP_COUNT = 3
+#: 给文件 handler 打的标记：重配时据此只移除自己装的 handler，不动控制台/测试临时 handler。
+_FILE_HANDLER_MARK = "_coc_file_handler"
+#: 记在 app logger 上的当前落盘目录：目录变了才重配，重复调用不会装两遍、写两行。
+_LOG_DIR_ATTR = "_coc_log_dir"
+
+
+def _is_timing_record(record: logging.LogRecord) -> bool:
+    """只放行「耗时|…」与「本回合…」两类记录进 timing.log。
+
+    ``record.getMessage()`` 会把 %-参数拼成最终文本（耗时行都是这种写法）；拿不到就丢弃，
+    绝不让一条日志因为过滤器本身出错而消失。
+    """
+    try:
+        return record.getMessage().startswith(("耗时|", "本回合"))
+    except Exception:  # noqa: BLE001 — 过滤器只做筛选，不许反过来影响日志
+        return False
+
+
+def _file_handler(path: Path, *, timing_only: bool = False) -> logging.Handler:
+    handler = logging.handlers.RotatingFileHandler(
+        path, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUP_COUNT, encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    if timing_only:
+        handler.addFilter(_is_timing_record)
+    setattr(handler, _FILE_HANDLER_MARK, True)
+    return handler
+
+
+def _add_file_handlers(app_logger: logging.Logger, log_dir: Path) -> None:
+    """把两个落盘 handler 装到 app logger 上；失败由调用方兜底，不在这里吞。"""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    app_logger.addHandler(_file_handler(log_dir / APP_LOG_NAME))
+    app_logger.addHandler(_file_handler(log_dir / TIMING_LOG_NAME, timing_only=True))
+
 
 def _configure_app_logging() -> None:
-    """给 ``app.*`` 这棵 logger 树装上 handler 与级别。
+    """给 ``app.*`` 这棵 logger 树装上 handler、级别与落盘文件。
 
     此前全项目没有任何日志配置，于是走 Python 的默认值：根 logger 级别 WARNING、无 handler。
     结果是**后端 27 处 logger.info 从来没有输出过**——包括各环节的「耗时|…」埋点。
@@ -28,6 +72,10 @@ def _configure_app_logging() -> None:
 
     只配 ``app`` 这一棵，不碰根 logger：uvicorn 的访问日志有自己的 handler，
     动根会让它重复输出。propagate=False 同理——防止本树的记录再冒泡到根被打第二遍。
+
+    除了 stdout，再把同一批记录写进 ``settings.log_dir``：打包版由 Tauri 拉起的 sidecar
+    stdout 并不落到那个 ``TRPG Player.log``（实测恒为 0 字节），只写 stdout 等于没有日志。
+    app.log 全量、timing.log 只留「耗时|…」与思考占比告警；轮转封顶，不会无限涨。
     """
     app_logger = logging.getLogger("app")
     app_logger.setLevel(settings.log_level.upper())
@@ -35,6 +83,32 @@ def _configure_app_logging() -> None:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
         app_logger.addHandler(handler)
+
+    desired_dir = Path(settings.log_dir)
+    if getattr(app_logger, _LOG_DIR_ATTR, None) != desired_dir:
+        # 目录变了（测试换临时目录、或运行期改配置）才重配：先摘掉上次装的文件 handler，
+        # 免得同一行被写两遍；控制台与调用方自己挂的 handler 一律不动。
+        for old in list(app_logger.handlers):
+            if getattr(old, _FILE_HANDLER_MARK, False):
+                app_logger.removeHandler(old)
+                try:
+                    old.close()
+                except Exception:  # noqa: BLE001 — 关旧 handler 失败不该挡住新配置
+                    pass
+        try:
+            _add_file_handlers(app_logger, desired_dir)
+        except Exception:  # noqa: BLE001 — 落盘失败必须降级，不能拖垮启动
+            # 清掉目录标记，下次调用（如运行期修好权限后再配）还会重试，而不是永久放弃。
+            setattr(app_logger, _LOG_DIR_ATTR, None)
+            app_logger.warning(
+                "应用日志无法写入 %s，本次仅输出到控制台", desired_dir, exc_info=True,
+            )
+        else:
+            setattr(app_logger, _LOG_DIR_ATTR, desired_dir)
+            app_logger.info(
+                "应用日志写入 %s（回合耗时另见 %s）",
+                desired_dir / APP_LOG_NAME, desired_dir / TIMING_LOG_NAME,
+            )
     app_logger.propagate = False
 
 

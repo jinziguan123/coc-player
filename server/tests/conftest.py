@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+# 应用日志落盘目录隔离到临时目录：必须在导入 app.* 之前设置，否则 app.config 实例化
+# 时就把 LOG_DIR 定死了。不隔离的后果与 isolate_dev_db 要防的是同一类——跑一次全量测试，
+# 开发态 server/logs/timing.log 里就混进测试的「耗时|…」行，真排查一局时还得先挑出去。
+os.environ.setdefault("LOG_DIR", tempfile.mkdtemp(prefix="coc-test-logs-"))
 
 import app.database as database
 from app.models.base import Base
