@@ -19,6 +19,7 @@ from app.models.character import Character
 from app.models.module import Module, ModuleChunk
 from app.models.session import GameSession
 from app.services import (
+    generation_lifecycle,
     image_store,
     module_image_service,
     module_rag_service,
@@ -481,6 +482,12 @@ def has_unprocessed_player_turn(
 
 async def run_human_team_turn_generation(session_id: str) -> None:
     """只运行 AI 队友的一轮公开行动，不生成 AI KP 叙事。"""
+    # 不排干后台收尾：这条路只跑队友、不动 world_state，没有与收尾抢写的风险。
+    async with generation_lifecycle.generation_timing(session_id, "真人 KP 的队友回合"):
+        await _run_human_team_turn_generation(session_id)
+
+
+async def _run_human_team_turn_generation(session_id: str) -> None:
     from app.database import SessionLocal
     from app.services.event_protocol import make_chunk as _make_chunk
     from app.services.team_turn_service import _run_team_turn

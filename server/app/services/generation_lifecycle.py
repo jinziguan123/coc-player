@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -14,6 +15,45 @@ from app.ai import usage_tracker
 logger = logging.getLogger(__name__)
 
 HousekeepingFn = Callable[[object, str, object], Awaitable[None]]
+
+#: 「等上轮收尾」低于这个秒数就不记：后台没活干时它恒为 0，每轮记一条纯噪音。
+_DRAIN_LOG_THRESHOLD = 0.5
+
+
+@contextlib.asynccontextmanager
+async def generation_timing(
+    session_id: str,
+    label: str,
+    *,
+    drain: Callable[[str], Awaitable[None]] | None = None,
+):
+    """给一条顶层生成路径记「等上轮收尾 / 合计 / 思考占比」。
+
+    每个交给 ``generation_manager.start`` 的协程都该包一层。开场是反面教材：它是玩家
+    第一次等待，却一处埋点都没有——实测一次开场 3 分 42 秒，98% 的输出 token 是模型思考
+    （生成完即被丢弃、不进旁白），而日志里连「花了多久」都查不到，只能靠体感描述。
+
+    ``drain`` 给定时在计时开始后立刻排干上一轮的后台收尾——那段等待也算玩家的等待，
+    必须计进合计里。不传则不排干（如真人 KP 的队友回合，本就不碰 world_state）。
+
+    合计写在 ``finally``：生成失败或被取消时**更**该知道时间花在哪儿。
+    """
+    started = time.monotonic()
+    if drain is not None:
+        t_drain = time.monotonic()
+        await drain(session_id)
+        drain_s = time.monotonic() - t_drain
+        if drain_s > _DRAIN_LOG_THRESHOLD:
+            logger.info("耗时|%s等上轮收尾 %.1fs session=%s", label, drain_s, session_id)
+    try:
+        yield
+    finally:
+        usage = usage_tracker.snapshot()
+        logger.info(
+            "耗时|%s合计 %.1fs（%s）session=%s",
+            label, time.monotonic() - started, usage_tracker.fmt(usage), session_id,
+        )
+        usage_tracker.warn_if_reasoning_dominates(usage)
 
 
 def classify_llm_error(exc: BaseException) -> str:

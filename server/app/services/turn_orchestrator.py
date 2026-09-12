@@ -147,6 +147,13 @@ _parse_team_decision = team_turn_service._parse_team_decision
 _run_team_turn = team_turn_service._run_team_turn
 TeamAgent = team_turn_service.TeamAgent
 _classify_llm_error = generation_lifecycle.classify_llm_error
+
+
+def _timed(session_id: str, label: str, *, drain: bool = True):
+    """本模块各条生成路径共用的计时包装（见 generation_lifecycle.generation_timing）。"""
+    return generation_lifecycle.generation_timing(
+        session_id, label, drain=_drain_housekeeping if drain else None,
+    )
 _housekeeping_manager = generation_lifecycle.HousekeepingManager()
 _housekeeping_tasks = _housekeeping_manager.tasks
 STORY_SUMMARY_TRIGGER_RATIO = generation_housekeeping.STORY_SUMMARY_TRIGGER_RATIO
@@ -1528,7 +1535,13 @@ async def run_check_request_generation(
     可疑点时，光报技能名 KP 猜不出具体针对什么，必须带上这句话才能裁定到位。
     KP 若判定需要，会输出 [DICE_CHECK]，经 _process_commands 挂成「待玩家投骰」；
     若判定无需检定，则直接简短叙述。"""
-    await _drain_housekeeping(session_id)
+    async with _timed(session_id, "申请检定"):
+        await _run_check_request_generation(session_id, actor_id, skill, intent)
+
+
+async def _run_check_request_generation(
+    session_id: str, actor_id: str, skill: str, intent: str = "",
+) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -1567,7 +1580,11 @@ async def run_combat_aftermath_generation(session_id: str) -> None:
     KP 承接直接后果、交代在场者状态、把主动权交还调查员。读一次即清 combat_result，
     避免玩家下一次行动时 _run_generation 再注入一遍余波。无结果摘要 / 无 LLM 则安静收场。
     """
-    await _drain_housekeeping(session_id)
+    async with _timed(session_id, "战斗余波"):
+        await _run_combat_aftermath_generation(session_id)
+
+
+async def _run_combat_aftermath_generation(session_id: str) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -1610,6 +1627,12 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
     以前是开头就 `await _drain_housekeeping`，玩家点了投骰却先看到「KP 正在整理笔记」、
     要等两次 LLM 才出骰子动画——点得越快等得越久。
     """
+    # drain=False：这条路的排干刻意放在掷骰之后（见上），那一段自带打点。
+    async with _timed(session_id, "投骰", drain=False):
+        await _run_roll_generation(session_id, check_id)
+
+
+async def _run_roll_generation(session_id: str, check_id: str) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -1747,7 +1770,6 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         # 骰子已经落地、动画已经在玩家那边跑起来了，现在才等上一轮后台收尾。
         # 但玩家看到的是「骰子出了，然后 KP 迟迟不说话」——这段等待此前一处埋点都没有，
         # 只能靠体感描述。骰子落地到 KP 开口之间的每一段都要能计时。
-        t_roll = time.monotonic()
         t_drain = time.monotonic()
         await _drain_housekeeping(session_id)
         drain_s = time.monotonic() - t_drain
@@ -1797,7 +1819,7 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
         await _settle_rolled_check(
             db, session_id, game_session, module, player_char, party_others,
             check=check, result=result, skill=skill, difficulty=difficulty,
-            source=source, disp_name=disp_name, t_roll=t_roll,
+            source=source, disp_name=disp_name,
         )
     except asyncio.CancelledError:
         logger.info("投骰生成被取消: session=%s", session_id)
@@ -1817,6 +1839,11 @@ async def run_luck_decision(session_id: str, spend: bool, reroll: bool = False) 
     都不选就是放弃。无论哪种，之后都汇回 ``_settle_rolled_check`` 那一条链——买来的成功、
     重掷来的成功和掷出来的成功，后续待遇必须一模一样。
     """
+    async with _timed(session_id, "幸运决策", drain=False):
+        await _run_luck_decision(session_id, spend, reroll)
+
+
+async def _run_luck_decision(session_id: str, spend: bool, reroll: bool = False) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -1885,7 +1912,7 @@ async def run_luck_decision(session_id: str, spend: bool, reroll: bool = False) 
             check=check, result=result, skill=skill, difficulty=difficulty,
             source=str(check.get("source") or ""),
             disp_name=str(pending.get("disp_name") or ""),
-            t_roll=time.monotonic(), luck_spent=spent,
+            luck_spent=spent,
         )
     except asyncio.CancelledError:
         logger.info("幸运消费后续生成被取消: session=%s", session_id)
@@ -1998,7 +2025,6 @@ async def _settle_rolled_check(
     difficulty: str,
     source: str,
     disp_name: str,
-    t_roll: float,
     luck_spent: int = 0,
 ) -> None:
     """骰子落定之后的整条结算链：治疗 → 批次归并 → 物品/线索发货 → KP 续写。
@@ -2083,11 +2109,8 @@ async def _settle_rolled_check(
         "耗时|投骰后 KP 续写 %.1fs（%s）session=%s",
         time.monotonic() - t_kp, usage_tracker.fmt(usage_tracker.delta(u_kp)), session_id,
     )
-    logger.info(
-        "耗时|投骰合计 %.1fs（%s）session=%s",
-        time.monotonic() - t_roll, usage_tracker.fmt(usage_tracker.snapshot()), session_id,
-    )
-    usage_tracker.warn_if_reasoning_dominates(usage_tracker.snapshot())
+    # 合计与思考占比由顶层入口的 _timed 统一记（投骰与幸运决策都汇到这条链，
+    # 在这里记会漏掉「掷骰之前」那段，两处入口也会各记一次）。
 
 
 def _persist_module_intro(db: Session, session_id: str, module: Module) -> str | None:
@@ -2120,7 +2143,11 @@ def _persist_module_intro(db: Session, session_id: str, module: Module) -> str |
 
 
 async def run_opening_generation(session_id: str) -> None:
-    await _drain_housekeeping(session_id)
+    async with _timed(session_id, "开场"):
+        await _run_opening_generation(session_id)
+
+
+async def _run_opening_generation(session_id: str) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -2183,7 +2210,11 @@ async def run_epilogue_generation(session_id: str) -> None:
     不能因为尾声里写了「怪物追来」就又开一场战斗，也不能再挂检定。
     fail-open：生成失败只落一句提示，绝不影响已经结束的会话状态。
     """
-    await _drain_housekeeping(session_id)
+    async with _timed(session_id, "尾声"):
+        await _run_epilogue_generation(session_id)
+
+
+async def _run_epilogue_generation(session_id: str) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -2295,7 +2326,13 @@ async def run_travel_generation(
     场景切换是后端据玩家显式选择执行的（非 KP 臆测），从根上杜绝「说句话就被自动搬走」。
     ``via``：连通图算出的途经场景名（目标不相邻但连通时非空）——KP 据此叙述穿行而非瞬移。
     """
-    await _drain_housekeeping(session_id)
+    async with _timed(session_id, "前往"):
+        await _run_travel_generation(session_id, actor_id, scene_id, via)
+
+
+async def _run_travel_generation(
+    session_id: str, actor_id: str, scene_id: str, via: list[str] | None = None,
+) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
