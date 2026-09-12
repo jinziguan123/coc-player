@@ -10,9 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsPane, TabsPanes, TabsTrigger } from '@/components/ui/tabs'
 import { ApiKeyField } from './ApiKeyField'
 import { ModelNameField } from './ModelNameField'
+import { formatHeaderLines, parseHeaderLines } from './headerLines'
 import { ModelRoles, RoleBadge } from './ModelRoles'
 import { ProfileRow } from './ProfileRow'
 import { Copy, PlugZap, SquarePen, Trash2 } from 'lucide-react'
@@ -31,6 +32,7 @@ interface AIProfile {
   context_window?: number
   thinking_disabled?: boolean
   reasoning_effort?: string
+  extra_headers?: Record<string, string>
 }
 
 /** 岗位卡只要「是谁、跑的哪个模型」这两样。 */
@@ -53,6 +55,8 @@ type FormData = {
   context_window: number
   thinking_disabled: boolean
   reasoning_effort: string
+  /** 自定义请求头的文本形态（每行「名称: 值」），提交时解析成对象。 */
+  extra_headers_text: string
 }
 
 const EMPTY_FORM: FormData = {
@@ -64,6 +68,7 @@ const EMPTY_FORM: FormData = {
   context_window: 0,
   thinking_disabled: false,
   reasoning_effort: '',
+  extra_headers_text: '',
 }
 
 const PROTOCOL_INFO: Record<string, { urlPlaceholder: string; modelPlaceholder: string }> = {
@@ -115,6 +120,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
       context_window: p.context_window || 0,
       thinking_disabled: !!p.thinking_disabled,
       reasoning_effort: p.reasoning_effort || '',
+      extra_headers_text: formatHeaderLines(p.extra_headers),
     })
   }
 
@@ -133,6 +139,22 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
     return form.api_key
   }
 
+  /** 自定义头的明文：列表接口把头值和密钥一样掩码了，「获取可用模型」要用真值就得向后端要。 */
+  const secretHeaders = async (): Promise<Record<string, string>> => {
+    const typed = parseHeaderLines(form.extra_headers_text)
+    const masked = Object.values(typed).some((v) => v.includes('****'))
+    if (editingId && editingId !== 'new' && masked) {
+      const res = await localApi.get<{ api_key: string; extra_headers?: Record<string, string> }>(
+        `/settings/ai/profiles/${editingId}/key`,
+      )
+      const real = res.extra_headers || {}
+      // 用户可能在掩码值旁新加了几行：掩码的项取真值，其余按填的来
+      return Object.fromEntries(
+        Object.entries(typed).map(([k, v]) => [k, v.includes('****') && real[k] ? real[k] : v]),
+      )
+    }
+    return typed
+  }
   /** 掩码回填：给「显示密钥」用，取到后填回表单。 */
   const revealKey = async (): Promise<string> => {
     const key = await secretKey()
@@ -157,11 +179,14 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
     }
     setSaving(true)
     try {
+      // 文本域只是表单形态；后端存的是对象。带掩码的值原样送回，后端据此沿用旧值。
+      const { extra_headers_text, ...rest } = form
+      const payload = { ...rest, extra_headers: parseHeaderLines(extra_headers_text) }
       if (editingId === 'new') {
-        await localApi.post('/settings/ai/profiles', form)
+        await localApi.post('/settings/ai/profiles', payload)
         toast.success('配置已创建')
       } else {
-        await localApi.put(`/settings/ai/profiles/${editingId}`, form)
+        await localApi.put(`/settings/ai/profiles/${editingId}`, payload)
         toast.success('配置已更新')
       }
       cancelEdit()
@@ -364,7 +389,9 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
               <TabsTrigger value="caps">能力</TabsTrigger>
             </TabsList>
 
-            <TabsContent
+            {/* 两页叠放同时挂载：窗体高度取较高的「连接」页，切到「能力」页不再缩一截 */}
+            <TabsPanes>
+            <TabsPane
               value="conn"
               className="!p-0 !pt-4"
               style={{ maxHeight: '62vh', overflowY: 'auto' }}
@@ -440,6 +467,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   placeholder={info.modelPlaceholder}
                   onChange={(v) => setForm({ ...form, model_name: v })}
                   resolveKey={secretKey}
+                  resolveHeaders={secretHeaders}
                 />
 
                 <ApiKeyField
@@ -449,10 +477,34 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   hint="使用本机运行的模型（如 Ollama）时可以留空"
                   revealKey={revealKey}
                 />
-              </div>
-            </TabsContent>
 
-            <TabsContent
+                {/* 有些服务在标准鉴权头之外还要带东西才放行（Google 的 x-goog-api-key、
+                    中转站的租户标识、OpenCode 这类代理的来源头）。每行一个，同名会覆盖默认头。 */}
+                <div>
+                  <label
+                    className="block text-sm font-semibold mb-1"
+                    style={{ fontSize: '0.85rem' }}
+                    htmlFor="ai-extra-headers"
+                  >
+                    自定义请求头（可选）
+                  </label>
+                  <textarea
+                    id="ai-extra-headers"
+                    className="input w-full"
+                    rows={3}
+                    style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.8rem', resize: 'vertical' }}
+                    placeholder={'每行一个，例如\nx-goog-api-key: AIza...\nHTTP-Referer: https://example.com'}
+                    value={form.extra_headers_text}
+                    onChange={(e) => setForm({ ...form, extra_headers_text: e.target.value })}
+                  />
+                  <p className="text-xs" style={{ marginTop: '0.3rem', opacity: 0.7 }}>
+                    每次请求原样附上，同名会覆盖默认头；值按密钥处理，列表里显示为掩码。
+                  </p>
+                </div>
+              </div>
+            </TabsPane>
+
+            <TabsPane
               value="caps"
               className="!p-0 !pt-4"
               style={{ maxHeight: '62vh', overflowY: 'auto' }}
@@ -543,7 +595,8 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
                   )
                 )}
               </div>
-            </TabsContent>
+            </TabsPane>
+            </TabsPanes>
           </Tabs>
 
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>

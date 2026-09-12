@@ -15,7 +15,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 const mockPost = vi.mocked(localApi.post)
 
 /** 受控组件，得有人替它拿着值——照实模拟表单那一侧。 */
-function Harness({ initial = '' }: { initial?: string }) {
+function Harness({
+  initial = '', resolveHeaders,
+}: { initial?: string; resolveHeaders?: () => Promise<Record<string, string>> }) {
   const [value, setValue] = useState(initial)
   return (
     <ModelNameField
@@ -25,6 +27,7 @@ function Harness({ initial = '' }: { initial?: string }) {
       placeholder="deepseek-chat"
       onChange={setValue}
       resolveKey={async () => 'sk-real'}
+      resolveHeaders={resolveHeaders}
     />
   )
 }
@@ -117,6 +120,21 @@ describe('模型名称：问上游要清单', () => {
       protocol: 'openai',
       base_url: 'https://api.deepseek.com',
       api_key: 'sk-real',
+    })
+  })
+
+  it('配了自定义请求头就一并带去问：Google 不带 x-goog-api-key 连清单都不给', async () => {
+    const user = userEvent.setup()
+    upstreamReturns(THREE)
+    render(<Harness resolveHeaders={async () => ({ 'x-goog-api-key': 'AIza-real' })} />)
+
+    await clickFetch(user)
+
+    expect(mockPost).toHaveBeenCalledWith('/settings/ai/models', {
+      protocol: 'openai',
+      base_url: 'https://api.deepseek.com',
+      api_key: 'sk-real',
+      extra_headers: { 'x-goog-api-key': 'AIza-real' },
     })
   })
 

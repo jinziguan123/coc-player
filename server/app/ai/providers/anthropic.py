@@ -8,7 +8,7 @@ import httpx
 
 from app.ai import usage_tracker
 from app.ai.provider import (
-    CACHE_BLOCKS_KEY, LLMProvider, StreamDelta, ToolCall, iter_sse_data_lines,
+    CACHE_BLOCKS_KEY, LLMProvider, StreamDelta, ToolCall, clean_headers, iter_sse_data_lines,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,9 +76,11 @@ class AnthropicProvider(LLMProvider):
         model: str = "claude-sonnet-4-20250514",
         base_url: str = "",
         api_key: str = "",
+        extra_headers: dict[str, str] | None = None,
     ):
         self.model = model
         self._api_key = api_key
+        self._extra_headers = clean_headers(extra_headers)
         self._client = httpx.AsyncClient(timeout=120.0)
         base = base_url.rstrip("/") if base_url else "https://api.anthropic.com"
         self._api_url = f"{base}/v1/messages"
@@ -111,10 +113,12 @@ class AnthropicProvider(LLMProvider):
         usage_tracker.add(self.last_usage)   # 累进本局用量（此前只写 last_usage、系统性漏记）
 
     def _headers(self) -> dict[str, str]:
+        # 自定义头放在后面：同名覆盖默认
         return {
             "x-api-key": self._api_key,
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
+            **self._extra_headers,
         }
 
     def _split_system(

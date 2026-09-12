@@ -10,7 +10,7 @@ import httpx
 
 from app.ai import usage_tracker
 from app.ai.provider import (
-    LLMProvider, StreamDelta, ToolCall, iter_sse_data_lines, strip_provider_keys,
+    LLMProvider, StreamDelta, ToolCall, clean_headers, iter_sse_data_lines, strip_provider_keys,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,25 +80,47 @@ def _http_error_detail(error: httpx.HTTPStatusError) -> str:
 
 
 class ToolCallAggregator:
-    """把 OpenAI 流式 delta 里按 index 分片下发的 tool_calls 聚合成完整调用。
+    """把流式 delta 里下发的 tool_calls 聚合成完整调用。
 
-    协议形态：首个分片带 index/id/function.name，后续分片只带 index 与
-    function.arguments 的字符串增量；聚合到流结束（finish_reason/[DONE]）才算完整。
+    两种协议形态都要认：
+
+    · **OpenAI / DeepSeek**：分片带 ``index``，首片给 id 与 function.name，
+      后续片只给同一 index 下 function.arguments 的字符串增量。
+    · **Gemini 的 OpenAI 兼容层**：**不给 index**，每个分片就是一次完整调用
+      （实抓：两次调用分别带各自的 id 与完整 arguments，都没有 index 字段）。
+
+    此前一律 ``int(part.get("index") or 0)``，于是 Gemini 的两次调用都落进 0 号槽，
+    arguments 被拼成 ``{"who":…}{"scene_id":…}`` 解析失败，名字还被后者覆盖——
+    回传给模型的就是个对不上号的缝合怪，下一轮必然 400。
+
+    没有 index 时的判据是 **function.name**：带名字即一次新调用，只带 arguments 的
+    分片续到最后一个槽（万一将来它也改成增量下发，这条仍然成立）。
     arguments 解析失败归一为空 dict——让执行器以缺参错误回给模型重试，而不是断流。
     """
 
     def __init__(self) -> None:
         self._calls: dict[int, dict] = {}
 
+    def _slot_index(self, part: dict, fn: dict) -> int:
+        index = part.get("index")
+        if index is not None:
+            return int(index)
+        if fn.get("name") or not self._calls:
+            return max(self._calls) + 1 if self._calls else 0
+        return max(self._calls)          # 无名分片：续上一次调用的 arguments
+
     def add(self, delta_tool_calls: list[dict]) -> None:
         for part in delta_tool_calls or []:
-            index = int(part.get("index") or 0)
+            fn = part.get("function") or {}
             slot = self._calls.setdefault(
-                index, {"id": "", "name": "", "arguments": ""},
+                self._slot_index(part, fn),
+                {"id": "", "name": "", "arguments": "", "extra_content": {}},
             )
             if part.get("id"):
                 slot["id"] = part["id"]
-            fn = part.get("function") or {}
+            if part.get("extra_content"):
+                # 供应商私有字段（如 Gemini 的思考签名）：原样收好，回传时要带回去
+                slot["extra_content"] = part["extra_content"]
             if fn.get("name"):
                 slot["name"] = fn["name"]
             if fn.get("arguments"):
@@ -119,6 +141,7 @@ class ToolCallAggregator:
                 arguments = {}
             calls.append(ToolCall(
                 id=slot["id"] or f"call_{index}", name=slot["name"], arguments=arguments,
+                extra_content=slot.get("extra_content") or {},
             ))
         self._calls.clear()
         return calls
@@ -131,9 +154,11 @@ class OpenAICompatProvider(LLMProvider):
         self, model: str = "deepseek-chat", base_url: str = "", api_key: str = "",
         vision: bool = False, reasoning_effort: str = "",
         thinking_disabled: bool = False,
+        extra_headers: dict[str, str] | None = None,
     ):
         self.model = model
         self._api_key = api_key
+        self._extra_headers = clean_headers(extra_headers)
         self._vision = vision  # 配置里的显式「支持视觉」开关
         # 思考强度（reasoning_effort：low/high/max）。空=不带该参数，用模型默认档。
         # 它**只调强度、关不掉思考**——要关走下面的 thinking_disabled。
@@ -147,9 +172,11 @@ class OpenAICompatProvider(LLMProvider):
         self.last_usage: dict | None = None
 
     def _headers(self) -> dict[str, str]:
+        # 自定义头放在后面：同名覆盖默认（有的服务要把鉴权头换成自己的那套）
         return {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            **self._extra_headers,
         }
 
     def _apply_reasoning(self, payload: dict) -> dict:

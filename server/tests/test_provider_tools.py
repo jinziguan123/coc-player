@@ -133,3 +133,62 @@ class TestDefaultStreamChat:
                 _PlainProvider(),
                 tools=[{"type": "function", "function": {"name": "x"}}],
             ))
+
+
+# ── 两种 tool_calls 流式协议（Gemini 实抓踩出来的） ─────────────────────────
+
+def _agg(*parts_per_chunk):
+    from app.ai.providers.openai_compat import ToolCallAggregator
+    a = ToolCallAggregator()
+    for parts in parts_per_chunk:
+        a.add(parts)
+    return a.flush()
+
+
+def test_openai_式分片按_index_增量拼接():
+    """首片给 id 与 name，后续片只给同一 index 下的 arguments 增量。"""
+    calls = _agg(
+        [{"index": 0, "id": "c0", "type": "function", "function": {"name": "say", "arguments": '{"who":'}}],
+        [{"index": 0, "function": {"arguments": '"诺特"}'}}],
+    )
+    assert len(calls) == 1
+    assert calls[0].id == "c0" and calls[0].name == "say" and calls[0].arguments == {"who": "诺特"}
+
+
+def test_没有_index_时每个带名字的分片都是独立调用():
+    """Gemini 的兼容层不给 index，每片就是一次完整调用。
+    此前一律归到 0 号槽 → arguments 拼成 {"who":…}{"scene_id":…} 解析失败、
+    名字被后者覆盖，回传给模型是个对不上号的缝合怪（实测每轮必 400）。"""
+    calls = _agg([
+        {"id": "c1", "type": "function", "function": {"name": "say", "arguments": '{"who":"诺特"}'}},
+        {"id": "c2", "type": "function", "function": {"name": "travel_suggest", "arguments": '{"scene_id":"street"}'}},
+    ])
+    assert [(c.id, c.name, c.arguments) for c in calls] == [
+        ("c1", "say", {"who": "诺特"}),
+        ("c2", "travel_suggest", {"scene_id": "street"}),
+    ]
+
+
+def test_没有_index_的无名分片续上一次调用():
+    """万一将来它也改成增量下发：只带 arguments、不带 name 的分片要续到最后一个槽。"""
+    calls = _agg(
+        [{"id": "c1", "function": {"name": "say", "arguments": '{"who":'}}],
+        [{"function": {"arguments": '"诺特"}'}}],
+    )
+    assert len(calls) == 1 and calls[0].arguments == {"who": "诺特"}
+
+
+def test_思考签名被保留并只挂在它原本所在的调用上():
+    """Gemini 把 thought_signature 挂在第一个 function call 的 extra_content 上。"""
+    sig = {"google": {"thought_signature": "EpoHCpcH…"}}
+    calls = _agg([
+        {"id": "c1", "extra_content": sig, "function": {"name": "say", "arguments": "{}"}},
+        {"id": "c2", "function": {"name": "travel_suggest", "arguments": "{}"}},
+    ])
+    assert calls[0].extra_content == sig
+    assert calls[1].extra_content == {}      # 本来就没有，不凭空造
+
+
+def test_不下发该字段的后端不受影响():
+    calls = _agg([{"index": 0, "id": "c0", "function": {"name": "say", "arguments": "{}"}}])
+    assert calls[0].extra_content == {}

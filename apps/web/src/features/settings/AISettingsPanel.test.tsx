@@ -145,6 +145,56 @@ describe('AI 配置面板', () => {
     expect(mockPut.mock.calls[0][1]).toMatchObject({ reasoning_effort: 'ultra' })
   })
 
+  it('编辑弹窗两页同时挂载叠放：切页时窗体高度不漂移，非当前页不可见', async () => {
+    const user = userEvent.setup()
+    render(<AISettingsPanel />)
+    await openRow(user, 'deepseek 主力')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
+    const dialog = await findDialog('编辑配置')
+
+    // 两页都在 DOM 里（Radix 默认只渲染当前页，那样高度就随内容跳）
+    const panes = within(dialog).getAllByRole('tabpanel', { hidden: true })
+    expect(panes).toHaveLength(2)
+    const conn = panes.find((p) => p.getAttribute('data-state') === 'active')!
+    const caps = panes.find((p) => p.getAttribute('data-state') === 'inactive')!
+    expect(conn.parentElement).toBe(caps.parentElement)          // 同一容器叠放
+    expect(caps.className).toMatch(/data-\[state=inactive\]:invisible/)
+
+    await user.click(within(dialog).getByRole('tab', { name: '能力' }))
+    expect(caps.getAttribute('data-state')).toBe('active')
+    expect(conn.getAttribute('data-state')).toBe('inactive')
+  })
+
+  it('自定义请求头按行填写，保存时解析成对象随表单提交', async () => {
+    const user = userEvent.setup()
+    mockPut.mockResolvedValue(chatProfile)
+    render(<AISettingsPanel />)
+    await openRow(user, 'deepseek 主力')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
+
+    const dialog = await findDialog('编辑配置')
+    // 在「连接」页，和地址、密钥同屏：它就是连得上连不上的一部分
+    const field = within(dialog).getByLabelText('自定义请求头（可选）')
+    expect(field.tagName).toBe('TEXTAREA')
+    await user.type(field, 'x-goog-api-key: AIzaXYZ{enter}HTTP-Referer: https://coc.local')
+
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mockPut).toHaveBeenCalled())
+    const body = mockPut.mock.calls[0][1] as Record<string, unknown>
+    expect(body.extra_headers).toEqual({ 'x-goog-api-key': 'AIzaXYZ', 'HTTP-Referer': 'https://coc.local' })
+    expect(body).not.toHaveProperty('extra_headers_text')   // 文本形态不出面板
+  })
+
+  it('编辑已有配置时把请求头对象回填成每行一条', async () => {
+    const user = userEvent.setup()
+    mockLists([{ ...chatProfile, extra_headers: { 'x-goog-api-key': 'AIza****wxyz' } }], [imageProfile])
+    render(<AISettingsPanel />)
+    await openRow(user, 'deepseek 主力')
+    await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
+    const dialog = await findDialog('编辑配置')
+    expect(within(dialog).getByLabelText('自定义请求头（可选）')).toHaveValue('x-goog-api-key: AIza****wxyz')
+  })
+
   it('「关闭模型思考」勾上后随表单保存，并隐藏只调强度的思考等级', async () => {
     // 思考默认是开的、effort 默认 high，这个开关是唯一能真正关掉它的途径；
     // 而 reasoning_effort 只调强度、关不掉思考，所以关闭思考后不再展示该输入框。

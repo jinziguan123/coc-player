@@ -29,7 +29,7 @@ interface ModelsResult {
 }
 
 export function ModelNameField({
-  protocol, baseUrl, value, placeholder, onChange, resolveKey,
+  protocol, baseUrl, value, placeholder, onChange, resolveKey, resolveHeaders,
 }: {
   protocol: string
   baseUrl: string
@@ -38,6 +38,8 @@ export function ModelNameField({
   onChange: (next: string) => void
   /** 取真实密钥：编辑态下表单里是掩码，要向后端单独要。 */
   resolveKey: () => Promise<string>
+  /** 自定义请求头（明文）：Google 这类服务不带 x-goog-api-key 连模型清单都不给。可不传。 */
+  resolveHeaders?: () => Promise<Record<string, string>>
 }) {
   const listId = useId()
   const [models, setModels] = useState<string[]>([])
@@ -60,6 +62,8 @@ export function ModelNameField({
         protocol,
         base_url: baseUrl.trim(),
         api_key: await resolveKey(),
+        // 没接自定义头的调用方不带这个键，后端默认为空
+        ...(resolveHeaders ? { extra_headers: await resolveHeaders() } : {}),
       })
       if (!res.success) {
         // 后端已经把「这个服务没有清单接口」之类的情况说成人话了，照转即可

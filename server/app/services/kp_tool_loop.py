@@ -619,6 +619,9 @@ async def _run_kp_agent_loop(
                         "name": tc.name,
                         "arguments": json.dumps(tc.arguments or {}, ensure_ascii=False),
                     },
+                    # 供应商私有字段原样带回（Gemini 的思考签名丢了就会被拒）。
+                    # 本地合成的调用（文本指令兜底、计划补掷）没有这个字段，也不该凭空造。
+                    **({"extra_content": tc.extra_content} if tc.extra_content else {}),
                 }
                 for tc in tool_calls
             ],

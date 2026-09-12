@@ -833,3 +833,36 @@ def test_其它工具卡不受影响():
     )))
     assert [eid for _off, eid in order] == ["ev-d"]            # 照常进重排清单
     assert _chunk_kinds(chunks).index("dice") < len(chunks) - 1  # 不在末尾
+
+
+def test_思考签名随工具结果原样回传():
+    """Gemini 要求回传工具结果时带回 thought_signature，丢了下一轮就被拒（400）。
+    本地合成的调用没有该字段，也不该凭空造一个。"""
+    sig = {"google": {"thought_signature": "EpoHCpcH…"}}
+    llm = _FakeToolLLM([
+        [_text("诺特开口。"), StreamDelta(kind="tool_call", tool_call=ToolCall(
+            id="c1", name="say", arguments={"who": "诺特", "text": "去街上看看"}, extra_content=sig))],
+        [_text("他站起身。")],
+    ])
+    executor = _RecordingExecutor()
+    asyncio.run(_run_loop(llm, executor))
+
+    # 第二次请求里回传的 assistant 消息
+    sent = llm.calls[1]["messages"]
+    assistant = next(m for m in sent if m.get("role") == "assistant" and m.get("tool_calls"))
+    assert assistant["tool_calls"][0]["extra_content"] == sig
+
+
+def test_本地合成的调用不带该字段():
+    """文本指令兜底造出来的调用不是模型真的调的，不该伪造签名。"""
+    llm = _FakeToolLLM([
+        [_text("[SET_FLAG: f1]")],
+        [_text("尘埃落定。")],
+    ])
+    executor = _RecordingExecutor()
+    asyncio.run(_run_loop(llm, executor))
+
+    assistant = next(
+        m for m in llm.calls[1]["messages"] if m.get("role") == "assistant" and m.get("tool_calls")
+    )
+    assert "extra_content" not in assistant["tool_calls"][0]

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.ai import profile_store
+from app.ai.provider import clean_headers
 from app.ai.profile_store import AIProfile, ImageProfile
 from app.api.deps import require_local_client
 from app.services import ai_quota
@@ -60,6 +61,7 @@ class AIProfileCreate(BaseModel):
     context_window: int = 0
     thinking_disabled: bool = False
     reasoning_effort: str = ""
+    extra_headers: dict[str, str] = {}
 
 
 class AIProfileUpdate(BaseModel):
@@ -73,6 +75,8 @@ class AIProfileUpdate(BaseModel):
     context_window: int | None = None
     thinking_disabled: bool | None = None
     reasoning_effort: str | None = None
+    # 整份替换：前端每次提交完整清单。值里带掩码（****）的那一项沿用旧值（同 api_key 的约定）。
+    extra_headers: dict[str, str] | None = None
 
 
 class TestResult(BaseModel):
@@ -87,6 +91,7 @@ class ModelsProbe(BaseModel):
     protocol: str = "openai"
     base_url: str = ""
     api_key: str = ""
+    extra_headers: dict[str, str] = {}
 
 
 class ModelsResult(BaseModel):
@@ -101,6 +106,30 @@ def _mask_key(key: str) -> str:
     if len(key) <= 8:
         return "****"
     return key[:4] + "****" + key[-4:]
+
+
+def _mask_headers(headers: dict[str, str]) -> dict[str, str]:
+    """自定义头的值可能就是密钥（x-goog-api-key），一律按密钥掩码；头名照原样给。"""
+    return {k: _mask_key(v) for k, v in (headers or {}).items()}
+
+
+def _merge_headers(old: dict[str, str], new: dict[str, str]) -> dict[str, str]:
+    """更新时的合并：以新清单为准（删掉的项就是删了），值带掩码的项沿用旧值。"""
+    out: dict[str, str] = {}
+    for name, value in clean_headers(new).items():
+        if "****" in value and name in (old or {}):
+            out[name] = old[name]
+        else:
+            out[name] = value
+    return out
+
+
+def _masked(profile: AIProfile) -> AIProfile:
+    """返回给前端的副本：api_key 与自定义头的值都掩码。"""
+    resp = profile.model_copy()
+    resp.api_key = _mask_key(resp.api_key)
+    resp.extra_headers = _mask_headers(resp.extra_headers)
+    return resp
 
 
 # ---------- API 端点 ----------
@@ -127,6 +156,7 @@ def list_profiles():
     profiles = profile_store._load_profiles()
     for p in profiles:
         p.api_key = _mask_key(p.api_key)
+        p.extra_headers = _mask_headers(p.extra_headers)
     return profiles
 
 
@@ -146,12 +176,12 @@ def create_profile(body: AIProfileCreate):
         context_window=body.context_window,
         thinking_disabled=body.thinking_disabled,
         reasoning_effort=body.reasoning_effort,
+        extra_headers=clean_headers(body.extra_headers),
         is_active=len(profiles) == 0,  # 第一个配置自动激活
     )
     profiles.append(new_profile)
     profile_store._save_profiles(profiles)
-    new_profile.api_key = _mask_key(new_profile.api_key)
-    return new_profile
+    return _masked(new_profile)
 
 
 @router.put("/ai/profiles/{profile_id}", response_model=AIProfile)
@@ -188,10 +218,11 @@ def update_profile(profile_id: str, body: AIProfileUpdate):
         # 如果包含掩码字符，说明前端没有修改 key，保留旧值
         if "****" not in body.api_key:
             target.api_key = body.api_key
+    if body.extra_headers is not None:
+        target.extra_headers = _merge_headers(target.extra_headers, body.extra_headers)
 
     profile_store._save_profiles(profiles)
-    target.api_key = _mask_key(target.api_key)
-    return target
+    return _masked(target)
 
 
 @router.delete("/ai/profiles/{profile_id}")
@@ -267,7 +298,7 @@ def reveal_profile_key(profile_id: str):
     变成界面操作，不扩大密钥的暴露面。"""
     for p in profile_store._load_profiles():
         if p.id == profile_id:
-            return {"api_key": p.api_key}
+            return {"api_key": p.api_key, "extra_headers": dict(p.extra_headers or {})}
     raise HTTPException(status_code=404, detail="配置不存在")
 
 
@@ -288,9 +319,7 @@ def duplicate_profile(profile_id: str):
     })
     profiles.append(dup)
     profile_store._save_profiles(profiles)
-    resp = dup.model_copy()
-    resp.api_key = _mask_key(resp.api_key)
-    return resp
+    return _masked(dup)
 
 
 @router.post("/ai/profiles/{profile_id}/test", response_model=TestResult)
@@ -321,10 +350,11 @@ async def test_profile(profile_id: str):
         latency = int((time.time() - start) * 1000)
         detail = ""
         try:
-            err_body = e.response.json()
-            detail = err_body.get("error", {}).get("message", "") or str(err_body)
+            detail = _error_message(e.response.json())
         except Exception:
-            detail = e.response.text[:200]
+            detail = ""
+        if not detail:
+            detail = (e.response.text or "")[:200]
         return TestResult(
             success=False,
             message=f"HTTP {e.response.status_code}: {detail}",
@@ -360,6 +390,7 @@ async def list_upstream_models(probe: ModelsProbe) -> ModelsResult:
         base = base or "https://api.deepseek.com"
         url = f"{base}/models"
         headers = {"Authorization": f"Bearer {key}"}
+    headers.update(clean_headers(probe.extra_headers))   # 与真实调用同口径：自定义头同名覆盖
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -409,7 +440,7 @@ def _clean_http_error(e: httpx.HTTPStatusError) -> str:
     不把整页 HTML 糊到提示里。"""
     body = (e.response.text or "").strip()
     try:
-        detail = e.response.json().get("error", {}).get("message", "")
+        detail = _error_message(e.response.json())
         if detail:
             return f"HTTP {e.response.status_code}: {detail}"
     except Exception:
@@ -547,6 +578,53 @@ async def test_image_profile(profile_id: str):
                           latency_ms=int((time.time() - start) * 1000))
 
 
+#: 连接测试的输出预算。16 太小：思考型模型（Gemini、DeepSeek 开着思考时）光思考就把它花完，
+#: 正文一个字都不剩。测试只为验证「连得上、鉴权对、模型名对」，拿到 200 就算过，但预算给足
+#: 一点能让多数模型真吐一句话，提示更有说服力。
+_TEST_MAX_TOKENS = 64
+
+
+def _error_message(payload: object) -> str:
+    """从上游错误体里取出那句人话。
+
+    形状不统一：OpenAI/DeepSeek 回 ``{"error": {"message": …}}``，Gemini 回的是**数组**
+    ``[{"error": {…}}]``。只认字典会让 Gemini 的报错以整段 JSON 的样子糊到界面上。
+    """
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    if not isinstance(payload, dict):
+        return ""
+    err = payload.get("error")
+    if isinstance(err, dict):
+        return str(err.get("message") or "").strip()
+    return str(err or "").strip()
+
+
+def _completion_text(data: object) -> tuple[str, str]:
+    """从 OpenAI 兼容的补全响应里取正文；取不到就说明为什么。
+
+    返回 ``(正文, 说不出正文的原因)``——两者必有其一。此前这里是
+    ``data["choices"][0]["message"]["content"]`` 直接下标，模型没吐正文时抛 KeyError，
+    界面上就是一句 ``'content'``，谁也看不懂（实测 Gemini：思考吃光 16 token 的预算，
+    message 里只剩一个 role）。
+    """
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return "", "上游返回了无法解析的响应"
+    choice = (data.get("choices") or [{}])[0] or {}
+    text = str(((choice.get("message") or {}).get("content")) or "").strip()
+    if text:
+        return text, ""
+    usage = data.get("usage") or {}
+    reasoning = int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0)
+    if reasoning:
+        return "", f"模型把 {reasoning} token 的输出预算全花在思考上，没留下正文"
+    if choice.get("finish_reason") == "length":
+        return "", "输出被长度上限截断，没取到正文"
+    return "", "模型返回了空内容"
+
+
 async def _test_openai(client: httpx.AsyncClient, profile: AIProfile) -> str:
     """使用 OpenAI 兼容协议测试连接"""
     base = profile.base_url.rstrip("/") if profile.base_url else "https://api.deepseek.com"
@@ -554,11 +632,12 @@ async def _test_openai(client: httpx.AsyncClient, profile: AIProfile) -> str:
     headers = {
         "Authorization": f"Bearer {profile.api_key}",
         "Content-Type": "application/json",
+        **clean_headers(getattr(profile, "extra_headers", None)),
     }
     payload = {
         "model": profile.model_name,
         "messages": [{"role": "user", "content": "回复OK"}],
-        "max_tokens": 16,
+        "max_tokens": _TEST_MAX_TOKENS,
         "temperature": 0,
     }
     # 按真实调用口径带上思考开关与强度，让连接测试如实反映能否用
@@ -569,9 +648,9 @@ async def _test_openai(client: httpx.AsyncClient, profile: AIProfile) -> str:
         payload.pop("temperature", None)
     resp = await client.post(url, headers=headers, json=payload)
     resp.raise_for_status()
-    data = resp.json()
-    content = data["choices"][0]["message"]["content"]
-    return f"连接成功: {content.strip()}"
+    text, why = _completion_text(resp.json())
+    # 拿到 200 就是连通了：鉴权、地址、模型名都对。没吐正文只是模型的事，照说明白，别判成失败。
+    return f"连接成功: {text}" if text else f"连接成功（{why}）"
 
 
 async def _test_anthropic(client: httpx.AsyncClient, profile: AIProfile) -> str:
@@ -582,18 +661,25 @@ async def _test_anthropic(client: httpx.AsyncClient, profile: AIProfile) -> str:
         "x-api-key": profile.api_key,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
+        **clean_headers(getattr(profile, "extra_headers", None)),
     }
     payload = {
         "model": profile.model_name,
         "messages": [{"role": "user", "content": "回复OK"}],
-        "max_tokens": 16,
+        "max_tokens": _TEST_MAX_TOKENS,
         "temperature": 0,
     }
     resp = await client.post(url, headers=headers, json=payload)
     resp.raise_for_status()
     data = resp.json()
-    content = data["content"][0]["text"]
-    return f"连接成功: {content.strip()}"
+    blocks = (data or {}).get("content") if isinstance(data, dict) else None
+    text = ""
+    for block in blocks or []:
+        if isinstance(block, dict) and block.get("type") in (None, "text"):
+            text = str(block.get("text") or "").strip()
+            if text:
+                break
+    return f"连接成功: {text}" if text else "连接成功（模型没有返回文本内容）"
 
 
 # ── 房间级 AI 配额 ──────────────────────────────────────────────────────────

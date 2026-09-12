@@ -61,6 +61,10 @@ class AIProfile(BaseModel):
     # 实测 deepseek-v4-flash：默认思考 73~140 token，置本项后恒为 0。
     # 不认这个字段的服务会忽略它；只在 OpenAI 兼容协议下下发。
     thinking_disabled: bool = False
+    # 自定义请求头：有些服务要在标准鉴权头之外再带东西才放行（Google 的 x-goog-api-key、
+    # 中转站的租户/项目标识、OpenCode 这类代理的来源标识）。每次请求都原样附上，同名可覆盖
+    # 默认头（有人就是要把 Authorization 换成别的形式）。值可能是密钥，接口返回时按密钥掩码。
+    extra_headers: dict[str, str] = {}
     # 思考强度（reasoning_effort）：low/high/max。空=不下发、用模型默认档（DeepSeek 默认 high）。
     # 注意它**只调强度、不能关思考**，要关请用上面的 thinking_disabled。
     # 仅 OpenAI 兼容协议生效；设了会一并省略 temperature（推理模型多拒绝/忽略它）。

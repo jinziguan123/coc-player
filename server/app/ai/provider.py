@@ -83,6 +83,18 @@ def _stall_message(endpoint: str, stall: float) -> str:
     )
 
 
+def clean_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """整理用户填的自定义请求头：去首尾空白、丢掉空名或空值。名字大小写照用户填的来，
+    HTTP 头本身不区分大小写，服务端都认。"""
+    out: dict[str, str] = {}
+    for name, value in (headers or {}).items():
+        n = str(name or "").strip()
+        v = str(value or "").strip()
+        if n and v:
+            out[n] = v
+    return out
+
+
 def model_name(llm_or_agent) -> str | None:
     """取一次生成所用的模型名，供落库时打在旁白 metadata 上（按模型分组统计文风）。
 
@@ -109,6 +121,12 @@ class ToolCall:
     id: str
     name: str
     arguments: dict = field(default_factory=dict)
+    #: 供应商挂在这次调用上的私有字段，**回传工具结果时必须原样带回**。
+    #: Gemini 的思考模型在第一个调用上挂 ``extra_content.google.thought_signature``
+    #: （一段加密的思考上下文），丢了它下一轮就会被拒：
+    #: 「Function call is missing a thought_signature in functionCall parts」。
+    #: 只在供应商真的下发时才非空，因此对 OpenAI/DeepSeek 这类不认识该字段的后端不产生影响。
+    extra_content: dict = field(default_factory=dict)
 
 
 @dataclass

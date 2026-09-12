@@ -2559,6 +2559,13 @@ export interface components {
              */
             context_window: number;
             /**
+             * Extra Headers
+             * @default {}
+             */
+            extra_headers: {
+                [key: string]: string;
+            };
+            /**
              * Id
              * @default
              */
@@ -2652,6 +2659,13 @@ export interface components {
              */
             context_window: number;
             /**
+             * Extra Headers
+             * @default {}
+             */
+            extra_headers: {
+                [key: string]: string;
+            };
+            /**
              * Model Name
              * @default
              */
@@ -2692,6 +2706,10 @@ export interface components {
             base_url?: string | null;
             /** Context Window */
             context_window?: number | null;
+            /** Extra Headers */
+            extra_headers?: {
+                [key: string]: string;
+            } | null;
             /** Model Name */
             model_name?: string | null;
             /** Name */
@@ -3390,6 +3408,13 @@ export interface components {
              * @default
              */
             base_url: string;
+            /**
+             * Extra Headers
+             * @default {}
+             */
+            extra_headers: {
+                [key: string]: string;
+            };
             /**
              * Protocol
              * @default openai
