@@ -349,6 +349,8 @@ export function GameSessionPage() {
   const kpTurnName = combat?.order.find((c) => c.id === combat.turn)?.name
   const kpSanDanger = kpParty.some((a) => a.san && a.san.max > 0 && a.san.current / a.san.max < 0.3)
   const currentSceneName = locations.find((l) => l.current)?.name || currentSession?.current_scene_id || ''
+  // 场景速查只剩「本场线索」：当前场景没有登记线索就给不出内容，别让右列留一个空壳
+  const currentSceneHasClues = !!locations.find((l) => l.current)?.clues?.length
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -2474,14 +2476,11 @@ export function GameSessionPage() {
           </button>
         </div>
       )}
-      {/* 场景速查：值班台下叙事模式把它摆上主台右侧（战术模式这块位置让给棋盘——原型同款） */}
-      {desk && !immersiveOn && (
+      {/* 场景速查：值班台下叙事模式把它摆上主台右侧（战术模式这块位置让给棋盘——原型同款）。
+          解锁地点已由写作台的「解锁地点」动作负责，这里只留本场线索。 */}
+      {desk && !immersiveOn && currentSceneHasClues && (
         <aside className="kp-desk-brief">
-          <KpSceneBrief
-            sessionId={currentSession.id}
-            places={locations}
-            onDone={() => setRefreshTick((x) => x + 1)}
-          />
+          <KpSceneBrief places={locations} />
         </aside>
       )}
       </div>
@@ -2499,11 +2498,7 @@ export function GameSessionPage() {
             variant="sidebar"
             onCollapse={() => setKpCollapsed(true)}
             hideSituation={desk}
-            aside={desk ? undefined : <KpSceneBrief
-              sessionId={currentSession.id}
-              places={locations}
-              onDone={() => setRefreshTick((x) => x + 1)}
-            />}
+            aside={desk ? undefined : <KpSceneBrief places={locations} />}
           />
         </aside>
       )}
