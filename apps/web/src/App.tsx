@@ -16,6 +16,8 @@ const GameSessionPage = lazy(() => import('./pages/GameSessionPage').then((m) =>
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage').then((m) => ({ default: m.RoomLobbyPage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const OnboardingPage = lazy(() => import('./features/onboarding/OnboardingPage').then((m) => ({ default: m.OnboardingPage })))
+// KP 值班台设计原型。只读页，与主流程互不影响；扶正过程中留着它做对照，最后再删。
+const KpConsoleLab = lazy(() => import('./features/kp-lab/KpConsoleLab').then((m) => ({ default: m.KpConsoleLab })))
 
 /**
  * 按存档号重挂游戏页。
@@ -55,6 +57,8 @@ export default function App() {
             <Route path="room/:sessionId" element={<RoomLobbyPage />} />
             <Route path="game/:sessionId" element={<GameSessionRoute />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="lab/kp" element={<KpConsoleLab />} />
+            <Route path="lab/kp/:sessionId" element={<KpConsoleLab />} />
           </Route>
         </Routes>
       </Suspense>

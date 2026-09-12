@@ -1,0 +1,770 @@
+/**
+ * KP 值班台（原型）样式。
+ *
+ * 刻意独立成文件、类名一律 kl- 前缀：原型要能被整体删掉或整体扶正，不该和主样式纠缠。
+ * 配色/字体全部取自项目既有的 --color-* 与 --font-*，这里不新造一套色板——
+ * 这次要改的是布局与信息层级，不是换皮。
+ *
+ * 唯一新增的视觉元素是「值班台底纹」：一层极细的网格线，只在这个控制台出现。
+ * 它是这块屏幕与其它页面的区分标记——你一眼就知道自己坐在主持位上，而不是在看一个网页。
+ */
+
+.kl-root {
+  --kl-rail: 272px;
+  --kl-grid-line: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-family: var(--font-ui);
+  color: var(--color-text-primary);
+}
+
+/* 值班台底纹：24px 方格 + 中心微弱辉光。pointer-events 全关，纯背景。 */
+.kl-grid-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--kl-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--kl-grid-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 20%, transparent 75%);
+}
+
+/* ---------- 值班条 ---------- */
+.kl-rail-top {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.875rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+.kl-title {
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* 定位串：场景 · 回合。等宽体，像值班台上的读数。 */
+.kl-locus {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kl-locus b { color: var(--color-text-accent); font-weight: 500; }
+
+/* 模式切换：分段控件，当前段有实心底。 */
+.kl-modes { display: inline-flex; border: 1px solid var(--color-border-strong); border-radius: 4px; overflow: hidden; }
+.kl-mode {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  background: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.kl-mode + .kl-mode { border-left: 1px solid var(--color-border); }
+.kl-mode:hover { color: var(--color-text-primary); }
+.kl-mode--on { background: var(--color-accent); color: var(--color-on-accent); }
+.kl-mode--on:hover { color: var(--color-on-accent); }
+
+.kl-proto-badge {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  padding: 0.15rem 0.45rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 3px;
+  color: var(--color-text-accent);
+}
+
+/* ---------- 主体：监控列 + 主台 ---------- */
+.kl-body { display: flex; flex: 1; min-height: 0; }
+
+.kl-rail-left {
+  width: var(--kl-rail);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);
+}
+
+.kl-section-label {
+  font-size: 0.625rem;
+  letter-spacing: 0.22em;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.kl-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+/* ---------- 调查员监控卡（签名元素） ---------- */
+.kl-mon {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-card);
+  padding: 0.55rem 0.6rem 0.5rem;
+  transition: border-color 0.2s;
+}
+.kl-mon:hover { border-color: var(--color-border-strong); }
+
+.kl-mon-head { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.45rem; }
+.kl-mon-sigil {
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-family: var(--font-display);
+  font-size: 0.8125rem;
+}
+.kl-mon-name { font-family: var(--font-display); font-size: 0.875rem; line-height: 1.1; }
+.kl-mon-occ { font-size: 0.625rem; color: var(--color-text-secondary); }
+
+/* 三条数值槽压紧：监控列要在一屏内放下四个人。 */
+.kl-mon .game-vital-item + .game-vital-item { margin-top: 0.2rem; }
+.kl-mon .game-vital-track { height: 6px; }
+
+/**
+ * SAN 越低，卡片本身越「不对劲」。
+ *
+ * 监控的是理智——这是 COC 与任何通用仪表盘的分界。低于一半时卡面渗出血色，
+ * 低于三成时名字轻微失衡、边框开始不安分。数值本身在槽里照常可读，
+ * 变的是**你扫过去时的第一感觉**，这正是监控该给的东西。
+ */
+.kl-mon--strained {
+  background:
+    radial-gradient(120% 90% at 50% 120%, color-mix(in srgb, var(--color-danger-deep) 26%, transparent), transparent 70%),
+    var(--color-bg-card);
+}
+.kl-mon--breaking {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+  background:
+    radial-gradient(120% 90% at 50% 120%, color-mix(in srgb, var(--color-danger-deep) 46%, transparent), transparent 72%),
+    var(--color-bg-card);
+}
+.kl-mon--breaking .kl-mon-name {
+  transform: rotate(-0.7deg) translateX(-0.5px);
+  color: color-mix(in srgb, var(--color-danger) 55%, var(--color-text-primary));
+}
+.kl-mon--out { opacity: 0.5; filter: saturate(0.4); }
+
+/* 行内动作：常驻但收敛（半透明），hover 整张卡时点亮。
+   不做 hover 才出现——KP 需要知道「这里有东西可点」，而不是去撞。 */
+.kl-mon-acts { display: flex; gap: 0.25rem; margin-top: 0.45rem; opacity: 0.55; transition: opacity 0.15s; }
+.kl-mon:hover .kl-mon-acts { opacity: 1; }
+.kl-act {
+  flex: 1;
+  font-size: 0.625rem;
+  padding: 0.2rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-secondary);
+  background: var(--color-input-bg);
+  transition: color 0.15s, border-color 0.15s;
+}
+.kl-act:hover { color: var(--color-text-accent); border-color: var(--color-border-strong); }
+
+/* ---------- 信号灯 ---------- */
+.kl-signal {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.6875rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.kl-signal--alert {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-text-accent);
+}
+.kl-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.kl-signal--alert .kl-dot { animation: kl-pulse 1.8s ease-in-out infinite; }
+@keyframes kl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* ---------- 主台 ---------- */
+.kl-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 自己是 flex 容器：战术台要靠它量出可用高度来定格长，撑不满就量不准。 */
+.kl-stage {
+  position: relative;
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  padding: 0.875rem 1rem;
+}
+.kl-narrative { flex: 1; min-height: 0; }
+
+/**
+ * 叙事模式的两栏：叙事流按可读宽度（62ch）定死，剩下的给场景速查。
+ *
+ * 不把叙事流拉满宽是刻意的——一行八十个字往回扫会丢行。空出来的地方也不留白，
+ * 那正好是 KP 一直想看又得去翻「资料」标签的东西。
+ */
+.kl-narrative { display: flex; gap: 1.25rem; align-items: flex-start; }
+.kl-brief { width: 244px; flex-shrink: 0; position: sticky; top: 0; }
+.kl-brief-empty { font-size: 0.6875rem; color: var(--color-text-secondary); opacity: 0.75; }
+.kl-brief-row {
+  display: flex; align-items: center; gap: 0.4rem;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.6875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  transition: border-color 0.15s;
+}
+.kl-brief-row:hover { border-color: var(--color-border-strong); }
+.kl-brief-tag { font-size: 0.5625rem; letter-spacing: 0.08em; color: var(--color-text-secondary); }
+.kl-brief-row:hover .kl-brief-tag--act { color: var(--color-text-accent); }
+
+/* 叙事流：KP 视角的极简回看，只求「刚发生了什么」一眼扫到。 */
+.kl-feed { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.55rem; max-width: 62ch; }
+.kl-feed-row { display: grid; grid-template-columns: 4.5rem 1fr; gap: 0.6rem; align-items: baseline; }
+.kl-feed-who {
+  font-size: 0.625rem; letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  text-align: right; padding-top: 0.15rem;
+}
+.kl-feed-text { font-family: var(--font-game); font-size: 0.8125rem; line-height: 1.75; white-space: pre-wrap; }
+.kl-feed-row--dice .kl-feed-text { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-dice-gold); }
+.kl-feed-row--system .kl-feed-text { font-size: 0.75rem; color: var(--color-text-secondary); }
+.kl-feed-row--say .kl-feed-text { color: var(--color-text-accent); }
+
+/* ---------- 战术台 ---------- */
+.kl-tac { display: flex; gap: 0.875rem; flex: 1; min-height: 0; }
+
+/**
+ * 先攻序改竖排。
+ *
+ * 它本来就是一个**序列**——竖向读天然就是时间顺序，而且一行放得下名字、血槽和状态；
+ * 横排 chip 那种形态里，这些东西一样都塞不进去，于是先攻轨退化成了纯装饰。
+ */
+.kl-init { width: 176px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.3rem; overflow-y: auto; }
+.kl-init-row {
+  position: relative;
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.55rem 0.5rem 0.55rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  text-align: left;
+  width: 100%;
+  transition: background 0.15s, border-color 0.15s;
+}
+.kl-init-row:hover { background: var(--color-bg-tertiary); }
+/* 游标：当前行动者左侧的琥珀竖条 */
+.kl-init-row--active {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-strong);
+}
+.kl-init-row--active::before {
+  content: '';
+  position: absolute; left: 0; top: 20%; bottom: 20%;
+  width: 2px; border-radius: 2px;
+  background: var(--color-accent);
+}
+.kl-init-row--passed { opacity: 0.42; }
+.kl-init-row--out { opacity: 0.3; text-decoration: line-through; }
+.kl-init-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kl-init-hp { font-family: var(--font-mono); font-size: 0.625rem; color: var(--color-text-secondary); }
+.kl-init-next { font-size: 0.5625rem; letter-spacing: 0.1em; color: var(--color-text-secondary); }
+
+.kl-board-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+/* overflow 是兜底：格长有下限（见 useFitCell 的 min），窄到极限时宁可裁掉一点，
+   也不能让棋盘画到右侧面板上去。 */
+.kl-board { flex: 1; min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; }
+
+/* 结算回放：最近一条最亮，往上依次淡出——不必读日期也知道哪条是刚发生的。 */
+.kl-rolls { flex-shrink: 0; padding-top: 0.35rem; border-top: 1px solid var(--color-border); }
+.kl-roll-line {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.7;
+  color: var(--color-dice-gold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 行动者面板：当前该谁动、他能做什么，就在棋盘右手边 */
+.kl-actor { width: 208px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.kl-actor-card { border: 1px solid var(--color-border-strong); border-radius: 5px; padding: 0.6rem; background: var(--color-bg-card); }
+.kl-actor-name { font-family: var(--font-display); font-size: 1rem; }
+.kl-actor-sub { font-size: 0.625rem; color: var(--color-text-secondary); letter-spacing: 0.06em; }
+.kl-actor-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; }
+.kl-actor-act {
+  display: flex; align-items: center; justify-content: center; gap: 0.3rem;
+  padding: 0.4rem 0.25rem;
+  font-size: 0.6875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
+  transition: color 0.15s, border-color 0.15s;
+}
+.kl-actor-act:hover { color: var(--color-text-accent); border-color: var(--color-border-strong); }
+
+/* ---------- 战场（原型版，见 LabBattleMap.tsx） ---------- */
+.lbm {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  gap: 0.25rem;
+}
+.lbm-corner { grid-area: 1 / 1; }
+
+/* 坐标尺：等宽体、克制的字号。它是给人念出来的（「挪到 F4」），不是装饰。 */
+.lbm-ruler {
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  opacity: 0.55;
+}
+.lbm-ruler--x { grid-area: 1 / 2; }
+.lbm-ruler--x span { display: grid; place-items: center; }
+.lbm-ruler--y { grid-area: 2 / 1; flex-direction: column; }
+.lbm-ruler--y span { display: grid; place-items: center; width: 1.1rem; }
+
+/**
+ * 两个主题要分别定调，不能共用一套色。
+ *
+ * 「压暗边缘」在暗色主题里是加黑，在羊皮纸里必须是加**暖褐**——照搬会得到
+ * 米色叠米色，等于什么都没画。同理灯光：暗色里是发光，羊皮纸里是纸面受光后的暖斑。
+ * 这两条第一版都写错了，在羊皮纸下整张图看起来还是一张白纸。
+ */
+.lbm-field {
+  --lbm-shade: rgba(0, 0, 0, 0.6);                 /* 晕影/投影的「暗」 */
+  --lbm-mark: color-mix(in srgb, var(--color-text-secondary) 52%, transparent);
+  --lbm-glow: color-mix(in srgb, var(--color-accent) 14%, transparent);  /* 暗色里是发光 */
+  /* 敌我按冷暖分，不按「两种红」分——见 LabBattleMap.sideVar 的说明。 */
+  --lbm-friend: #9dc3e6;
+  --lbm-ally: #8aa6b8;
+  --lbm-foe: #d9646c;
+  grid-area: 2 / 2;
+  position: relative;
+  overflow: hidden;
+  /* 必须隔离：底下那层噪点用了 mix-blend-mode，不隔离的话它会拿整个祖先层作背景去混，
+     战场之外的面板（如右侧行动者卡）会跟着一起被洗淡。混合只该发生在这块地面内部。 */
+  isolation: isolate;
+  /* 古地图式双线框：外粗内细、中间留一道缝。一处很便宜的特征，
+     它让这块区域读起来是「一张画出来的图」，而不是一个 div。 */
+  border: 1px solid var(--color-border-strong);
+  box-shadow: inset 0 0 0 3px var(--color-bg-secondary), inset 0 0 0 4px var(--color-border);
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--color-bg-tertiary) 85%, transparent),
+      var(--color-bg-secondary) 70%);
+}
+:root[data-theme="parchment"] .lbm-field {
+  --lbm-shade: rgba(86, 56, 20, 0.42);             /* 暖褐：像旧纸被摩挲久了的边 */
+  --lbm-mark: color-mix(in srgb, #6b4f2a 55%, transparent);
+  --lbm-glow: rgba(255, 248, 230, 0.62);           /* 浅色里不该发光，是纸面受光的亮斑 */
+  /* 浅底上要压深才看得清，蓝取墨蓝、红取深血红 */
+  --lbm-friend: #2f4d70;
+  --lbm-ally: #4d6274;
+  --lbm-foe: #8f1d20;
+  /* 纸面本身要比页面底色沉一点，才像「摊在桌上的一张图」而不是页面的一部分 */
+  background:
+    linear-gradient(180deg, #e3d5ba, #d9c9a9 78%);
+}
+
+/**
+ * 交点点阵取代实线，再每 5 格加一道重线。
+ *
+ * 前者把 96 个空格的视觉重量降下来；后者是战棋垫的老做法——数格子时以 5 为一段，
+ * 比一格一格数快得多。所以这道重线不是装饰，它在替 KP 算距离。
+ */
+.lbm-dots {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--lbm-mark) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--lbm-mark) 1px, transparent 1px),
+    radial-gradient(circle at center, var(--lbm-mark) 1.2px, transparent 1.3px);
+}
+
+/* 噪点层已删。它是上一版用来掩盖「画面没内容」的补丁——真正缺的是令牌的分量，
+   不是地面的颗粒。地面从此只负责安静地承住棋子。 */
+
+/**
+ * 俯视战术底图。
+ *
+ * 原图的对比度是按「看插画」调的：直接铺上去会把棋子淹在花纹里。所以先压暗、降饱和、
+ * 再轻微模糊一点点——底图在这里是**背景**，它的工作是让人知道这是哪儿，
+ * 不是把注意力抢走。有底图时点阵和灯光都相应收敛。
+ */
+.lbm-art {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  filter: saturate(0.32) brightness(0.55) contrast(0.85) blur(0.4px);
+}
+:root[data-theme="parchment"] .lbm-art {
+  /* 浅色主题压得太狠会变成一块黑，改走「褪色旧图」的方向 */
+  filter: saturate(0.25) contrast(0.78) sepia(0.45);
+}
+
+/* 三档浓淡：图越规整越能放开，图越跑偏越要压。两个主题各给一套——
+   同样的透明度，浅底上永远比深底上抢眼。 */
+.lbm-art--faint { opacity: 0.28; }
+.lbm-art--normal { opacity: 0.6; }
+.lbm-art--strong { opacity: 0.9; }
+:root[data-theme="parchment"] .lbm-art--faint { opacity: 0.22; }
+:root[data-theme="parchment"] .lbm-art--normal { opacity: 0.45; }
+:root[data-theme="parchment"] .lbm-art--strong { opacity: 0.72; }
+/**
+ * 压在底图之上的一层同色帘子。
+ *
+ * 光靠 filter 压不住：filter 只改像素，**改不了「这张图有多少细节在抢注意力」**。
+ * 实测拿一张人物插画当底图，脸和衣褶的对比度一路盖过棋子，整张战术图直接失效。
+ * 帘子把底图整体推远一档，保证无论生成出什么，棋子永远是画面上最响的东西。
+ */
+.lbm-art::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: var(--color-bg-secondary);
+  opacity: 0.35;
+}
+:root[data-theme="parchment"] .lbm-art::after { opacity: 0.4; }
+.lbm-art--strong::after { opacity: 0.18; }
+
+/* 有底图时格线反而要更实：它得压过图上的纹理才数得清格子。 */
+.lbm-field--art .lbm-dots { opacity: 0.85; }
+.lbm-field--art .lbm-light { opacity: 0.3; }
+
+.lbm-light { position: absolute; inset: 0; pointer-events: none; }
+
+/* 四周压暗：让注意力留在灯下，也把空旷的远角收进暗处 */
+.lbm-vignette {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 calc(var(--lbm-cell) * 2) calc(var(--lbm-cell) * 0.55) var(--lbm-shade);
+}
+
+.lbm-cell {
+  position: absolute; left: 0; top: 0;
+  display: grid; place-items: center;
+  color: var(--color-text-secondary);
+}
+.lbm-cell--blocked {
+  background: color-mix(in srgb, var(--color-bg-primary) 60%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+.lbm-cell--cover {
+  background: repeating-linear-gradient(45deg,
+    color-mix(in srgb, var(--color-text-secondary) 20%, transparent) 0 3px,
+    transparent 3px 6px);
+  align-items: end; justify-items: end; padding: 2px;
+}
+.lbm-cell--cover-full {
+  background: repeating-linear-gradient(45deg,
+    color-mix(in srgb, var(--color-text-secondary) 36%, transparent) 0 3px,
+    transparent 3px 6px);
+}
+
+/**
+ * ---------- 战棋（微缩模型） ----------
+ *
+ * 画面上唯一有内容的东西，所以分量全给它。三件套：站立剪影、俯视底座、名牌。
+ * 关键在于**剪影要离开地面**（有投影、有高度），底座要**躺在地面上**（压扁的椭圆）。
+ * 两者的透视不一致——真实的战棋摆拍也是这样，我们看底座是俯视，看小人是平视。
+ * 强行统一成一个正圆，就退回成了 Web 头像。
+ */
+.lbm-mini {
+  position: absolute; left: 0; top: 0;
+  overflow: visible;
+  transition: transform 0.35s ease;
+}
+
+.lbm-mini-fig {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  line-height: 0;
+  /* 两层阴影：贴地的硬阴影给「站着」，扩散的软阴影给体积 */
+  filter:
+    drop-shadow(0 1px 0 color-mix(in srgb, var(--lbm-shade) 90%, transparent))
+    drop-shadow(0 3px 4px var(--lbm-shade));
+}
+
+.lbm-mini-base {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  overflow: visible;
+}
+/* 盘面：中心略亮，像一块打磨过的圆底 */
+.lbm-mini-base-fill {
+  fill: color-mix(in srgb, currentColor 22%, var(--color-bg-card));
+  stroke: none;
+}
+
+.lbm-mini-name {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 0.5625rem;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-bg-card) 82%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+  pointer-events: none;
+}
+
+.lbm-mini-badge { position: absolute; left: 62%; display: grid; place-items: center; }
+
+/* 当前行动者：地面上一圈缓慢的光晕。只给一个人，多了就不叫强调。 */
+.lbm-mini--turn .lbm-mini-base { filter: drop-shadow(0 0 6px color-mix(in srgb, currentColor 65%, transparent)); }
+.lbm-mini--turn .lbm-mini-fig {
+  animation: lbm-breathe 2.6s ease-in-out infinite;
+}
+@keyframes lbm-breathe {
+  0%, 100% { filter: drop-shadow(0 1px 0 var(--lbm-shade)) drop-shadow(0 3px 4px var(--lbm-shade)); }
+  50% { filter: drop-shadow(0 1px 0 var(--lbm-shade)) drop-shadow(0 3px 4px var(--lbm-shade)) drop-shadow(0 0 7px color-mix(in srgb, currentColor 75%, transparent)); }
+}
+
+.lbm-mini--target .lbm-mini-base-fill { fill: color-mix(in srgb, var(--color-danger) 32%, var(--color-bg-card)); }
+.lbm-mini--out { opacity: 0.42; filter: saturate(0.3); }
+.lbm-mini--out .lbm-mini-name { text-decoration: line-through; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lbm-mini--turn .lbm-mini-fig { animation: none; }
+  .lbm-mini { transition: none; }
+}
+
+/* 底图浓淡：三格分段，挨着底图按钮放 */
+.kl-levels {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.kl-level {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.625rem;
+  color: var(--color-text-secondary);
+  background: var(--color-input-bg);
+  transition: background 0.12s, color 0.12s;
+}
+.kl-level + .kl-level { border-left: 1px solid var(--color-border); }
+.kl-level:hover { color: var(--color-text-accent); }
+.kl-level--on { background: var(--color-accent); color: var(--color-on-accent); }
+.kl-level--on:hover { color: var(--color-on-accent); }
+
+/* ---------- 轮廓选择 ---------- */
+.kl-figrow { position: relative; margin-top: 0.45rem; }
+.kl-figrow-btn {
+  display: flex; align-items: center; gap: 0.35rem;
+  width: 100%;
+  padding: 0.28rem 0.4rem;
+  font-size: 0.6875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-input-bg);
+  color: var(--color-text-secondary);
+  transition: color 0.15s, border-color 0.15s;
+}
+.kl-figrow-btn:hover { color: var(--color-text-accent); border-color: var(--color-border-strong); }
+
+/* 平铺全部候选而不是下拉：挑轮廓是看图选的，缩成一行文字就白挑了。 */
+.kl-figpick {
+  position: absolute;
+  right: 0; top: calc(100% + 0.35rem);
+  width: 232px;
+  max-height: 19rem;
+  display: flex; flex-direction: column;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 5px;
+  background: var(--color-bg-tertiary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  z-index: 40;
+}
+.kl-figpick-head {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.6875rem;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+.kl-figpick-close {
+  width: 1.1rem; height: 1.1rem;
+  display: grid; place-items: center;
+  border-radius: 3px;
+  color: var(--color-text-secondary);
+  line-height: 1;
+}
+.kl-figpick-close:hover { color: var(--color-text-accent); }
+.kl-figpick-body { overflow-y: auto; padding: 0.35rem 0.5rem 0.5rem; }
+.kl-figpick-group {
+  font-size: 0.5625rem; letter-spacing: 0.18em;
+  color: var(--color-text-secondary);
+  margin: 0.45rem 0 0.25rem;
+}
+.kl-figpick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.25rem; }
+.kl-figpick-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 0.3rem 0.1rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 0.5rem;
+  color: var(--color-text-secondary);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.kl-figpick-cell:hover { background: var(--color-bg-card); color: var(--color-text-primary); }
+.kl-figpick-cell--on {
+  border-color: var(--color-accent);
+  color: var(--color-text-accent);
+  background: var(--color-bg-card);
+}
+
+.kl-target {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.6875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
+  transition: border-color 0.15s;
+}
+.kl-target:hover { border-color: var(--color-danger); }
+
+.kl-round {
+  display: inline-flex; align-items: baseline; gap: 0.3rem;
+  font-family: var(--font-display);
+}
+.kl-round-num { font-size: 1.5rem; color: var(--color-text-accent); line-height: 1; }
+
+/* ---------- 操作台 ---------- */
+.kl-deck {
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  padding: 0.55rem 0.75rem 0.65rem;
+}
+.kl-deck-input-wrap { position: relative; display: flex; align-items: flex-end; gap: 0.5rem; }
+.kl-deck-input {
+  flex: 1;
+  min-height: 2.5rem;
+  max-height: 9rem;
+  resize: none;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--font-game);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
+}
+.kl-deck-input:focus { outline: none; border-color: var(--color-accent); }
+.kl-deck-input::placeholder { color: var(--color-text-secondary); opacity: 0.7; }
+
+/* 动作芯片：12 个动作全部平铺，不再有「更多…」下拉。
+   跑团时手在键盘上，眼睛在桌上——多一次下拉就是多一次找。 */
+.kl-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.45rem; }
+.kl-chip {
+  display: inline-flex; align-items: center; gap: 0.28rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.6875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  background: var(--color-input-bg);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.kl-chip:hover { color: var(--color-text-accent); border-color: var(--color-border-strong); }
+.kl-chip--on { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
+.kl-chip--on:hover { color: var(--color-on-accent); }
+.kl-chip kbd {
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  opacity: 0.6;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+/* 斜杠命令面板：输入框里打 / 唤起，键盘上下选、回车填入 */
+.kl-palette {
+  position: absolute;
+  left: 0; bottom: calc(100% + 0.35rem);
+  width: min(420px, 100%);
+  max-height: 15rem;
+  overflow-y: auto;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 5px;
+  background: var(--color-bg-tertiary);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+  padding: 0.25rem;
+}
+.kl-palette-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  text-align: left;
+  color: var(--color-text-secondary);
+}
+.kl-palette-row--on { background: var(--color-bg-card); color: var(--color-text-primary); }
+.kl-palette-cmd { font-family: var(--font-mono); font-size: 0.6875rem; color: var(--color-text-accent); }
+.kl-palette-hint { margin-left: auto; font-size: 0.625rem; opacity: 0.7; }
+
+/**
+ * 中等宽度（约 1200–1400）：先攻序与行动者面板让宽给棋盘。
+ *
+ * 这两条侧栏加起来固定吃掉 384px，1200px 视口下棋盘只剩 228px——12 格宽的战场
+ * 怎么算都放不下，格长会一路撞到下限、整张图撑出容器。侧栏的内容压得住，棋盘压不住，
+ * 所以该让的是侧栏。
+ */
+@media (min-width: 1101px) and (max-width: 1440px) {
+  .kl-init { width: 126px; }
+  .kl-actor { width: 164px; }
+  .kl-init-row { padding: 0.4rem 0.35rem 0.4rem 0.6rem; font-size: 0.6875rem; }
+  .kl-init-next { display: none; }        /* 挤的时候先丢这个：序列本身已经说明了顺序 */
+  .kl-actor-acts { gap: 0.25rem; }
+}
+
+/* 窄屏：监控列压到顶部横排，战术台三段改竖排 */
+@media (max-width: 1100px) {
+  .kl-body { flex-direction: column; }
+  .kl-rail-left {
+    width: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-bottom: 1px solid var(--color-border);
+  }
+  .kl-mon { min-width: 190px; }
+  .kl-tac { flex-direction: column; }
+  .kl-init { width: auto; flex-direction: row; overflow-x: auto; }
+  .kl-actor { width: auto; }
+  .kl-actor-acts { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kl-signal--alert .kl-dot { animation: none; }
+}
