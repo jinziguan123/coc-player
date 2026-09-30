@@ -1300,7 +1300,7 @@ def test_split_generation_injects_turn_plan_into_each_group(db_factory, monkeypa
             safety=chat_service.turn_planner.SafetyPolicy(do_not_reveal=["管家的秘密"]),
         )
 
-    async def fake_stream(kp, messages, result, npcs=None, group_label=None):
+    async def fake_stream(kp, messages, result, npcs=None, group_label=None, **kwargs):
         captured.append((group_label, messages))
         result[0] = f"{group_label} 的叙事"
         result[1] = result[0]
@@ -1566,7 +1566,7 @@ def test_travel_runs_team_turn_so_teammates_speak(db_factory, monkeypatch):
     的队友永远没有发言机会，表现为「一转移地点队友就全程哑火」。"""
     _patch_runtime(monkeypatch, db_factory)
 
-    async def fake_stream(kp, messages, result, npcs=None, group_label=None):
+    async def fake_stream(kp, messages, result, npcs=None, group_label=None, **kwargs):
         result[0] = "你推开门，眼前是一排落满灰尘的书架。"
         result[1] = result[0]
         yield chat_service._make_chunk("narration", result[0], actor_name="KP")

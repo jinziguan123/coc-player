@@ -130,3 +130,20 @@ def test_tutorial_beats_are_spelled_out_for_the_kp():
     )
     assert "start_combat" in notes, "战斗幕缺少切入战斗轮的明确指示"
     assert "start_chase" in notes, "追逐幕缺少切入追逐的明确指示"
+
+
+def test_pregen_investigator_recognizes_the_npcs_they_know():
+    """预设调查员认识的模组 NPC，单凭 player_brief 就要认得出——
+    否则开场第一个气泡就是「陌生人」，而 player_brief 明写着是他连夜找上门的。"""
+    from app.services.npc_identity import NameMasker
+
+    npcs = SAMPLE_MODULE["npcs"]
+    npc_names = {n["name"] for n in npcs}
+    known = [
+        r["name"] for r in SAMPLE_CHARACTER["system_data"].get("relations", [])
+        if r.get("name") in npc_names
+    ]
+    assert known, "预设调查员至少认识一位模组 NPC"
+    mask = NameMasker(SAMPLE_MODULE["world_setting"]["player_brief"], npcs)
+    for name in known:
+        assert mask(name) == name

@@ -157,7 +157,7 @@ def _seed(db):
 
 
 def _run(db, module, hero, teammates, session, kp_text, monkeypatch):
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         result[0] = ""
         result[1] = ""
         return

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from app.ai.text_guard import comparable_passages, is_near_duplicate, normalize_comparison_text
@@ -82,8 +82,11 @@ class NarrationScanner:
         party_names: set[str] | None = None,
         shown_dialogues: list[str] | None = None,
         prior_narration: str = "",
+        masker: Callable[..., str] | None = None,
     ) -> None:
         self.result = result
+        self.masker = masker
+        self._prior_narration = prior_narration or ""
         self.group_label = group_label
         self.guess_speakers = guess_speakers
         self.speakers = narration_speakers.SpeakerResolver(npcs, party_names)
@@ -175,12 +178,31 @@ class NarrationScanner:
         if out:
             yield self._mk("narration", out, actor_name="KP")
 
+    def _shown_name(self, speaker: str, text: str) -> str:
+        """气泡署名的对外称呼：和 say() 工具（``kp_actions._exec_say``）同一把遮名器。
+
+        判据带上本次生成里玩家已经看到的一切——此前步骤的旁白、本次旁白（含尚未切出的
+        pending）、本次已出的台词和这句台词本身。这些都还没落库，masker 的库快照里没有；
+        不带上就会出现「旁白刚写完林恩抬起头，紧接着的气泡还叫他陌生人」。
+        """
+        if self.masker is None:
+            return speaker
+        seen = [self._prior_narration, self.narration, self.pending]
+        seen += [t for _who, t in self.extracted]
+        seen += [text, self._deferred_tail]   # 后置说话人「林恩低声说」紧跟在气泡后面
+        return self.masker(speaker, extra_prose="\n".join(s for s in seen if s))
+
     def _emit_dialogue(self, speaker: str, text: str) -> Any:
-        """记账并产出一个 NPC 气泡（调用方已做完玩家党/张冠李戴的抑制判断）。"""
+        """记账并产出一个 NPC 气泡（调用方已做完玩家党/张冠李戴的抑制判断）。
+
+        ``last_speaker`` 记规范名（供后续引号的说话人推断），对外的气泡、落库署名、
+        互动史用遮名后的称呼。
+        """
         self.speakers.last_speaker = speaker
-        self.extracted.append((speaker, text))
-        self.dialogue_marks.append((len(self.narration), speaker, text))
-        return self._mk("npc_dialogue", text, actor_name=speaker)
+        shown = self._shown_name(speaker, text)
+        self.extracted.append((shown, text))
+        self.dialogue_marks.append((len(self.narration), shown, text))
+        return self._mk("npc_dialogue", text, actor_name=shown)
 
     def _emit_say(self) -> Any | None:
         # 气泡本身即「引号」，KP 若在 [SAY] 内又套了引号（[SAY]“台词”[/SAY]）会让气泡显示成

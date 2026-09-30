@@ -517,6 +517,7 @@ async def _run_generation(
                 npcs=matcher_npcs, plan=plan, party_names=party_names,
                 shown_dialogues=shown_dialogues,
                 event_order=event_order,
+                masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
@@ -545,6 +546,7 @@ async def _run_generation(
             async for chunk in _stream_narration_filtered(
                 kp, messages, result, npcs=matcher_npcs, party_names=party_names,
                 shown_dialogues=shown_dialogues,
+                masker=npc_identity.build_masker(db, session_id, module),
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
@@ -732,6 +734,7 @@ async def _run_split_narrations(
             stream_kwargs = {"shown_dialogues": shown_dialogues} if shown_dialogues else {}
             async for chunk in _stream_narration_filtered(
                 kp, messages, result, npcs=matcher_npcs, group_label=label,
+                masker=npc_identity.build_masker(db, session_id, module),
                 **stream_kwargs,
             ):
                 room_hub.broadcast(session_id, chunk)
@@ -1407,6 +1410,7 @@ async def _run_kp_turn(
         try:
             async for chunk in _stream_narration_filtered(
                 kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
+                masker=npc_identity.build_masker(db, session_id, module),
             ):
                 if hold:
                     held.append(chunk)
@@ -2262,6 +2266,7 @@ async def _run_epilogue_generation(session_id: str) -> None:
         try:
             async for chunk in _stream_narration_filtered(
                 kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
+                masker=npc_identity.build_masker(db, session_id, module),
             ):
                 room_hub.broadcast(session_id, chunk)
         except asyncio.CancelledError:

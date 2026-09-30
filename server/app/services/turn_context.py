@@ -13,6 +13,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
     module_rag_service,
+    npc_identity,
     rag_stats,
     rulebook_service,
     session_service,
@@ -372,6 +373,12 @@ def _record_npc_say_memory(
     # 玩家侧名单 + 系统/KP：这些说话人不算临场 NPC（audience_names 即玩家+队友名）
     _non_npc = {n.strip() for n in (audience_names or []) if n and n.strip()}
     _non_npc |= {"系统", "KP", "旁白"}
+    # 遮名称呼（「陌生人」「不明存在」、模组写的 unknown_as）是玩家还没认出某个模组 NPC 时
+    # 气泡上的署名，不是龙套的名字——登记成临场 NPC 就等于凭空多出一个叫「陌生人」的角色。
+    _non_npc |= {npc_identity.UNKNOWN_LABEL, *npc_identity.UNKNOWN_HUMAN.values()}
+    _non_npc |= {
+        npc_identity.unknown_label(npc) for npc in _npc_defs if isinstance(npc, dict)
+    }
     picked: dict[str, str] = {}
     improv_names: list[str] = []
     disclaimed: list[tuple[str, str]] = []

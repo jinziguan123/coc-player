@@ -403,3 +403,173 @@ def test_叙事里点过名的怪物_遭遇卡照常报真名(db_factory, monkey
     card = [e for e in session_service.get_session_events(db, session.id)
             if (e.metadata_ or {}).get("icat") == "encounter"][-1]
     assert MONSTER in card.content
+
+
+# ── 正文 [SAY] 出口：和 say() 工具走同一把遮名器 ─────────────────────
+
+
+def _scan(text: str, npcs: list[dict], masker=None, **kw):
+    """把一段 KP 正文整块喂给台词过滤器，返回 (chunks, result)。"""
+    import asyncio
+
+    from app.services.narration_protocol import filter_narration_stream
+
+    async def _tokens():
+        yield text
+
+    async def _run():
+        result = ["", "", [], [], []]
+        chunks = [c async for c in filter_narration_stream(
+            _tokens(), result, npcs=npcs, masker=masker, **kw,
+        )]
+        return chunks, result
+
+    return asyncio.run(_run())
+
+
+def _dialogue_names(chunks) -> list[str]:
+    return [c.actor_name for c in chunks if c.type == "npc_dialogue"]
+
+
+_SCAN_NPCS = [
+    {"id": "npc_student", "name": STUDENT, "description": "学生服青年"},
+    {"id": "npc_field", "name": MONSTER, "description": "山顶枯树上现身的神"},
+]
+
+
+def test_SAY气泡同样遮住怪物名():
+    """[SAY] 这条出口原先只做规范化、不遮名——怪物的神话真名直接印在气泡上。"""
+    mask = ni.NameMasker("", _SCAN_NPCS)
+    chunks, result = _scan(
+        f"黑暗里有什么在低语。[SAY: who={MONSTER}]回来……回来……[/SAY]", _SCAN_NPCS, mask,
+    )
+    assert _dialogue_names(chunks) == [ni.UNKNOWN_LABEL]
+    assert [who for who, _t in result[2]] == [ni.UNKNOWN_LABEL]
+    assert [who for _o, who, _t in result[3]] == [ni.UNKNOWN_LABEL]
+    assert "莎布" not in repr(result[2]) + repr(result[3])
+
+
+def test_SAY气泡能认出本轮刚写下的正文():
+    """本轮旁白还没落库，masker 的库快照里没有它；刚写下「香澄澪」就该改口。"""
+    mask = ni.NameMasker("", _SCAN_NPCS)
+    chunks, result = _scan(
+        f"{STUDENT}抬起头。[SAY: who={STUDENT}]你们也是来找人的？[/SAY]", _SCAN_NPCS, mask,
+    )
+    assert _dialogue_names(chunks) == [STUDENT]
+    # 台词本身自报家门也算
+    chunks, _ = _scan(f"[SAY: who={STUDENT}]我叫{STUDENT}。[/SAY]", _SCAN_NPCS, mask)
+    assert _dialogue_names(chunks) == [STUDENT]
+    # 同一次生成里前面的台词自报过家门，后面的也认得
+    chunks, _ = _scan(
+        f"[SAY: who={STUDENT}]我叫{STUDENT}。[/SAY]\n\n她顿了顿。"
+        f"[SAY: who={STUDENT}]跟我来。[/SAY]",
+        _SCAN_NPCS, mask,
+    )
+    assert _dialogue_names(chunks) == [STUDENT, STUDENT]
+    # 前几步已经写下的旁白（prior_narration）同样算
+    chunks, _ = _scan(
+        f"[SAY: who={STUDENT}]跟我来。[/SAY]", _SCAN_NPCS, mask,
+        prior_narration=f"{STUDENT}站在门口。",
+    )
+    assert _dialogue_names(chunks) == [STUDENT]
+
+
+def test_SAY气泡不传masker时行为不变():
+    chunks, result = _scan(f"[SAY: who={MONSTER}]回来……[/SAY]", _SCAN_NPCS)
+    assert _dialogue_names(chunks) == [MONSTER]
+    assert result[2] == [(MONSTER, "回来……")]
+
+
+def test_引号抽取的台词同样遮名():
+    """启发式引号抽取是正文的另一条台词出口，同样不能漏真名。"""
+    npcs = [{"id": "npc_old", "name": "老崔", "description": "驼背的老人"}]
+    mask = ni.NameMasker("", npcs)
+    # 「老崔：」这个前缀会从旁白里抹掉（只作署名），玩家其实没看到这个名字
+    chunks, _ = _scan("老崔：“别往礁盘去。”", npcs, mask)
+    assert _dialogue_names(chunks) == ["陌生人"]
+    # 旁白里写过名字，玩家就认得了
+    chunks, _ = _scan("老崔放下烟斗。\n\n老崔：“别往礁盘去。”", npcs, mask)
+    assert _dialogue_names(chunks) == ["老崔"]
+    # 遮名器不认识的名字原样通过
+    chunks, _ = _scan("老崔：“别往礁盘去。”", npcs, ni.NameMasker("", []))
+    assert _dialogue_names(chunks) == ["老崔"]
+
+
+def _seed_fog_harbor(db, *, relations=None):
+    from app.content.onboarding import SAMPLE_MODULE
+
+    module = Module(
+        title=SAMPLE_MODULE["title"], rule_system="coc",
+        scenes=SAMPLE_MODULE["scenes"], npcs=SAMPLE_MODULE["npcs"],
+        clues=[], world_setting=SAMPLE_MODULE["world_setting"],
+    )
+    hero = Character(
+        name="许闻舟", rule_system="coc", is_player=True,
+        system_data={"relations": relations} if relations else {},
+    )
+    db.add_all([module, hero])
+    db.commit()
+    session = GameSession(
+        module_id=module.id, player_character_id=hero.id,
+        status="active", current_scene_id=SAMPLE_MODULE["scenes"][0]["id"], world_state={},
+    )
+    db.add(session)
+    db.commit()
+    return module, session
+
+
+def test_雾港林恩两条出口署名一致(db_factory):
+    """实录：同一个林恩，调 say() 的气泡署「陌生人」，[SAY] 的气泡署「林恩港务员」。
+
+    两处病根：[SAY] 出口不遮名；遮名器又认不出林恩——档案名「林恩港务员」、
+    player_brief 写「港务员林恩」、叙事只写「林恩」，三者互不包含。
+    """
+    from app.services import kp_actions
+
+    db = db_factory()
+    module, session = _seed_fog_harbor(db)
+    _narrate(db, session.id, "林恩站在桌边，手指一遍遍摩挲着怀表的表盖。")
+    mask = ni.build_masker(db, session.id, module)
+
+    say_result = ["", "", [], [], []]
+    kp_actions._exec_say(say_result, module, "林恩港务员", "许记者，你来了就好。", masker=mask)
+    chunks, scan_result = _scan(
+        "林恩抬起头。[SAY: who=林恩港务员]许记者，你来了就好。[/SAY]", module.npcs, mask,
+    )
+    assert say_result[3][0][1] == "林恩港务员"
+    assert scan_result[3][0][1] == "林恩港务员"
+    assert _dialogue_names(chunks) == ["林恩港务员"]
+    # 开场第一句叙事之前，单凭 player_brief 也认得出来
+    fresh = ni.NameMasker(module.world_setting["player_brief"], module.npcs)
+    assert fresh("林恩港务员") == "林恩港务员"
+    # 怪物照遮
+    assert mask("深潜者幼体") == ni.UNKNOWN_LABEL
+
+
+def test_调查员卡的人际关系里写明的NPC_开场就报真名(db_factory):
+    """角色卡「档案」页的人际关系就是「这个调查员开场就认识谁」——和 player_brief 同一性质。"""
+    db = db_factory()
+    module, _hero, session = _seed(db)
+    hero = db.get(Character, session.player_character_id)
+    hero.system_data = {"relations": [{"name": STUDENT, "relation": "同乡"}]}
+    db.commit()
+
+    mask = ni.build_masker(db, session.id, module)
+    assert mask(STUDENT) == STUDENT
+    assert mask(MONSTER) == ni.UNKNOWN_LABEL        # 没写进关系的照常遮着
+
+
+def test_队友卡上的人际关系同样算数(db_factory):
+    from app.models.session_participant import SessionParticipant
+
+    db = db_factory()
+    module, _hero, session = _seed(db)
+    mate = Character(
+        name="队友甲", rule_system="coc",
+        system_data={"relations": [{"name": STUDENT, "relation": "学长"}, "坏数据"]},
+    )
+    db.add(mate)
+    db.commit()
+    db.add(SessionParticipant(session_id=session.id, character_id=mate.id, role="ai"))
+    db.commit()
+    assert ni.build_masker(db, session.id, module)(STUDENT) == STUDENT

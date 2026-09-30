@@ -249,6 +249,9 @@ SAMPLE_MODULE = {
         {
             "id": "harbor_master_lin",
             "name": "林恩港务员",
+            # 场上的叫法：player_brief 写「港务员林恩」、叙事里只写「林恩」，都不含档案名。
+            # 导入模组的别名由导入流程生成（见 module_service），内置模组不走导入，手写补上。
+            "aliases": ["林恩", "港务员林恩"],
             "description": "一位眼下乌青、反复核对怀表的中年人。",
             "personality": "务实而紧张，不愿让港口陷入恐慌；被追问时先回避，再松口",
             "background": "负责记录船只进出与灯塔维护，与看守老崔共事十一年。",

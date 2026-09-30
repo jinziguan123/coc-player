@@ -53,7 +53,7 @@ def _dice(chunks):
 
 
 def _run(db, module, hero, teammates, session, kp_text, monkeypatch):
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         result[0] = ""
         result[1] = ""
         return
@@ -193,7 +193,7 @@ def test_roll_generation_rolls_pending_check(db_factory, monkeypatch):
     monkeypatch.setattr(chat_service, "get_fast_llm", lambda: None)
     monkeypatch.setattr(room_hub, "broadcast", lambda *a, **k: None)
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         result[0] = ""
         result[1] = ""
         return
@@ -355,7 +355,7 @@ def test_dice_continuation_sanity_guard_only_on_success(db_factory, monkeypatch)
         called["n"] += 1
         return TurnPlan()   # trigger=False：只观测是否被调用，不实际发 SAN
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         result[0] = result[1] = "旁白。"
         return
         yield
@@ -398,7 +398,7 @@ def test_dice_continuation_fires_followup_san_check(db_factory, monkeypatch):
 
     calls = {"n": 0}
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             # 第一段续写：揭示禁忌知识并在末尾追加 SAN 检定
@@ -446,7 +446,7 @@ def test_san_per_character_and_once_per_source(db_factory, monkeypatch):
     ))
     db.commit()
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         result[0] = ""
         result[1] = ""
         return
@@ -740,7 +740,7 @@ def test_dice_is_broadcast_before_waiting_on_housekeeping(db_factory, monkeypatc
     monkeypatch.setattr(turn_orchestrator, "_drain_housekeeping", slow_drain)
     monkeypatch.setattr(room_hub, "broadcast", spy_broadcast)
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         result[0] = ""
         result[1] = ""
         return

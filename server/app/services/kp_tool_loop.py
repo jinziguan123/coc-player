@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from sqlalchemy.orm import Session
 
@@ -535,6 +535,7 @@ async def _run_kp_agent_loop(
     party_names: set[str] | None = None,
     shown_dialogues: list[str] | None = None,
     event_order: list | None = None,
+    masker_factory: Callable[[], npc_identity.NameMasker] | None = None,
 ) -> AsyncIterator[str]:
     """KP agent loop：与 _stream_narration_filtered 并列的新路径（use_tool_calls 开启时用）。
 
@@ -550,6 +551,10 @@ async def _run_kp_agent_loop(
     - 执行器返回 suspend（如已挂「待玩家投骰」）：本轮生成就此收束。
     产物写入 result（与旧路径同构）；validator 终检、落库、世界记忆钩子、幕后推演等
     收尾由调用方与旧路径共用——loop 只替换「生成 + 指令执行」段。
+
+    ``masker_factory``：正文 [SAY] 气泡的遮名器，与 say() 工具同一口径（见
+    ``narration_scanner.NarrationScanner._shown_name``）。每步现建一把——上一步的
+    npc_act 台词可能已落库；再追加本轮此前 say() / [SAY] 的台词正文（还在 result 里攒着）。
     """
     tools = tools if tools is not None else kp_tools.openai_tool_schemas()
     requires_check = bool(plan is not None and plan.requires_check)
@@ -562,6 +567,12 @@ async def _run_kp_agent_loop(
     # 轮次是乘数——每轮都要把累积消息整份重发、模型每轮再思考一遍。不记下「几轮、哪些工具」，
     # 就只能看到「KP 叙事 95.7s」而不知道是谁把它拖长的。
     used_tools: list[str] = []
+
+    def _step_masker() -> npc_identity.NameMasker | None:
+        if masker_factory is None:
+            return None
+        said = "\n".join(t for _who, t in (result[2] if len(result) > 2 else []))
+        return masker_factory().with_prose(said)
 
     def _log_rounds() -> None:
         if used_tools:
@@ -588,6 +599,7 @@ async def _run_kp_agent_loop(
                 party_names=party_names,  # 内联 [SAY] 误代言玩家/队友也挡下
                 shown_dialogues=shown_dialogues,
                 prior_narration=result[0],
+                masker=_step_masker(),
             ):
                 yield chunk
         except BaseException:
@@ -685,6 +697,7 @@ async def _run_kp_agent_loop(
                 guess_speakers=False, party_names=party_names,
                 shown_dialogues=shown_dialogues,
                 prior_narration=result[0],
+                masker=_step_masker(),
             ):
                 yield chunk
         except BaseException:
@@ -901,6 +914,7 @@ async def _process_commands(
                         kp, messages, cont_result,
                         npcs=_matcher_npcs(module, teammates, game_session),
                         group_label=label,
+                        masker=npc_identity.build_masker(db, session_id, module),
                     ):
                         yield chunk
                     await style_editor.polish_result(llm, cont_result)   # 取消时不走，finally 落原文
@@ -929,6 +943,7 @@ async def _process_commands(
             try:
                 async for chunk in _stream_narration_filtered(
                     kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
+                    masker=npc_identity.build_masker(db, session_id, module),
                 ):
                     yield chunk
                 await style_editor.polish_result(llm, cont_result)   # 取消时不走，finally 落原文
@@ -1064,6 +1079,7 @@ async def _handle_rule_lookup(
     try:
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
+            masker=npc_identity.build_masker(db, session_id, module),
         ):
             yield chunk
     finally:
@@ -1125,6 +1141,7 @@ async def _handle_module_lookup(
     try:
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
+            masker=npc_identity.build_masker(db, session_id, module),
         ):
             yield chunk
     finally:
@@ -1180,6 +1197,7 @@ async def _handle_recall_history(
     try:
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
+            masker=npc_identity.build_masker(db, session_id, module),
         ):
             yield chunk
     finally:

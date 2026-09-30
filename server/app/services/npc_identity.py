@@ -10,7 +10,8 @@
 不需要额外标注，也不给 KP 加负担，而且自动跟上剧情：等玩家读到典籍、
 NPC 说破身份、KP 在叙事里直呼其名的那一刻，机制界面自然跟着改口。
 
-**外加一条开局判据**：模组的 ``player_brief``。光看本局叙事的话，开场第一句话之前
+**外加两条开局判据**：模组的 ``player_brief``，以及本局调查员卡上的人际关系
+（``system_data.relations``，见 :func:`_party_acquaintances`）。光看本局叙事的话，开场第一句话之前
 prose 是空的，模组里每个 NPC 一律先按陌生人处理——《鬼屋》的调查员分明是诺特请来的，
 气泡上却写着「陌生男性」。player_brief 的定义（见 module_service）就是「玩家角色开场
 本就合法知道的前情：身份动机、受谁委托、为何来到起始地点」，委托人、雇主、同行的同事
@@ -28,6 +29,7 @@ from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
+from app.models.character import Character
 from app.models.module import Module
 from app.services import session_service
 
@@ -238,6 +240,20 @@ class NameMasker:
         prose = f"{self._prose}\n{extra_prose}" if extra_prose else self._prose
         return self._resolve(text, npc, prose)
 
+    def with_prose(self, extra: str) -> NameMasker:
+        """追加一段「玩家已经看到、但还没落库」的正文，得到一把新的遮名器。
+
+        agent loop 一轮分好几步生成，前几步的旁白与 say() 台词要到回合收尾才落库；
+        后一步的气泡要认得前一步刚介绍过的人。
+        """
+        if not (extra or "").strip():
+            return self
+        clone = NameMasker.__new__(NameMasker)
+        clone._prose = f"{self._prose}\n{extra}"
+        clone._npcs = self._npcs
+        clone._calls = self._calls
+        return clone
+
     def reveals(self, name: str | None) -> bool:
         """这个名字现在是不是照实显示（供调用方判断要不要额外藏细节）。"""
         text = (name or "").strip()
@@ -271,15 +287,44 @@ def _pre_known_prose(module: Module | None) -> str:
     return str(ws.get("player_brief") or "").strip()
 
 
+def _party_acquaintances(db: Session, session_id: str) -> str:
+    """本局调查员卡上「人际关系」里写明的人——开场就认识，与 ``player_brief`` 同等对待。
+
+    角色卡「档案」页的 ``system_data.relations`` 本来就是「这个调查员认识谁」。
+    《雾港》的预设调查员明写着与「林恩港务员」是旧识，遮名器却从不读它，
+    只能指望 player_brief 恰好用同一个词序提到他。
+    """
+    chars = session_service.get_party_members(db, session_id)
+    session = session_service.get_session(db, session_id)
+    lead_id = getattr(session, "player_character_id", None)
+    if lead_id and all(c.id != lead_id for c in chars):
+        # 没有席位记录的旧会话：主角只挂在 player_character_id 上
+        lead = db.get(Character, lead_id)
+        if lead is not None:
+            chars.append(lead)
+    names: list[str] = []
+    for char in chars:
+        relations = (char.system_data or {}).get("relations") if isinstance(
+            char.system_data, dict) else None
+        for rel in relations or []:
+            name = str(rel.get("name") or "").strip() if isinstance(rel, dict) else ""
+            if name:
+                names.append(name)
+    return "\n".join(names)
+
+
 def build_masker(db: Session, session_id: str, module: Module | None) -> NameMasker:
     """按当前进度构建一个对外称呼表。"""
     npcs = list(getattr(module, "npcs", None) or []) if module is not None else []
     npcs = [n for n in npcs if isinstance(n, dict)]
     if not npcs:
         return NameMasker("", [])
-    prose = _player_visible_prose(db, session_id)
-    known = _pre_known_prose(module)
-    return NameMasker(f"{known}\n{prose}" if known else prose, npcs)
+    parts = [
+        _pre_known_prose(module),
+        _party_acquaintances(db, session_id),
+        _player_visible_prose(db, session_id),
+    ]
+    return NameMasker("\n".join(p for p in parts if p), npcs)
 
 
 def public_name(

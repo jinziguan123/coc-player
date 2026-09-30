@@ -427,7 +427,7 @@ def test_handle_module_lookup_retrieves_continues_and_persists(db_factory, monke
 
     monkeypatch.setattr(module_rag_service, "retrieve", fake_retrieve)
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         captured["messages"] = messages
         result[0] = "吊灯的灰在你们头顶簌簌落下。"
         result[1] = result[0]
@@ -466,7 +466,7 @@ def test_handle_module_lookup_fallback_when_no_hits(db_factory, monkeypatch):
 
     captured = {}
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         captured["messages"] = messages
         result[0] = "按既有资料续写。"
         result[1] = result[0]

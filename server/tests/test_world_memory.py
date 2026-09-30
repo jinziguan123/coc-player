@@ -1316,3 +1316,27 @@ def test_否认进NPC自己的记忆():
     system = messages[0]["content"]
     assert "我没见过那位先生" in system
     assert "不能改口" in system
+
+
+def test_遮名称呼不会被登记成临场NPC(db_factory):
+    """玩家还不认识的 NPC，气泡署的是「陌生人」「不明存在」这类遮名称呼——
+    它们不是龙套的名字，登记进 improvised_npcs 会把「陌生人」当成一个新角色喂给 KP。"""
+    db = db_factory()
+    session, module, player, mate = _seed(db)
+    module.npcs = module.npcs + [{"id": "npc_voice", "name": "呼子", "unknown_as": "林中的声音"}]
+    db.commit()
+    extracted = [
+        ("陌生人", "你们不该来这儿。"),
+        ("陌生男性", "走吧。"),
+        ("陌生女性", "快走。"),
+        ("不明存在", "回来……"),
+        ("林中的声音", "回来……"),
+        ("门房老赵", "几位找谁？"),             # 真龙套照常登记
+    ]
+    for _ in range(2):                              # 两轮 → 够数确认
+        chat_service._record_npc_say_memory(
+            db, session.id, session, module, extracted, [player.name, mate.name],
+        )
+    ws = session.world_state or {}
+    registered = set(ws.get("improvised_npcs") or {}) | set(ws.get("improvised_npc_pending") or {})
+    assert registered == {"门房老赵"}

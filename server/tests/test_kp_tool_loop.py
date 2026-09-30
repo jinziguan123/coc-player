@@ -866,3 +866,34 @@ def test_本地合成的调用不带该字段():
         m for m in llm.calls[1]["messages"] if m.get("role") == "assistant" and m.get("tool_calls")
     )
     assert "extra_content" not in assistant["tool_calls"][0]
+
+
+def test_正文SAY气泡与say工具同一口径遮名(db_factory):
+    """同一个 NPC，调 say() 的气泡遮名、正文 [SAY] 的气泡却署真名——两条出口要一致。
+
+    第一步 say() 让香澄自报家门，第二步正文 [SAY] 里她再开口：此时 say() 那句还只在
+    result 里攒着没落库，也得算进「玩家认识她了」。怪物没被点过名，照常遮住。
+    """
+    db = db_factory()
+    sid, session, module, hero = _seed(db)
+    module.npcs = [
+        {"id": "npc_student", "name": "香澄澪", "description": "学生服青年"},
+        {"id": "npc_field", "name": "田间潜随者（莎布·尼古拉丝化身）", "description": "山顶的神"},
+    ]
+    db.commit()
+    llm = _FakeToolLLM([
+        [_call("say", {"who": "香澄澪", "text": "我叫香澄澪。"})],
+        [_text("[SAY: who=香澄澪]跟我来。[/SAY]"
+               "[SAY: who=田间潜随者（莎布·尼古拉丝化身）]回来……[/SAY]")],
+    ])
+    result = ["", "", [], [], []]
+    execute = chat_service._build_kp_tool_executor(
+        db, sid, session, module, hero, [], llm, result,
+    )
+    chunks = asyncio.run(_drain(chat_service._run_kp_agent_loop(
+        llm, [{"role": "system", "content": "KP"}], result, execute,
+        masker_factory=lambda: npc_identity.build_masker(db, sid, module),
+    )))
+    names = [c.actor_name for c in chunks if c.type in ("dialogue", "npc_dialogue")]
+    assert names == ["香澄澪", "香澄澪", npc_identity.UNKNOWN_LABEL]
+    assert [who for _o, who, _t in result[3]] == names

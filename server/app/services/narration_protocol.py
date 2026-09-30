@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from app.services.narration_scanner import NarrationScanner, looks_like_speech
 from app.services.narration_speakers import (
@@ -43,6 +43,7 @@ async def filter_narration_stream(
     party_names: set[str] | None = None,
     shown_dialogues: list[str] | None = None,
     prior_narration: str = "",
+    masker: Callable[..., str] | None = None,
 ) -> AsyncIterator[str]:
     """流式输出 KP 旁白，并把 NPC 台词抽成对话气泡。
 
@@ -72,11 +73,15 @@ async def filter_narration_stream(
     ``group_label`` 给定时（分头行动后端按组生成）：本次整段产物确定性地归入该组——
     既给流式 chunk 打上 ``metadata.group``（前端实时分栏），也以 ``(0, label)`` 预置
     group_mark（落库分组），不再依赖模型自觉打 [GROUP]。
+
+    ``masker``（:class:`app.services.npc_identity.NameMasker`）给定时，气泡署名换成对外称呼：
+    玩家还没认出来的 NPC 显示「陌生人」「不明存在」之类，与 say() 工具那条出口同一口径。
+    不给则照旧署规范名。
     """
     scanner = NarrationScanner(
         result, npcs=npcs, group_label=group_label, guess_speakers=guess_speakers,
         party_names=party_names, shown_dialogues=shown_dialogues,
-        prior_narration=prior_narration,
+        prior_narration=prior_narration, masker=masker,
     )
     # ``full_response`` 只记**扫描器真正吃进去的字符**，因此按 token 切片累加而不是整块累加。
     #

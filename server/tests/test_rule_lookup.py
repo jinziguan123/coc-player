@@ -113,7 +113,7 @@ def test_handle_rule_lookup_retrieves_continues_and_persists(db_factory, monkeyp
 
     monkeypatch.setattr(rulebook_service, "retrieve", fake_retrieve)
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         captured["messages"] = messages
         result[0] = "据规则，你这次重掷失败，后果显著加重。"
         result[1] = result[0]
@@ -150,7 +150,7 @@ def test_handle_rule_lookup_fallback_when_no_hits(db_factory, monkeypatch):
 
     captured = {}
 
-    async def fake_stream(kp, messages, result, npcs=None):
+    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
         captured["messages"] = messages
         result[0] = "依经验裁定继续。"
         result[1] = result[0]
