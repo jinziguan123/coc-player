@@ -1,5 +1,5 @@
 /**
- * 背景音乐播放引擎：按氛围选曲、交叉淡入淡出、自动播放受阻时等第一次交互再起。
+ * 背景音乐播放引擎：按氛围选曲、先淡出旧曲再淡入新曲、自动播放受阻时等第一次交互再起。
  *
  * 曲库从后端 /bgm/tracks 取（按目录扫描，用户自己放的曲子也在里面），本 hook 只管「放」：
  * - 氛围变了才换曲；新氛围的曲目列表里本就含正在放的那首（比如两边都回落到 explore），
@@ -19,7 +19,10 @@ import { deriveBgmMood, pickTrack, tracksForMood } from './bgm'
 const ENABLED_KEY = 'trpg_bgm_enabled'
 const VOLUME_KEY = 'trpg_bgm_volume'
 const DEFAULT_VOLUME = 0.4
-const FADE_MS = 1800
+// 换曲是「旧曲淡出 → 新曲淡入」两段接力，不交叉：两首调性节奏都不同的曲子叠在一起，
+// 中间那一秒多听起来就是乱的。淡出略短于淡入——收得干脆、起得从容。
+const FADE_OUT_MS = 1500
+const FADE_IN_MS = 2000
 const FADE_STEP_MS = 50
 
 function readEnabled(): boolean {
@@ -37,10 +40,10 @@ function absolutize(raw: string): string {
   return /^https?:\/\//i.test(raw) ? raw : `${getServerUrl()}${raw}`
 }
 
-/** 把一个 audio 的音量在 FADE_MS 内线性拉到 target；返回取消函数。到 0 时顺手暂停。 */
-function fadeTo(audio: HTMLAudioElement, target: number, onDone?: () => void): () => void {
+/** 把一个 audio 的音量在 ms 内线性拉到 target；返回取消函数。到 0 时顺手暂停。 */
+function fadeTo(audio: HTMLAudioElement, target: number, ms: number, onDone?: () => void): () => void {
   const start = audio.volume
-  const steps = Math.max(1, Math.round(FADE_MS / FADE_STEP_MS))
+  const steps = Math.max(1, Math.round(ms / FADE_STEP_MS))
   let i = 0
   const timer = window.setInterval(() => {
     i += 1
@@ -55,8 +58,6 @@ function fadeTo(audio: HTMLAudioElement, target: number, onDone?: () => void): (
 }
 
 export interface BgmState {
-  /** 此刻的氛围（控件显示用） */
-  mood: string
   enabled: boolean
   volume: number
   /** 浏览器拦了自动播放，正等玩家第一次交互 */
@@ -67,13 +68,18 @@ export interface BgmState {
   setVolume: (v: number) => void
 }
 
-function useBgm(mood: string | null): Omit<BgmState, 'mood'> {
+function useBgm(mood: string | null): BgmState {
   const [enabled, setEnabledState] = useState(readEnabled)
   const [volume, setVolumeState] = useState(readVolume)
   const [blocked, setBlocked] = useState(false)
   const [tracks, setTracks] = useState<Record<string, string[]> | null>(null)
 
   const currentRef = useRef<{ audio: HTMLAudioElement; url: string; cancelFade?: () => void } | null>(null)
+  // 旧曲淡出完成的时刻：新曲要等它，才是「先出后进」而不是交叉
+  const fadeOutDoneRef = useRef<Promise<void>>(Promise.resolve())
+  const outgoingRef = useRef(new Set<HTMLAudioElement>())   // 正在淡出的旧曲（卸载时一并掐掉）
+  // 每次换曲 / 停止都 +1：淡出期间氛围又变了，等出来的那个「起播」就作废，只认最新一次
+  const genRef = useRef(0)
   const volumeRef = useRef(volume)
   volumeRef.current = volume
 
@@ -86,16 +92,26 @@ function useBgm(mood: string | null): Omit<BgmState, 'mood'> {
   }, [])
 
   const stop = useCallback(() => {
+    genRef.current += 1
     const cur = currentRef.current
     if (!cur) return
     currentRef.current = null
     cur.cancelFade?.()
-    fadeTo(cur.audio, 0, () => { cur.audio.src = '' })
+    const { audio } = cur
+    // 已经停着（放完了 / 自动播放被拦）就没什么可淡的，别让下一首白等一段淡出
+    if (audio.paused || audio.ended) { audio.src = ''; return }
+    outgoingRef.current.add(audio)
+    fadeOutDoneRef.current = new Promise<void>((resolve) => {
+      fadeTo(audio, 0, FADE_OUT_MS, () => {
+        audio.src = ''
+        outgoingRef.current.delete(audio)
+        resolve()
+      })
+    })
   }, [])
 
-  // 起播一首：新曲从 0 淡入，旧曲同时淡出。play() 被浏览器拒绝就记下 blocked，等交互重试。
-  const start = useCallback((url: string, loop: boolean, onEnded: () => void) => {
-    stop()
+  // 真正起播一首：从 0 淡入。只读 ref 与稳定的 setState，所以依赖为空。
+  const play = useCallback((url: string, loop: boolean, onEnded: () => void) => {
     const audio = new Audio(absolutize(url))
     audio.loop = loop
     audio.volume = 0
@@ -106,12 +122,22 @@ function useBgm(mood: string | null): Omit<BgmState, 'mood'> {
     audio.play()
       .then(() => {
         setBlocked(false)
-        if (currentRef.current === entry) entry.cancelFade = fadeTo(audio, volumeRef.current)
+        if (currentRef.current === entry) entry.cancelFade = fadeTo(audio, volumeRef.current, FADE_IN_MS)
       })
       .catch((err: unknown) => {
         if ((err as { name?: string })?.name === 'NotAllowedError') setBlocked(true)
       })
-  }, [stop])
+  }, [])
+
+  // 起播一首：先等旧曲淡出完，新曲再从 0 淡入。
+  const start = useCallback((url: string, loop: boolean, onEnded: () => void) => {
+    stop()
+    const gen = genRef.current
+    void fadeOutDoneRef.current.then(() => {
+      if (gen !== genRef.current) return   // 等待期间又换了氛围或关了配乐：这一首不放了
+      play(url, loop, onEnded)
+    })
+  }, [stop, play])
 
   // 选曲：氛围或曲库变化时决定是否换曲。
   const list = tracks && mood ? tracksForMood(tracks, mood) : []
@@ -147,7 +173,7 @@ function useBgm(mood: string | null): Omit<BgmState, 'mood'> {
       const cur = currentRef.current
       if (!cur) { setBlocked(false); return }
       cur.audio.play()
-        .then(() => { setBlocked(false); cur.cancelFade = fadeTo(cur.audio, volumeRef.current) })
+        .then(() => { setBlocked(false); cur.cancelFade = fadeTo(cur.audio, volumeRef.current, FADE_IN_MS) })
         .catch(() => {})
     }
     window.addEventListener('pointerdown', resume, { once: true })
@@ -158,11 +184,14 @@ function useBgm(mood: string | null): Omit<BgmState, 'mood'> {
     }
   }, [blocked])
 
-  // 离开游戏页：立刻停（不淡出——页面都没了，没人听那 1.8 秒）
+  // 离开游戏页：立刻停（不淡出——页面都没了，没人听那一秒多），连同还在淡出的旧曲和等着起播的新曲
   useEffect(() => () => {
+    genRef.current += 1
     const cur = currentRef.current
     currentRef.current = null
     if (cur) { cur.cancelFade?.(); cur.audio.pause(); cur.audio.src = '' }
+    for (const a of outgoingRef.current) { a.pause(); a.src = '' }
+    outgoingRef.current.clear()
   }, [])
 
   const setEnabled = useCallback((on: boolean) => {
@@ -190,5 +219,5 @@ export function useSessionBgm(input: {
   ended: boolean
 }): BgmState {
   const mood = deriveBgmMood({ inCombat: !!input.combat, inChase: !!input.chase, locations: input.locations })
-  return { mood, ...useBgm(input.ended ? null : mood) }
+  return useBgm(input.ended ? null : mood)
 }
