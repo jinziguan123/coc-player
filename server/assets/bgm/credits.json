@@ -1,0 +1,165 @@
+{
+  "note": "内置曲目的来源与署名（唯一真源；设置页「音乐致谢」读取此文件）。入库版本均已转码为 128kbps MP3 并去除元数据，曲目内容未作改动。",
+  "tracks": [
+    {
+      "mood": "calm",
+      "file": "gymnopedie-no-1.mp3",
+      "title": "Gymnopedie No 1",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100787",
+      "attribution": "\"Gymnopedie No 1\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "calm",
+      "file": "teller-of-the-tales.mp3",
+      "title": "Teller of the Tales",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1400020",
+      "attribution": "\"Teller of the Tales\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "explore",
+      "file": "myst-on-the-moor.mp3",
+      "title": "Myst on the Moor",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1600007",
+      "attribution": "\"Myst on the Moor\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "explore",
+      "file": "comfortable-mystery.mp3",
+      "title": "Comfortable Mystery",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100287",
+      "attribution": "\"Comfortable Mystery\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "tense",
+      "file": "penumbra.mp3",
+      "title": "Penumbra",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1200105",
+      "attribution": "\"Penumbra\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "tense",
+      "file": "darkest-child.mp3",
+      "title": "Darkest Child",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100783",
+      "attribution": "\"Darkest Child\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "horror",
+      "file": "unseen-horrors.mp3",
+      "title": "Unseen Horrors",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1400043",
+      "attribution": "\"Unseen Horrors\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "horror",
+      "file": "dissonant-waltz.mp3",
+      "title": "Dissonant Waltz",
+      "author": "Yubatake",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://opengameart.org/content/dissonant-waltz",
+      "attribution": "\"Dissonant Waltz\" by Yubatake (OpenGameArt.org)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "mythos",
+      "file": "echoes-of-time-v2.mp3",
+      "title": "Echoes of Time v2",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1300030",
+      "attribution": "\"Echoes of Time v2\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "mythos",
+      "file": "ritual.mp3",
+      "title": "Ritual",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100466",
+      "attribution": "\"Ritual\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "sorrow",
+      "file": "lost-time.mp3",
+      "title": "Lost Time",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1500032",
+      "attribution": "\"Lost Time\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "sorrow",
+      "file": "sad-trio.mp3",
+      "title": "Sad Trio",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100089",
+      "attribution": "\"Sad Trio\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "combat",
+      "file": "volatile-reaction.mp3",
+      "title": "Volatile Reaction",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1400039",
+      "attribution": "\"Volatile Reaction\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "combat",
+      "file": "five-armies.mp3",
+      "title": "Five Armies",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100875",
+      "attribution": "\"Five Armies\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "chase",
+      "file": "chase.mp3",
+      "title": "Chase",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100399",
+      "attribution": "\"Chase\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "mood": "chase",
+      "file": "interloper.mp3",
+      "title": "Interloper",
+      "author": "Kevin MacLeod",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100401",
+      "attribution": "\"Interloper\" Kevin MacLeod (incompetech.com)\nLicensed under Creative Commons: By Attribution 4.0 License\nhttp://creativecommons.org/licenses/by/4.0/"
+    }
+  ]
+}

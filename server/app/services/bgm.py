@@ -170,3 +170,22 @@ def track_path(source: str, mood: str, name: str) -> Path | None:
     if path.parent != root.resolve() or not path.is_file():
         return None
     return path
+
+
+def builtin_credits() -> list[dict]:
+    """内置曲目的来源与署名（server/assets/bgm/credits.json）。CC-BY 要求可见署名，设置页据此展示。
+
+    只列内置曲库：用户自己放的曲子授权由用户自负，我们也无从知道。
+    """
+    import json
+
+    path = library_root("builtin") / "credits.json"
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return []
+    keys = ("mood", "file", "title", "author", "license", "license_url", "source", "attribution")
+    return [
+        {k: str(t.get(k) or "") for k in keys}
+        for t in (data.get("tracks") or []) if isinstance(t, dict)
+    ]

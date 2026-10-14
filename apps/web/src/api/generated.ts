@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/bgm/credits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Credits
+         * @description 内置曲目的来源与署名（设置页「音乐致谢」）。
+         */
+        get: operations["credits_api_bgm_credits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/bgm/tracks": {
         parameters: {
             query?: never;
@@ -4052,6 +4072,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    credits_api_bgm_credits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_tracks_api_bgm_tracks_get: {
         parameters: {
             query?: never;

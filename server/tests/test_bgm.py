@@ -149,3 +149,25 @@ def test_曲目路径防穿越(libs):
     assert bgm.track_path("elsewhere", "explore", "a.mp3") is None
     assert bgm.track_path("builtin", "explore", "a.exe") is None
     assert bgm.track_path("builtin", "explore", "missing.mp3") is None
+
+
+# ── 内置曲库的授权登记 ──────────────────────────────────────────────────────
+
+
+def test_每个内置曲目都在credits登记且文件确实存在():
+    """CC-BY 要求署名：内置目录里多出一首没登记的曲子，就是一次授权违规。"""
+    root = bgm.library_root("builtin")
+    on_disk = {
+        f"{p.parent.name}/{p.name}" for p in root.glob("*/*")
+        if p.is_file() and p.suffix.lower() in bgm._AUDIO_EXTS
+    }
+    credits = bgm.builtin_credits()
+    registered = {f"{t['mood']}/{t['file']}" for t in credits}
+    assert on_disk == registered
+    for t in credits:
+        assert t["mood"] in bgm.MOODS
+        assert t["title"] and t["author"] and t["license"] and t["source"]
+        # 只收允许随软件再分发的授权（README 的约定）
+        assert t["license"] in {"CC0", "CC BY 3.0", "CC BY 4.0"}, t
+        if t["license"] != "CC0":
+            assert t["attribution"], f"{t['file']} 是 CC-BY，必须带署名文本"

@@ -16,6 +16,12 @@ def list_tracks():
     return {"moods": bgm.MOODS, "tracks": bgm.list_tracks()}
 
 
+@router.get("/credits")
+def credits():
+    """内置曲目的来源与署名（设置页「音乐致谢」）。"""
+    return {"tracks": bgm.builtin_credits()}
+
+
 @router.get("/{source}/{mood}/{name}")
 def get_track(source: str, mood: str, name: str):
     path = bgm.track_path(source, mood, name)
