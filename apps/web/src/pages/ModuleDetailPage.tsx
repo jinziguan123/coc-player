@@ -23,6 +23,8 @@ import { BIOMES, BIOME_LABELS, BIOME_TEXTURES } from '../lib/biome'
 import { MODULE_DIFFICULTIES } from '../lib/module'
 import { StylePicker } from '@/components/style/StylePicker'
 import { useStyleOptions, type StyleOption } from '@/components/style/useStyleOptions'
+import { ModuleHero } from '@/components/module/ModuleHero'
+import { ModuleViewTabs } from '@/components/module/ModuleViewTabs'
 
 /** 只读态显示成人话：命中预设显示预设名，自定义显示原文，空串返回空串。 */
 function styleLabel(options: StyleOption[] | undefined, value: string): string {
@@ -461,9 +463,6 @@ export function ModuleDetailPage() {
 
   const graph = view === 'graph'
   const wide = (graph && !edit) || view === 'sandbox'
-  const tabBtn = (v: 'detail' | 'graph' | 'timeline' | 'sandbox', icon: React.ReactNode, label: string) => (
-    <button onClick={() => setView(v)} className="flex items-center gap-1 px-2 py-1" style={view === v ? { background: 'var(--color-accent)', color: 'var(--color-on-accent)' } : { color: 'var(--color-text-secondary)' }}>{icon} {label}</button>
-  )
   // 沙盘数据：模组视角=作者上帝视角（无迷雾）；chapter 章节不上图；未落位场景保存时由后端自动落位
   const sandboxLocs = data.map_nodes.map((node) => {
     const scene = node.scene_id ? data.scenes.find((s) => s.id === node.scene_id) : undefined
@@ -592,12 +591,11 @@ export function ModuleDetailPage() {
             切个页签鼠标底下的按钮就换了一个。锚在左边则谁也推不动它。
             标题「新建/编辑/查看模组」三态等宽，所以起点在任何状态下都对齐。 */}
         {!isNew && (
-          <div className="flex rounded overflow-hidden text-sm shrink-0" style={{ border: '1px solid var(--color-border)' }}>
-            {tabBtn('detail', <FileText size={14} />, '详情')}
-            {!edit && tabBtn('graph', <Network size={14} />, '关系图')}
-            {!edit && tabBtn('timeline', <GitBranch size={14} />, '时间线')}
-            {tabBtn('sandbox', <Hexagon size={14} />, '沙盘')}
-          </div>
+          <ModuleViewTabs view={view} onPick={setView} items={[
+            { id: 'detail', icon: <FileText size={14} />, label: '详情' },
+            ...(edit ? [] : [{ id: 'graph' as const, icon: <Network size={14} />, label: '关系图' }, { id: 'timeline' as const, icon: <GitBranch size={14} />, label: '时间线' }]),
+            { id: 'sandbox', icon: <Hexagon size={14} />, label: '沙盘' },
+          ]} />
         )}
         <div className="ml-auto flex gap-2 items-center">
           {!isNew && !edit && (view === 'detail' || view === 'sandbox') && (
@@ -612,6 +610,7 @@ export function ModuleDetailPage() {
         </div>
       </div>
 
+      {!isNew && !edit && view === 'detail' && <ModuleHero title={data.title} cover={data.scenes[0]?.image} facts={[data.world_setting.era, data.world_setting.region, data.world_setting.player_count && `${String(data.world_setting.player_count)} 人`].filter(Boolean).map(String)} />}
       {!edit && (
         <div className="card mb-4 flex items-center gap-2 text-sm" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
           <Eye size={15} /> 剧透警告：{view === 'graph' ? '关系图含线索归属等剧情结构' : view === 'timeline' ? '时间线含剧情推进与 NPC 生死等结构' : view === 'sandbox' ? '沙盘展示全部地点的地理分布（含玩家尚未发现的场景）' : '以下含 NPC 秘密、线索与真相'}。若你打算亲自游玩本模组，请勿继续阅读。
