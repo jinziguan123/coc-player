@@ -29,6 +29,8 @@ export interface SessionSummary {
   character_name?: string
   created_at?: string
   updated_at?: string
+  /** 最后一次交互（本局最后一条事件的时间，没有事件时等于 updated_at） */
+  last_active_at?: string
   room_code?: string | null
   /** 首页「继续上次的桌」用：只含**当前所在**场景（后端 _scene_brief，不剧透其它场景） */
   scene_title?: string | null

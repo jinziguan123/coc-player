@@ -6,7 +6,7 @@ import { HomeIntro } from '@/components/home/HomeIntro'
 import { CaseFileHeader } from '@/components/home/CaseFileHeader'
 import { HomePortal } from '@/components/home/HomePortal'
 import { ResumeSessions } from '@/components/home/ResumeSessions'
-import { pickFeatured, useHomeInventory } from '@/features/home/useHomeInventory'
+import { lastActive, pickFeatured, useHomeInventory } from '@/features/home/useHomeInventory'
 import { itemVariants, listVariants } from '@/lib/motion'
 
 /** 开一局新的三条路：大字列表而不是三张同权卡片——焦点让给右边的拱门。 */
@@ -20,7 +20,10 @@ export function HomePage() {
   // 库存拉一次，抬头、拱门、续玩列表、新手介绍几处共用（见 useHomeInventory 的说明）
   const inventory = useHomeInventory()
   const featured = inventory ? pickFeatured(inventory.openSessions) : null
-  const others = inventory?.openSessions.filter((s) => s.id !== featured?.id) ?? []
+  // 其余的桌同样按最后一次交互排，最近玩过的在前
+  const others = (inventory?.openSessions ?? [])
+    .filter((s) => s.id !== featured?.id)
+    .sort((a, b) => lastActive(b).localeCompare(lastActive(a)))
 
   return (
     // 左：题铭、库存、入口；右：拱门。宽屏两栏铺满，不再挤在左上角；窄屏拱门落到下面。

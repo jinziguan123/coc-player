@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { animate, m, useReducedMotion } from 'motion/react'
 import { GiCrossedSwords, GiDoorway } from 'react-icons/gi'
 import { DecoSunburst } from '@/components/ui/deco'
-import { sessionHref } from '@/features/home/useHomeInventory'
+import { lastActive, sessionHref } from '@/features/home/useHomeInventory'
 import type { SessionSummary } from '@/features/game-setup/types'
 import { ease, spring } from '@/lib/motion'
 import { relativeTime } from '@/lib/relativeTime'
@@ -69,7 +69,7 @@ function SessionWindow({ session }: { session: SessionSummary }) {
   const [entering, setEntering] = useState<DOMRect | null>(null)
   const href = sessionHref(session)
   const isKp = session.character_name === 'KP'
-  const lastSeen = relativeTime(session.updated_at)
+  const lastSeen = relativeTime(lastActive(session))
   const inCombat = typeof session.combat_round === 'number'
 
   const enter = (e: React.MouseEvent) => {

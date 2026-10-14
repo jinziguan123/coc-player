@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -15,6 +16,7 @@ from app.api.deps import (
 )
 from app.database import get_db
 from app.models.character import Character
+from app.models.event_log import EventLog
 from app.models.module import Module
 from app.schemas.event import EventRead
 from app.schemas.session import (
@@ -139,13 +141,30 @@ def list_sessions(
         if module_ids else {}
     )
     chars_map = _chars_map(db, sessions)
+    last_events = _last_event_times(db, [s.id for s in sessions])
     out = []
     for s in sessions:
         module = modules_map.get(s.module_id)
         payload = _session_payload(s, chars_map, module.title if module else None, token)
         payload.update(_scene_brief(s, module))
+        # 最后一次交互：本局最后一条事件的时间。updated_at 两头都不可靠——战斗态回写之类的
+        # 后台写入会刷新它，只发消息时它又纹丝不动。没有任何事件的局才退回 updated_at。
+        payload["last_active_at"] = last_events.get(s.id) or s.updated_at
         out.append(payload)
     return out
+
+
+def _last_event_times(db: Session, session_ids: list[str]) -> dict:
+    """一次分组查询拿到各局最后一条事件的时间，不逐局查。"""
+    if not session_ids:
+        return {}
+    rows = (
+        db.query(EventLog.session_id, func.max(EventLog.created_at))
+        .filter(EventLog.session_id.in_(session_ids))
+        .group_by(EventLog.session_id)
+        .all()
+    )
+    return dict(rows)
 
 
 def _scene_brief(session, module: Module | None) -> dict:
