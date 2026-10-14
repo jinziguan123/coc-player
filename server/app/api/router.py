@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.ai_settings import public_router as ai_settings_public_router
 from app.api.ai_settings import router as ai_settings_router
+from app.api.bgm import router as bgm_router
 from app.api.characters import router as characters_router
 from app.api.chat import router as chat_router
 from app.api.combat import router as combat_router
@@ -16,6 +17,7 @@ from app.api.sessions import router as sessions_router
 
 api_router = APIRouter()
 api_router.include_router(images_router)
+api_router.include_router(bgm_router)
 api_router.include_router(modules_router)
 api_router.include_router(onboarding_router)
 api_router.include_router(characters_router)

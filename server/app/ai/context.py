@@ -23,6 +23,7 @@ from app.ai.prompts.kp_system import (
     KP_OPENING_PROMPT,
     HANDOUT_INSTRUCTION,
     MARK_SEEN_INSTRUCTION,
+    SET_MOOD_INSTRUCTION,
     MODULE_EXCERPT_SECTION,
     MODULE_LOOKUP_INSTRUCTION,
     RECALL_HISTORY_INSTRUCTION,
@@ -41,7 +42,9 @@ from app.ai.prompts.team_system import (
     TEAM_SYSTEM_PROMPT,
 )
 from app.services import (
+    bgm,
     combat_service,
+    entity_state,
     hex_map,
     session_service,
     style_presets,
@@ -411,33 +414,9 @@ def _find_scene(module: Module, scene_id: str | None) -> dict | None:
     return None
 
 
-def _active_flags(session: GameSession) -> set[str]:
-    """当前已激活的剧情标志集合（world_state.flags 容忍 dict / list 两种形态）。"""
-    raw = (session.world_state or {}).get("flags")
-    if isinstance(raw, dict):
-        return {k for k, v in raw.items() if v}
-    if isinstance(raw, (list, set, tuple)):
-        return set(raw)
-    return set()
-
-
-def _resolve_state(entity: dict, flags: set[str]) -> dict:
-    """按已激活 flags 把 entity.states 里命中的变体依次覆盖到基础字段上（后命中者优先）。
-
-    变体形如 ``{"when": ["flag_a", ...], <要覆盖的字段>}``：when 内的 flag 全部已激活才生效，
-    缺省/空 when 视为恒命中。无 states 或无任何命中时返回基础字段本身（向后兼容）。
-    """
-    states = entity.get("states")
-    if not states:
-        return entity
-    base = {k: v for k, v in entity.items() if k != "states"}
-    for st in states:
-        when = st.get("when") or []
-        if isinstance(when, str):
-            when = [when]
-        if all(w in flags for w in when):
-            base.update({k: v for k, v in st.items() if k != "when"})
-    return base
+# 剧情状态解析已下沉到领域层（bgm 等领域服务也要用）；保留原名供既有调用方。
+_active_flags = entity_state.active_flags
+_resolve_state = entity_state.resolve_state
 
 
 def _resolve_scene(scenes: list[dict] | None, scene_id: str | None, flags: set[str]) -> dict | None:
@@ -1195,6 +1174,21 @@ def _sec_travel_suggest(c: _SectionCtx) -> str | None:
     return TRAVEL_SUGGEST_INSTRUCTION if c.has_multi_location else None
 
 
+def _sec_set_mood_ad(c: _SectionCtx) -> str | None:
+    return SET_MOOD_INSTRUCTION
+
+
+def _sec_bgm_current(c: _SectionCtx) -> str | None:
+    """当前配乐氛围一行：让 KP 知道此刻放的是什么，别去「换」成它本来就在放的那首。"""
+    if c.facts.is_opening:
+        return None
+    sid = c.viewer_scene_id or c.session.current_scene_id
+    if not sid:
+        return None
+    mood = bgm.scene_mood(c.module, c.session, sid)
+    return f"\n\n当前配乐氛围：{mood}（{bgm.MOODS.get(mood, mood)}）。"
+
+
 def _sec_rule_lookup_ad(c: _SectionCtx) -> str | None:
     return RULE_LOOKUP_INSTRUCTION if c.rules_lookup_enabled else None
 
@@ -1394,6 +1388,7 @@ _SECTIONS: tuple[_Section, ...] = (
     _Section("module-lookup-ad",  SYS_TIER_STATIC, 0, _sec_module_lookup_ad),
     _Section("recall-ad",         SYS_TIER_STATIC, 0, _sec_recall_ad),
     _Section("plot-flag-ad",      SYS_TIER_STATIC, 0, _sec_plot_flag_ad),
+    _Section("set-mood-ad",       SYS_TIER_STATIC, 0, _sec_set_mood_ad),
     # ── 半静态：模组数据随已访问场景/剧情推进而变，同一轮内稳定 ──
     _Section("module-data",       SYS_TIER_SEMI, 0, _sec_module_data),
     _Section("truth",             SYS_TIER_SEMI, 0, _sec_truth),
@@ -1418,6 +1413,8 @@ _SECTIONS: tuple[_Section, ...] = (
     _Section("npc-memory",        SYS_TIER_VOLATILE, 10, _sec_npc_memory,      True),
     _Section("backstage",         SYS_TIER_VOLATILE, 30, _sec_backstage,       True),
     _Section("improvised-npcs",   SYS_TIER_VOLATILE, 35, _sec_improvised_npcs, True),
+    # 配乐氛围只是锦上添花，超预算时最先丢。
+    _Section("bgm-current",       SYS_TIER_VOLATILE, 50, _sec_bgm_current,     True),
 )
 
 

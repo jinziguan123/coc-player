@@ -43,6 +43,7 @@ import { KpSubTabs } from './KpSubTabs'
 import { useDragResize } from '@/components/ui/useDragResize'
 import { useDictation } from './useDictation'
 import { useSlashCommands } from './useSlashCommands'
+import { KP_MOOD_OPTIONS } from '@/features/game-session/bgm'
 import { ACTION_CHIPS, ACTION_LABELS, PROSE_ACTIONS, REFERENCE_IDS, type KpAction } from './kpActions'
 
 type PanelTab = 'tools' | 'advisor' | 'assets' | 'director' | 'source'
@@ -914,6 +915,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
             </>}
             {action === 'scene_change' && <KpInput name="scene_id" placeholder="场景 ID 或名称" options={catalogs.scenes} fields={fields} onChange={setField} />}
             {(action === 'set_flag' || action === 'clear_flag') && <KpInput name="flag" placeholder="剧情标志" fields={fields} onChange={setField} />}
+            {action === 'set_mood' && <KpInput name="mood" placeholder="氛围，auto=回到场景默认" options={KP_MOOD_OPTIONS} fields={fields} onChange={setField} />}
             {action === 'handout' && <><GiScrollUnfurled size={16} /><KpInput name="id" placeholder="手书 ID" options={catalogs.handouts} fields={fields} onChange={setField} /></>}
             {action === 'hp_change' && <><KpInput name="target" placeholder="角色名" fields={fields} onChange={setField} /><KpInput name="delta" placeholder="变化值，如 -3 或 2" fields={fields} onChange={setField} /><KpInput name="reason" placeholder="原因（可选）" fields={fields} onChange={setField} /></>}
             {action === 'start_combat' && <>

@@ -7,7 +7,7 @@
 import type { ComponentType } from 'react'
 import { BookOpen, Bot, Image, NotebookPen, WandSparkles, type LucideIcon } from 'lucide-react'
 import {
-  GiBrain, GiCancel, GiCheckMark, GiCrossedSwords, GiFootTrip, GiHeartPlus,
+  GiBrain, GiCancel, GiCheckMark, GiCrossedSwords, GiFootTrip, GiHeartPlus, GiMusicalNotes,
   GiPadlock, GiRollingDices, GiScrollUnfurled, GiSkullCrossedBones, GiTheaterCurtains,
 } from 'react-icons/gi'
 
@@ -27,6 +27,7 @@ export type KpAction =
   | 'end_combat'
   | 'unlock_place'
   | 'move_actor'
+  | 'set_mood'
 
 export const ACTION_LABELS: Record<KpAction, string> = {
   narration: '发布叙事',
@@ -44,6 +45,7 @@ export const ACTION_LABELS: Record<KpAction, string> = {
   end_combat: '结束战斗',
   unlock_place: '解锁地点',
   move_actor: '移动角色',
+  set_mood: '配乐氛围',
 }
 
 /**
@@ -71,6 +73,7 @@ export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon
   { id: 'end_combat', label: '结束战斗', icon: GiSkullCrossedBones },
   { id: 'set_flag', label: '推进标志', icon: GiCheckMark },
   { id: 'clear_flag', label: '解除标志', icon: GiCancel },
+  { id: 'set_mood', label: '配乐', icon: GiMusicalNotes },
 ]
 
 /**
@@ -95,6 +98,7 @@ export const ACTION_COMMANDS: Array<{ cmd: string; action: KpAction; hint: strin
   { cmd: '结束', action: 'end_combat', hint: '结束当前战斗' },
   { cmd: '标志', action: 'set_flag', hint: '推进剧情标志' },
   { cmd: '解除', action: 'clear_flag', hint: '解除剧情标志' },
+  { cmd: '配乐', action: 'set_mood', hint: '换当前场景的背景音乐氛围' },
 ]
 
 /** 旁白与 NPC 台词是「一整段文字」，输入框得写得下；检定那种一行一格的表单撑开只会空旷。 */

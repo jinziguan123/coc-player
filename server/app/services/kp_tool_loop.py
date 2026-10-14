@@ -61,6 +61,7 @@ MODULE_LOOKUP_RE = command_protocol.MODULE_LOOKUP_RE
 RECALL_HISTORY_RE = command_protocol.RECALL_HISTORY_RE
 SET_FLAG_RE = command_protocol.SET_FLAG_RE
 CLEAR_FLAG_RE = command_protocol.CLEAR_FLAG_RE
+SET_MOOD_RE = command_protocol.SET_MOOD_RE
 HANDOUT_RE = command_protocol.HANDOUT_RE
 MARK_SEEN_RE = command_protocol.MARK_SEEN_RE
 GROUP_RE = command_protocol.GROUP_RE
@@ -195,6 +196,7 @@ _SOLO_ARG_KEY = {
     "scene_change": "scene_id", "travel_suggest": "scene_id",
     "block_path": "scene_id", "unblock_path": "scene_id",
     "rule_lookup": "query", "module_lookup": "query", "recall_history": "query",
+    "set_mood": "mood",
 }
 
 _TEXT_TAG_RE = re.compile(r"\[([A-Z_]{3,})(?:[:：\s]([^\]]*))?\]")
@@ -434,6 +436,10 @@ def _build_kp_tool_executor(
         chunks = _exec_flag(db, session_id, game_session, flag, name == "set_flag")
         return kp_tools.ToolOutcome("ok", chunks=chunks)
 
+    async def _h_set_mood(name, kv):
+        chunks, note = turn_effects.exec_set_mood(db, session_id, game_session, kv.get("mood", ""))
+        return kp_tools.ToolOutcome(note, chunks=chunks)
+
     async def _h_hp_change(name, kv):
         chunks = await _exec_hp_change(
             db, session_id, player_char,
@@ -499,6 +505,7 @@ def _build_kp_tool_executor(
         "unblock_path": _h_block_path,
         "handout": _h_handout,
         "mark_seen": _h_mark_seen,
+        "set_mood": _h_set_mood,
     }
 
     async def execute(call: ToolCall) -> kp_tools.ToolOutcome:
@@ -1017,6 +1024,15 @@ async def _process_commands(
             yield chunk
     for match in CLEAR_FLAG_RE.finditer(kp_text):
         for chunk in _exec_flag(db, session_id, game_session, match.group(1).strip(), False):
+            yield chunk
+
+    # 配乐氛围：多条只认最后一条（同一段叙述里改两次，后者才是收尾时的气氛）。
+    mood_matches = list(SET_MOOD_RE.finditer(kp_text))
+    if mood_matches:
+        mood_chunks, _note = turn_effects.exec_set_mood(
+            db, session_id, game_session, mood_matches[-1].group(1).strip(),
+        )
+        for chunk in mood_chunks:
             yield chunk
 
     # 手书发放：[HANDOUT: id=xxx] → 把模组手书的原文落库为 system 事件并广播（handout 是

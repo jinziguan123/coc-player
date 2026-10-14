@@ -39,6 +39,7 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
       "description": "场景详细描述",
       "danger": "该场景的危险等级，仅限四选一：calm（安全平静）/uneasy（隐隐不安）/dangerous（明确危险）/deadly（致命凶险）",
       "atmosphere": "一句话氛围基调，给 KP 渲染用：以感官（声/味/光/体感）+ 情绪基调描述，如『腐臭、低压、木板随时塌陷』。不要写成剧透或台词",
+      "mood": "配乐氛围，仅限六选一：calm（安宁，歇脚/白天的安全处）/explore（调查，默认）/tense（不安）/horror（恐怖）/mythos（神话显现，直面超自然）/sorrow（悲伤）。按玩家**身处此地时**的主基调选，拿不准就 explore",
       "kind": "二选一：location（一个真实存在的地点，默认）/ chapter（纯叙事章节或抽象阶段，如『委托与准备』『尾声』——它不是玩家能在地图上前往的地方）",
       "keywords": ["解锁关键词：玩家在对话/行动里提到其中任意一个，大地图就解锁该地点，因此**每个词都必须是『这个地点的称呼』**。覆盖：完整地名、核心地名（去掉『废墟/遗址/旧址』等状态词，如『沉思礼拜堂废墟』→『沉思礼拜堂』）、通俗设施名（礼拜堂/图书馆）、专名（沉思/科比特/罗克斯伯里）、模组原文里的门牌地址或俗称/绰号，以及数字写法变体（『2号车厢』要含『二号车厢』）。**绝不要该场景的内容词**：场景里的物件（行李/钥匙/报纸）、人物或怪物（乘务员/循声者）、氛围描写（黑暗/血腥/喘息）都不是地点称呼——这类词一旦出现在任何叙述里就会误解锁该地点、提前剧透。2-6 个，每个≥2字；不要过泛的通用词（如『房间』『那边』『房子』『街区』）。chapter 类场景留空数组"],
       "connections": ["scene_2"],
@@ -47,7 +48,7 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
         {{"trigger": "触发情景，自然语言：进入场景即目睹/翻动尸体/打开衣柜/点灯后……", "kind": "四选一：san_check（见恐怖景象掷理智）/dice_check（需技能检定）/damage（陷阱或环境伤害）/note（其他机制性提示）", "san_loss": "kind=san_check 时的损失规格，**照抄模组原文**（如 0/1d3、1/1d6+1）", "skill": "kind=dice_check 时的技能名", "damage": "kind=damage 时的伤害骰式（如 1d6）", "note": "补充说明或后果"}}
       ],
       "states": [
-        {{"when": ["剧情标志名，如 basement_flooded"], "danger": "切换后的危险度", "atmosphere": "切换后的氛围", "description": "（可选）切换后的场景描述，覆盖默认", "structural": false}}
+        {{"when": ["剧情标志名，如 basement_flooded"], "danger": "切换后的危险度", "atmosphere": "切换后的氛围", "mood": "（可选）切换后的配乐氛围", "description": "（可选）切换后的场景描述，覆盖默认", "structural": false}}
       ]
     }}
   ],
@@ -131,7 +132,8 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
 8. difficulty 根据模组战斗频率、解谜难度、角色死亡风险综合判断
 9. 每个场景给出 danger（四选一枚举）与 atmosphere（一句话氛围）：danger 按该场景的实际威胁程度判定，
    多数调查/日常场景是 calm 或 uneasy，只有真正有战斗/陷阱/神话冲击的场景才 dangerous/deadly；
-   atmosphere 只写基调与感官，绝不能泄露需要被发现的线索或真相
+   atmosphere 只写基调与感官，绝不能泄露需要被发现的线索或真相；mood 与 danger 相互印证，
+   多数场景是 explore 或 tense，calm/mythos/sorrow 只给确有此基调的场景
 10. 时间线/剧情推进（重要）：模组里"会随剧情改变"的场景/NPC，用 states + triggers 表达，不要假设场景危险度一成不变：
     - 只为**确实会随剧情变化**的场景/NPC 写 states（变体），其余场景/NPC 的 states 留空数组 []；
       变体 when 引用剧情标志名，命中后覆盖对应字段（场景的 danger/atmosphere/description；NPC 的

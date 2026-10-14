@@ -995,6 +995,39 @@ def _exec_flag(
     return chunks
 
 
+def exec_set_mood(
+    db: Session, session_id: str, game_session: GameSession, raw_mood: str,
+) -> tuple[list[str], str]:
+    """KP 改当前场景的配乐氛围。返回 (chunks, 给 KP 的结果说明)。
+
+    覆盖绑定在**房主锚点场景**（current_scene_id）上：分头行动时 KP 的叙述本来就以它为主线，
+    别处的人继续听各自场景的默认。不落聊天事件——玩家听得到，不需要再看一行「氛围切换」。
+    广播 map_update 而不是新造一种事件：前端收到它会重取地点列表，mood 就在里面。
+    """
+    from app.services import bgm
+
+    mood_raw = (raw_mood or "").strip().lower()
+    sid = game_session.current_scene_id
+    if not sid:
+        return [], "当前没有所在场景，未改变配乐。"
+    if mood_raw in ("auto", "default", "自动", "默认"):
+        mood = None
+    else:
+        mood = bgm.normalize_mood(mood_raw)
+        if mood is None or mood not in bgm.KP_MOODS:
+            return [], (
+                f"无效的氛围：{raw_mood!r}。可选 " + "/".join(bgm.KP_MOODS)
+                + "，或 auto 回到场景默认；战斗与追逐由系统自动切换。"
+            )
+    _apply_world_memory(
+        db, game_session, lambda ws: bgm.apply_override(ws, sid, mood),
+    )
+    chunks = [_make_chunk("map_update", metadata={"reason": "bgm"})]
+    if mood is None:
+        return chunks, "ok：配乐已回到场景默认。"
+    return chunks, f"ok：配乐氛围已切换为 {bgm.MOODS[mood]}。"
+
+
 async def _exec_handout(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     hid: str, player_char: Character, teammates: list[Character] | None,

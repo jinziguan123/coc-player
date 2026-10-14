@@ -447,6 +447,26 @@ REGISTRY: tuple[ToolSpec, ...] = (
         }, []),
         kind="state",
     ),
+    ToolSpec(
+        name="set_mood",
+        tag="SET_MOOD",
+        description=(
+            "改变当前场景的配乐氛围。系统已按场景自动配乐、战斗/追逐也会自动换曲，**通常不用调用**；"
+            "只在此刻气氛与场景默认明显不符时用（平静处突现神话造物、得知噩耗、危机解除终于喘口气）。"
+            "只对当前场景生效，换场景自动复原。一个场景至多换一两次，叙述里不要提到音乐本身。"
+        ),
+        parameters=_params({
+            "mood": {
+                "type": "string",
+                "enum": ["calm", "explore", "tense", "horror", "mythos", "sorrow", "auto"],
+                "description": (
+                    "calm 安宁 / explore 调查 / tense 不安 / horror 恐怖 / mythos 神话显现 / "
+                    "sorrow 悲伤；auto＝撤销覆盖、回到场景默认"
+                ),
+            },
+        }, ["mood"]),
+        kind="state",
+    ),
 )
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in REGISTRY}
@@ -496,9 +516,9 @@ def tool_mode_message() -> dict:
             "【工具调用模式】本会话已启用标准工具调用：上文提到的方括号指令"
             "（[DICE_CHECK]、[OPPOSED_CHECK]、[SAN_CHECK]、[HP_CHANGE]、[NPC_ACT]、"
             "[SCENE_CHANGE]、[RULE_LOOKUP]、[MODULE_LOOKUP]、[SET_FLAG]、[CLEAR_FLAG]、"
-            "[HANDOUT]、[MARK_SEEN]）一律改为调用对应的同名工具（dice_check、opposed_check、"
+            "[HANDOUT]、[MARK_SEEN]、[SET_MOOD]）一律改为调用对应的同名工具（dice_check、opposed_check、"
             "san_check、hp_change、npc_act、scene_change、rule_lookup、module_lookup、"
-            "set_flag、clear_flag、handout、mark_seen），不要把这些指令写成文本。"
+            "set_flag、clear_flag、handout、mark_seen、set_mood），不要把这些指令写成文本。"
             "**NPC 台词一律改为调用 say(who, text) 工具**（每句一次，who 填说话人姓名、"
             "text 只填这句话本身）——不要再把台词或 [SAY] 写进叙述文本，写进文本的引号不会"
             "成为对话气泡。旁白（环境/动作/神态）仍照常写在叙述文本里。"

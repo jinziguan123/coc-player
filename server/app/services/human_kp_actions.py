@@ -159,6 +159,14 @@ async def execute_human_kp_action(
             raise ValueError("剧情标志不能为空")
         return _exec_flag(db, session_id, game_session, flag, action == "set_flag"), "剧情标志已更新"
 
+    if action == "set_mood":
+        chunks, note = turn_effects.exec_set_mood(
+            db, session_id, game_session, str(payload.get("mood") or ""),
+        )
+        if not chunks:
+            raise ValueError(note)
+        return chunks, note.removeprefix("ok：")
+
     if action == "handout":
         hid = str(payload.get("id") or payload.get("handout_id") or "").strip()
         if not hid:

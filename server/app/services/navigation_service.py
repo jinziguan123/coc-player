@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.session import GameSession
 from app.models.session_navigation import SessionNavigation
-from app.services import world_memory
+from app.services import bgm, world_memory
 from app.services.event_store import KP_ONLY_SENTINEL, get_session_events
 
 
@@ -474,6 +474,9 @@ def list_known_locations(
             # 用作氛围底；battle_map 是「打起来时的地面」，铺在方格战场下面。存在会话里
             # 而不是模组里：同一个模组的两局可以各配各的图，也不该让局内操作改写模组。
             "battle_map": battle_maps.get(sid) or None,
+            # 背景音乐氛围（场景默认 + KP 临时覆盖）。与 image 同理从这里给：查看者自己在哪
+            # 就听哪的曲子，分头行动时各听各的。战斗 / 追逐由前端按自己的状态再盖一层。
+            "mood": bgm.scene_mood(module, session, sid),
         })
     out.sort(key=lambda x: (not x["current"], not x["visited"], x["id"]))
     return out

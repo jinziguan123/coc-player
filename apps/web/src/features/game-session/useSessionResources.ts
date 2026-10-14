@@ -35,6 +35,7 @@ export interface KnownLocation {
   // 战场底图（俯视战术图）：与 image 是两回事——image 是「这地方看起来什么样」，
   // 用作氛围底；battle_map 是「打起来时的地面」，铺在方格战场下面。
   battle_map?: { url: string; level: string } | null
+  mood?: string                                          // 背景音乐氛围（场景默认 + KP 临时覆盖，后端已合成）
   sceneId?: string
   nodeKind?: 'scene' | 'terrain'
 }

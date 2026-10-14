@@ -1484,10 +1484,12 @@
               "handout",
               "hp_change",
               "start_combat",
+              "end_combat",
               "unlock_place",
               "move_actor",
               "set_battle_map",
-              "set_token"
+              "set_token",
+              "set_mood"
             ],
             "title": "Action",
             "type": "string"
@@ -3110,6 +3112,84 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/bgm/tracks": {
+      "get": {
+        "description": "各氛围可播放的曲目 URL，及氛围标签的中文名（前端设置面板用）。",
+        "operationId": "list_tracks_api_bgm_tracks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Tracks",
+        "tags": [
+          "bgm"
+        ]
+      }
+    },
+    "/api/bgm/{source}/{mood}/{name}": {
+      "get": {
+        "operationId": "get_track_api_bgm__source___mood___name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "mood",
+            "required": true,
+            "schema": {
+              "title": "Mood",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Track",
+        "tags": [
+          "bgm"
+        ]
+      }
+    },
     "/api/characters": {
       "get": {
         "operationId": "list_characters_api_characters_get",
