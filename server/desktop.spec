@@ -5,6 +5,7 @@
 #
 # 打包内容：run_desktop.py 入口 + 整个 app 包；数据文件带上
 #   - alembic/  → 迁移脚本   - web_dist/ → 前端产物   - seed/ → 内置默认内容
+#   - assets/bgm/ → 内置背景音乐曲库
 # 并纳入 fastembed / onnxruntime / tokenizers（规则书 RAG）：模型权重不打进包，首次用到时
 # 下载一次到 app-data/models（见 embedding.py）。
 import os
@@ -22,6 +23,10 @@ if os.path.isdir(WEB_DIST):
 SEED = os.path.join(SPEC_DIR, "seed")
 if os.path.isdir(SEED):
     datas.append((SEED, "seed"))
+# 内置背景音乐曲库（入库的静态素材，与 seed 不同：不由 make_seed.py 生成）
+BGM = os.path.join(SPEC_DIR, "assets", "bgm")
+if os.path.isdir(BGM):
+    datas.append((BGM, os.path.join("assets", "bgm")))
 
 hiddenimports = [
     "app.main",

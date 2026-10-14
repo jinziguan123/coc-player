@@ -4,6 +4,63 @@
  */
 
 export interface paths {
+    "/api/bgm/credits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Credits
+         * @description 内置曲目的来源与署名（设置页「音乐致谢」）。
+         */
+        get: operations["credits_api_bgm_credits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bgm/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tracks
+         * @description 各氛围可播放的曲目 URL，及氛围标签的中文名（前端设置面板用）。
+         */
+        get: operations["list_tracks_api_bgm_tracks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bgm/{source}/{mood}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Track */
+        get: operations["get_track_api_bgm__source___mood___name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/characters": {
         parameters: {
             query?: never;
@@ -3241,7 +3298,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "narration" | "dialogue" | "dice_check" | "opposed_check" | "generic_roll" | "san_check" | "scene_change" | "set_flag" | "clear_flag" | "handout" | "hp_change" | "start_combat" | "unlock_place" | "move_actor" | "set_battle_map" | "set_token";
+            action: "narration" | "dialogue" | "dice_check" | "opposed_check" | "generic_roll" | "san_check" | "scene_change" | "set_flag" | "clear_flag" | "handout" | "hp_change" | "start_combat" | "end_combat" | "unlock_place" | "move_actor" | "set_battle_map" | "set_token" | "set_mood";
             /** Payload */
             payload?: {
                 [key: string]: unknown;
@@ -4015,6 +4072,79 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    credits_api_bgm_credits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_tracks_api_bgm_tracks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_track_api_bgm__source___mood___name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source: string;
+                mood: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_characters_api_characters_get: {
         parameters: {
             query?: {

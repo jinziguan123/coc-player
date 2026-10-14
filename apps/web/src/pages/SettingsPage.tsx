@@ -18,6 +18,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { getOnboardingReturnTo } from '@/features/onboarding/navigation'
 import { AISettingsPanel } from '@/features/settings/AISettingsPanel'
 import { LanRosterPanel } from '@/features/settings/LanRosterPanel'
+import { MusicCreditsPanel } from '@/features/settings/MusicCreditsPanel'
 import { NetlinkPanel } from '@/features/settings/NetlinkPanel'
 
 /* ---------- 二级导航项 ---------- */
@@ -499,6 +500,7 @@ function AppearanceSettingsPanel() {
           <span>在对局界面渲染场景氛围底</span>
         </label>
       </div>
+      <MusicCreditsPanel />
     </div>
   )
 }

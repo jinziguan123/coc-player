@@ -7,6 +7,8 @@ import { api, connectSSE, getServerUrl } from '../api/client'
 import { runLiveSession } from '@/lib/liveSession'
 import { HistorySearchModal } from '../components/game/HistorySearchModal'
 import { useSceneVisuals } from '@/features/game-session/useSceneVisuals'
+import { useSessionBgm } from '@/features/game-session/useBgm'
+import { BgmControl } from '../components/game/BgmControl'
 import {
   buildPartyByName,
   fmtTime,
@@ -515,6 +517,7 @@ export function GameSessionPage() {
   const { sceneBackdrop, battleMap, sandboxBackdropUrl } = useSceneVisuals({
     messages, locations, mapBackdrop,
   })
+  const bgm = useSessionBgm({ combat, chase, locations, ended: currentSession?.status === 'ended' })  // 背景音乐
   // 氛围底真的铺上了才给正文加护读底：没图（未配生图 / 还在生成）时保持原有的透明观感。
   useEffect(() => {
     const root = document.documentElement
@@ -1441,6 +1444,7 @@ export function GameSessionPage() {
           )}
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <ContextUsageBadge sessionId={currentSession.id} refreshKey={messages.length} paused={streaming} />
+            <BgmControl bgm={bgm} />
             <button
               onClick={() => setShowSearch((v) => !v)}
               data-tour="search"

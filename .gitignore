@@ -16,6 +16,8 @@ __pycache__/
 server/data/
 # 文生图与场景图缓存（运行时文件，不入库）
 server/images/
+# 用户自定义背景音乐曲库（源码运行时的数据目录，不入库；内置曲库在 server/assets/bgm/）
+server/bgm/
 # 嵌入模型缓存（fastembed 首次使用时下载 bge-small-zh-v1.5，~90MB，运行时重下，不入库）
 server/models/
 # 打包用的内置种子（由 make_seed.py 从开发库生成，构建时重建，不入库）

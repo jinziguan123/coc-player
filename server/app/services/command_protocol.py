@@ -40,6 +40,8 @@ HANDOUT_RE = re.compile(r"\[HANDOUT[:：\s]\s*([^\]]+?)\s*\]")
 # 记账：KP 主动声明「这条线索/这个桥段我已经给过玩家了」。台账此前只有两条写入路径，
 # 一条要规划器从叙事回推 clue_id、一条只认字面，都会漏；KP 自己最清楚它刚给出了什么。
 MARK_SEEN_RE = re.compile(r"\[MARK_SEEN[:：\s]\s*([^\]]+?)\s*\]")
+# 配乐氛围：只改 world_state.bgm_override，不出任何聊天卡片（见 services/bgm.py）。
+SET_MOOD_RE = re.compile(r"\[SET_MOOD[:：\s]\s*(?:mood=)?\s*([^\]]+?)\s*\]")
 GROUP_RE = re.compile(r"\[GROUP:([^\]]*)\]")
 
 CMD_TAG_PREFIXES = (
@@ -59,6 +61,7 @@ CMD_TAG_PREFIXES = (
     "CLEAR_FLAG:",
     "HANDOUT:",
     "MARK_SEEN:",
+    "SET_MOOD:",
 )
 _CMD_TAG_KEYWORDS = tuple(prefix.rstrip(":") for prefix in CMD_TAG_PREFIXES)
 

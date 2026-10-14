@@ -115,12 +115,18 @@ INTENTS: list[tuple[str, list[Step]]] = [
     ("建议前往", [
         ("travel_suggest", {"scene_id": "scene_b"}, "[TRAVEL_SUGGEST: scene_id=scene_b]"),
     ]),
+    ("切换配乐氛围", [("set_mood", {"mood": "horror"}, "[SET_MOOD: mood=horror]")]),
+    ("先切氛围再撤销", [
+        ("set_mood", {"mood": "sorrow"}, "[SET_MOOD: mood=sorrow]"),
+        ("set_mood", {"mood": "auto"}, "[SET_MOOD: mood=auto]"),
+    ]),
 ]
 
 # 初始快照：用来断言每条用例**确实改动了什么**，杜绝「两边都没干活」的假等价。
 _PRISTINE = {
     "events": [], "current_scene_id": "scene_a", "flags": {},
     "blocked_scenes": {}, "handouts_issued": [], "travel_suggested": [],
+    "bgm_override": {},
 }
 
 
@@ -159,6 +165,7 @@ def _snapshot(db, session_id: str) -> dict:
         "blocked_scenes": ws.get("blocked_scenes") or {},
         "handouts_issued": ws.get("handouts_issued") or [],
         "travel_suggested": sorted(ws.get("travel_suggested") or []),
+        "bgm_override": ws.get("bgm_override") or {},
     }
 
 
