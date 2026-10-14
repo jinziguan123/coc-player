@@ -1,6 +1,6 @@
 /**
  * 主题切换（纯前端，裸 localStorage，无状态库）
- * - 'gothic'    ：克苏鲁哥特暗色（默认，:root 基线）
+ * - 'gothic'    ：密斯卡托尼克 · 装饰艺术暗色（默认，:root 基线；id 沿用旧名以兼容已存的 localStorage）
  * - 'parchment' ：羊皮纸暖褐（:root[data-theme="parchment"] 覆盖）
  *
  * 首帧防白闪由 index.html 内联脚本负责（在 #root 渲染前设好 data-theme）。
@@ -14,12 +14,12 @@ const DEFAULT_THEME: Theme = 'gothic'
 
 /** 各主题的 <meta name="theme-color"> 值（与 body 顶部底色一致，移动端地址栏配色） */
 const META_THEME_COLOR: Record<Theme, string> = {
-  gothic: '#0c0e13',
+  gothic: '#0a110f',
   parchment: '#f0e6d3',
 }
 
 export const THEMES: { value: Theme; label: string; swatch: string[] }[] = [
-  { value: 'gothic', label: '暗夜哥特', swatch: ['#0c0e13', '#14171f', '#d4a24e'] },
+  { value: 'gothic', label: '密大装饰', swatch: ['#0a110f', '#142420', '#c8a25a'] },
   { value: 'parchment', label: '羊皮纸', swatch: ['#f0e6d3', '#e8dcc8', '#8b2500'] },
 ]
 

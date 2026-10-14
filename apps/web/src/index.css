@@ -11,34 +11,38 @@
 @import 'lxgw-wenkai-screen-webfont/lxgwwenkaigbscreen.css';
 @import "tailwindcss";
 
-/* ===== Design Tokens：克苏鲁暗夜主题（唯一主题，无浅色切换） ===== */
+/* ===== Design Tokens：密斯卡托尼克 · 装饰艺术（默认暗色主题） =====
+   1920 年代阿卡姆俱乐部 / 密大图书馆：漆黑 + 瓶绿分层，黄铜是唯一强调色；
+   铜绿（--color-verdigris）与牛血红是「底下有什么不对劲」的两种语义色。 */
 :root {
-  /* 基底：墨蓝黑三级分层（避免纯黑） */
-  --color-bg-primary: #0c0e13;
-  --color-bg-secondary: #14171f;
-  --color-bg-tertiary: #1a1e28;
-  --color-bg-card: #14171f;
+  /* 基底：漆黑 → 瓶绿三级分层（避免纯黑，也避免旧版的墨蓝） */
+  --color-bg-primary: #0a110f;
+  --color-bg-secondary: #101c18;
+  --color-bg-tertiary: #142420;
+  --color-bg-card: #101c18;
 
-  /* 文字：羊皮纸暖白为主，青铜灰为次 */
-  --color-text-primary: #e8dcc0;
-  --color-text-secondary: #98a2ad;
-  --color-text-accent: #d4a24e;
+  /* 文字：象牙白为主，旧黄铜灰为次 */
+  --color-text-primary: #ece3cf;
+  --color-text-secondary: #ada692;
+  --color-text-accent: #d6b06a;
 
-  /* 烛光琥珀强调 */
-  --color-accent: #d4a24e;
-  --color-accent-hover: #e2b566;
-  --color-on-accent: #191307;                    /* 琥珀底上的深色文字 */
-  --color-border: rgba(212, 162, 78, 0.14);      /* 细边框：琥珀 14% */
-  --color-border-strong: rgba(212, 162, 78, 0.32);
+  /* 黄铜强调 */
+  --color-accent: #c8a25a;
+  --color-accent-hover: #e0c07e;
+  --color-on-accent: #15110a;                    /* 黄铜底上的深色文字 */
+  --color-border: rgba(200, 162, 90, 0.16);      /* 细边框：黄铜 16% */
+  --color-border-strong: rgba(200, 162, 90, 0.36);
+  --color-brass-dim: #8a7040;                    /* 暗黄铜：装饰线、非激活描边 */
+  --color-verdigris: #6fa898;                    /* 铜绿：SAN / NPC / 进行中 */
 
   /* 语义色 */
-  --color-danger: #c05e66;        /* 可读血红：文字 / 图标 / 描边 */
-  --color-danger-deep: #8f2f36;   /* 血酒红：填充底色（HP/SAN 警示、危险按钮） */
+  --color-danger: #c4545c;        /* 可读牛血红：文字 / 图标 / 描边 */
+  --color-danger-deep: #7d2229;   /* 牛血红：填充底色（HP/SAN 警示、危险按钮） */
   --color-on-danger: #f4e6da;
-  --color-success: #7da36b;
-  --color-dice-gold: #e0b75f;     /* 骰子 / 大成功 */
-  --color-dice-fumble: #d96459;   /* 大失败：比普通失败更刺目的血色 */
-  --color-player-bg: #262016;     /* 玩家气泡：暗琥珀 */
+  --color-success: #86b07a;
+  --color-dice-gold: #e6c98a;     /* 骰子 / 大成功：亮黄铜 */
+  --color-dice-fumble: #d9584f;   /* 大失败：比普通失败更刺目的血色 */
+  --color-player-bg: #1a2e28;     /* 玩家气泡：亮一档的瓶绿 */
 
   /* —— 抽出的“散落硬编码深色值”，两主题各给一份，避免切换后破面 —— */
   --color-input-bg: rgba(0, 0, 0, 0.28);                 /* 输入框 / Select 触发器底 */
@@ -49,20 +53,20 @@
   --combat-friend: #9dc3e6;
   --combat-ally: #8aa6b8;
   --combat-foe: #d9646c;
-  --sidebar-bg: linear-gradient(180deg, #12151d 0%, #0d1016 100%);
+  --sidebar-bg: linear-gradient(180deg, #0a1311 0%, #070c0b 100%);
   --sidebar-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
   --shadow-color: rgba(0, 0, 0, 0.35);                   /* 卡片 / 气泡投影 */
   --shadow-color-strong: rgba(0, 0, 0, 0.45);            /* 卡片 hover 投影 */
   --card-inset: rgba(0, 0, 0, 0.22);                     /* 卡片内暗角 */
   --card-noise-opacity: 0.05;                            /* .card::before 噪声强度 */
-  --scrollbar-thumb: rgba(212, 162, 78, 0.22);
-  --scrollbar-thumb-hover: rgba(212, 162, 78, 0.38);
-  --npc-bubble-bg: hsl(var(--npc-hue, 222) 18% 13%);
-  --npc-bubble-border: hsl(var(--npc-hue, 222) 24% 30% / 0.55);
+  --scrollbar-thumb: rgba(200, 162, 90, 0.22);
+  --scrollbar-thumb-hover: rgba(200, 162, 90, 0.4);
+  --npc-bubble-bg: hsl(var(--npc-hue, 165) 18% 12%);
+  --npc-bubble-border: hsl(var(--npc-hue, 165) 24% 30% / 0.55);
   --page-bg:
-    radial-gradient(ellipse 90% 55% at 50% -10%, rgba(212, 162, 78, 0.055) 0%, transparent 60%),
-    radial-gradient(ellipse 130% 90% at 50% 115%, rgba(4, 5, 8, 0.85) 0%, transparent 55%),
-    linear-gradient(180deg, #0e1118 0%, #0c0e13 55%, #0a0c10 100%);
+    radial-gradient(ellipse 90% 55% at 50% -10%, rgba(200, 162, 90, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 130% 90% at 50% 115%, rgba(3, 6, 5, 0.85) 0%, transparent 55%),
+    linear-gradient(180deg, #0d1613 0%, #0a110f 55%, #080d0c 100%);
 
   /* 场景氛围底：把当前场景配图糊成「这个地方的色调」。
      关键是 contrast 而不是 brightness——AI 生图的亮度分布不可控（实测港务所那张中央
@@ -75,8 +79,8 @@
      而不是给每条消息各贴一块底——那样背景被切成一段一段，比不加还难看。
      只留一点点四周暗角与上下收边，不做强对比的中心亮区。 */
   --scene-backdrop-scrim:
-    radial-gradient(ellipse 100% 85% at 50% 45%, rgba(12, 14, 19, 0.38) 0%, rgba(12, 14, 19, 0.62) 100%),
-    linear-gradient(180deg, #0c0e13 0%, transparent 10%, transparent 90%, #0c0e13 100%);
+    radial-gradient(ellipse 100% 85% at 50% 45%, rgba(10, 17, 15, 0.38) 0%, rgba(10, 17, 15, 0.62) 100%),
+    linear-gradient(180deg, #0a110f 0%, transparent 10%, transparent 90%, #0a110f 100%);
 
   /* 字体（按区域拆分）：
      · --font-ui  系统 UI「羊皮卷」衬线：首页/列表/侧边栏/按钮/表单/游戏外壳等一切非游戏内信息
@@ -95,17 +99,18 @@
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 
   /* ===== 字号刻度（此前全站几乎只有 text-xs 一档，标题与正文无层级差） ===== */
-  --text-2xs: 0.6875rem;   /* 11px 徽标/角标 */
-  --text-xs: 0.75rem;      /* 12px 次要信息 */
-  --text-sm: 0.8125rem;    /* 13px 正文 */
-  --text-base: 0.9375rem;  /* 15px 主要正文 */
-  --text-lg: 1.0625rem;    /* 17px 区块标题 */
-  --text-xl: 1.375rem;     /* 22px 页面标题 */
+  --text-2xs: 0.75rem;     /* 12px 徽标/角标 */
+  --text-xs: 0.8125rem;    /* 13px 次要信息 */
+  --text-sm: 0.875rem;     /* 14px 正文 */
+  --text-base: 1rem;       /* 16px 主要正文 */
+  --text-lg: 1.125rem;     /* 18px 区块标题 */
+  --text-xl: 1.625rem;     /* 26px 页面标题 */
+  --text-2xl: 2.25rem;     /* 36px 首页题铭 */
 
   /* ===== 表面层级：面板 > 分组 > 条目，三层各自可辨 ===== */
-  --surface-1: #171b24;    /* 面板底 */
-  --surface-2: #1c212c;    /* 分组底 */
-  --surface-3: #232936;    /* 条目底 / hover */
+  --surface-1: #101c18;    /* 面板底 */
+  --surface-2: #142420;    /* 分组底 */
+  --surface-3: #1a2e28;    /* 条目底 / hover */
   --surface-sunken: rgba(0, 0, 0, 0.24);   /* 内凹（进度条槽、代码块） */
 
   --radius-sm: 3px;
@@ -201,7 +206,7 @@ body {
 }
 
 ::selection {
-  background: rgba(212, 162, 78, 0.28);
+  background: rgba(200, 162, 90, 0.28);
 }
 
 /* ===== Scrollbar ===== */
@@ -220,10 +225,9 @@ body {
   font-family: var(--font-title);
   font-size: var(--text-xl);
   font-weight: 700;
-  color: var(--color-text-accent);
+  color: var(--color-text-primary);
   margin-bottom: 1.5rem;
-  letter-spacing: 0.14em;
-  text-shadow: 0 0 18px rgba(212, 162, 78, 0.18);
+  letter-spacing: 0.16em;
 }
 
 /* ===== 页面头部：返回 + 标题 + 右侧操作 =====
@@ -1167,7 +1171,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--color-text-accent);
-  text-shadow: 0 0 26px rgba(212, 162, 78, 0.22);
+  text-shadow: 0 0 26px rgba(200, 162, 90, 0.22);
   text-wrap: balance;
 }
 .case-sub { margin-top: 0.15rem; font-size: var(--text-sm); color: var(--color-text-secondary); }
@@ -1446,7 +1450,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.14em;
   color: var(--color-text-accent);
-  text-shadow: 0 0 18px rgba(212, 162, 78, 0.18);
+  text-shadow: 0 0 18px rgba(200, 162, 90, 0.18);
   margin: 0;
 }
 /* 统计紧跟标题、操作推到最右：中间那段留白正好把「这一页是什么」与「能做什么」分开 */
@@ -2163,7 +2167,7 @@ body {
 /* ===== 悬浮窗 ===== */
 /* 遮罩：压暗 + 轻虚化，把注意力从背后的列表拉到窗体上；入场淡入一次 */
 .modal-backdrop {
-  background: radial-gradient(ellipse at center, rgba(6, 7, 11, 0.7), rgba(3, 4, 6, 0.86));
+  background: radial-gradient(ellipse at center, rgba(5, 10, 9, 0.7), rgba(2, 5, 4, 0.86));
   backdrop-filter: blur(2px);
   animation: modalBackdropIn 0.18s ease-out both;
 }
@@ -2913,7 +2917,7 @@ body {
 }
 .input:focus {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(212, 162, 78, 0.12);
+  box-shadow: 0 0 0 2px rgba(200, 162, 90, 0.12);
 }
 .input::placeholder {
   color: var(--color-text-secondary);
@@ -3013,7 +3017,7 @@ body {
 }
 .combat-select:focus {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(212, 162, 78, 0.14);
+  box-shadow: 0 0 0 2px rgba(200, 162, 90, 0.14);
 }
 .combat-select:disabled {
   opacity: 0.5;
@@ -3162,24 +3166,42 @@ button.chip, .chip-btn { cursor: pointer; }
   border-right: 1px solid var(--color-border);
   background: var(--sidebar-bg);
   box-shadow: var(--sidebar-shadow);
-  /* 收展平滑过渡：此前宽度瞬变，导航项被硬切 */
-  transition: width 0.22s ease;
+  /* 收展平滑过渡：进对局自动收起时尤其要顺，否则像界面跳了一下 */
+  transition: width 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   overflow: hidden;
 }
 
+/* 品牌位：扇形日芒 + 加宽字距的拉丁字标 + 中文副题（装饰艺术的「门楣」） */
 .sidebar-logo {
   position: relative;
-  padding: 1.25rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 1.5rem 0.75rem 1.25rem;
   border-bottom: 1px solid var(--color-border);
-  font-family: var(--font-display);   /* 纯拉丁「CoC Player」，ZCOOL 无回落风险 */
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--color-text-accent);
-  letter-spacing: 0.1em;
-  text-shadow: 0 0 14px rgba(212, 162, 78, 0.25);
+  color: var(--color-accent);
   white-space: nowrap;
 }
-/* logo 下的菱形压纹：与 .home-rule / .empty-state 的收纹饰同一母题 */
+.sidebar-logo-mark { width: 3.6rem; height: auto; }
+.sidebar-logo-word {
+  font-family: var(--font-display);   /* 纯拉丁「COC PLAYER」，ZCOOL 无回落风险 */
+  font-size: 1.15rem;
+  line-height: 1;
+  letter-spacing: 0.22em;
+  padding-left: 0.22em;               /* 抵消末字字距，视觉居中 */
+  color: var(--color-text-accent);
+  text-shadow: 0 0 14px rgba(200, 162, 90, 0.25);
+}
+.sidebar-logo-sub {
+  font-family: var(--font-title);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+}
+/* logo 下的菱形压纹 */
 .sidebar-logo::after {
   content: '';
   position: absolute;
@@ -3210,10 +3232,12 @@ button.chip, .chip-btn { cursor: pointer; }
 }
 
 .sidebar-link {
+  position: relative;
+  isolation: isolate;   /* 让 z-index:-1 的激活底只沉到本项文字之下，不沉出侧栏 */
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0.75rem;
+  gap: 0.7rem;
+  padding: 0.6rem 0.85rem;
   margin-bottom: 2px;
   border-radius: 3px;
   font-size: 0.875rem;
@@ -3231,25 +3255,30 @@ button.chip, .chip-btn { cursor: pointer; }
 }
 .sidebar-link:hover {
   color: var(--color-text-primary);
-  background: rgba(212, 162, 78, 0.06);
+  background: rgba(200, 162, 90, 0.06);
 }
-/* 选中项左缘加琥珀竖条——与「当前生效」的 .active-rail、参战方色带同一套语言 */
+/* 选中项：黄铜底 + 左缘竖条由 .sidebar-link-active 承担（Motion layoutId 在各项间滑动） */
 .sidebar-link.active {
-  position: relative;
   color: var(--color-text-accent);
-  background: rgba(212, 162, 78, 0.1);
   font-weight: 600;
 }
-.sidebar-link.active::before {
+.sidebar-link-active {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(200, 162, 90, 0.16), rgba(200, 162, 90, 0.04) 85%);
+}
+.sidebar-link-active::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 20%;
-  bottom: 20%;
+  top: 18%;
+  bottom: 18%;
   width: 2px;
   border-radius: 0 2px 2px 0;
   background: var(--color-accent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 70%, transparent);
 }
 .sidebar-link svg {
   font-size: 1.1rem;
@@ -3272,7 +3301,7 @@ button.chip, .chip-btn { cursor: pointer; }
 }
 .sidebar-toggle:hover {
   color: var(--color-text-primary);
-  background: rgba(212, 162, 78, 0.06);
+  background: rgba(200, 162, 90, 0.06);
 }
 
 .sidebar-footer {
@@ -3284,13 +3313,11 @@ button.chip, .chip-btn { cursor: pointer; }
 
 /* ===== 收起态：仅图标 ===== */
 .sidebar.collapsed {
-  width: 3.5rem;
+  width: 4.25rem;
 }
-.sidebar.collapsed .sidebar-logo {
-  padding: 1.25rem 0;
-  text-align: center;
-  letter-spacing: 0;
-}
+.sidebar.collapsed .sidebar-logo { padding: 1.1rem 0 1rem; }
+.sidebar.collapsed .sidebar-logo-mark { width: 2.4rem; }
+.sidebar.collapsed .sidebar-logo-word { font-size: 0.85rem; letter-spacing: 0.12em; padding-left: 0.12em; }
 .sidebar.collapsed .sidebar-link {
   justify-content: center;
   padding: 0.5rem;
@@ -3341,7 +3368,7 @@ button.chip, .chip-btn { cursor: pointer; }
   transition: color 0.15s, background 0.15s;
   white-space: nowrap;
 }
-.subnav-item:hover { color: var(--color-text-primary); background: rgba(212, 162, 78, 0.06); }
+.subnav-item:hover { color: var(--color-text-primary); background: rgba(200, 162, 90, 0.06); }
 .subnav-item svg { font-size: 1.05rem; opacity: 0.85; flex-shrink: 0; }
 .subnav-item:focus-visible {
   outline: none;
@@ -3350,7 +3377,7 @@ button.chip, .chip-btn { cursor: pointer; }
 }
 .subnav-item.active {
   color: var(--color-text-accent);
-  background: rgba(212, 162, 78, 0.1);
+  background: rgba(200, 162, 90, 0.1);
   font-weight: 600;
 }
 /* 选中项左缘琥珀竖条（与 .sidebar-link.active 同一「当前在此」语言） */
@@ -3369,7 +3396,7 @@ button.chip, .chip-btn { cursor: pointer; }
 :root[data-theme="parchment"] .subnav-item:hover { background: rgba(139, 37, 0, 0.06); }
 :root[data-theme="parchment"] .subnav-item.active { background: rgba(139, 37, 0, 0.09); }
 :root[data-theme="parchment"] .sidebar-link:hover { background: rgba(139, 37, 0, 0.06); }
-:root[data-theme="parchment"] .sidebar-link.active { background: rgba(139, 37, 0, 0.09); }
+:root[data-theme="parchment"] .sidebar-link-active { background: rgba(139, 37, 0, 0.09); }
 
 /* 桌面端角色卡是并列栏，不需要遮罩；窄屏媒体查询里再打开（须先声明，否则会覆盖它） */
 .char-panel-scrim { display: none; }
@@ -3449,7 +3476,7 @@ button.chip, .chip-btn { cursor: pointer; }
   line-height: 1.95;
   color: var(--color-text-primary);
   padding: 0.5rem 0;
-  border-left: 2px solid rgba(212, 162, 78, 0.35);
+  border-left: 2px solid rgba(200, 162, 90, 0.35);
   padding-left: 1rem;
 }
 
@@ -3460,8 +3487,8 @@ button.chip, .chip-btn { cursor: pointer; }
   color: var(--color-dice-gold);
   font-weight: 600;
   padding: 0.5rem 0.75rem;
-  background: rgba(224, 183, 95, 0.07);
-  border: 1px solid rgba(224, 183, 95, 0.22);
+  background: rgba(230, 201, 138, 0.07);
+  border: 1px solid rgba(230, 201, 138, 0.22);
   border-radius: 3px;
   display: inline-block;
 }
@@ -3529,7 +3556,7 @@ button.chip, .chip-btn { cursor: pointer; }
   font-family: var(--font-mono);
   font-style: normal;
   font-size: 0.9em;
-  background: rgba(212, 162, 78, 0.1);
+  background: rgba(200, 162, 90, 0.1);
   padding: 0.05em 0.35em;
   border-radius: 3px;
 }
@@ -3587,7 +3614,7 @@ button.chip, .chip-btn { cursor: pointer; }
   padding: 0.5rem 0.85rem;
   font-family: var(--font-game);   /* 游戏内信息：玩家台词走圆润楷体 */
   background: var(--color-player-bg);
-  border: 1px solid rgba(212, 162, 78, 0.28);
+  border: 1px solid rgba(200, 162, 90, 0.28);
   border-radius: 4px 4px 0 4px;
   line-height: 1.7;
   box-shadow: 0 1px 4px var(--shadow-color);
@@ -3614,7 +3641,7 @@ button.chip, .chip-btn { cursor: pointer; }
   max-width: 80%;
   padding: 0.4rem 0.8rem;
   font-family: var(--font-game);   /* 游戏内信息：行动/协助描述走圆润楷体 */
-  background: rgba(212, 162, 78, 0.05);
+  background: rgba(200, 162, 90, 0.05);
   border: 1px dashed var(--color-border-strong);
   border-radius: 4px;
   line-height: 1.6;
@@ -3844,7 +3871,7 @@ select.input option {
 .entry-card:hover {
   transform: translateY(-4px);
   border-color: var(--color-accent);
-  box-shadow: 0 0 22px rgba(212, 162, 78, 0.28);
+  box-shadow: 0 0 22px rgba(200, 162, 90, 0.28);
 }
 .entry-card:active { transform: translateY(-1px); }
 .entry-card > svg { font-size: 2.4rem; color: var(--color-text-accent); }
@@ -3918,7 +3945,7 @@ select.input option {
 .seat-chip:hover:not(:disabled) {
   border-color: var(--color-accent);
   color: var(--color-text-accent);
-  background: rgba(212, 162, 78, 0.08);
+  background: rgba(200, 162, 90, 0.08);
 }
 .seat-chip:disabled { opacity: 0.45; cursor: default; }
 /* 角色列表：一张卡要一眼看出「这是谁、擅长什么」，而不是一颗只写名字的药丸 */
@@ -3950,13 +3977,13 @@ select.input option {
 .char-card:hover:not(:disabled) {
   border-color: var(--color-accent);
   transform: translateY(-1px);
-  box-shadow: 0 0 12px rgba(212, 162, 78, 0.18);
+  box-shadow: 0 0 12px rgba(200, 162, 90, 0.18);
 }
 .char-card:disabled { opacity: 0.45; cursor: default; }
 .char-card--on {
   border-color: var(--color-accent);
-  background: rgba(212, 162, 78, 0.1);
-  box-shadow: 0 0 12px rgba(212, 162, 78, 0.25);
+  background: rgba(200, 162, 90, 0.1);
+  box-shadow: 0 0 12px rgba(200, 162, 90, 0.25);
 }
 .char-card-avatar {
   flex-shrink: 0;
@@ -4561,7 +4588,7 @@ select.input option {
 .chat-token:hover {
   transform: scale(1.06);
   border-color: var(--color-accent);
-  box-shadow: 0 0 16px rgba(212, 162, 78, 0.3), 0 6px 20px var(--shadow-color-strong);
+  box-shadow: 0 0 16px rgba(200, 162, 90, 0.3), 0 6px 20px var(--shadow-color-strong);
 }
 @keyframes tokenIn {
   from { opacity: 0; transform: scale(0.6); }
@@ -4647,8 +4674,8 @@ select.input option {
 .seat-chip--on {
   border-color: var(--color-accent);
   color: var(--color-text-accent);
-  background: rgba(212, 162, 78, 0.14);
-  box-shadow: 0 0 10px rgba(212, 162, 78, 0.22);
+  background: rgba(200, 162, 90, 0.14);
+  box-shadow: 0 0 10px rgba(200, 162, 90, 0.22);
 }
 
 /* 骰子事件卡入场：微旋转 + 缩放弹入（骰子落定的仪式感） */
@@ -4668,9 +4695,9 @@ select.input option {
              critPulse 0.9s ease-out 0.2s both;
 }
 @keyframes critPulse {
-  0% { box-shadow: 0 0 0 0 rgba(224, 183, 95, 0); }
-  35% { box-shadow: 0 0 18px 3px rgba(224, 183, 95, 0.55); }
-  100% { box-shadow: 0 0 0 0 rgba(224, 183, 95, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(230, 201, 138, 0); }
+  35% { box-shadow: 0 0 18px 3px rgba(230, 201, 138, 0.55); }
+  100% { box-shadow: 0 0 0 0 rgba(230, 201, 138, 0); }
 }
 
 /* 大失败：血红震颤一次（水平轻抖 + 血色描边闪一下） */
@@ -4692,8 +4719,8 @@ select.input option {
   animation: pendingBreath 2.2s ease-in-out infinite;
 }
 @keyframes pendingBreath {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 162, 78, 0); }
-  50% { box-shadow: 0 0 12px 1px rgba(212, 162, 78, 0.28); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(200, 162, 90, 0); }
+  50% { box-shadow: 0 0 12px 1px rgba(200, 162, 90, 0.28); }
 }
 
 /* SAN 大额降：面板血红闪边一次 */
@@ -4701,9 +4728,9 @@ select.input option {
   animation: sanDrop 0.7s ease-out both;
 }
 @keyframes sanDrop {
-  0% { box-shadow: inset 0 0 0 0 rgba(192, 94, 102, 0); }
+  0% { box-shadow: inset 0 0 0 0 rgba(196, 84, 92, 0); }
   30% { box-shadow: inset 0 0 22px 2px rgba(143, 47, 54, 0.55); }
-  100% { box-shadow: inset 0 0 0 0 rgba(192, 94, 102, 0); }
+  100% { box-shadow: inset 0 0 0 0 rgba(196, 84, 92, 0); }
 }
 
 /* 恢复：琥珀微光一次 */
@@ -4711,9 +4738,9 @@ select.input option {
   animation: panelRestore 0.7s ease-out both;
 }
 @keyframes panelRestore {
-  0% { box-shadow: inset 0 0 0 0 rgba(212, 162, 78, 0); }
-  30% { box-shadow: inset 0 0 20px 2px rgba(212, 162, 78, 0.4); }
-  100% { box-shadow: inset 0 0 0 0 rgba(212, 162, 78, 0); }
+  0% { box-shadow: inset 0 0 0 0 rgba(200, 162, 90, 0); }
+  30% { box-shadow: inset 0 0 20px 2px rgba(200, 162, 90, 0.4); }
+  100% { box-shadow: inset 0 0 0 0 rgba(200, 162, 90, 0); }
 }
 
 /* 进度条平滑收缩（StatBar 用 transition-all；这里显式给足时长与缓动） */
@@ -4735,7 +4762,7 @@ select.input option {
   pointer-events: none;
   animation: hpFloat 1s ease-out both;
 }
-.hp-float--dmg { color: var(--color-danger); text-shadow: 0 0 6px rgba(192, 94, 102, 0.45); }
+.hp-float--dmg { color: var(--color-danger); text-shadow: 0 0 6px rgba(196, 84, 92, 0.45); }
 .hp-float--heal { color: var(--color-success); text-shadow: 0 0 6px rgba(125, 163, 107, 0.4); }
 @keyframes hpFloat {
   0% { opacity: 0; transform: translateY(4px); }
@@ -4757,7 +4784,7 @@ select.input option {
 /* 血条掉血红闪：填充色瞬间抹成血红再回落到本色（本色由行内 style 控制，动画只覆盖一次）。 */
 .hp-bar-dmg { animation: hpBarDmg 0.6s ease-out both; }
 @keyframes hpBarDmg {
-  0%, 45% { background: var(--color-danger) !important; box-shadow: 0 0 8px 1px rgba(192, 94, 102, 0.6); }
+  0%, 45% { background: var(--color-danger) !important; box-shadow: 0 0 8px 1px rgba(196, 84, 92, 0.6); }
   100% { box-shadow: none; }
 }
 
@@ -4883,7 +4910,7 @@ select.input option {
 }
 
 :root {
-  --vital-tick: rgba(212, 162, 78, 0.10);
+  --vital-tick: rgba(200, 162, 90, 0.10);
 }
 
 :root[data-theme="parchment"] {
@@ -5239,9 +5266,9 @@ select.input option {
 .token-hit { animation: tokenHit 0.45s ease-out both; }
 @keyframes tokenHit {
   0% { transform: translateX(0); filter: none; }
-  15% { transform: translateX(-3px); filter: drop-shadow(0 0 6px rgba(192, 94, 102, 0.85)); }
-  35% { transform: translateX(3px); filter: drop-shadow(0 0 5px rgba(192, 94, 102, 0.7)); }
-  55% { transform: translateX(-2px); filter: drop-shadow(0 0 4px rgba(192, 94, 102, 0.5)); }
+  15% { transform: translateX(-3px); filter: drop-shadow(0 0 6px rgba(196, 84, 92, 0.85)); }
+  35% { transform: translateX(3px); filter: drop-shadow(0 0 5px rgba(196, 84, 92, 0.7)); }
+  55% { transform: translateX(-2px); filter: drop-shadow(0 0 4px rgba(196, 84, 92, 0.5)); }
   75% { transform: translateX(2px); }
   100% { transform: translateX(0); filter: none; }
 }
@@ -5265,7 +5292,7 @@ select.input option {
   pointer-events: none;
   animation: tokenFloat 1s ease-out both;
 }
-.token-float--dmg { color: var(--color-danger); text-shadow: 0 0 6px rgba(192, 94, 102, 0.5); }
+.token-float--dmg { color: var(--color-danger); text-shadow: 0 0 6px rgba(196, 84, 92, 0.5); }
 .token-float--heal { color: var(--color-success); text-shadow: 0 0 6px rgba(125, 163, 107, 0.45); }
 @keyframes tokenFloat {
   0% { opacity: 0; transform: translate(-50%, 4px); }
@@ -5275,7 +5302,7 @@ select.input option {
 /* 选中目标准星：叠在敌方令牌正中，轻微脉冲 */
 .token-target {
   transform: translate(-50%, -50%);
-  filter: drop-shadow(0 0 4px rgba(192, 94, 102, 0.7));
+  filter: drop-shadow(0 0 4px rgba(196, 84, 92, 0.7));
   animation: targetPulse 1.2s ease-in-out infinite;
 }
 @keyframes targetPulse {
@@ -5320,7 +5347,7 @@ select.input option {
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: radial-gradient(ellipse at center, rgba(8, 9, 13, 0.72), rgba(4, 5, 8, 0.92));
+  background: radial-gradient(ellipse at center, rgba(6, 11, 10, 0.72), rgba(3, 6, 5, 0.92));
   animation: sceneVeil 0.6s ease-in-out both;
   pointer-events: none;
 }
@@ -5415,13 +5442,13 @@ select.input option {
  * 拿不到这里的变量，仍是不透明——浮层要的就是挡住底下的东西。
  */
 [data-scene-backdrop='on'] .game-session-layout {
-  --surface-1: rgba(23, 27, 36, 0.72);
-  --surface-2: rgba(28, 33, 44, 0.70);
-  --surface-3: rgba(35, 41, 54, 0.72);
-  --color-player-bg: rgba(38, 32, 22, 0.76);
-  --npc-bubble-bg: hsl(var(--npc-hue, 222) 18% 13% / 0.72);
-  --color-bg-card: rgba(20, 23, 31, 0.72);
-  --color-bg-tertiary: rgba(26, 30, 40, 0.70);
+  --surface-1: rgba(16, 28, 24, 0.72);
+  --surface-2: rgba(20, 36, 32, 0.70);
+  --surface-3: rgba(26, 46, 40, 0.72);
+  --color-player-bg: rgba(26, 46, 40, 0.78);
+  --npc-bubble-bg: hsl(var(--npc-hue, 165) 18% 12% / 0.72);
+  --color-bg-card: rgba(16, 28, 24, 0.72);
+  --color-bg-tertiary: rgba(20, 36, 32, 0.70);
 }
 :root[data-theme='parchment'][data-scene-backdrop='on'] .game-session-layout {
   --surface-1: rgba(236, 226, 206, 0.72);
@@ -5766,7 +5793,7 @@ select.input option {
 .side-token:hover {
   transform: scale(1.06);
   border-color: var(--color-accent);
-  box-shadow: 0 0 16px rgba(212, 162, 78, 0.3), 0 6px 20px var(--shadow-color-strong);
+  box-shadow: 0 0 16px rgba(200, 162, 90, 0.3), 0 6px 20px var(--shadow-color-strong);
 }
 .side-token-label {
   font-family: var(--font-title);
@@ -5790,29 +5817,56 @@ select.input option {
   box-shadow: 0 2px 6px var(--shadow-color);
 }
 
-/* 路由切换转场：新页淡入 + 轻微上移与缩放（推入/翻页的顺滑感）。
-   ≤300ms、ease-out，仅用 opacity/transform 合成属性；prefers-reduced-motion 下由文件末尾统一禁用。
-   AppShell 的 <main key={pathname}> 每次切页重挂载即触发本入场（纯 CSS，无路由动画库）。 */
-.route-fade {
-  animation: routeFade 0.28s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-  will-change: opacity, transform;
+/* 路由切换转场已交给 Motion（AppShell 的 AnimatePresence，见 lib/motion.ts 的 pageVariants），
+   因为纯 CSS 只能做进场、做不了旧页退场。 */
+
+/* ===== 装饰艺术纹饰（components/ui/deco.tsx） ===== */
+.deco-corners { position: absolute; inset: 0; pointer-events: none; color: var(--color-accent); }
+.deco-corner { position: absolute; width: 1.1rem; height: 1.1rem; opacity: 0.85; }
+.deco-corner--tl { left: 6px; top: 6px; }
+.deco-corner--tr { right: 6px; top: 6px; transform: scaleX(-1); }
+.deco-corner--bl { left: 6px; bottom: 6px; transform: scaleY(-1); }
+.deco-corner--br { right: 6px; bottom: 6px; transform: scale(-1, -1); }
+.deco-rule {
+  position: relative;
+  height: 7px;
+  border-top: 1px solid var(--color-brass-dim, var(--color-border-strong));
+  border-bottom: 1px solid var(--color-brass-dim, var(--color-border-strong));
 }
-@keyframes routeFade {
-  from { opacity: 0; transform: translateY(10px) scale(0.992); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+.deco-rule::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  border-top: 1px solid var(--color-brass-dim, var(--color-border-strong));
 }
+
+/* ===== 胶片颗粒：整屏一层极淡的噪点，让大面积纯色不再像塑料 =====
+   固定定位、不随内容滚动，只合成一次；pointer-events 透传。噪点是内联 SVG 的
+   feTurbulence，不额外下载图片。 */
+.film-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: var(--film-grain-opacity, 0.06);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1.1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-theme="parchment"] .film-grain { --film-grain-opacity: 0.035; mix-blend-mode: multiply; }
 
 /* ===== 通用微交互 ===== */
 
 /* 按钮 hover 琥珀辉光（主按钮已有 filter 过渡，这里补 box-shadow 辉光 + 按下微沉） */
 .btn-primary { transition: filter 0.2s ease, box-shadow 0.25s ease, transform 0.12s ease; }
 .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 0 14px rgba(212, 162, 78, 0.35);
+  box-shadow: 0 0 14px rgba(200, 162, 90, 0.35);
 }
 .btn-primary:active:not(:disabled) { transform: translateY(1px); }
 .btn-secondary { transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.25s ease; }
 .btn-secondary:hover {
-  box-shadow: 0 0 10px rgba(212, 162, 78, 0.18);
+  box-shadow: 0 0 10px rgba(200, 162, 90, 0.18);
 }
 
 /* 卡片 hover 微升 */
@@ -5826,7 +5880,7 @@ select.input option {
 
 /* 输入框聚焦补一点辉光（.input 已含 border/box-shadow transition） */
 .input:focus {
-  box-shadow: 0 0 0 2px rgba(212, 162, 78, 0.12), 0 0 12px rgba(212, 162, 78, 0.14);
+  box-shadow: 0 0 0 2px rgba(200, 162, 90, 0.12), 0 0 12px rgba(200, 162, 90, 0.14);
 }
 
 /* ===== 模组上传解析进度条 ===== */

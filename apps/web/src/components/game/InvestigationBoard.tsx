@@ -23,8 +23,8 @@ export interface BoardLocation {
 
 const CARD_W = 148
 const CLUE_W = 108
-const CANDLE = '#d4a24e'
-const PARCH = '#e8dcc0'
+const CANDLE = '#c8a25a'
+const PARCH = '#ece3cf'
 const TWINE = '#8a7a5c'
 const THREAD = '#a13a42'   // 线索红丝线 / 红图钉
 

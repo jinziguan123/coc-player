@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
- * 通用悬浮窗：portal 到 document.body，避开 `.route-fade`（<main> 带 transform/will-change）
+ * 通用悬浮窗：portal 到 document.body，避开路由转场的 <main>（动画期间带 transform）
  * 造成的「fixed 被限制在内容区」陷阱——遮罩因此能盖住整个视口（含左侧菜单栏）。
  * 窗体以**主内容区（<main>，即游戏聊天界面）**为中心居中（避开侧栏偏移）；不透明。
  */
