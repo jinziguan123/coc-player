@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { localApi } from '../../api/client'
-import { Modal } from '../../components/ui/modal'
+import { Modal, ModalPresence } from '../../components/ui/modal'
 import {
   Select,
   SelectContent,
@@ -253,6 +253,7 @@ export function ImageProfilePanel({ openCreateAt = 0 }: {
         </div>
       )}
 
+      <ModalPresence>
       {editingId !== null && (
         <Modal onClose={cancelEdit} widthClass="max-w-xl" padded>
           <div style={{ maxHeight: '78vh', overflowY: 'auto', paddingRight: '0.25rem' }}>
@@ -391,6 +392,7 @@ export function ImageProfilePanel({ openCreateAt = 0 }: {
           </div>
         </Modal>
       )}
+      </ModalPresence>
     </div>
   )
 }

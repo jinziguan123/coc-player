@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { MoreHorizontal } from 'lucide-react'
+import { AnimatePresence, m } from 'motion/react'
+import { popoverVariants } from '@/lib/motion'
 
 /**
  * 「更多」菜单。
@@ -15,6 +17,9 @@ import { MoreHorizontal } from 'lucide-react'
  * 展开后只露得出第一项，剩下的全被切在容器边界外。Portal 到 body 才躲得开。
  *
  * 语义仍是 menu / menuitem：Radix Popover 只管定位与开合，ARIA 角色这里自己给。
+ *
+ * 开合动画走 Motion：Portal / Content 都 forceMount，何时卸载交给 AnimatePresence，
+ * 关掉时才有约 100ms 的退场，而不是 Radix 默认的瞬间消失。
  */
 export interface MoreMenuItem {
   label: string
@@ -45,32 +50,46 @@ export function MoreMenu({ items, label = '更多' }: {
         <MoreHorizontal size={13} aria-hidden="true" />
       </PopoverPrimitive.Trigger>
 
-      <PopoverPrimitive.Portal>
-        <PopoverPrimitive.Content
-          role="menu"
-          align="end"
-          sideOffset={6}
-          // 留出边距，贴着视口边时 Radix 才会把它挪回来——最后一行的菜单本来会有一截
-          // 探到视口外，摆在那儿等于看不见
-          collisionPadding={12}
-          className="more-menu-list z-[110]"
-        >
-          {items.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              role="menuitem"
-              title={item.title}
-              className={`more-menu-item${item.separated ? ' more-menu-item--sep' : ''}`}
-              // 点完就收：这些都是「打开一个面板」或「发起一次操作」，没有连点的用法
-              onClick={() => { setOpen(false); item.onClick() }}
+      <AnimatePresence>
+        {open && (
+          <PopoverPrimitive.Portal forceMount>
+            <PopoverPrimitive.Content
+              forceMount
+              asChild
+              role="menu"
+              align="end"
+              sideOffset={6}
+              // 留出边距，贴着视口边时 Radix 才会把它挪回来——最后一行的菜单本来会有一截
+              // 探到视口外，摆在那儿等于看不见
+              collisionPadding={12}
             >
-              {item.icon && <span className="more-menu-icon" aria-hidden="true">{item.icon}</span>}
-              {item.label}
-            </button>
-          ))}
-        </PopoverPrimitive.Content>
-      </PopoverPrimitive.Portal>
+              <m.div
+                className="more-menu-list z-[110]"
+                variants={popoverVariants}
+                initial="initial"
+                animate="enter"
+                exit="exit"
+                style={{ transformOrigin: 'var(--radix-popover-content-transform-origin)' }}
+              >
+                {items.map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    role="menuitem"
+                    title={item.title}
+                    className={`more-menu-item${item.separated ? ' more-menu-item--sep' : ''}`}
+                    // 点完就收：这些都是「打开一个面板」或「发起一次操作」，没有连点的用法
+                    onClick={() => { setOpen(false); item.onClick() }}
+                  >
+                    {item.icon && <span className="more-menu-icon" aria-hidden="true">{item.icon}</span>}
+                    {item.label}
+                  </button>
+                ))}
+              </m.div>
+            </PopoverPrimitive.Content>
+          </PopoverPrimitive.Portal>
+        )}
+      </AnimatePresence>
     </PopoverPrimitive.Root>
   )
 }

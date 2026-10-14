@@ -44,6 +44,20 @@ export const popoverVariants: Variants = {
   exit: { opacity: 0, scale: 0.97, y: -2, transition: { duration: 0.1, ease: ease.inOut } },
 }
 
+/** 悬浮窗遮罩：纯淡入淡出。退场与窗体同拍，别让遮罩比窗体多挂一截。 */
+export const modalBackdropVariants: Variants = {
+  initial: { opacity: 0 },
+  enter: { opacity: 1, transition: { duration: 0.18, ease: ease.out } },
+  exit: { opacity: 0, transition: { duration: 0.1, ease: ease.inOut } },
+}
+
+/** 悬浮窗窗体：比浮层更有分量——自下方微微浮起，退场略沉、比进场快得多。 */
+export const modalPanelVariants: Variants = {
+  initial: { opacity: 0, y: 8, scale: 0.985 },
+  enter: { opacity: 1, y: 0, scale: 1, transition: { ...spring.pop, opacity: { duration: 0.16, ease: ease.out } } },
+  exit: { opacity: 0, y: 4, scale: 0.985, transition: { duration: 0.1, ease: ease.inOut } },
+}
+
 /** 列表错峰：父容器用 listVariants，子项用 itemVariants。只给首屏那一批用（同 lib/stagger.ts 的约定）。 */
 export const listVariants: Variants = {
   initial: {},

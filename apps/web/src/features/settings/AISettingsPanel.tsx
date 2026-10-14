@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { localApi } from '../../api/client'
-import { Modal } from '../../components/ui/modal'
+import { Modal, ModalPresence } from '../../components/ui/modal'
 import {
   Select,
   SelectContent,
@@ -378,6 +378,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
         </div>
       )}
 
+      <ModalPresence>
       {editingId !== null && (
         <Modal onClose={cancelEdit} widthClass="max-w-xl" padded>
           <h3 className="card-title">{editingId === 'new' ? '新增配置' : '编辑配置'}</h3>
@@ -609,6 +610,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
           </div>
         </Modal>
       )}
+      </ModalPresence>
 
         </TabsContent>
 

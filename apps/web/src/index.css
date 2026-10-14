@@ -2389,35 +2389,26 @@ body {
 }
 
 /* ===== 悬浮窗 ===== */
-/* 遮罩：压暗 + 轻虚化，把注意力从背后的列表拉到窗体上；入场淡入一次 */
+/* 遮罩：压暗 + 轻虚化，把注意力从背后的列表拉到窗体上。
+   进场 / 退场都走 Motion（modal.tsx + lib/motion.ts），这里只管质感 */
 .modal-backdrop {
   background: radial-gradient(ellipse at center, rgba(5, 10, 9, 0.7), rgba(2, 5, 4, 0.86));
   backdrop-filter: blur(2px);
-  animation: modalBackdropIn 0.18s ease-out both;
 }
-@keyframes modalBackdropIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-/* 窗体：琥珀细描边 + 顶缘高光，与卡片拉开层级；入场微微上浮 */
+/* 窗体：琥珀细描边 + 顶缘高光，与卡片拉开层级 */
 .modal-panel {
   border: 1px solid var(--color-border-strong);
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.55),
     0 0 0 1px color-mix(in srgb, var(--color-accent) 10%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--color-accent) 18%, transparent);
-  animation: modalPanelIn 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
-/* Radix Dialog 与 .modal-panel 同一窗体质感（不含入场动画——Radix 走自有 data-state 动画） */
+/* Radix Dialog 与 .modal-panel 同一窗体质感（动画同样走 Motion，见 dialog.tsx） */
 .dialog-panel {
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.55),
     0 0 0 1px color-mix(in srgb, var(--color-accent) 10%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--color-accent) 18%, transparent);
-}
-@keyframes modalPanelIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ===== 检定结果读数卡 ===== */
@@ -4156,7 +4147,11 @@ select.input option {
   /* 压黑而不是纯黑：底下的页面还隐约在，用户知道自己只是叠了一层、没有跳走 */
   background: rgba(10, 8, 5, 0.82);
   backdrop-filter: blur(3px);
-  animation: modalBackdropIn 0.2s ease-out both;
+  animation: entryBackdropIn 0.2s ease-out both;
+}
+@keyframes entryBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .entry-choices {
   display: flex;
