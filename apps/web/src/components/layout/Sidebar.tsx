@@ -48,8 +48,27 @@ export function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-logo" title="CoC Player">
         <DecoSunburst className="sidebar-logo-mark" />
-        <span className="sidebar-logo-word">{collapsed ? 'COC' : 'COC PLAYER'}</span>
-        {!collapsed && <span className="sidebar-logo-sub">克苏鲁的呼唤 · 第七版</span>}
+        {/* 收展时文字换成另一套：等宽度过渡走完大半再淡入，否则「COC PLAYER」会在
+            还没展开的窄栏里被居中裁成「OC PLAY」 */}
+        <m.span
+          key={collapsed ? 'short' : 'long'}
+          className="sidebar-logo-word"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2, delay: collapsed ? 0 : 0.22 }}
+        >
+          {collapsed ? 'COC' : 'COC PLAYER'}
+        </m.span>
+        {!collapsed && (
+          <m.span
+            className="sidebar-logo-sub"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2, delay: 0.26 }}
+          >
+            克苏鲁的呼唤 · 第七版
+          </m.span>
+        )}
       </div>
       <nav className="sidebar-nav">
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (

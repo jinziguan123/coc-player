@@ -44,7 +44,8 @@ import { useDragResize } from '@/components/ui/useDragResize'
 import { useDictation } from './useDictation'
 import { useSlashCommands } from './useSlashCommands'
 import { KP_MOOD_OPTIONS } from '@/features/game-session/bgm'
-import { ACTION_CHIPS, ACTION_LABELS, PROSE_ACTIONS, REFERENCE_IDS, type KpAction } from './kpActions'
+import { ACTION_LABELS, PROSE_ACTIONS, REFERENCE_IDS, type KpAction } from './kpActions'
+import { KpActionBar } from './KpActionBar'
 
 type PanelTab = 'tools' | 'advisor' | 'assets' | 'director' | 'source'
 
@@ -781,23 +782,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               从前它们是三块各自漂浮的元素，KP 得自己把「我在干什么」拼起来。
               切动作只换输入区的形态，不换页面。 */}
           <div className="kp-composer">
-          {/* 全部动作平铺，一个不藏。此前只有三件事是直达按钮，其余九个压在「更多…」
-              下拉里——而那九个里有「发手书」「切场景」「开战」这种并不冷门的动作。
-              跑团时眼睛在桌上、手在键盘上，多一次下拉就是多一次找。 */}
-          <div className="kp-composer-actions">
-            {ACTION_CHIPS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => { setAction(id); setFields({}) }}
-                aria-pressed={action === id}
-                title={ACTION_LABELS[id]}
-                className={`kp-quick-action ${action === id ? 'kp-quick-action--on' : ''}`}
-              >
-                <Icon size={13} /> {label}
-              </button>
-            ))}
-          </div>
+          {/* 全部动作直达、按四组排开（见 kpActions.ACTION_GROUPS）——一个不藏 */}
+          <KpActionBar action={action} onPick={(id) => { setAction(id); setFields({}) }} />
           <div className={`kp-composer-form flex flex-wrap gap-2${PROSE_ACTIONS.has(action) ? ' kp-composer-form--prose' : ''}`}>
             {action === 'narration' && (
               <div className="kp-narration-wrap flex w-full items-start gap-2">

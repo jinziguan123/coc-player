@@ -7,6 +7,8 @@
 // 所以有元数据时改画结构化读数，没有（旧事件/追逐/自定义骰）时回落散文行。
 import type { ReactNode } from 'react'
 import { GiRollingDices } from 'react-icons/gi'
+import { BrassDial } from './BrassDial'
+import { ResultSeal } from './ResultSeal'
 
 /** 检定结果按成败取强调色。兼容引擎英文枚举与 SAN 检定的中文。 */
 export function diceAccent(outcome: string): string {
@@ -99,6 +101,13 @@ export function CheckResultCard({
   const sanLossLabel = typeof oldSan === 'number'
     ? `SAN 减少 ${meta.san_loss}，由 ${oldSan} 变为 ${meta.new_san}`
     : `SAN 减少 ${meta.san_loss}，剩余 ${meta.new_san}`
+  // 只有新到达的卡才甩针 / 落章；回看历史时静止在终点
+  const fresh = !!animClass
+  const oc = String(meta.outcome || '')
+  const seal = blind ? null
+    : oc.includes('critical') || oc.includes('大成功') ? 'critical'
+    : oc.includes('fumble') || oc.includes('大失败') ? 'fumble'
+    : null
 
   return (
     <div
@@ -106,7 +115,12 @@ export function CheckResultCard({
       className={`dice-card dice-readout rounded-md px-3 py-2 flex flex-wrap items-center gap-3 ${animClass}`}
       style={{ borderLeft: `3px solid ${accent}`, width: 'fit-content', maxWidth: '100%' }}
     >
-      <GiRollingDices style={{ color: accent, fontSize: '1.15rem', flexShrink: 0 }} />
+      {/* 暗投不画表盘：指针落点本身就泄露了结果 */}
+      {blind ? (
+        <GiRollingDices style={{ color: accent, fontSize: '1.15rem', flexShrink: 0 }} />
+      ) : (
+        <BrassDial roll={meta.roll as number} skill={meta.skill_value} target={meta.target as number} animate={fresh} />
+      )}
 
       <div className="min-w-0">
         {subject && (
@@ -143,12 +157,15 @@ export function CheckResultCard({
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        <span
-          className="dice-outcome-chip"
-          style={{ color: accent, borderColor: accent }}
-        >
-          {blind ? '暗投' : label}
-        </span>
+        {/* 盖了章就不再挂同义的成败标签——「大成功」说一遍就够 */}
+        {!seal && (
+          <span
+            className="dice-outcome-chip"
+            style={{ color: accent, borderColor: accent }}
+          >
+            {blind ? '暗投' : label}
+          </span>
+        )}
         {tierNote && !blind && (
           <span className="chip" title="纯按骰值对技能值达成的等级，与本次要求的难度分开看">
             达成 {tierNote}
@@ -156,6 +173,8 @@ export function CheckResultCard({
         )}
         {chips}
       </div>
+
+      {seal && <ResultSeal kind={seal} animate={fresh} />}
 
       {hasSanLoss && (
         <div

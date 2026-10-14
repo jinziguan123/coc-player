@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { CountUp } from '@/components/ui/CountUp'
 
 interface VitalMeta {
   label: string
@@ -97,9 +98,12 @@ export function GameVitalBar({ type, current, max }: GameVitalBarProps) {
         </div>
 
         <div className="game-vital-values">
-          <span className={`game-vital-cur ${isLow ? 'game-vital-cur--low' : ''}`}>
-            {current}
-          </span>
+          {/* 受伤 / 掉 SAN 时数字滚到新值，而不是一下跳过去——眼睛来得及看到「掉了多少」 */}
+          <CountUp
+            value={current}
+            fromZero={false}
+            className={`game-vital-cur ${isLow ? 'game-vital-cur--low' : ''}`}
+          />
           <span className="game-vital-max">/{max}</span>
         </div>
       </div>

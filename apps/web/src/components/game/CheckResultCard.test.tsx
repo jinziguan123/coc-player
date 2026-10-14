@@ -50,3 +50,25 @@ describe('检定结果卡', () => {
     expect(screen.getByText('疯狂')).toBeInTheDocument()
   })
 })
+
+describe('检定结果卡：表盘与印章', () => {
+  const base = { actor: '调查员', skill: '侦查', skill_value: 60, target: 60 }
+
+  it('大成功盖一枚可读的印章，普通成功不盖——罕见才值得盖章', () => {
+    const { rerender } = render(
+      <CheckResultCard meta={{ ...base, roll: 1, outcome: 'critical' }} blind={false} animClass="" />,
+    )
+    expect(screen.getByRole('img', { name: '大成功' })).toBeInTheDocument()
+
+    rerender(<CheckResultCard meta={{ ...base, roll: 30, outcome: 'success' }} blind={false} animClass="" />)
+    expect(screen.queryByRole('img', { name: /大成功|大失败/ })).not.toBeInTheDocument()
+  })
+
+  it('暗投既不画表盘也不盖章：指针落点和印章都会泄露结果', () => {
+    const { container } = render(
+      <CheckResultCard meta={{ ...base, roll: 100, outcome: 'fumble' }} blind animClass="" />,
+    )
+    expect(container.querySelector('.brass-dial')).toBeNull()
+    expect(screen.queryByRole('img', { name: '大失败' })).not.toBeInTheDocument()
+  })
+})

@@ -2416,12 +2416,74 @@ body {
 /* ===== 检定结果读数卡 ===== */
 /* 掷出的点数：整张卡的主角。等宽 tabular-nums 让连续几条检定的数字竖向对齐。 */
 .dice-readout-roll {
-  font-family: var(--font-mono);
+  font-family: var(--font-display);   /* 纯数字走 ZCOOL：装饰艺术的仪表读数感 */
   font-variant-numeric: tabular-nums;
-  font-size: 1.45rem;
-  font-weight: 700;
+  font-size: 2rem;
+  font-weight: 400;
   line-height: 1;
 }
+
+/* ===== 黄铜表盘（BrassDial） ===== */
+.brass-dial { position: relative; display: inline-block; flex-shrink: 0; }
+.brass-dial svg { display: block; overflow: visible; }
+.dial-rim { fill: none; stroke: var(--color-accent); stroke-width: 1.2; }
+.dial-rim--thin { stroke: var(--color-brass-dim); stroke-width: 0.8; }
+.dial-band { fill: none; stroke-width: 7; }
+.dial-band--extreme { stroke: var(--color-dice-gold); }
+.dial-band--hard { stroke: color-mix(in srgb, var(--color-accent) 80%, transparent); }
+.dial-band--regular { stroke: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+.dial-band--fail { stroke: color-mix(in srgb, var(--color-text-secondary) 18%, transparent); }
+.dial-band--fumble { stroke: var(--color-danger-deep); }
+.dial-target { stroke: var(--color-text-primary); stroke-width: 1.5; }
+.dial-needle {
+  position: absolute;
+  width: 2px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, var(--color-dice-gold), var(--color-accent));
+  box-shadow: 0 0 6px rgba(230, 201, 138, 0.45);
+}
+.dial-hub {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, var(--color-dice-gold), var(--color-brass-dim));
+  box-shadow: 0 0 0 1px var(--color-bg-primary);
+}
+
+/* ===== 朱砂印章（ResultSeal）：只给大成功 / 大失败 =====
+   朱文（大成功）：红字红框、底透出纸色；白文（大失败）：红底镂出字。
+   边缘的「没盖实」用一层噪点遮罩做出来，不是一枚干净的矢量方块。 */
+.result-seal {
+  --seal-red: #b8392b;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0.4rem 0.55rem;
+  font-family: var(--font-game);
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='60'%3E%3Cfilter id='r'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2.6 2.2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23r)'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='60'%3E%3Cfilter id='r'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2.6 2.2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23r)'/%3E%3C/svg%3E");
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+.result-seal--critical {
+  color: var(--seal-red);
+  border: 2.5px solid var(--seal-red);
+  box-shadow: inset 0 0 0 2px transparent, inset 0 0 0 3px var(--seal-red);
+}
+.result-seal--fumble {
+  color: var(--color-bg-primary);
+  background: var(--seal-red);
+}
+.result-seal-text { position: relative; }
+:root[data-theme="parchment"] .result-seal { --seal-red: #a32c1e; }
+:root[data-theme="parchment"] .result-seal--fumble { color: #f3e9d4; }
 /* 成败标签：描边胶囊，颜色由行内 accent 注入（与点数同色，一眼对应） */
 .dice-outcome-chip {
   display: inline-flex;
@@ -2520,33 +2582,35 @@ body {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-/* 常用动作直达按钮：选中态实心，与「更多」下拉并排 */
+/* 动作按钮：分段控件里的一格。激活的黄铜底是 .kp-quick-action-bg（Motion layoutId），
+   在按钮之间滑动；按钮自身只管文字颜色。 */
 .kp-quick-action {
+  position: relative;
+  isolation: isolate;
   display: inline-flex;
   align-items: center;
-  gap: 0.28rem;
-  padding: 0.26rem 0.6rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border-strong);
-  background: var(--surface-sunken);
+  gap: 0.32rem;
+  padding: 0.32rem 0.62rem;
+  border: none;
+  background: transparent;
   font-family: var(--font-title);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition: color 0.18s ease, background 0.18s ease;
 }
-.kp-quick-action:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-accent);
-}
-.kp-quick-action--on {
-  color: var(--color-on-accent);
+.kp-quick-action:hover { color: var(--color-text-primary); background: rgba(200, 162, 90, 0.07); }
+.kp-quick-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.kp-quick-action--on,
+.kp-quick-action--on:hover { color: var(--color-on-accent); font-weight: 600; background: transparent; }
+.kp-quick-action-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent));
-  border-color: var(--color-accent);
-  font-weight: 600;
+  box-shadow: 0 0 12px rgba(200, 162, 90, 0.25);
 }
-.kp-quick-action--on:hover { color: var(--color-on-accent); }
 
 /* ===== 回合条：本回合还差什么 + 把回合交还给玩家 =====
    常驻（不随标签切换消失）：冷场/卡关/待回收都是时效信号，KP 正翻模组资料时同样要看得见。
@@ -2613,15 +2677,33 @@ body {
   background: var(--surface-sunken);
   overflow: hidden;
 }
-.kp-composer-actions {
+/* 动作条：四组横排，组与组之间留缝；组内按钮拼成一条分段控件 */
+.kp-action-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.4rem 0.45rem;
+  gap: 0.45rem 1rem;
+  padding: 0.5rem 0.6rem;
   border-bottom: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-accent) 4%, transparent);
 }
+.kp-action-group { display: inline-flex; align-items: center; gap: 0.45rem; }
+.kp-action-group-label {
+  font-family: var(--font-title);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--color-brass-dim);
+}
+.kp-action-group-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--surface-sunken);
+}
+.kp-action-group-chips .kp-quick-action + .kp-quick-action { border-left: 1px solid var(--color-border); }
 /**
  * ===== 控制台在宽屏下改两栏 =====
  *
@@ -2675,7 +2757,6 @@ body {
 .kp-console-dock .kp-monitor-label { grid-column: 1 / -1; }
 .kp-console-dock .kp-console-body { flex: 1; min-width: 0; }
 /* 坞里横向有的是地方：芯片摊开、输入框长高，不必再压到最紧 */
-.kp-console-dock .kp-composer-actions .kp-quick-action { padding: 0.24rem 0.55rem; }
 .kp-console-dock .kp-composer-form--prose textarea { min-height: 5.5rem; }
 /* 竖向反过来要省：坞的高度有限，调查员卡压紧一档才装得下两张 */
 .kp-console-dock .kp-monitor { gap: 0.25rem; padding: 0.35rem 0.4rem 0.4rem; }
@@ -2901,8 +2982,6 @@ body {
 }
 .kp-mon-act:hover { color: var(--color-text-accent); border-color: var(--color-border-strong); }
 
-/* 14 个动作全平铺在一条窄栏里，芯片得收紧一档才不至于占掉半屏 */
-.kp-composer-actions .kp-quick-action { padding: 0.2rem 0.42rem; gap: 0.22rem; }
 
 .kp-composer-form { padding: 0.5rem 0.45rem; }
 
@@ -3689,12 +3768,13 @@ button.chip, .chip-btn { cursor: pointer; }
    中文斜体是伪斜、可读性差，故不用 italic，靠字体与排版区分。 */
 .chat-msg--narration .chat-content {
   font-family: var(--font-game);   /* 游戏内信息：KP 旁白走圆润楷体 */
-  font-size: 0.95rem;
+  font-size: 1.0625rem;            /* 17px：一局要读一两个小时，旁白是最该舒服的字 */
   line-height: 1.95;
+  max-width: 46em;                 /* 每行约四十几个字，超宽屏下不至于一行横穿整屏 */
   color: var(--color-text-primary);
   padding: 0.5rem 0;
   border-left: 2px solid rgba(200, 162, 90, 0.35);
-  padding-left: 1rem;
+  padding-left: 1.1rem;
 }
 
 .chat-msg--dice .chat-content {
@@ -3845,6 +3925,7 @@ button.chip, .chip-btn { cursor: pointer; }
   font-family: var(--font-game);   /* 游戏内信息：NPC 台词走圆润楷体 */
   background: var(--npc-bubble-bg);
   border: 1px solid var(--npc-bubble-border);
+  border-left: 2px solid var(--color-verdigris);   /* 铜绿竖线：NPC 的声音，与 KP 旁白的黄铜线区分 */
   /* 直角那一角是指向头像的「尾巴」。头像改为顶对齐（紧跟名字下方）后，
      尾巴也从左下挪到左上，否则它指着头像下方的空气。 */
   border-radius: 0 4px 4px 4px;
@@ -5077,8 +5158,9 @@ select.input option {
 }
 
 .game-vital-cur {
-  font-weight: 700;
-  font-size: var(--text-base);
+  font-family: var(--font-display);   /* 纯数字：仪表读数感 */
+  font-weight: 400;
+  font-size: 1.2rem;
   color: var(--color-text-primary);
   transition: color 0.25s ease;
 }
