@@ -8,6 +8,12 @@ import { lastActive, sessionHref } from '@/features/home/useHomeInventory'
 import type { SessionSummary } from '@/features/game-setup/types'
 import { ease, spring } from '@/lib/motion'
 import { relativeTime } from '@/lib/relativeTime'
+import { getServerUrl } from '@/api/client'
+
+/** 联机客人的后端在房主机器上，相对路径要拼上服务器地址 */
+function imageUrl(src: string): string {
+  return /^https?:\/\//i.test(src) ? src : `${getServerUrl()}${src}`
+}
 
 /*
  * 拱门几何（viewBox 540×836，与 .portal 的 aspect-ratio 一致，所以 SVG 线框与 HTML 里的
@@ -90,7 +96,7 @@ function SessionWindow({ session }: { session: SessionSummary }) {
       >
         {session.scene_image ? (
           <m.img
-            src={session.scene_image}
+            src={imageUrl(session.scene_image)}
             alt=""
             className="portal-image"
             initial={{ scale: 1.12 }}
@@ -194,7 +200,7 @@ function PortalEnter({ rect, image, onDone }: { rect: DOMRect; image?: string | 
       ref={ref}
       className="portal-enter"
       // 首帧就是拱门窗口的形状，不会先闪一帧全屏
-      style={{ clipPath: from, ...(image ? { backgroundImage: `url(${image})` } : {}) }}
+      style={{ clipPath: from, ...(image ? { backgroundImage: `url(${imageUrl(image)})` } : {}) }}
     >
       <m.div
         className="portal-enter-dim"
