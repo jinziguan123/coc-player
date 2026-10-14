@@ -1049,75 +1049,289 @@ body {
   transform: translate(-50%, -50%) rotate(45deg);
 }
 
+/* ── 首页：左栏题铭 + 入口，右栏拱门 ───────────────────────────────── */
+.home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: clamp(2rem, 4vw, 4.5rem);
+  min-height: 100%;
+}
+.home-lead {
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+  min-width: 0;
+  max-width: 40rem;
+  padding-top: 0.75rem;
+}
+@media (max-width: 1023px) {
+  .home { grid-template-columns: minmax(0, 1fr); }
+  .home-lead { max-width: none; }
+}
+
+/* 小标签：12px、600、宽字距、暗黄铜——装饰艺术的「铭牌字」 */
+.home-label {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-title);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.26em;
+  color: var(--color-brass-dim);
+}
+
+/* 入口：大字列表。每一行是一条路，hover 时箭头前探、图标菱框转正 */
+.home-entries { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--color-border); }
 .home-entry {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  padding: 1.05rem 0.5rem 1.05rem 0.25rem;
+  border-bottom: 1px solid var(--color-border);
   color: inherit;
-  cursor: pointer;
-  /* 容器放开之后每张卡有近 400px 宽，若高度还是内容撑出来的九十来像素，就成了 4:1 的扁条。
-     给个下限把比例拉回来，顺带把首页内容在纵向铺开一点——不然整页都堆在顶部。 */
-  min-height: 8.5rem;
-  justify-content: center;
+  transition: background 0.25s ease;
 }
-.home-entry:hover {
-  border-color: var(--color-border-strong);
-}
-/* 入口卡图标：与角色名录的 .char-sigil 同一枚「纹章框」，三个入口像一排铸印 */
+.home-entry:hover { background: linear-gradient(90deg, rgba(200, 162, 90, 0.07), transparent 80%); }
+.home-entry:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* 菱形框图标：框转 45°，图标反转回来 */
 .home-entry-icon {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.6rem;
-  height: 2.6rem;
-  margin-bottom: 0.15rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border-strong);
-  background:
-    linear-gradient(160deg,
-      color-mix(in srgb, var(--color-accent) 14%, transparent),
-      transparent 70%),
-    var(--surface-2);
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
   color: var(--color-text-accent);
-  font-size: 1.35rem;
-  box-shadow: inset 0 0 10px var(--card-inset);
-  transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.2s ease;
+  font-size: 1.25rem;
 }
-.home-entry:hover .home-entry-icon {
-  border-color: var(--color-accent);
-  box-shadow:
-    inset 0 0 10px var(--card-inset),
-    0 0 12px color-mix(in srgb, var(--color-accent) 25%, transparent);
-  transform: translateY(-1px);
-}
-/* lucide 图标默认 24px 绝对尺寸，在纹章框里偏大；与 gi 的 1em 统一到同一视觉尺寸 */
-.home-entry-icon svg { width: 1.3rem; height: 1.3rem; }
-/* 主入口用琥珀描边点出「先点这个」，但不做成实心按钮——三张卡还是并列关系 */
-.home-entry--primary {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background:
-    linear-gradient(160deg, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent 55%),
-    var(--color-bg-secondary);
-}
-.home-entry--primary:hover {
-  border-color: var(--color-accent);
-}
-/* 主卡四角 L 形角饰：与战斗 HUD 的 .combat-hud 角饰同源，标识「推荐起点」 */
-.home-entry--primary::after {
+.home-entry-icon::before {
   content: '';
   position: absolute;
-  inset: 3px;
-  pointer-events: none;
-  --entry-corner: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background:
-    linear-gradient(var(--entry-corner), var(--entry-corner)) left top / 10px 1px,
-    linear-gradient(var(--entry-corner), var(--entry-corner)) left top / 1px 10px,
-    linear-gradient(var(--entry-corner), var(--entry-corner)) right top / 10px 1px,
-    linear-gradient(var(--entry-corner), var(--entry-corner)) right top / 1px 10px,
-    linear-gradient(var(--entry-corner), var(--entry-corner)) left bottom / 10px 1px,
-    linear-gradient(var(--entry-corner), var(--entry-corner)) left bottom / 1px 10px,
-    linear-gradient(var(--entry-corner), var(--entry-corner)) right bottom / 10px 1px,
-    linear-gradient(var(--entry-corner), var(--entry-corner)) right bottom / 1px 10px;
-  background-repeat: no-repeat;
-  opacity: 0.85;
+  inset: 0.35rem;
+  border: 1px solid var(--color-brass-dim);
+  transform: rotate(45deg);
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.25s ease, background 0.25s ease;
 }
+.home-entry:hover .home-entry-icon::before {
+  transform: rotate(135deg);
+  border-color: var(--color-accent);
+  background: rgba(200, 162, 90, 0.08);
+}
+.home-entry-icon svg { position: relative; }
+.home-entry-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; flex: 1; }
+.home-entry-title {
+  font-family: var(--font-title);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--color-text-primary);
+}
+.home-entry-desc { font-size: var(--text-sm); color: var(--color-text-secondary); }
+.home-entry-arrow {
+  flex-shrink: 0;
+  color: var(--color-brass-dim);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s ease;
+}
+.home-entry:hover .home-entry-arrow { transform: translateX(5px); color: var(--color-accent); }
+/* 推荐起点：标题走黄铜色——仍是列表里的一行，不抢拱门的戏 */
+.home-entry--primary .home-entry-title { color: var(--color-text-accent); }
+
+/* ── 拱门 ─────────────────────────────────────────────────────────────
+   几何见 HomePortal.tsx 顶部注释：容器比例固定 540:836，SVG 线框 preserveAspectRatio=none
+   与 HTML 图片窗口共用同一套坐标，所以缩放时线与图始终对齐。 */
+.portal-stage {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  justify-content: center;
+  height: calc(100vh - 3rem);
+  max-height: 58rem;
+  min-height: 34rem;
+}
+.portal {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 540 / 836;
+  color: var(--color-accent);
+}
+@media (max-width: 1023px) {
+  .portal-stage { position: static; height: auto; max-height: none; min-height: 0; }
+  .portal { width: min(100%, 26rem); height: auto; }
+}
+.portal-frame { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
+.portal-line { fill: none; stroke: currentColor; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.portal-line--main { stroke-width: 1.6; }
+.portal-line--dim { stroke: var(--color-brass-dim); }
+/* 拱心石：门楣正中一枚小梯形 */
+.portal-keystone {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: -0.35rem;
+  width: 1.6rem;
+  height: 1.25rem;
+  margin-left: -0.8rem;
+  background: var(--color-bg-primary);
+  border: 1.5px solid currentColor;
+  clip-path: polygon(0 0, 100% 0, 82% 100%, 18% 100%);
+}
+.portal-keystone::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-left: -0.2rem;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+/* 图片窗：x 30–510、y 30–836，顶部半圆半径 240（=窗宽一半；纵向 240/806 ≈ 29.78%） */
+.portal-window {
+  position: absolute;
+  left: 5.556%;
+  top: 3.589%;
+  width: 88.889%;
+  bottom: 0;
+  overflow: hidden;
+  border-radius: 50% 50% 0 0 / 29.78% 29.78% 0 0;
+  background: radial-gradient(ellipse 80% 60% at 50% 30%, #1d342d 0%, var(--color-bg-secondary) 55%, var(--color-bg-primary) 100%);
+  isolation: isolate;
+}
+.portal-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 黄铜 × 瓶绿的调色：压饱和、偏暖，让任意一张 AI 生图都落进这套色板 */
+  filter: sepia(0.35) saturate(0.75) brightness(0.82) contrast(1.05);
+  transition: transform 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.portal-window:hover .portal-image { transform: scale(1.035) !important; }
+.portal-sunburst {
+  position: absolute;
+  left: 50%;
+  top: 14%;
+  width: 82%;
+  transform: translateX(-50%);
+  color: var(--color-accent);
+  opacity: 0.22;
+}
+.portal-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 30%, rgba(10, 17, 15, 0.55) 52%, rgba(10, 17, 15, 0.94) 78%, var(--color-bg-primary) 100%);
+  pointer-events: none;
+}
+.portal-body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0 1.5rem 2.2rem;
+  text-align: center;
+}
+.portal-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  color: var(--color-text-accent);
+}
+.portal-eyebrow-gem { width: 6px; height: 6px; background: var(--color-verdigris); transform: rotate(45deg); }
+.portal-title {
+  margin: 0;
+  padding-left: 0.3em;   /* 抵消末字字距 */
+  font-family: var(--font-title);
+  font-size: clamp(2rem, 3.4vw, 2.75rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.3em;
+  color: var(--color-text-primary);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.6);
+}
+.portal-title--sm { font-size: clamp(1.5rem, 2.4vw, 2rem); letter-spacing: 0.2em; }
+.portal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+.portal-meta-sep { width: 1px; height: 0.8em; background: var(--color-brass-dim); }
+.portal-meta-combat { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--color-danger); }
+.portal-scene { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
+.portal-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1.9rem;
+  font-family: var(--font-title);
+  font-size: var(--text-base);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--color-on-accent);
+  background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent) 55%, #a8853f);
+  /* 斜切角：装饰艺术的「切角铭牌」 */
+  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
+  position: relative;
+  overflow: hidden;
+  transition: filter 0.2s ease, transform 0.15s ease;
+}
+/* 掠光：hover 时一道高光从左扫到右，像灯光扫过黄铜 */
+.portal-cta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 244, 214, 0.55) 50%, transparent 65%);
+  transform: translateX(-120%);
+}
+.portal-cta:hover { filter: brightness(1.06); }
+.portal-cta:hover::after { transform: translateX(120%); transition: transform 0.75s cubic-bezier(0.22, 1, 0.36, 1); }
+.portal-cta:active { transform: translateY(1px); }
+/* clip-path 会裁掉 outline，焦点环改用内描边 + 外侧投影 */
+.portal-cta:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-bg-primary); filter: brightness(1.12); }
+.portal-cta svg { font-size: 1.15rem; }
+.portal-foot { margin: 0; font-size: var(--text-2xs); letter-spacing: 0.08em; color: var(--color-text-secondary); opacity: 0.8; }
+.portal-foot-link { color: var(--color-text-accent); }
+
+/* 羊皮纸主题：门里是泛黄纸色，底部渐变往纸色收，而不是往漆黑收 */
+:root[data-theme="parchment"] .portal-window {
+  background: radial-gradient(ellipse 80% 60% at 50% 30%, #f3ead6 0%, var(--color-bg-secondary) 60%, var(--color-bg-tertiary) 100%);
+}
+:root[data-theme="parchment"] .portal-scrim {
+  background: linear-gradient(180deg, transparent 30%, rgba(240, 230, 211, 0.6) 52%, rgba(240, 230, 211, 0.95) 78%, var(--color-bg-primary) 100%);
+}
+:root[data-theme="parchment"] .portal-image { filter: sepia(0.45) saturate(0.7) contrast(0.95); }
+:root[data-theme="parchment"] .portal-title { text-shadow: none; }
+:root[data-theme="parchment"] .portal-cta { background: var(--color-accent); color: var(--color-on-accent); }
+:root[data-theme="parchment"] {
+  --color-brass-dim: #8a6a3a;
+  --color-verdigris: #3f6e62;
+}
+
+/* 穿门而入的那一层：挂在 body 上，盖住整屏 */
+.portal-enter {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--color-bg-primary) center / cover no-repeat;
+  pointer-events: none;
+}
+.portal-enter-dim { position: absolute; inset: 0; background: var(--color-bg-primary); }
 
 /* ——— 首页新手指引 ——— */
 /* 三段并排：宽屏一屏读完，窄屏再退回竖排。中列（规则表）给多一点宽度，
@@ -1125,15 +1339,13 @@ body {
 /* ── 卷宗抬头 ─────────────────────────────────────────────────────────
    这一页在导航里叫「卷宗」，视觉上却一直是标准落地页。左对齐 + 等宽库存清单，
    把它拉回档案的语言。字号一律压住：抬头是索引，不是海报。 */
-.case-head { margin-bottom: 1.15rem; }
-.case-head-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding-bottom: 0.45rem;
-  border-bottom: 1px solid var(--color-border);
+.case-head { display: flex; flex-direction: column; gap: 1.1rem; }
+.case-eyebrow {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.26em;
+  color: var(--color-brass-dim);
 }
 .case-stats {
   display: flex;
@@ -1166,15 +1378,41 @@ body {
 .case-stat-empty { color: var(--color-text-accent); }
 
 .case-title {
-  font-family: var(--font-display);
-  font-size: var(--text-3xl);
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: var(--text-2xl);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--color-text-accent);
-  text-shadow: 0 0 26px rgba(200, 162, 90, 0.22);
-  text-wrap: balance;
+  line-height: 1.35;
+  letter-spacing: 0.14em;
+  color: var(--color-text-primary);
 }
-.case-sub { margin-top: 0.15rem; font-size: var(--text-sm); color: var(--color-text-secondary); }
+/* 库存铭牌：三格横带，上下双线收口，格间细竖线 */
+.case-band {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--color-border-strong);
+  border-bottom: 1px solid var(--color-border-strong);
+  box-shadow: 0 -4px 0 -3px var(--color-border), 0 4px 0 -3px var(--color-border);
+}
+.case-band-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  padding: 0.95rem 1.1rem;
+  color: var(--color-text-secondary);
+  transition: background 0.2s ease;
+}
+.case-band-cell + .case-band-cell { border-left: 1px solid var(--color-border); }
+.case-band-cell:hover { background: rgba(200, 162, 90, 0.06); }
+.case-band-cell:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.case-band-num {
+  font-family: var(--font-display);   /* 纯数字，ZCOOL 无缺字风险 */
+  font-size: 2.25rem;
+  line-height: 1;
+  color: var(--color-text-accent);
+  font-variant-numeric: tabular-nums;
+}
+.case-band-label { font-size: var(--text-sm); letter-spacing: 0.12em; }
 
 /* ── 顶栏的「更多」菜单 ───────────────────────────────────────────────
    对局页顶栏一度并排挂着九个同样大小的按钮，性质完全不同却长得一模一样。
@@ -1461,33 +1699,29 @@ body {
 /* 抬头里的统计是只读的，不像首页那几条能点进去——去掉指针，免得看着像按钮却点不动 */
 .archive-stats .case-stat { cursor: default; }
 
-/* ── 接着玩 ───────────────────────────────────────────────────────────
-   还开着的桌。卡片刻意比上面三个入口轻：入口是「开始做什么」，这里是「回到哪儿」，
-   后者不该在视觉上压过前者。 */
-.resume { margin-top: 1.4rem; }
+/* ── 其它在跑的桌 ─────────────────────────────────────────────────────
+   最近那桌已经在拱门里；这里列剩下的，刻意比入口轻——是「回到哪儿」的索引。 */
+.resume { margin: 0; }
 .resume-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.5rem;
 }
 .resume-grid {
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
 }
-@media (min-width: 640px) { .resume-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1100px) { .resume-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 .resume-card {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   min-width: 0;
-  padding: 0.6rem 0.75rem;
+  padding: 0.7rem 0.85rem;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: 2px;
   background: var(--color-bg-card);
   transition: border-color 140ms ease, background 140ms ease;
 }
@@ -1736,23 +1970,6 @@ body {
   border-bottom-color: var(--color-accent);
 }
 
-.home-shortcut {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.28rem 0.7rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  font-family: var(--font-title);
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.home-shortcut:hover {
-  color: var(--color-text-accent);
-  border-color: var(--color-border-strong);
-  background: var(--surface-2);
-}
 
 /* 战斗区小标题（战场/我方/敌方）：中文用 uppercase 无效，改用字距+字号建立层级 */
 .combat-label {

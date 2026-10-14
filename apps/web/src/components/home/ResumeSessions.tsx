@@ -20,10 +20,10 @@ function statusClass(status: string): string {
 const MAX = 4
 
 /**
- * 「接着玩」：把还开着的桌摆在首页，一步回到上次那局。
+ * 「其它在跑的桌」：最近那一桌已经在右边的拱门里了，这里列剩下的，一步回到任意一局。
  *
  * 此前要回到进行中的游戏得先点「开始游戏」、再在房间列表里找——而这恰恰是这个工作台上
- * 最高频的一件事。一桌都没开着时整块不渲染：首页不该摆一个空框告诉你这里什么都没有。
+ * 最高频的一件事。没有别的桌时整块不渲染：首页不该摆一个空框告诉你这里什么都没有。
  */
 export function ResumeSessions({ sessions }: { sessions: SessionSummary[] }) {
   if (sessions.length === 0) return null
@@ -32,7 +32,7 @@ export function ResumeSessions({ sessions }: { sessions: SessionSummary[] }) {
   return (
     <section className="resume" aria-labelledby="resume-head">
       <div className="resume-head">
-        <h2 id="resume-head" className="section-head" style={{ margin: 0 }}>接着玩</h2>
+        <h2 id="resume-head" className="home-label">其它在跑的桌</h2>
         {sessions.length > shown.length && (
           <Link to="/game" className="home-intro-link no-underline">
             还有 {sessions.length - shown.length} 桌

@@ -1,91 +1,62 @@
 import { Link } from 'react-router-dom'
-import { Dices, Sparkles, Upload } from 'lucide-react'
-import { GiScrollUnfurled, GiCharacter, GiBookmarklet } from 'react-icons/gi'
+import { m } from 'motion/react'
+import { GiCompass, GiRollingDices, GiScrollUnfurled } from 'react-icons/gi'
+import { ArrowRight } from 'lucide-react'
 import { HomeIntro } from '@/components/home/HomeIntro'
 import { CaseFileHeader } from '@/components/home/CaseFileHeader'
+import { HomePortal } from '@/components/home/HomePortal'
 import { ResumeSessions } from '@/components/home/ResumeSessions'
-import { useHomeInventory } from '@/features/home/useHomeInventory'
+import { pickFeatured, useHomeInventory } from '@/features/home/useHomeInventory'
+import { itemVariants, listVariants } from '@/lib/motion'
 
-/** 首页入口卡：图标 + 标题 + 一句说明，比裸按钮更能交代「点进去是什么」。 */
+/** 开一局新的三条路：大字列表而不是三张同权卡片——焦点让给右边的拱门。 */
 const ENTRIES = [
-  {
-    to: '/onboarding',
-    Icon: Sparkles,
-    title: '体验新手团',
-    desc: '十分钟走完一场微型调查，边玩边熟悉规则与投骰',
-    primary: true,
-  },
-  // primary 要每项都有：`as const` 下缺省会让联合类型里读不到该字段
-  { to: '/game', Icon: Dices, title: '开始游戏', desc: '开新局或用房间码加入队友的桌', primary: false },
-  { to: '/modules', Icon: Upload, title: '上传模组', desc: '导入剧本，由 AI 解析成场景、NPC 与线索', primary: false },
-] as const
-
-/** 次级入口：已有素材的快速跳转。 */
-const SHORTCUTS = [
-  { to: '/modules', Icon: GiScrollUnfurled, label: '模组库' },
-  { to: '/characters', Icon: GiCharacter, label: '角色' },
-  { to: '/rulebooks', Icon: GiBookmarklet, label: '规则书' },
+  { to: '/onboarding', Icon: GiCompass, title: '体验新手团', desc: '十分钟走完一场微型调查，边玩边熟悉规则与投骰', primary: true },
+  { to: '/game', Icon: GiRollingDices, title: '开始游戏', desc: '开新局，或用房间码加入队友的桌', primary: false },
+  { to: '/modules', Icon: GiScrollUnfurled, title: '上传模组', desc: '导入剧本，由 AI 解析成场景、NPC 与线索', primary: false },
 ] as const
 
 export function HomePage() {
-  // 库存拉一次，抬头、续玩卡、新手介绍三处共用（见 useHomeInventory 的说明）
+  // 库存拉一次，抬头、拱门、续玩列表、新手介绍几处共用（见 useHomeInventory 的说明）
   const inventory = useHomeInventory()
+  const featured = inventory ? pickFeatured(inventory.openSessions) : null
+  const others = inventory?.openSessions.filter((s) => s.id !== featured?.id) ?? []
 
   return (
-    // 与内页同一套容器：**不居中、不限宽、不加页面级 mt**。
-    //
-    // 居中会让标题左边缘随窗口宽度浮动，跳一次页整块横着弹一下；页面级 mt 则让它上下错位
-    // （各页曾经是 232/237/253 与 37/57/69 三种位置）。上边距统一交给 main 的内边距。
-    //
-    // 也不再压到 5xl：左对齐 ＋ 窄容器＝内容全挤在左上角、右边空掉一大片。放开之后
-    // 三栏介绍每列也能从 250–330px 松到四百多，比原先好读。
-    // 撑满可用高度、把「第一次跑团？」压到底：老玩家的首页内容本来就少（三个入口 ＋
-    // 一两桌在跑），全挤在顶端时下面那一大片看着像没写完。推到底之后，留白落在中间，
-    // 成了「常用的」与「要不要看科普」之间的分隔。
-    <div className="flex min-h-full w-full flex-col">
-      <CaseFileHeader inventory={inventory} />
+    // 左：题铭、库存、入口；右：拱门。宽屏两栏铺满，不再挤在左上角；窄屏拱门落到下面。
+    <div className="home">
+      <section className="home-lead">
+        <CaseFileHeader inventory={inventory} />
 
-      <div className="grid gap-3 sm:grid-cols-3 mt-1">
-        {ENTRIES.map(({ to, Icon, title, desc, primary }) => (
-          <Link
-            key={title}
-            to={to}
-            className={`home-entry card !p-4 flex flex-col gap-2 no-underline ${primary ? 'home-entry--primary' : ''}`}
-          >
-            {/* 纹章框图标：与角色名录的 .char-sigil 同一语言，三个入口像一排铸印 */}
-            <span className="home-entry-icon" aria-hidden="true"><Icon /></span>
-            <span
-              className="font-semibold"
-              style={{ fontFamily: 'var(--font-title)', fontSize: 'var(--text-lg)', color: 'var(--color-text-primary)' }}
-            >
-              {title}
-            </span>
-            <span
-              className="leading-relaxed"
-              style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}
-            >
-              {desc}
-            </span>
-          </Link>
-        ))}
-      </div>
+        <div>
+          <h2 className="home-label">开一局新的</h2>
+          <m.ul className="home-entries" variants={listVariants} initial="initial" animate="enter">
+            {ENTRIES.map(({ to, Icon, title, desc, primary }) => (
+              <m.li key={title} variants={itemVariants}>
+                <Link to={to} className={`home-entry no-underline ${primary ? 'home-entry--primary' : ''}`}>
+                  <span className="home-entry-icon" aria-hidden><Icon /></span>
+                  <span className="home-entry-text">
+                    <span className="home-entry-title">{title}</span>
+                    <span className="home-entry-desc">{desc}</span>
+                  </span>
+                  <ArrowRight className="home-entry-arrow" size={18} aria-hidden />
+                </Link>
+              </m.li>
+            ))}
+          </m.ul>
+        </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {SHORTCUTS.map(({ to, Icon, label }) => (
-          <Link key={label} to={to} className="home-shortcut no-underline">
-            <Icon /> {label}
-          </Link>
-        ))}
-      </div>
+        {/* 最近那桌在拱门里，这里只列剩下的；没有别的桌时整块不渲染 */}
+        <ResumeSessions sessions={others} />
 
-      {/* 还开着的桌摆在入口之下：回到进行中的游戏是这个工作台上最高频的事，
-          此前却要先点「开始游戏」再去列表里找。一桌都没开时整块不渲染。 */}
-      {inventory && <ResumeSessions sessions={inventory.openSessions} />}
+        {/* 一个调查员都没有 = 还没上过桌，这种人才需要看科普；老玩家默认收起。 */}
+        <div className="mt-auto pt-6">
+          <HomeIntro defaultOpen={inventory?.characters === 0} />
+        </div>
+      </section>
 
-      {/* 一个调查员都没有 = 还没上过桌，这种人才需要看科普；老玩家默认收起。 */}
-      <div className="mt-auto pt-6">
-      <HomeIntro defaultOpen={inventory?.characters === 0} />
-      </div>
+      {/* 库存还没回来时不画拱门：先画空门再换成「上次那桌」会闪一下 */}
+      {inventory !== null && <HomePortal session={featured} />}
     </div>
   )
 }

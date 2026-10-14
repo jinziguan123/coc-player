@@ -53,3 +53,15 @@ export function useHomeInventory(): HomeInventory | null {
 
   return inventory
 }
+
+/**
+ * 拱门里摆哪一桌：最近碰过的那桌。已开打的（进行中/暂停）优先于还在大厅等人的——
+ * 「回到桌上」比「回大厅」更像是你此刻想做的事。
+ */
+export function pickFeatured(sessions: SessionSummary[]): SessionSummary | null {
+  if (sessions.length === 0) return null
+  const rank = (s: SessionSummary) => (s.status === 'setup' ? 1 : 0)
+  return [...sessions].sort(
+    (a, b) => rank(a) - rank(b) || (b.updated_at ?? '').localeCompare(a.updated_at ?? ''),
+  )[0]
+}

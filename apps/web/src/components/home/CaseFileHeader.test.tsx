@@ -34,7 +34,7 @@ describe('卷宗抬头', () => {
 
   it('库存取不到就不显示这一行，标题照常在', () => {
     open(null)
-    expect(screen.getByRole('heading', { name: 'CoC Player' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /AI 当守秘人/ })).toBeInTheDocument()
     expect(screen.queryByText('调查员')).not.toBeInTheDocument()
   })
 })

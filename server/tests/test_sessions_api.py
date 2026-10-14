@@ -989,3 +989,55 @@ def test_end_vote_skips_epilogue_for_human_kp(client, monkeypatch):
                json={"acting_character_id": ids["hero"]}, headers=host)
     assert r.status_code == 200 and r.json()["ended"] is True
     assert started == []
+
+
+def test_list_sessions_carries_current_scene_brief(client):
+    """首页「继续上次的桌」要的场景名 / 场景图 / 战斗轮次随列表一次带回，不必逐桌再拉详情。
+
+    只给**当前所在**场景：那是玩家已经身处其中的地方，不算剧透；别的场景一律不透出。
+    """
+    from app.models.combat_state import CombatState
+
+    c, ids = client
+    tok = {"X-Player-Token": "me"}
+    sid = c.post(
+        "/api/sessions",
+        json={"module_id": ids["module"],
+              "participants": [{"character_id": ids["hero"], "is_primary": True}]},
+        headers=tok,
+    ).json()["id"]
+
+    db = next(app.dependency_overrides[get_db]())
+    module = db.get(Module, ids["module"])
+    module.scenes = [
+        {"id": "s1", "title": "委托与准备", "image": "/api/images/a.jpg"},
+        {"id": "s2", "name": "地窖", "image": "/api/images/secret.jpg"},
+    ]
+    session = db.get(GameSession, sid)
+    session.current_scene_id = "s1"
+    db.add(CombatState(session_id=sid, state={"active": True, "round": 3}))
+    db.commit()
+    db.close()
+
+    item = next(s for s in c.get("/api/sessions", headers=tok).json() if s["id"] == sid)
+    assert item["scene_title"] == "委托与准备"
+    assert item["scene_image"] == "/api/images/a.jpg"
+    assert item["combat_round"] == 3
+    assert "secret.jpg" not in str(item)
+
+
+def test_list_sessions_scene_brief_absent_when_unknown(client):
+    """当前场景在模组里找不到（或还没进场景）时字段为空，而不是报错。"""
+    c, ids = client
+    tok = {"X-Player-Token": "me"}
+    sid = c.post(
+        "/api/sessions",
+        json={"module_id": ids["module"],
+              "participants": [{"character_id": ids["hero"], "is_primary": True}]},
+        headers=tok,
+    ).json()["id"]
+
+    item = next(s for s in c.get("/api/sessions", headers=tok).json() if s["id"] == sid)
+    assert item["scene_title"] is None
+    assert item["scene_image"] is None
+    assert item["combat_round"] is None
