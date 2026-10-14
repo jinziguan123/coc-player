@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.rules.coc.combat import compare_checks
 from app.rules.coc.checks import resolve_skill_check
+from app.rules.coc.options import CocRuleOptions
 
 
 def resolve_chase_round(
@@ -18,21 +19,23 @@ def resolve_chase_round(
     quarry_mov: int = 8,
     pursuer_mov: int = 8,
     hazard: dict | None = None,
+    options: CocRuleOptions | None = None,
 ) -> dict:
     """一轮追逐：逃方(quarry) vs 追方(pursuer) 移动对抗，MOV 快者得奖励骰。返回 gap 变化与明细。
 
     - 逃方胜 → gap +1（极难/大成功 +2）；追方胜 → gap -1（同理 -2）；平 → 不变。
     - hazard={who:'quarry'|'pursuer', skill, difficulty}：该方面对障碍检定，失败则对其不利（gap ∓1）。
+    options：本局村规，透传给每一次检定。
     **不改状态**：调用方据 gap_delta 更新 chase_states.state 的 gap。
     """
     mov_diff = (quarry_mov or 0) - (pursuer_mov or 0)
     q = resolve_skill_check(
         quarry_data, skill, "normal",
-        bonus=1 if mov_diff > 0 else 0, penalty=1 if mov_diff < 0 else 0,
+        bonus=1 if mov_diff > 0 else 0, penalty=1 if mov_diff < 0 else 0, options=options,
     )
     p = resolve_skill_check(
         pursuer_data, skill, "normal",
-        bonus=1 if mov_diff < 0 else 0, penalty=1 if mov_diff > 0 else 0,
+        bonus=1 if mov_diff < 0 else 0, penalty=1 if mov_diff > 0 else 0, options=options,
     )
     w = compare_checks(q, p)
     if w == "a":
@@ -48,6 +51,7 @@ def resolve_chase_round(
         hz_data = quarry_data if who == "quarry" else pursuer_data
         hz = resolve_skill_check(
             hz_data, hazard.get("skill", "敏捷"), hazard.get("difficulty", "normal"),
+        options=options,
         )
         hazard_result = {"who": who, "check": hz, "passed": hz.meets_difficulty}
         if not hz.meets_difficulty:

@@ -15,8 +15,9 @@ from app.models.character import Character
 from app.models.chase_state import ChaseState
 from app.models.session import GameSession
 from app.rules.coc import chase as engine
+from app.rules.coc import options as coc_options
 from app.ai.provider import model_meta
-from app.services import session_service
+from app.services import rule_options_service, session_service
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 
@@ -108,6 +109,7 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
         _char_data(q), _char_data(p), skill=state["skill"],
         quarry_mov=q.get("mov", 8), pursuer_mov=p.get("mov", 8),
         hazard=action.get("hazard"),
+        options=coc_options.from_dict(rule_options_service.effective_by_id(db, session_id)),
     )
     state["round"] += 1
     state["gap"] += res["gap_delta"]

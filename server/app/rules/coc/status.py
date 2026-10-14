@@ -18,3 +18,10 @@ CHARACTER_STATUSES: list[dict[str, str]] = [
 LEGACY_STATUS_ALIAS = {"incapacitated": "major_wound"}
 
 VALID_STATUS_VALUES = {s["value"] for s in CHARACTER_STATUSES}
+
+#: 状态严重度：落疯狂等新状态时只升不降——疯狂不覆盖更严重的既有状态（昏迷/死亡），
+#: 永久疯狂也不被临时疯狂降级。
+STATUS_SEVERITY: dict[str, int] = {
+    "active": 0, "major_wound": 1, "temporary_insanity": 2,
+    "indefinite_insanity": 3, "unconscious": 4, "permanent_insanity": 5, "dead": 6,
+}

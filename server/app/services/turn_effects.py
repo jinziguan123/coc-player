@@ -14,7 +14,10 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
+from app.rules.coc import options as coc_options
 from app.rules.coc.checks import display_skill_name
+from app.rules.coc.combat import is_major_wound
+from app.rules.coc.status import STATUS_SEVERITY
 from app.rules.registry import get_engine
 from app.services import (
     dice_runtime,
@@ -67,13 +70,6 @@ def _update_character_stat(db: Session, char: Character, path: str, value) -> No
     db.refresh(char)
 
 
-# 疯狂/失能状态严重度：疯狂不覆盖更严重的既有状态，永久疯狂也不被临时疯狂降级。
-_STATUS_SEVERITY = {
-    "active": 0, "major_wound": 1, "temporary_insanity": 2,
-    "indefinite_insanity": 3, "unconscious": 4, "permanent_insanity": 5, "dead": 6,
-}
-
-
 def _apply_madness_status(
     db: Session, char: Character, new_san: int, went_insane: bool,
 ) -> str | None:
@@ -88,7 +84,7 @@ def _apply_madness_status(
     else:
         return None
     cur = char.status or "active"
-    if _STATUS_SEVERITY.get(target, 0) <= _STATUS_SEVERITY.get(cur, 0):
+    if STATUS_SEVERITY.get(target, 0) <= STATUS_SEVERITY.get(cur, 0):
         return None  # 既有状态已同等或更严重，不降级
     char.status = target
     if target == "temporary_insanity":
@@ -446,7 +442,8 @@ async def _exec_hp_change(
 ) -> list[str]:
     """执行一条 HP 变化结算（target=player/主角 或队友名；NPC/匹配不到则不结算）。返回 chunks。
 
-    确定性规则钩子（CoC 7e，不依赖 KP 自觉）：单次伤害 ≥ 最大 HP 一半即重伤——
+    确定性规则钩子（CoC 7e，不依赖 KP 自觉）：单次伤害 ≥ 最大 HP 一半即重伤（阈值随本局村规
+    major_wound_divisor，与战斗结算 combat.is_major_wound 同一口径）——
     落 major_wound 状态并**系统自动**过一次体质（CON）检定，失败则昏迷（unconscious）。
     昏迷判定是被动生理反应而非玩家主动行动，故不走「待玩家投骰」、直接自动掷。
     队友受伤同样结算（多人局队友也会重伤/昏迷）。
@@ -476,7 +473,8 @@ async def _exec_hp_change(
         hp_content = f"{char.name} 受到 {dmg} 点伤害（HP {old_hp} → {new_hp}）"
         if reason:
             hp_content += f"——{reason}"
-        major_wound = dmg >= max_hp // 2 and max_hp > 0
+        rule_opts = coc_options.from_dict(rule_options_service.effective_by_id(db, session_id))
+        major_wound = max_hp > 0 and is_major_wound(dmg, max_hp, rule_opts)
         already_major = char.status == "major_wound"
         if max_hp > 0 and dmg > max_hp:
             # 单次伤害 > 最大 HP → 当场毙命（CoC 7e）
