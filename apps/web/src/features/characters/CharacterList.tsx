@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { m } from 'motion/react'
+import { spring } from '@/lib/motion'
 import { GiScrollUnfurled } from 'react-icons/gi'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { CharacterPortrait } from '@/components/character/CharacterPortrait'
@@ -38,6 +40,11 @@ export function CharacterList({
   onDelete,
 }: CharacterListProps) {
   const [query, setQuery] = useState('')
+  // 只有首次拿到的那一批播入场；之后的搜索 / 翻页只是重排
+  const firstBatch = useRef(true)
+  useEffect(() => {
+    if (characters.length > 0) firstBatch.current = false
+  }, [characters.length])
   const [page, setPage] = useState(1)
   const normalizedQuery = query.trim().toLowerCase()
   const filtered = characters.filter((character) => {
@@ -83,7 +90,7 @@ export function CharacterList({
               : '没有匹配的角色'}
           </p>
         )}
-        {pageItems.map((character) => {
+        {pageItems.map((character, index) => {
           const hitPoints = (character.system_data?.hitPoints as {
             current: number
             max: number
@@ -96,10 +103,14 @@ export function CharacterList({
           const archived = character.experiences?.length ?? 0
           const isActive = selectedId === character.id
           return (
-            <div
+            <m.div
               key={character.id}
               className="character-card roster-item cursor-pointer"
               data-active={isActive}
+              // 首屏那一批从左侧依次滑入；搜索、翻页后的重排不再表演（同 lib/stagger.ts 的约定）
+              initial={firstBatch.current ? { opacity: 0, x: -14 } : false}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ ...spring.soft, delay: firstBatch.current ? Math.min(index * 0.045, 0.35) : 0 }}
               onClick={() => onSelect(character)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') onSelect(character)
@@ -107,6 +118,8 @@ export function CharacterList({
               role="button"
               tabIndex={0}
             >
+              {/* 选中底色：同一个 layoutId 在名录条目之间滑过去 */}
+              {isActive && <m.span layoutId="roster-active" className="roster-active" transition={spring.snappy} />}
               <CharacterPortrait
                 name={character.name}
                 avatarUrl={character.avatar_url}
@@ -173,7 +186,7 @@ export function CharacterList({
                   )}
                 </ConfirmDialog>
               </div>
-            </div>
+            </m.div>
           )
         })}
       </div>

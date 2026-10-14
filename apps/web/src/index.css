@@ -678,20 +678,26 @@ body {
 
 /* 名录条目：窄页里要塞下头像+姓名+职业+要害，所以一行到底、不换行 */
 .roster-item {
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.6rem;
   width: 100%;
-  padding: 0.42rem 0.5rem;
-  border-radius: 3px;
-  border-left: 2px solid transparent;
+  padding: 0.5rem 0.55rem;
+  border-radius: 2px;
   text-align: left;
-  transition: background 0.14s ease, border-color 0.14s ease;
+  transition: background 0.18s ease;
 }
-.roster-item:hover { background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
-.roster-item[data-active='true'] {
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  border-left-color: var(--color-accent);
+.roster-item:hover { background: color-mix(in srgb, var(--color-accent) 6%, transparent); }
+/* 选中底色（layoutId 滑动）：黄铜渐变 + 左缘竖条 */
+.roster-active {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 2px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 18%, transparent), color-mix(in srgb, var(--color-accent) 4%, transparent));
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 .roster-name {
   font-family: var(--font-title);
@@ -964,6 +970,48 @@ body {
 }
 .skill-row:hover {
   background: var(--surface-2);
+}
+/* 技能列表：窄栏单列，宽处（角色页）自动排成多列 */
+.skill-list { display: grid; gap: 0.15rem 1rem; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+.skill-value { font-family: var(--font-display); font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+/* 技能底条：打开时从左长出来，前几十行错峰 */
+.skill-fill {
+  border-radius: 2px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 4%, transparent), color-mix(in srgb, var(--color-accent) 14%, transparent));
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent);
+  transform-origin: 0 50%;
+  animation: skillFillIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes skillFillIn {
+  from { transform: scaleX(0); opacity: 0; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .skill-fill { animation: none; } }
+
+/* 角色卡抬头：小拱门里的头像 + 大号姓名 */
+.char-dossier-head { display: flex; align-items: center; gap: 0.9rem; }
+.char-dossier-arch {
+  position: relative;
+  flex-shrink: 0;
+  padding: 3px;
+  border: 1px solid var(--color-accent);
+  border-radius: 50% 50% 2px 2px / 38% 38% 2px 2px;
+  box-shadow: 0 0 0 3px var(--color-bg-secondary), 0 0 0 4px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+.char-dossier-portrait {
+  width: 3.4rem !important;
+  height: 4.2rem !important;
+  border-radius: 50% 50% 1px 1px / 36% 36% 1px 1px !important;
+  font-size: 1.6rem !important;
+  overflow: hidden;
+}
+.char-dossier-name {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--color-text-primary);
 }
 
 /* ===== KP 控制台 =====
