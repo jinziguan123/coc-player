@@ -454,12 +454,19 @@ body {
   letter-spacing: 0.06em;
 }
 .stat-tile-value {
+  font-family: var(--font-display);   /* 纯数字：仪表读数感 */
+  font-variant-numeric: tabular-nums;
+  font-size: 1.45rem;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--color-text-primary);
+}
+/* 困难 · 极难 门槛：小一号、暗黄铜，读得到但不抢主值 */
+.stat-tile-sub {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: var(--text-base);
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--color-text-primary);
+  font-size: var(--text-2xs);
+  color: var(--color-brass-dim);
 }
 
 /* 分区小标题：琥珀短横 + 字距，替代四处散落的 text-xs font-semibold */
@@ -2421,6 +2428,17 @@ body {
   font-size: 2rem;
   font-weight: 400;
   line-height: 1;
+}
+
+/* 页签的滑动下划线（components/ui/tabs.tsx） */
+.tabs-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 2px;
+  pointer-events: none;
+  background: var(--color-accent);
+  box-shadow: 0 0 8px rgba(200, 162, 90, 0.5);
 }
 
 /* ===== 黄铜表盘（BrassDial） ===== */

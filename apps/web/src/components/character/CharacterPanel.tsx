@@ -220,12 +220,17 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
       <div>
         <div className="section-head">属性</div>
         <div className="char-attr-grid grid grid-cols-4 gap-1">
-          {Object.entries(ATTR_LABELS).map(([k, label]) => (
-            <div key={k} className="stat-tile">
-              <div className="stat-tile-label">{label}</div>
-              <div className="stat-tile-value">{character.base_attributes[k] || 0}</div>
-            </div>
-          ))}
+          {Object.entries(ATTR_LABELS).map(([k, label]) => {
+            const v = character.base_attributes[k] || 0
+            return (
+              <div key={k} className="stat-tile" title={`困难 ${Math.floor(v / 2)} · 极难 ${Math.floor(v / 5)}`}>
+                <div className="stat-tile-label">{label}</div>
+                <div className="stat-tile-value">{v}</div>
+                {/* 困难 / 极难门槛：检定时最常要心算的两个数，直接摆出来 */}
+                <div className="stat-tile-sub">{Math.floor(v / 2)} · {Math.floor(v / 5)}</div>
+              </div>
+            )
+          })}
         </div>
       </div>
 
