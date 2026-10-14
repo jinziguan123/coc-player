@@ -11,7 +11,7 @@ const s = (over: Partial<SessionSummary> = {}): SessionSummary => ({
 const open = (sessions: SessionSummary[]) =>
   render(<MemoryRouter><ResumeSessions sessions={sessions} /></MemoryRouter>)
 
-describe('接着玩', () => {
+describe('其它在跑的桌', () => {
   it('一步回到那局，不必先进「开始游戏」再翻列表', () => {
     open([s()])
     expect(screen.getByRole('link', { name: /鬼屋/ })).toHaveAttribute('href', '/game/sess-1')

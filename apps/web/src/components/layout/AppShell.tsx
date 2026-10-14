@@ -1,6 +1,9 @@
-import { Outlet, useLocation } from 'react-router-dom'
+import { Suspense } from 'react'
+import { useOutlet, useLocation } from 'react-router-dom'
+import { AnimatePresence, m } from 'motion/react'
 import { useKnockNotices } from '@/features/netlink/useKnockNotices'
 import { useNetlinkAutoStart } from '@/features/netlink/useNetlinkAutoStart'
+import { pageVariants } from '@/lib/motion'
 import { Sidebar } from './Sidebar'
 
 export function AppShell() {
@@ -9,15 +12,37 @@ export function AppShell() {
   // 自动恢复不全局，隧道要等他恰好翻到设置页才启动，客人在那之前怎么都进不来。
   useNetlinkAutoStart()
   useKnockNotices()
-  // 路由切换整页淡入（150ms）：用 pathname 作 key，切页即重挂载触发 route-fade。
   const { pathname } = useLocation()
+  // 退场动画期间旧页还要再渲染一会儿：用 useOutlet 拿到「这一刻」的页面元素交给
+  // AnimatePresence 冻住，而不是 <Outlet />——后者会在旧页上直接渲染出新路由的内容。
+  const outlet = useOutlet()
   const gameSession = pathname.startsWith('/game/')
   return (
     <div className={`app-shell flex h-screen overflow-hidden ${gameSession ? 'game-session-shell' : ''}`}>
-      <Sidebar />
-      <main key={pathname} className="app-main min-w-0 flex-1 overflow-auto p-6 route-fade">
-        <Outlet />
-      </main>
+      <Sidebar autoCollapse={gameSession} />
+      <AnimatePresence mode="wait" initial={false}>
+        <m.main
+          key={pathname}
+          className="app-main min-w-0 flex-1 overflow-auto p-6"
+          variants={pageVariants}
+          initial="initial"
+          animate="enter"
+          exit="exit"
+        >
+          {/* Suspense 放在内容区里而不是整个壳外面：懒加载的页面还在下载时，
+              侧栏照常在，只有内容区显示「正在打开」，而不是整屏被替换。 */}
+          <Suspense fallback={<PageFallback />}>{outlet}</Suspense>
+        </m.main>
+      </AnimatePresence>
+      <div className="film-grain" aria-hidden />
+    </div>
+  )
+}
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center text-sm" aria-live="polite">
+      正在打开…
     </div>
   )
 }

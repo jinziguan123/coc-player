@@ -1,7 +1,10 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { staggerStyle } from '@/lib/stagger'
-import { GiDiceTwentyFacesTwenty } from 'react-icons/gi'
+import { GiCrossedSwords, GiDiceTwentyFacesTwenty } from 'react-icons/gi'
+import { TiltCard } from '@/components/ui/TiltCard'
+import { lastActive } from '@/features/home/useHomeInventory'
+import { relativeTime } from '@/lib/relativeTime'
 import type { GameSetupState } from './useGameSetup'
+import { absoluteImageUrl } from '@/lib/imageUrl'
 
 function formatTime(timestamp?: string) {
   if (!timestamp) return ''
@@ -25,6 +28,8 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
     activeSessions, openSession, deleteSession,
     remoteRooms, reconnecting, reconnectRemoteRoom, forgetRoom,
   } = setup
+  // 最近交互过的桌排在前面（与首页「继续上次的桌」同一口径）
+  const sorted = [...activeSessions].sort((a, b) => lastActive(b).localeCompare(lastActive(a)))
 
   return (
     <section>
@@ -40,59 +45,61 @@ export function SessionList({ setup }: { setup: GameSetupState }) {
       )}
       {/* 拿到整幅宽度后可以多排一列：卡里只有标题、角色和时间三行，两列时每张近 600px
           宽得发空。三列封顶——再多模组名就要截断了。 */}
-      <div className="grid gap-2.5 lg:grid-cols-2 xl:grid-cols-3">
-        {activeSessions.map((session, i) => (
-          <div
-            key={session.id}
-            style={staggerStyle(i)}
-            onClick={() => openSession(session)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') openSession(session)
-            }}
-            className={`card entity-card list-enter w-full cursor-pointer text-left ${session.status === 'active' ? 'active-rail' : ''}`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div
-                  className="truncate font-semibold"
-                  style={{ color: 'var(--color-text-accent)', fontSize: 'var(--text-base)' }}
-                >
-                  {session.module_title || '未知模组'}
-                </div>
-                <div
-                  className="mt-0.5 truncate"
-                  style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-xs)' }}
-                >
-                  {session.character_name || '未知角色'} · {formatTime(session.created_at)}
-                </div>
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-1">
-                <span className={statusChipClass(session.status)}>{statusBadge(session.status)}</span>
-                <ConfirmDialog
-                  title="删除游戏"
-                  description="确定要删除该游戏存档吗？聊天记录将一并删除，此操作不可恢复。"
-                  confirmLabel="删除"
-                  onConfirm={() => deleteSession(session.id)}
-                >
-                  {(open) => (
-                    <span className="entity-card-actions inline-flex">
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          open()
-                        }}
-                        className="chip chip--danger chip-btn chip-btn--danger"
-                      >
-                        删除
-                      </button>
-                    </span>
+      <div className="table-grid">
+        {sorted.map((session, i) => (
+          <TiltCard key={session.id} index={i} max={4} className="table-card-wrap">
+            <div
+              onClick={() => openSession(session)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') openSession(session)
+              }}
+              className={`card entity-card table-card table-card--${session.status}`}
+            >
+              {session.scene_image && (
+                <img src={absoluteImageUrl(session.scene_image)} alt="" className="table-card-scene" loading="lazy" />
+              )}
+              <span className="table-card-ribbon" aria-hidden />
+              <div className="table-card-body">
+                <div className="table-card-top">
+                  <span className={statusChipClass(session.status)}>{statusBadge(session.status)}</span>
+                  {typeof session.combat_round === 'number' && (
+                    <span className="table-card-combat"><GiCrossedSwords aria-hidden /> 第 {session.combat_round} 轮</span>
                   )}
-                </ConfirmDialog>
+                </div>
+                <div className="table-card-title">{session.module_title || '未知模组'}</div>
+                <div className="table-card-meta">
+                  {session.character_name === 'KP' ? '你是 KP' : session.character_name || '未选角色'}
+                  {session.scene_title && <> · 停在「{session.scene_title}」</>}
+                </div>
+                <div className="table-card-foot">
+                  {session.room_code && <span className="table-card-code">{session.room_code}</span>}
+                  <span>{relativeTime(lastActive(session)) ?? formatTime(session.created_at)}</span>
+                </div>
               </div>
+              <ConfirmDialog
+                title="删除游戏"
+                description="确定要删除该游戏存档吗？聊天记录将一并删除，此操作不可恢复。"
+                confirmLabel="删除"
+                onConfirm={() => deleteSession(session.id)}
+              >
+                {(open) => (
+                  <span className="entity-card-actions table-card-delete">
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        open()
+                      }}
+                      className="chip chip--danger chip-btn chip-btn--danger"
+                    >
+                      删除
+                    </button>
+                  </span>
+                )}
+              </ConfirmDialog>
             </div>
-          </div>
+          </TiltCard>
         ))}
       </div>
 

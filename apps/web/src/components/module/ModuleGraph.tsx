@@ -16,7 +16,7 @@ interface Clue { id: string; name?: string; description?: string; location?: str
 interface SceneData extends Record<string, unknown> { name: string; npcs: string[]; clues: string[]; orphan?: boolean }
 
 const NODE_W = 210
-const ACCENT = '#d4a24e'
+const ACCENT = '#c8a25a'
 const DANGER_META: Record<string, { label: string; color: string }> = {
   calm: { label: '平静', color: 'var(--color-text-secondary)' },
   uneasy: { label: '不安', color: '#cfa93f' },

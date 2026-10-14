@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { HomeInventory } from '@/features/home/useHomeInventory'
+import { CountUp } from '@/components/ui/CountUp'
 
 /**
  * 卷宗抬头。
@@ -9,7 +10,7 @@ import type { HomeInventory } from '@/features/home/useHomeInventory'
  * 产品自己的语汇没在视觉上兑现，是这一页最没个性的地方。
  *
  * 所以把顶部改成一份卷宗的抬头：**左对齐**（档案是左对齐的，居中是海报的语言），
- * 右侧挂一行等宽的库存清单。
+ * 题铭之下一条三格的库存横带（装饰艺术的「铭牌」），数字首屏从 0 滚上来。
  *
  * 原先标题上头还有一枚「卷宗」书签，拿掉了：侧边栏第一项已经高亮着「卷宗」，书签只是
  * 把同一件事再说一遍；它还随各页容器宽度浮动，跳页时看着像在飘（详见 ArchiveHead）。
@@ -37,33 +38,30 @@ function rowsOf(inv: HomeInventory): Row[] {
 export function CaseFileHeader({ inventory }: { inventory: HomeInventory | null }) {
   return (
     <header className="case-head">
-      <div className="case-head-top">
-        <h1 className="case-title">CoC Player</h1>
-        {inventory && (
-          <div className="case-stats">
-            {rowsOf(inventory).map(({ label, count, emptyText, to }) => (
-              <Link
-                key={label}
-                to={to}
-                className="case-stat no-underline"
-                // 读屏里「调查员 7」听着像半句话，补一句完整的
-                aria-label={count > 0 ? `${label} ${count}，前往` : emptyText}
-              >
-                {count > 0 ? (
-                  <>
-                    <span className="case-stat-label">{label}</span>
-                    <span className="case-stat-num">{count}</span>
-                  </>
-                ) : (
-                  <span className="case-stat-empty">{emptyText}</span>
-                )}
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <p className="case-sub">AI 当守秘人，你带调查员上桌</p>
+      <p className="case-eyebrow">CoC Player · 克苏鲁的呼唤 第七版</p>
+      <h1 className="case-title">AI 当守秘人，<br />你带调查员上桌</h1>
+      {inventory && (
+        <div className="case-band">
+          {rowsOf(inventory).map(({ label, count, emptyText, to }) => (
+            <Link
+              key={label}
+              to={to}
+              className="case-band-cell no-underline"
+              // 读屏里「调查员 7」听着像半句话，补一句完整的
+              aria-label={count > 0 ? `${label} ${count}，前往` : emptyText}
+            >
+              {count > 0 ? (
+                <>
+                  <CountUp value={count} className="case-band-num" />
+                  <span className="case-band-label">{label}</span>
+                </>
+              ) : (
+                <span className="case-stat-empty">{emptyText}</span>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
     </header>
   )
 }

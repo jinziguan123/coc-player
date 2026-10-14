@@ -157,17 +157,17 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
   return (
     <div className="char-basic space-y-3">
       {/* 抬头：头像（无则首字纹章）+ 姓名 + 身份，横排比居中大头像省一半竖向空间 */}
-      <div className="flex items-center gap-2.5">
-        <CharacterPortrait
-          name={character.name}
-          avatarUrl={character.avatar_url}
-          className="!h-11 !w-11 !text-[length:var(--text-xl)]"
-        />
+      <div className="char-dossier-head">
+        {/* 头像装进一道小拱门：与首页拱门、调查员档案同一母题 */}
+        <span className="char-dossier-arch">
+          <CharacterPortrait
+            name={character.name}
+            avatarUrl={character.avatar_url}
+            className="char-dossier-portrait"
+          />
+        </span>
         <div className="min-w-0 flex-1">
-          <h3
-            className="truncate font-semibold"
-            style={{ fontSize: 'var(--text-lg)', color: 'var(--color-text-accent)', fontFamily: 'var(--font-title)' }}
-          >
+          <h3 className="char-dossier-name truncate">
             {character.name}
           </h3>
           <div
@@ -220,12 +220,17 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
       <div>
         <div className="section-head">属性</div>
         <div className="char-attr-grid grid grid-cols-4 gap-1">
-          {Object.entries(ATTR_LABELS).map(([k, label]) => (
-            <div key={k} className="stat-tile">
-              <div className="stat-tile-label">{label}</div>
-              <div className="stat-tile-value">{character.base_attributes[k] || 0}</div>
-            </div>
-          ))}
+          {Object.entries(ATTR_LABELS).map(([k, label]) => {
+            const v = character.base_attributes[k] || 0
+            return (
+              <div key={k} className="stat-tile" title={`困难 ${Math.floor(v / 2)} · 极难 ${Math.floor(v / 5)}`}>
+                <div className="stat-tile-label">{label}</div>
+                <div className="stat-tile-value">{v}</div>
+                {/* 困难 / 极难门槛：检定时最常要心算的两个数，直接摆出来 */}
+                <div className="stat-tile-sub">{Math.floor(v / 2)} · {Math.floor(v / 5)}</div>
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -256,21 +261,18 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
 
 /** 单个技能行：自己持有「检定目标」输入框的状态，互不影响。 */
 /** 技能行内容：底衬一条按技能值宽度的琥珀微填充，一列扫下来就能看出强弱分布。 */
-function SkillRowInner({ name, value }: { name: string; value: number }) {
+function SkillRowInner({ name, value, index = 0 }: { name: string; value: number; index?: number }) {
+  const tone = value >= 50 ? 'var(--color-dice-gold)' : value >= 25 ? 'var(--color-text-primary)' : 'var(--color-text-secondary)'
   return (
     <>
+      {/* 底条打开时从左往右长到技能值的宽度（.skill-fill 的入场动画） */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-y-0 left-0 rounded"
-        style={{
-          width: `${Math.max(0, Math.min(100, value))}%`,
-          background: 'color-mix(in srgb, var(--color-accent) 9%, transparent)',
-        }}
+        className="skill-fill pointer-events-none absolute inset-y-0 left-0"
+        style={{ width: `${Math.max(0, Math.min(100, value))}%`, animationDelay: `${Math.min(index, 24) * 22}ms` }}
       />
       <span className="relative truncate">{name}</span>
-      <span className="relative font-mono tabular-nums font-bold" style={{
-        color: value >= 50 ? 'var(--color-success)' : value >= 25 ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-      }}>
+      <span className="skill-value relative" style={{ color: tone }} title={`困难 ${Math.floor(value / 2)} · 极难 ${Math.floor(value / 5)}`}>
         {value}
       </span>
     </>
@@ -278,10 +280,10 @@ function SkillRowInner({ name, value }: { name: string; value: number }) {
 }
 
 function SkillCheckRow({
-  name, value, onSkillCheck,
-}: { name: string; value: number; onSkillCheck: (skill: string, intent: string) => void }) {
+  name, value, index, onSkillCheck,
+}: { name: string; value: number; index: number; onSkillCheck: (skill: string, intent: string) => void }) {
   const [intent, setIntent] = useState('')
-  const row = <SkillRowInner name={name} value={value} />
+  const row = <SkillRowInner name={name} value={value} index={index} />
   return (
     <ConfirmDialog
       title="申请检定"
@@ -340,16 +342,16 @@ function SkillsTab({
           点击技能把检定申请加入本回合，与你这一轮的发言一起交给 KP（难度由 KP 裁定，之后再投骰）
         </p>
       )}
-      <div className="space-y-0.5">
-        {filtered.map(([name, value]) => {
+      <div className="skill-list">
+        {filtered.map(([name, value], i) => {
           if (!onSkillCheck) {
             return (
               <div key={name} className="skill-row relative flex items-center justify-between gap-2 py-1 px-1.5 rounded text-xs">
-                <SkillRowInner name={name} value={value} />
+                <SkillRowInner name={name} value={value} index={i} />
               </div>
             )
           }
-          return <SkillCheckRow key={name} name={name} value={value} onSkillCheck={onSkillCheck} />
+          return <SkillCheckRow key={name} name={name} value={value} index={i} onSkillCheck={onSkillCheck} />
         })}
         {filtered.length === 0 && (
           <p className="text-xs text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>

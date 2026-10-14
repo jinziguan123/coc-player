@@ -3,26 +3,15 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, localApi } from '../api/client'
 import { useModuleStore } from '../stores/moduleStore'
-import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { GiUpCard, GiScrollUnfurled, GiArchiveResearch } from 'react-icons/gi'
+import { GiUpCard, GiScrollUnfurled, GiQuillInk } from 'react-icons/gi'
+import { AnimatePresence, m } from 'motion/react'
+import { ModuleCard } from '@/components/module/ModuleCard'
+import { spring } from '@/lib/motion'
 import { ArchiveHead } from '@/components/layout/ArchiveHead'
 import { Loader2, X } from 'lucide-react'
-import { staggerStyle } from '@/lib/stagger'
 
 const ALLOWED_EXTS = ['txt', 'md', 'pdf', 'docx', 'doc', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
-
-/** 难度徽标取色：走主题语义色而非写死的 #2d7d46/#991b1b，两套主题下都能读。
- *  只上描边与文字色（不填实心），与同排其它 chip 保持同一视觉重量。 */
-function difficultyChipStyle(difficulty: string): React.CSSProperties {
-  const tone = ({
-    入门: 'var(--color-success)',
-    普通: 'var(--color-text-secondary)',
-    困难: 'var(--color-dice-gold)',
-    噩梦: 'var(--color-danger)',
-  } as Record<string, string>)[difficulty]
-  return tone ? { color: tone, borderColor: tone } : {}
-}
 
 export function ModulePage() {
   const { modules, loading, fetchModules, startUpload } = useModuleStore()
@@ -32,6 +21,10 @@ export function ModulePage() {
   const [uploadJob, setUploadJob] = useState<{ stage: string; percent: number } | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  // 导入抽屉：上传是偶尔才做的事，不该常年占着首屏最好的位置。书架空着时自动摊开。
+  const [uploadToggled, setUploadToggled] = useState<boolean | null>(null)
+  const uploadOpen = uploadToggled ?? (!loading && modules.length === 0)
+  const setUploadOpen = (fn: (v: boolean) => boolean) => setUploadToggled(fn(uploadOpen))
 
   useEffect(() => {
     fetchModules()
@@ -138,15 +131,34 @@ export function ModulePage() {
         title="模组"
         stats={[{ label: '在库', value: modules.length }]}
         actions={(
-          <button onClick={() => navigate('/modules/new')} className="btn-primary btn-sm flex items-center gap-1">
-            <GiUpCard /> 新建模组
-          </button>
+          <>
+            <button
+              onClick={() => setUploadOpen((v) => !v)}
+              aria-expanded={uploadOpen}
+              className="btn-secondary btn-sm flex items-center gap-1"
+            >
+              <GiUpCard /> {uploadOpen ? '收起导入' : '导入剧本'}
+            </button>
+            <button onClick={() => navigate('/modules/new')} className="btn-primary btn-sm flex items-center gap-1">
+              <GiQuillInk /> 新建模组
+            </button>
+          </>
         )}
       />
 
+      <AnimatePresence initial={false}>
+      {uploadOpen && (
+      <m.div
+        key="upload"
+        className="upload-drawer"
+        initial={{ height: 0, opacity: 0 }}
+        animate={{ height: 'auto', opacity: 1 }}
+        exit={{ height: 0, opacity: 0 }}
+        transition={{ height: spring.soft, opacity: { duration: 0.2 } }}
+      >
       <div className="card mb-8 max-w-3xl">
         <h3 className="card-title flex items-center gap-2">
-          <GiUpCard /> 上传模组
+          <GiUpCard /> 导入剧本
         </h3>
 
         <div
@@ -232,6 +244,9 @@ export function ModulePage() {
           </button>
         </div>
       </div>
+      </m.div>
+      )}
+      </AnimatePresence>
 
       {uploadJob && (
         <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem' }}>
@@ -268,122 +283,9 @@ export function ModulePage() {
           </span>
         </div>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="module-grid">
           {modules.map((m, i) => (
-            <div
-              key={m.id}
-              style={staggerStyle(i)}
-              className="card entity-card list-enter !p-0 flex flex-col overflow-hidden"
-            >
-              {/* 抬头：卷轴纹章 + 标题 + 规则/索引态；操作按钮 hover 才浮现 */}
-              <div
-                className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
-                style={{ borderBottom: '1px solid var(--color-border)' }}
-              >
-                <span className="char-sigil" aria-hidden="true"><GiScrollUnfurled /></span>
-                <div className="min-w-0 flex-1">
-                  <h3 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]" title={m.title}>
-                    {m.title}
-                  </h3>
-                  <div className="flex flex-wrap items-center gap-1">
-                    <span className="chip chip--accent">{m.rule_system.toUpperCase()}</span>
-                    {m.rag_status === 'ready' && (
-                      <span className="chip chip--success" title="模组原文已建索引，跑团时 KP 可引用原文">
-                        <GiArchiveResearch /> 原文索引
-                      </span>
-                    )}
-                    {m.rag_status === 'indexing' && (
-                      <span className="chip" title="正在为模组原文建索引">
-                        <Loader2 className="animate-spin" size={11} /> 索引中
-                      </span>
-                    )}
-                    {m.rag_status === 'failed' && (
-                      <span className="chip chip--danger" title="原文索引构建失败，可点「重建索引」重试">
-                        <GiArchiveResearch /> 索引失败
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="entity-card-actions flex flex-shrink-0 flex-wrap items-center justify-end gap-1">
-                  {m.rag_status !== 'indexing' && (
-                    <button
-                      onClick={() => rebuildRag(m.id)}
-                      className="chip chip--accent chip-btn chip-btn--accent"
-                      title="（重）建模组原文索引：让 KP 跑团时能检索并引用模组原文"
-                    >
-                      <GiArchiveResearch /> 重建索引
-                    </button>
-                  )}
-                  <ConfirmDialog
-                    title="查看 / 编辑模组（含剧透）"
-                    description={`「${m.title}」的内容包含 NPC 秘密、线索与剧情真相。若你打算亲自游玩本模组，请不要查看。确定继续吗？`}
-                    confirmLabel="继续查看"
-                    onConfirm={() => navigate(`/modules/${m.id}`)}
-                  >
-                    {(open) => (
-                      <button
-                        onClick={open}
-                        className="chip chip--accent chip-btn chip-btn--accent"
-                      >
-                        查看/编辑
-                      </button>
-                    )}
-                  </ConfirmDialog>
-                  <ConfirmDialog
-                    title="删除模组"
-                    description={`确定要删除「${m.title}」吗？此操作不可恢复。`}
-                    confirmLabel="删除"
-                    onConfirm={() => deleteModule(m.id)}
-                  >
-                    {(open) => (
-                      <button
-                        onClick={open}
-                        className="chip chip--danger chip-btn chip-btn--danger"
-                      >
-                        删除
-                      </button>
-                    )}
-                  </ConfirmDialog>
-                </div>
-              </div>
-
-              <div className="flex flex-1 flex-col px-3 py-2.5">
-                <p
-                  className="mb-2 leading-relaxed"
-                  style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}
-                >
-                  {m.description}
-                </p>
-                <div className="mb-2 flex flex-wrap gap-1">
-                  {Boolean(m.world_setting?.era) && <span className="chip">{String(m.world_setting.era)}</span>}
-                  {Boolean(m.world_setting?.region) && <span className="chip">{String(m.world_setting.region)}</span>}
-                  {Boolean(m.world_setting?.player_count) && <span className="chip">{String(m.world_setting.player_count)}人</span>}
-                  {Boolean(m.world_setting?.difficulty) && (
-                    <span className="chip" style={difficultyChipStyle(String(m.world_setting.difficulty))}>
-                      {String(m.world_setting.difficulty)}
-                    </span>
-                  )}
-                  {(m.world_setting?.tags as string[] || []).map((t: string) => (
-                    <span key={t} className="chip" style={{ opacity: 0.75 }}>{t}</span>
-                  ))}
-                </div>
-                {/* 规模数字置底对齐，卡片高度不齐时这一行仍成一条基线 */}
-                <div className="mt-auto grid grid-cols-3 gap-1 pt-1">
-                  <div className="stat-tile">
-                    <div className="stat-tile-value">{m.scenes?.length ?? 0}</div>
-                    <div className="stat-tile-label">场景</div>
-                  </div>
-                  <div className="stat-tile">
-                    <div className="stat-tile-value">{m.npcs?.length ?? 0}</div>
-                    <div className="stat-tile-label">NPC</div>
-                  </div>
-                  <div className="stat-tile">
-                    <div className="stat-tile-value">{m.clues?.length ?? 0}</div>
-                    <div className="stat-tile-label">线索</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <ModuleCard key={m.id} module={m} index={i} onRebuildRag={rebuildRag} onDelete={deleteModule} />
           ))}
         </div>
       )}

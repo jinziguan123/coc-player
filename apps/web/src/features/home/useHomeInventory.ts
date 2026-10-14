@@ -53,3 +53,22 @@ export function useHomeInventory(): HomeInventory | null {
 
   return inventory
 }
+
+/** 这一桌最后一次有人交互的时间：后端给的 last_active_at，旧后端退回 updated_at */
+export function lastActive(s: SessionSummary): string {
+  return s.last_active_at ?? s.updated_at ?? ''
+}
+
+/**
+ * 拱门里摆哪一桌：最后一次有人交互（发消息、掷骰…）的那桌。已开打的（进行中/暂停）优先于
+ * 还在大厅等人的——「回到桌上」比「回大厅」更像是你此刻想做的事。
+ *
+ * 不按 updated_at 排：战斗态回写之类的后台写入会刷新它，只发消息时它又不动。
+ */
+export function pickFeatured(sessions: SessionSummary[]): SessionSummary | null {
+  if (sessions.length === 0) return null
+  const rank = (s: SessionSummary) => (s.status === 'setup' ? 1 : 0)
+  return [...sessions].sort(
+    (a, b) => rank(a) - rank(b) || lastActive(b).localeCompare(lastActive(a)),
+  )[0]
+}

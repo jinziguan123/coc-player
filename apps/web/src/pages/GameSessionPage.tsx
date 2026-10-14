@@ -58,7 +58,7 @@ import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpPartyMonitor } from '../components/game/KpPartyMonitor'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
-import { Modal } from '../components/ui/modal'
+import { Modal, ModalPresence } from '../components/ui/modal'
 import { GiReturnArrow, GiScrollUnfurled, GiTreasureMap, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
@@ -1568,13 +1568,15 @@ export function GameSessionPage() {
           : 'flex flex-1 min-w-0'}`}
         style={immersiveOn && !chatCollapsed ? { width: 'clamp(280px, 25vw, 420px)' } : undefined}
       >
-        {showRecap && <RecapModal sessionId={currentSession.id} onClose={() => setShowRecap(false)} />}
+        <ModalPresence>
+        {showRecap && <RecapModal key="recap" sessionId={currentSession.id} onClose={() => setShowRecap(false)} />}
         {showGrowth && myCharId && (
-          <GrowthModal sessionId={currentSession.id} characterId={myCharId} onClose={() => setShowGrowth(false)} />
+          <GrowthModal key="growth" sessionId={currentSession.id} characterId={myCharId} onClose={() => setShowGrowth(false)} />
         )}
-        {showImprov && <ImprovisedNpcModal sessionId={currentSession.id} onClose={() => setShowImprov(false)} />}
+        {showImprov && <ImprovisedNpcModal key="improv" sessionId={currentSession.id} onClose={() => setShowImprov(false)} />}
         {showStyle && (
           <SessionStyleModal
+            key="style"
             sessionId={currentSession.id}
             narrativeStyle={currentSession.narrative_style || ''}
             imageStyle={currentSession.image_style || ''}
@@ -1584,17 +1586,19 @@ export function GameSessionPage() {
         )}
         {portraitView && (
           // NPC 立绘放大查看：复用通用 Modal（Esc / 点遮罩关闭），点图本身也可关闭
-          <Modal onClose={() => setPortraitView(null)} widthClass="max-w-md">
+          <Modal key="portrait" onClose={() => setPortraitView(null)} widthClass="max-w-md">
             <img src={portraitView} alt="" className="block w-full cursor-pointer" onClick={() => setPortraitView(null)} />
           </Modal>
         )}
         {showSearch && currentSession && (
           <HistorySearchModal
+            key="search"
             sessionId={currentSession.id}
             onClose={() => setShowSearch(false)}
             onJump={jumpToEvent}
           />
         )}
+        </ModalPresence>
         {currentSession.participants && currentSession.participants.length > 1 && !desk && (
           <div data-tour="party" className="pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
             <PartyRoster
@@ -1604,6 +1608,7 @@ export function GameSessionPage() {
             />
           </div>
         )}
+        <ModalPresence>
         {showBigMap && (
           <Modal onClose={() => { setConfirmTravel(null); setShowBigMap(false) }} widthClass="max-w-4xl" padded>
             <div>
@@ -1681,6 +1686,7 @@ export function GameSessionPage() {
             </div>
           </Modal>
         )}
+        </ModalPresence>
         {!liveConnected && (
           <div className="text-center text-xs py-1 mb-1 rounded" style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-tertiary)' }}>
             与房间连接中断，正在重连…

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { AlertTriangle, Copy, RefreshCw } from 'lucide-react'
 import { GiArtificialIntelligence, GiNetworkBars, GiPaintBrush, GiArchiveResearch } from 'react-icons/gi'
 import { toast } from 'sonner'
+import { m } from 'motion/react'
+import { spring } from '@/lib/motion'
 import { api, localApi } from '../api/client'
 import { Switch } from '../components/ui/switch'
 import {
@@ -52,8 +54,8 @@ export function SettingsPage() {
             onClick={() => setActiveTab(key)}
             className={`subnav-item ${activeTab === key ? 'active' : ''}`}
           >
-            <Icon aria-hidden="true" />
-            {label}
+            {activeTab === key && <m.span layoutId="subnav-active" className="subnav-active" transition={spring.snappy} />}
+            <Icon aria-hidden="true" />{label}
           </button>
         ))}
       </nav>

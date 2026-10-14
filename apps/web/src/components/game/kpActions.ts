@@ -77,6 +77,18 @@ export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon
 ]
 
 /**
+ * 动作分组：仍是**一个不藏**（见上），只是按「这一下在桌上做的是什么」分成四组，
+ * 组间有标签与间隔。十六个同权按钮排成一行时眼睛无处落脚；分组之后找「开战」只需扫
+ * 「战斗」那一格。组内顺序沿用 ACTION_CHIPS 的频次排序。
+ */
+export const ACTION_GROUPS: Array<{ label: string; ids: KpAction[] }> = [
+  { label: '说', ids: ['narration', 'dialogue', 'handout'] },
+  { label: '骰', ids: ['dice_check', 'san_check', 'generic_roll', 'opposed_check'] },
+  { label: '场景', ids: ['scene_change', 'unlock_place', 'move_actor', 'set_flag', 'clear_flag', 'set_mood'] },
+  { label: '战斗', ids: ['start_combat', 'hp_change', 'end_combat'] },
+]
+
+/**
  * 斜杠命令：输入框里打 `/` 唤起。
  *
  * 手不用离开键盘去够鼠标——这是「产出顺手」最直接的一条。缩写取「打两个字就够」的长度，

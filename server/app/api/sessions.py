@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -15,6 +16,7 @@ from app.api.deps import (
 )
 from app.database import get_db
 from app.models.character import Character
+from app.models.event_log import EventLog
 from app.models.module import Module
 from app.schemas.event import EventRead
 from app.schemas.session import (
@@ -28,7 +30,7 @@ from app.schemas.session import (
     SessionStatusUpdate,
     SessionStyleUpdate,
 )
-from app.services import session_service
+from app.services import combat_service, session_service
 from app.services.event_protocol import make_chunk as _make_chunk
 from app.services import rate_limit, room_sync
 from app.services.rate_limit import limiter
@@ -135,14 +137,53 @@ def list_sessions(
     sessions = session_service.list_sessions_for_token(db, token)
     module_ids = {s.module_id for s in sessions}
     modules_map = (
-        {m.id: m.title for m in db.query(Module).filter(Module.id.in_(module_ids)).all()}
+        {m.id: m for m in db.query(Module).filter(Module.id.in_(module_ids)).all()}
         if module_ids else {}
     )
     chars_map = _chars_map(db, sessions)
-    return [
-        _session_payload(s, chars_map, modules_map.get(s.module_id), token)
-        for s in sessions
-    ]
+    last_events = _last_event_times(db, [s.id for s in sessions])
+    out = []
+    for s in sessions:
+        module = modules_map.get(s.module_id)
+        payload = _session_payload(s, chars_map, module.title if module else None, token)
+        payload.update(_scene_brief(s, module))
+        # 最后一次交互：本局最后一条事件的时间。updated_at 两头都不可靠——战斗态回写之类的
+        # 后台写入会刷新它，只发消息时它又纹丝不动。没有任何事件的局才退回 updated_at。
+        payload["last_active_at"] = last_events.get(s.id) or s.updated_at
+        out.append(payload)
+    return out
+
+
+def _last_event_times(db: Session, session_ids: list[str]) -> dict:
+    """一次分组查询拿到各局最后一条事件的时间，不逐局查。"""
+    if not session_ids:
+        return {}
+    rows = (
+        db.query(EventLog.session_id, func.max(EventLog.created_at))
+        .filter(EventLog.session_id.in_(session_ids))
+        .group_by(EventLog.session_id)
+        .all()
+    )
+    return dict(rows)
+
+
+def _scene_brief(session, module: Module | None) -> dict:
+    """首页「继续上次的桌」的场景摘要：当前场景名、场景图、战斗轮次。
+
+    只取**当前所在**场景——玩家已身处其中，不算剧透；模组里其它场景一概不透出。
+    """
+    scene = None
+    if module and session.current_scene_id:
+        scene = next(
+            (sc for sc in (module.scenes or []) if sc.get("id") == session.current_scene_id),
+            None,
+        )
+    combat = combat_service.get_combat(session)
+    return {
+        "scene_title": (scene.get("title") or scene.get("name")) if scene else None,
+        "scene_image": scene.get("image") or None if scene else None,
+        "combat_round": combat.get("round") if combat else None,
+    }
 
 
 @router.get("/by-code/{room_code}")

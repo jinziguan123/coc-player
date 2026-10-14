@@ -105,5 +105,5 @@ it('首页提供唯一的新手团主入口', () => {
   expect(others.length).toBeGreaterThan(0)
   for (const other of others) expect(other).not.toHaveClass('home-entry--primary')
   // 标题足以证明首页渲染出来了；标语的措辞不在这条测试的职责范围内，钉了只会被改文案误伤
-  expect(screen.getByRole('heading', { name: 'CoC Player' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: /AI 当守秘人/ })).toBeInTheDocument()
 })

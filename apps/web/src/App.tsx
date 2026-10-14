@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy } from 'react'
 import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom'
 import { AppShell } from './components/layout/AppShell'
 import { Toaster } from './components/ui/toaster'
@@ -31,37 +31,27 @@ function GameSessionRoute() {
   return <GameSessionPage key={sessionId} />
 }
 
-function PageFallback() {
-  return (
-    <div className="flex min-h-[40vh] items-center justify-center text-sm" aria-live="polite">
-      正在打开…
-    </div>
-  )
-}
-
 export default function App() {
   return (
     <BrowserRouter>
       <Toaster />
-      <Suspense fallback={<PageFallback />}>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route index element={<HomePage />} />
-            <Route path="modules" element={<ModulePage />} />
-            <Route path="modules/new" element={<ModuleDetailPage />} />
-            <Route path="modules/:id" element={<ModuleDetailPage />} />
-            <Route path="rulebooks" element={<RulebookPage />} />
-            <Route path="characters" element={<CharacterPage />} />
-            <Route path="game" element={<GamePage />} />
-            <Route path="onboarding" element={<OnboardingPage />} />
-            <Route path="room/:sessionId" element={<RoomLobbyPage />} />
-            <Route path="game/:sessionId" element={<GameSessionRoute />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="lab/kp" element={<KpConsoleLab />} />
-            <Route path="lab/kp/:sessionId" element={<KpConsoleLab />} />
-          </Route>
-        </Routes>
-      </Suspense>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<HomePage />} />
+          <Route path="modules" element={<ModulePage />} />
+          <Route path="modules/new" element={<ModuleDetailPage />} />
+          <Route path="modules/:id" element={<ModuleDetailPage />} />
+          <Route path="rulebooks" element={<RulebookPage />} />
+          <Route path="characters" element={<CharacterPage />} />
+          <Route path="game" element={<GamePage />} />
+          <Route path="onboarding" element={<OnboardingPage />} />
+          <Route path="room/:sessionId" element={<RoomLobbyPage />} />
+          <Route path="game/:sessionId" element={<GameSessionRoute />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="lab/kp" element={<KpConsoleLab />} />
+          <Route path="lab/kp/:sessionId" element={<KpConsoleLab />} />
+        </Route>
+      </Routes>
     </BrowserRouter>
   )
 }

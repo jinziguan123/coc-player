@@ -1,6 +1,7 @@
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
+import { LazyMotion, domAnimation } from 'motion/react'
 import { describe, expect, it, vi } from 'vitest'
-import { Modal } from './modal'
+import { Modal, ModalPresence } from './modal'
 
 function parts() {
   const panel = document.querySelector('.modal-panel') as HTMLElement
@@ -39,5 +40,34 @@ describe('Modal', () => {
     fireEvent.mouseDown(panel)
 
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('ModalPresence 退场', () => {
+  function Harness({ open, onClose }: { open: boolean; onClose: () => void }) {
+    return (
+      <LazyMotion features={domAnimation} strict>
+        <ModalPresence>
+          {open && <Modal onClose={onClose}><span>content</span></Modal>}
+        </ModalPresence>
+      </LazyMotion>
+    )
+  }
+
+  it('关掉后先留着播完退场再卸载，退场途中不再响应 Esc / 遮罩', async () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<Harness open onClose={onClose} />)
+    expect(document.querySelector('.modal-panel')).not.toBeNull()
+
+    rerender(<Harness open={false} onClose={onClose} />)
+    // 退场中：还在 DOM 里，但遮罩不再拦点击
+    const backdrop = document.querySelector('.modal-backdrop') as HTMLElement
+    expect(backdrop).not.toBeNull()
+    expect(backdrop.style.pointerEvents).toBe('none')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.mouseDown(parts().mask)
+    expect(onClose).not.toHaveBeenCalled()
+
+    await waitFor(() => expect(document.querySelector('.modal-panel')).toBeNull())
   })
 })

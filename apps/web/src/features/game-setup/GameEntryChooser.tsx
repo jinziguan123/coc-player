@@ -9,7 +9,7 @@ import { GiCastle, GiEntryDoor } from 'react-icons/gi'
  * 而用户此刻只想回答一个问题：**我是开一局，还是去别人那局**。先把这个问题问清楚，
  * 后面的表单才只出现该出现的那一半。
  *
- * portal 到 body：GamePage 在 `.route-fade` 的 <main> 里，那上面有 transform/will-change，
+ * portal 到 body：GamePage 在 Motion 转场的 <main> 里，那上面有 transform/will-change，
  * 会给 fixed 定位建立新的包含块，遮罩会被裁在内容区里（与 components/ui/modal 同一处理）。
  */
 export function GameEntryChooser({

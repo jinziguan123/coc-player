@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import { LazyMotion, domAnimation } from 'motion/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { MoreMenu } from './more-menu'
@@ -53,5 +54,14 @@ describe('更多菜单', () => {
   it('一项都没有时整个不渲染——非房主席位会滤掉全部条目', () => {
     const { container } = render(<MoreMenu items={[]} />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('关掉时先播退场再卸载，而不是瞬间消失', async () => {
+    const user = userEvent.setup()
+    render(<LazyMotion features={domAnimation} strict><MoreMenu items={items} /></LazyMotion>)
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
   })
 })
