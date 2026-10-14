@@ -29,10 +29,11 @@ const DEFAULT_MAX = 700
  * 每一条都欠着一次拆分；拆完请把数字调下来，别留着当额度用。
  */
 const GRANDFATHERED: Record<string, number> = {
-  'pages/GameSessionPage.tsx': 2410,   // 局内三份远端数据已搬进 features/game-session/useSessionResources.ts
+  'pages/GameSessionPage.tsx': 2410,   // 局内三份远端数据已搬进 features/game-session/useSessionResources.ts；骰子消息 → DiceMessage，手书卡 → HandoutCard
   'pages/CharacterPage.tsx': 1776,
-  // 语音转文字 → useDictation；悬浮窗拖拽缩放 → ui/useDragResize；二级标签 → KpSubTabs
-  'components/game/HumanKpPanel.tsx': 1320,
+  // 语音转文字 → useDictation；悬浮窗拖拽缩放 → ui/useDragResize；二级标签 → KpSubTabs；
+  // 各动作的输入表单 → KpActionForm
+  'components/game/HumanKpPanel.tsx': 1109,
   'pages/ModuleDetailPage.tsx': 1261,
   'pages/RoomLobbyPage.tsx': 1019,
   'pages/SettingsPage.tsx': 722,
