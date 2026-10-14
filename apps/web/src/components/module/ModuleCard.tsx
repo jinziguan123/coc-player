@@ -1,11 +1,11 @@
 import { useNavigate } from 'react-router-dom'
 import { GiArchiveResearch } from 'react-icons/gi'
 import { Loader2 } from 'lucide-react'
-import { getServerUrl } from '@/api/client'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { DecoSunburst } from '@/components/ui/deco'
 import { TiltCard } from '@/components/ui/TiltCard'
 import type { Module } from '@/stores/moduleStore'
+import { absoluteImageUrl } from '@/lib/imageUrl'
 
 /** 难度着色：走主题语义色，两套主题下都能读 */
 const DIFFICULTY_TONE: Record<string, string> = {
@@ -15,9 +15,6 @@ const DIFFICULTY_TONE: Record<string, string> = {
   噩梦: 'var(--color-danger)',
 }
 
-function imageUrl(src: string): string {
-  return /^https?:\/\//i.test(src) ? src : `${getServerUrl()}${src}`
-}
 
 /**
  * 模组卡：做成一本书的封面。
@@ -49,7 +46,7 @@ export function ModuleCard({
     <TiltCard index={index} className="card entity-card module-card">
       <div className={`module-cover ${cover ? '' : 'module-cover--bare'}`}>
         {cover ? (
-          <img src={imageUrl(cover)} alt="" className="module-cover-img" loading="lazy" />
+          <img src={absoluteImageUrl(cover)} alt="" className="module-cover-img" loading="lazy" />
         ) : (
           <>
             <DecoSunburst className="module-cover-sunburst" />

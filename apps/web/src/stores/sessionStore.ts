@@ -39,6 +39,12 @@ interface GameSession {
   module_title?: string
   character_name?: string
   created_at?: string
+  updated_at?: string
+  /** 以下只在会话列表里带（后端 list_sessions）：最后一次交互时间、当前场景摘要 */
+  last_active_at?: string
+  scene_title?: string | null
+  scene_image?: string | null
+  combat_round?: number | null
 }
 
 export interface ChatMessage {

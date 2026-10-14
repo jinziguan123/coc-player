@@ -1,24 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { api, getApiBase, getPlayerToken, localApi } from '../api/client'
-import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiBookCover, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
 import { VillageRulesPanel } from '@/components/game/VillageRulesPanel'
 import { VillageRulesSummary } from '@/components/game/VillageRulesSummary'
 import { ArchiveHead } from '@/components/layout/ArchiveHead'
-import { staggerStyle } from '@/lib/stagger'
-
-interface Rulebook {
-  id: string
-  title: string
-  rule_system: string
-  page_count: number
-  chunk_count: number
-  status: string
-  embed_model: string
-  error: string
-}
+import { Collapse } from '@/components/ui/Collapse'
+import { RulebookTome, type Rulebook } from '@/components/rulebook/RulebookTome'
 
 interface RuleHit {
   text: string
@@ -27,20 +16,6 @@ interface RuleHit {
   rulebook_id: string
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  indexing: '索引中…',
-  ready: '可检索',
-  failed: '失败',
-}
-/** 状态徽标取色：走主题语义色而非写死十六进制，羊皮纸主题下同样可读。 */
-function statusChipStyle(status: string): React.CSSProperties {
-  const tone = ({
-    indexing: 'var(--color-dice-gold)',
-    ready: 'var(--color-success)',
-    failed: 'var(--color-danger)',
-  } as Record<string, string>)[status]
-  return tone ? { color: tone, borderColor: tone } : {}
-}
 
 /** 摘要要的那点东西：差异项、桌面约定、总开关。完整回显交给折叠里的配置面板。 */
 interface VillageRulesBrief {
@@ -192,11 +167,11 @@ export function RulebookPage() {
             />
           )}
 
-          {rulesOpen && (
+          <Collapse open={rulesOpen}>
             <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
               <VillageRulesPanel ruleSystem={ruleSystem} twoColumn onSaved={fetchRules} />
             </div>
-          )}
+          </Collapse>
         </div>
 
         <div className="min-w-0" aria-label="规则书库">
@@ -259,73 +234,10 @@ export function RulebookPage() {
                 </span>
               </div>
             ) : (
-              // 不再挤在 21rem 侧栏里，书卡可以并排了。三列封顶：书名本就长，
-              // 再窄下去标题就得截断，反而不如两列读得清。
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              // 书架：一册册立着排开，书名竖排不必截断
+              <div className="tome-shelf">
                 {books.map((b, i) => (
-                  <div
-                    key={b.id}
-                    style={staggerStyle(i)}
-                    className="entity-card list-enter flex flex-col overflow-hidden rounded"
-                  >
-                    <div
-                      className="flex items-start gap-2.5 px-3 pt-3 pb-2.5"
-                      style={{ borderBottom: '1px solid var(--color-border)' }}
-                    >
-                      <span className="char-sigil" aria-hidden="true"><GiBookCover /></span>
-                      <div className="min-w-0 flex-1">
-                        <h4 className="card-title !mb-0.5 truncate !text-[length:var(--text-base)]" title={b.title}>
-                          {b.title}
-                        </h4>
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className="chip chip--accent">{b.rule_system.toUpperCase()}</span>
-                          <span className="chip" style={statusChipStyle(b.status)}>
-                            {STATUS_LABEL[b.status] || b.status}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="entity-card-actions flex flex-shrink-0 items-center gap-1">
-                        <ConfirmDialog
-                          title="删除规则书"
-                          description={`确定要删除「${b.title}」及其索引吗？此操作不可恢复。`}
-                          confirmLabel="删除"
-                          onConfirm={() => deleteBook(b.id)}
-                        >
-                          {(open) => (
-                            <button
-                              onClick={open}
-                              className="chip chip--danger chip-btn chip-btn--danger"
-                            >
-                              删除
-                            </button>
-                          )}
-                        </ConfirmDialog>
-                      </div>
-                    </div>
-                    <div className="flex flex-1 flex-col px-3 py-2">
-                      {/* 页数/片段数是次要信息，此前用两块 stat-tile 撑掉了半张卡的高度——
-                          读者真正要认的是书名和它能不能检索。降级成一行 meta 文字。 */}
-                      <div
-                        className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
-                        style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-text-secondary)' }}
-                      >
-                        <span>{b.page_count} 页</span>
-                        <span aria-hidden="true">·</span>
-                        <span>{b.chunk_count} 个片段</span>
-                        {b.embed_model && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="truncate" title={b.embed_model}>{b.embed_model}</span>
-                          </>
-                        )}
-                      </div>
-                      {b.status === 'failed' && b.error && (
-                        <p className="mt-1.5" style={{ fontSize: 'var(--text-2xs)', color: 'var(--color-danger)' }}>
-                          错误：{b.error}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                  <RulebookTome key={b.id} book={b} index={i} onDelete={deleteBook} />
                 ))}
               </div>
             )}
@@ -344,7 +256,7 @@ export function RulebookPage() {
                   {searchOpen ? '收起' : '展开'}
                 </span>
               </button>
-              {searchOpen && (
+              <Collapse open={searchOpen}>
                 <div className="mt-3">
                   <div className="flex gap-2">
                     <input
@@ -375,7 +287,7 @@ export function RulebookPage() {
                     </div>
                   )}
                 </div>
-              )}
+              </Collapse>
             </div>
           )}
         </div>
