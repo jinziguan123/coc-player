@@ -17,7 +17,6 @@ from app.ai.context import build_team_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.rules.registry import get_engine
 from app.services import (
     dice_runtime,
     narration_protocol,
@@ -323,15 +322,13 @@ async def _run_team_turn(
         # 广播成败——否则玩家能从事件或网络看到结果而元游戏。
         if action == "check" and decision.get("skill"):
             skill = decision["skill"]
-            engine = get_engine(module.rule_system)
             cdata = {
                 "base_attributes": teammate.base_attributes,
                 "skills": teammate.skills,
                 "system_data": teammate.system_data,
             }
-            result = engine.resolve_check(
+            result = rule_options_service.ruleset_by_id(db, session_id).check.resolve_skill_check(
                 cdata, skill, "normal",
-                options=rule_options_service.effective_by_id(db, session_id),
             )
             if any(s in skill for s in ALWAYS_BLIND_SKILLS):
                 tier_cn = TIER_LABEL.get(result.tier, result.tier)

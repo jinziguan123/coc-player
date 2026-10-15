@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.rules.registry import get_engine
 from app.services import (
     combat_service,
     dice_runtime,
@@ -134,8 +133,7 @@ async def execute_human_kp_action(
         descs: list[str] = []
         chunks = [
             c async for c in _resolve_opposed(
-                db, session_id, payload, get_engine(module.rule_system),
-                module, player_char, teammates, descs,
+                db, session_id, payload, module, player_char, teammates, descs,
             )
         ]
         if not descs:

@@ -167,11 +167,13 @@ _ENUM_CHOICES = {
 }
 
 
-def from_dict(raw: dict | None) -> CocRuleOptions:
+def from_dict(raw: dict | CocRuleOptions | None) -> CocRuleOptions:
     """把外部 dict 规范化成 :class:`CocRuleOptions`：认识的键才要，值一律钳进合法区间。
 
     未知键直接丢弃（旧前端提交的、或以后删掉的字段不会把这里搞崩）；类型不对的值退回默认。
     """
+    if isinstance(raw, CocRuleOptions):
+        return raw  # 已经规范化过（经 Ruleset 注入的就是它）
     if not raw:
         return DEFAULT_OPTIONS
     known = {f.name: f.type for f in fields(CocRuleOptions)}

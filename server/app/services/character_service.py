@@ -1,27 +1,24 @@
 from sqlalchemy.orm import Session
 
-import app.rules  # noqa: F401
 from app.models.character import Character
-from app.rules.registry import get_engine
+from app.rules import ruleset_for
 
 
 def roll_attribute_sets(rule_system: str, count: int = 3) -> list[dict[str, int]]:
-    engine = get_engine(rule_system)
-    return engine.roll_attribute_sets(count)
+    return ruleset_for(rule_system).sheet.roll_attribute_sets(count)
 
 
 def get_character_schema(rule_system: str) -> dict:
-    engine = get_engine(rule_system)
-    return engine.get_character_schema()
+    return ruleset_for(rule_system).sheet.get_character_schema()
 
 
 def create_character(db: Session, data: dict) -> Character:
     rule_system = data["rule_system"]
-    engine = get_engine(rule_system)
+    sheet = ruleset_for(rule_system).sheet
 
-    computed = engine.create_character(data)
+    computed = sheet.create_character(data)
 
-    ok, errors = engine.validate_character(computed)
+    ok, errors = sheet.validate_character(computed)
     if not ok:
         raise ValueError(f"角色数据校验失败: {', '.join(errors)}")
 

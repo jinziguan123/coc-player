@@ -14,8 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.chase_state import ChaseState
 from app.models.session import GameSession
-from app.rules.coc import chase as engine
-from app.rules.coc import options as coc_options
+from app.rules import Ruleset, ruleset_for
 from app.ai.provider import model_meta
 from app.services import rule_options_service, session_service
 from app.services.event_protocol import make_chunk
@@ -66,12 +65,12 @@ def _quarry_from_char(char: Character) -> dict:
             "system_data": sd}
 
 
-def _pursuer_from_npc(npc: dict) -> dict:
+def _pursuer_from_npc(npc: dict, rs: Ruleset | None = None) -> dict:
     attrs = npc.get("attributes") or {}
-    from app.rules.coc.character import compute_derived
+    rs = rs or ruleset_for(rule_options_service.DEFAULT_RULE_SYSTEM)
     mov = 8
     try:
-        mov = compute_derived(attrs).get("move", 8)
+        mov = rs.character.compute_derived(attrs).get("move", 8)
     except Exception:
         pass
     return {"name": npc.get("name") or "追兵", "mov": npc.get("mov") or mov,
@@ -105,11 +104,11 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
     if not state:
         raise ValueError("当前不在追逐中")
     q, p = state["quarry"], state["pursuer"]
-    res = engine.resolve_chase_round(
+    rs = rule_options_service.ruleset(db, session)
+    res = rs.chase.resolve_chase_round(
         _char_data(q), _char_data(p), skill=state["skill"],
         quarry_mov=q.get("mov", 8), pursuer_mov=p.get("mov", 8),
         hazard=action.get("hazard"),
-        options=coc_options.from_dict(rule_options_service.effective_by_id(db, session_id)),
     )
     state["round"] += 1
     state["gap"] += res["gap_delta"]
@@ -121,7 +120,7 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
     ev = session_service.add_event(db, session_id, "dice", line, actor_name="追逐")
     chunks.append(_chunk("dice", line, id=ev.id))
 
-    outcome = engine.check_chase_end(state["gap"], state["escape_at"], state["caught_at"])
+    outcome = rs.chase.check_chase_end(state["gap"], state["escape_at"], state["caught_at"])
     if outcome:
         chunks += _end_chase(db, session_id, state, outcome)
     else:

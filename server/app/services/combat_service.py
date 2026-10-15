@@ -17,10 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.combat_state import CombatState
 from app.models.session import GameSession
-from app.rules.coc import combat as engine
-from app.rules.coc import options as coc_options
-from app.rules.coc import positioning
-from app.rules.coc.weapons import WEAPON_CATEGORY_ORDER
+from app.rules import Ruleset, ruleset_for
 from app.ai.provider import model_meta
 from app.services import rule_options_service, session_service, world_memory
 from app.services.event_protocol import make_chunk
@@ -29,7 +26,6 @@ from app.services.room_hub import room_hub
 
 # 火器大类（决定先攻火器优先与「远程」判定）
 _FIREARM_CATEGORIES = {"手枪", "半自动步枪", "全自动步枪", "霰弹枪", "冲锋枪", "狙击步枪", "机枪"}
-_ = WEAPON_CATEGORY_ORDER  # 引用以示来源（大类枚举取自武器表）
 
 
 def _chunk(chunk_type: str, content: str = "", **extra) -> RoomEvent:
@@ -47,8 +43,9 @@ def _chunk(chunk_type: str, content: str = "", **extra) -> RoomEvent:
     )
 
 
-def _weapon_is_firearm(weapon_name: str) -> bool:
-    w = engine.resolve_weapon(weapon_name)
+def _weapon_is_firearm(weapon_name: str, *, rs: Ruleset | None = None) -> bool:
+    rs = rs or _raw_rules()
+    w = rs.combat.resolve_weapon(weapon_name)
     return w.get("category") in _FIREARM_CATEGORIES or (w.get("skill", "").startswith("射击"))
 
 
@@ -80,23 +77,24 @@ def _regular_budget(mov: int) -> int:
 
 
 def _attack_geometry(state: dict, actor: dict, target: dict, weapon: str,
-                     ranged: bool) -> tuple[int, int, bool, str, list[dict]]:
+                     ranged: bool, *, rs: Ruleset | None = None) -> tuple[int, int, bool, str, list[dict]]:
     """方格几何折算 →（命中奖励骰, 命中惩罚骰, 是否可达, 不可达原因, 奖惩骰来由）。
     无 grid 或缺坐标 → 视为可达、无奖惩（向后兼容旧战斗态/无方格场景）。
     近战须相邻、火器超基础射程 -1 惩罚 / 超 2× 不可及；火器抵近（≤2 格）+1 奖励骰（P-Grid-2）。
 
     第五个返回值是给玩家看的**来由**：这些奖惩骰全由几何算出，玩家在战场上看不到算式，
     只显示「惩罚骰 ×1」会让人以为被针对了。"""
+    rs = rs or _raw_rules()
     grid = state.get("grid")
     notes: list[dict] = []
     if not grid or not actor.get("pos") or not target.get("pos"):
         return 0, 0, True, "", notes
-    dist = positioning.cell_distance(actor, target)
-    range_cells = positioning.range_in_cells(weapon, grid.get("cell_m", _GRID_CELL_M))
-    bonus, penalty, reachable = positioning.range_check(dist, range_cells, ranged)
+    dist = rs.positioning.cell_distance(actor, target)
+    range_cells = rs.positioning.range_in_cells(weapon, grid.get("cell_m", _GRID_CELL_M))
+    bonus, penalty, reachable = rs.positioning.range_check(dist, range_cells, ranged)
     if penalty:
         notes.append({"kind": "penalty", "n": penalty, "reason": "超出武器基础射程"})
-    pb = positioning.point_blank_bonus(dist, ranged)   # 抵近射击奖励骰
+    pb = rs.positioning.point_blank_bonus(dist, ranged)   # 抵近射击奖励骰
     if pb:
         notes.append({"kind": "bonus", "n": pb, "reason": "抵近射击"})
     bonus += pb
@@ -105,24 +103,26 @@ def _attack_geometry(state: dict, actor: dict, target: dict, weapon: str,
             "目标超出射程" if ranged else "目标不在近战范围，需先移动接近"
         ), notes
     if ranged:   # 射击：视线被墙/全掩体挡断 → 不可命中；半掩体 → -1 惩罚骰
-        if not positioning.has_line_of_sight(actor, target, grid):
+        if not rs.positioning.has_line_of_sight(actor, target, grid):
             return bonus, penalty, False, "没有射击视线（被遮挡）", notes
-        cover = positioning.cover_penalty(actor, target, grid)
+        cover = rs.positioning.cover_penalty(actor, target, grid)
         if cover:
             penalty += cover
             notes.append({"kind": "penalty", "n": cover, "reason": "目标有半掩体遮挡"})
     return bonus, penalty, True, "", notes
 
 
-def _flank_penalty(state: dict, defender: dict) -> int:
+def _flank_penalty(state: dict, defender: dict, *, rs: Ruleset | None = None) -> int:
     """防御者被夹击的惩罚骰（无 grid → 0）。供守方闪避/招架检定用。"""
+    rs = rs or _raw_rules()
     if not state.get("grid"):
         return 0
-    return positioning.flank_penalty(defender, state.get("initiative") or [])
+    return rs.positioning.flank_penalty(defender, state.get("initiative") or [])
 
 
-def _char_participant(char: Character, side: str, is_human: bool = True) -> dict:
+def _char_participant(char: Character, side: str, is_human: bool = True, *, rs: Ruleset | None = None) -> dict:
     """把玩家/队友角色卡转成参战方。HP 与状态与角色卡同步。is_human=True 的回合会停下等操作。"""
+    rs = rs or _raw_rules()
     sd = char.system_data or {}
     hp = (sd.get("hitPoints") or {})
     weapon = (sd.get("combat", {}) or {}).get("weapon") or "徒手格斗"
@@ -131,7 +131,7 @@ def _char_participant(char: Character, side: str, is_human: bool = True) -> dict
         "is_human": is_human,
         "dex": (char.base_attributes or {}).get("DEX", 50),
         "hp": hp.get("current", 0), "max_hp": hp.get("max", hp.get("current", 0)),
-        "status": "ok", "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon),
+        "status": "ok", "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon, rs=rs),
         "skills": char.skills or {}, "base_attributes": char.base_attributes or {},
         "system_data": sd, "db": (sd.get("damageBonus") or "0"),
         "armor": _coerce_armor(sd.get("armor")),   # 护甲值：每次受到的物理伤害先扣它（CoC7e）
@@ -144,21 +144,21 @@ def _char_participant(char: Character, side: str, is_human: bool = True) -> dict
     }
 
 
-def _npc_participant(npc: dict, side: str = "enemy", masker=None) -> dict:
+def _npc_participant(npc: dict, side: str = "enemy", masker=None, *, rs: Ruleset | None = None) -> dict:
     """把模组 NPC（或临时敌）转成参战方。HP 由属性派生，只在战斗态追踪。
 
     ``name`` 存的是**对外称呼**（玩家还没认出这东西时是「不明存在」之类），
     HUD、先攻表、战报、命中日志一律读它——它们全是玩家可见面，不能替 KP
     把怪物的真名说出去。真名另存 ``true_name``，供按名定位与 KP 侧使用。
     """
+    rs = rs or _raw_rules()
     attrs = npc.get("attributes") or {}
     con, siz = attrs.get("CON", 50), attrs.get("SIZ", 50)
     max_hp = npc.get("hp") or (con + siz) // 10
     weapon = npc.get("weapon") or "徒手格斗"
-    from app.rules.coc.character import compute_derived
     db = "0"
     try:
-        db = compute_derived(attrs).get("damageBonus", "0")
+        db = rs.character.compute_derived(attrs).get("damageBonus", "0")
     except Exception:
         pass
     return {
@@ -168,7 +168,7 @@ def _npc_participant(npc: dict, side: str = "enemy", masker=None) -> dict:
         "true_name": npc.get("name") or "敌人",
         "side": side,
         "dex": attrs.get("DEX", 50), "hp": max_hp, "max_hp": max_hp, "status": "ok",
-        "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon),
+        "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon, rs=rs),
         # damage：怪物卡上写明的攻击伤害骰（如「撕咬 1D6」）。自创攻击方式不在人类武器表里，
         # 没有它就只能按徒手 1D3+DB 估伤。解析出来的值不保证是字符串（模型可能给 6 这种数字），
         # 统一转字符串再用——直接 .strip() 会在建参战方时炸掉整场战斗。
@@ -186,17 +186,18 @@ def _npc_participant(npc: dict, side: str = "enemy", masker=None) -> dict:
     }
 
 
-def _attack_weapon(actor: dict, weapon: str) -> str | dict:
+def _attack_weapon(actor: dict, weapon: str, *, rs: Ruleset | None = None) -> str | dict:
     """这次攻击喂给引擎的武器：参战方卡上写了 damage（怪物的「撕咬 1D6」）且这次用的正是那件
     攻击方式 → 造一件以它命名、按它伤害结算的武器；否则原样给名字、走武器表。
 
     被缴械/临时换武器时 weapon 与卡上那件不符，就不能再套怪物卡的伤害，故要比对名字。
     """
+    rs = rs or _raw_rules()
     dam = actor.get("damage")
     dam = dam.strip() if isinstance(dam, str) else ""
     if not dam or (weapon or "").strip() != (actor.get("weapon") or "").strip():
         return weapon
-    base = engine.lookup_weapon(weapon) or {"tho": 0, "range": "接触", "round": "1"}
+    base = rs.combat.lookup_weapon(weapon) or {"tho": 0, "range": "接触", "round": "1"}
     return {**base, "name": weapon, "dam": dam}
 
 
@@ -210,11 +211,16 @@ def _char_data(p: dict) -> dict:
             "system_data": p.get("system_data") or {}, "_weapon": p.get("weapon")}
 
 
-def _rule_options(db: Session, session_id: str) -> coc_options.CocRuleOptions:
-    """本局生效的村规（模组默认 → 村规 → 本局覆盖）；战斗内每一次检定都要带上它。"""
-    return coc_options.from_dict(
-        rule_options_service.effective_by_id(db, session_id) if session_id else None,
-    )
+def _rules(db: Session, session_id: str | None) -> Ruleset:
+    """本局生效规则（村规已注入）。战斗内每一次结算都经它，不再手工传 options。"""
+    if not session_id:
+        return _raw_rules()
+    return rule_options_service.ruleset_by_id(db, session_id)
+
+
+def _raw_rules() -> Ruleset:
+    """无会话上下文的纯函数辅助（几何、武器查表）兜底用：与村规无关，取 RAW。"""
+    return ruleset_for(rule_options_service.DEFAULT_RULE_SYSTEM)
 
 
 def get_combat(session: GameSession) -> dict | None:
@@ -246,11 +252,12 @@ def start_combat(db: Session, session_id: str, player_side: list[dict], enemies:
                  trigger: str = "", deployment: dict | None = None) -> dict:
     """建立战斗态：合并双方为参战方、排先攻、round=1。player_side/enemies 已是参战方 dict。
     deployment（可选）：{参战方 id → {"x","y"}} 覆盖默认布阵（KP 摆位/测试用），越界项忽略。"""
+    rs = _rules(db, session_id)
     participants = list(player_side) + list(enemies)
-    order = engine.roll_initiative(participants)
+    order = rs.combat.roll_initiative(participants)
     # 方格战场：造默认棋盘 + 确定性布阵（我方左、敌方右，沿 y 居中）。几何被摆出来、不还原叙事。
     grid = {"cols": _GRID_COLS, "rows": _GRID_ROWS, "cell_m": _GRID_CELL_M, "blocked": [], "cover": {}}
-    positioning.default_deployment(order, grid)
+    rs.positioning.default_deployment(order, grid)
     for p in order:                       # KP/测试可覆盖初始站位
         d = (deployment or {}).get(p["id"]) or (deployment or {}).get(p.get("char_id"))
         if d and 0 <= int(d.get("x", -1)) < _GRID_COLS and 0 <= int(d.get("y", -1)) < _GRID_ROWS:
@@ -276,11 +283,12 @@ async def start(db: Session, session_id: str, party: list[Character], enemies: l
     party：玩家方角色（human_ids 里的算真人玩家=会停下等操作，其余算 AI 队友=自动）。
     enemies：敌方 spec（含 attributes/skills/weapon/combat_ai/personality）。有 agent 时叙述开场交战。
     """
+    rs = _rules(db, session_id)
     player_side = [
-        _char_participant(c, "player" if c.id in human_ids else "ally", c.id in human_ids)
+        _char_participant(c, "player" if c.id in human_ids else "ally", c.id in human_ids, rs=rs)
         for c in party
     ]
-    enemy_side = [_npc_participant(n, "enemy", masker) for n in enemies]
+    enemy_side = [_npc_participant(n, "enemy", masker, rs=rs) for n in enemies]
     state = start_combat(db, session_id, player_side, enemy_side, trigger, deployment=deployment)
     chunks = [_chunk("combat_start", trigger or "战斗爆发！", metadata=_combat_meta(state))]
     drive_chunks, beats = await drive_npcs(db, session_id, state, agent, scene_hint)
@@ -356,15 +364,15 @@ def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: st
 
     ``session_id`` 用来取本局村规（重伤阈值）；战斗态 dict 里不带会话身份，只能由调用方给。
     """
+    rs = _rules(db, session_id)
     absorbed = 0
     armor = 0 if ignore_armor else int(target.get("armor") or 0)
     if armor > 0 and amount > 0:
         absorbed = min(amount, armor)
         amount = amount - absorbed
-    r = engine.resolve_wound(
+    r = rs.wound.resolve_wound(
         target.get("hp", 0), target.get("max_hp") or 1, amount, _char_data(target),
         already_wounded=(target.get("status") == "major_wound"),
-        options=_rule_options(db, session_id),
     )
     target["hp"] = r["new_hp"]
     target["status"] = r["status"]
@@ -436,6 +444,7 @@ def resolve_move(db: Session, session_id: str, actor_id: str, dest: dict,
     """方格移动：把当前行动者移到 dest 格。校验轮到本人、无待掷、未被擒、目标格可达（BFS 绕障碍/占用）。
     常规移动（dash=False）：预算 = move_left（⌈mov/2⌉），**不推进先攻**、同回合仍可攻击，扣 move_left。
     冲刺（dash=True）：预算 = 满 mov，但**独占本回合**（推进先攻、清空 move_left）。"""
+    rs = _rules(db, session_id)
     session = db.get(GameSession, session_id)
     state = get_combat(session)
     if not state:
@@ -456,16 +465,16 @@ def resolve_move(db: Session, session_id: str, actor_id: str, dest: dict,
         raise ValueError("落点非法")
     dest_key = f"{dx},{dy}"
     occupied = {f'{p["pos"]["x"]},{p["pos"]["y"]}' for p in (state.get("initiative") or [])
-                if p.get("pos") and p["id"] != actor_id and engine.is_active(p)}
+                if p.get("pos") and p["id"] != actor_id and rs.combat.is_active(p)}
     budget = int(actor.get("mov") or _DEFAULT_MOV) if dash else int(actor.get("move_left") or 0)
-    if dest_key not in positioning.reachable_cells(actor, budget, grid, occupied):
+    if dest_key not in rs.positioning.reachable_cells(actor, budget, grid, occupied):
         raise ValueError("目标格超出移动力或不可达")
-    cost = positioning.cell_distance(actor, {"x": dx, "y": dy})
+    cost = rs.positioning.cell_distance(actor, {"x": dx, "y": dy})
     actor["pos"] = {"x": dx, "y": dy}
     if dash:
         actor["move_left"] = 0
         actor["acted_this_round"] = True
-        engine.advance_turn(state)      # 冲刺独占本回合 → 推进先攻
+        rs.combat.advance_turn(state)      # 冲刺独占本回合 → 推进先攻
     else:
         actor["move_left"] = max(0, budget - cost)
     _save_combat(db, session_id, state)
@@ -482,6 +491,7 @@ async def resolve_player_action(
     （关键 NPC 走 agent.decide，杂兵走启发式），停在下一个玩家回合或战斗结束。
     有 agent 时把本轮交战整段交给战斗子代理叙述（一次调用），叙述 chunk 置于机械 chunk 之前。
     """
+    rs = _rules(db, session_id)
     session = db.get(GameSession, session_id)
     state = get_combat(session)
     if not state:
@@ -503,7 +513,7 @@ async def resolve_player_action(
     chunks, summary = _apply_one_action(db, session_id, state, actor, action)
     beats = [summary] if summary else []
     actor["acted_this_round"] = True
-    engine.advance_turn(state)
+    rs.combat.advance_turn(state)
     drive_chunks, drive_beats = await drive_npcs(db, session_id, state, agent, scene_hint)
     beats += drive_beats
 
@@ -521,11 +531,12 @@ async def _begin_player_attack(
 ) -> list[str]:
     """真人攻击第一段：掷命中（3D 骰事件，玩家点『攻击』即触发）。命中→挂 pending_roll 等玩家掷伤害；
     未命中/目标已不在→照常记账、推进、驱动 NPC。"""
+    rs = _rules(db, session_id)
     target = _find(state, action.get("target_id"))
-    if target is None or not engine.is_active(target):
+    if target is None or not rs.combat.is_active(target):
         chunks, summary = _apply_one_action(db, session_id, state, actor, action)  # 目标没了→降级
         actor["acted_this_round"] = True
-        engine.advance_turn(state)
+        rs.combat.advance_turn(state)
         drive_chunks, drive_beats = await drive_npcs(db, session_id, state, agent, scene_hint)
         out: list[str] = []
         if agent and (([summary] if summary else []) + drive_beats):
@@ -538,25 +549,24 @@ async def _begin_player_attack(
     disarmed = "disarmed" in (actor.get("conditions") or [])
     if disarmed:
         weapon = "徒手格斗"
-    ranged = _weapon_is_firearm(weapon)
+    ranged = _weapon_is_firearm(weapon, rs=rs)
     aim_bonus = 1 if actor.get("aim") else 0
     target_grappled = "grappled" in (target.get("conditions") or [])
     defense = None if ranged else (
         action.get("defense")
-        or engine.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
+        or rs.combat.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
     g_bonus, g_penalty, reachable, reason, g_notes = _attack_geometry(
-        state, actor, target, weapon, ranged,
+        state, actor, target, weapon, ranged, rs=rs,
     )
     if not reachable:
         raise ValueError(reason)   # 够不着 → 不结算、不推进，前端提示先移动接近或换目标
     if aim_bonus:
         g_notes = [{"kind": "bonus", "n": aim_bonus, "reason": "上一轮瞄准"}] + g_notes
-    res = engine.resolve_attack(
-        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon),
+    res = rs.combat.resolve_attack(
+        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon, rs=rs),
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus + g_bonus, penalty=g_penalty,
-        defense_penalty=_flank_penalty(state, target),   # 目标被我方夹击 → 其闪避吃惩罚
-        options=_rule_options(db, session_id),
+        defense_penalty=_flank_penalty(state, target, rs=rs),   # 目标被我方夹击 → 其闪避吃惩罚
     )
     if actor.get("aim"):
         actor["aim"] = False   # 瞄准一次性消费
@@ -589,7 +599,7 @@ async def _begin_player_attack(
     state["log"].append({"round": state["round"], "actor": actor["name"], "action": "attack",
                          "target": target["name"], "hit": False, "damage": 0})
     actor["acted_this_round"] = True
-    engine.advance_turn(state)
+    rs.combat.advance_turn(state)
     drive_chunks, drive_beats = await drive_npcs(db, session_id, state, agent, scene_hint)
     beats = [f"{actor['name']} 用 {weapon} 攻击 {target['name']}：未命中/被防住"] + drive_beats
     narr: list[str] = []
@@ -620,12 +630,12 @@ async def _begin_player_burst(
     """真人连发（半自动/连发火器一轮多枪）：按射速上限截发，逐发结算命中/伤害，
     **换目标每换一个 +1 惩罚骰**（同目标连开不加罚，CoC7e RAW）。一次性结算、整体展示，
     不走两段式手掷伤害（连射是泼弹、不逐发仪式）。命中即扣血（走护甲）。"""
+    rs = _rules(db, session_id)
     weapon = action.get("weapon") or actor.get("weapon") or "徒手格斗"
-    cap = engine.burst_capacity(weapon)
-    opts = _rule_options(db, session_id)
+    cap = rs.combat.burst_capacity(weapon)
     shots = [t for t in (action.get("shots") or []) if t][:cap]
     # 前置校验：需可连射的火器（cap≥2）且至少 2 发；否则降级为单发两段式攻击。
-    if cap < 2 or not _weapon_is_firearm(weapon) or len(shots) < 2:
+    if cap < 2 or not _weapon_is_firearm(weapon, rs=rs) or len(shots) < 2:
         single = {k: v for k, v in action.items() if k != "shots"}
         single["target_id"] = shots[0] if shots else action.get("target_id")
         return await _begin_player_attack(db, session_id, state, actor, single, agent, scene_hint)
@@ -641,13 +651,12 @@ async def _begin_player_burst(
             order_seen[tid] = len(order_seen)   # 目标首次出现顺序 = 该目标的换目标惩罚骰数
         pen = order_seen[tid]
         target = _find(state, tid)
-        if target is None or not engine.is_active(target):
+        if target is None or not rs.combat.is_active(target):
             shot_results.append({"target": target["name"] if target else "已倒下目标",
                                  "hit": False, "penalty": pen, "damage": None, "gone": True})
             continue
-        res = engine.resolve_attack(_char_data(actor), actor.get("db", "0"), weapon,
-                                    defender_data=None, ranged=True, bonus=aim_bonus, penalty=pen,
-                                    options=opts)
+        res = rs.combat.resolve_attack(_char_data(actor), actor.get("db", "0"), weapon,
+                                    defender_data=None, ranged=True, bonus=aim_bonus, penalty=pen)
         chk = res["attacker_check"]
         rec = {"target": target["name"], "roll": chk.roll, "target_val": chk.skill_value,
                "outcome": chk.outcome, "hit": res["hit"], "penalty": pen,
@@ -663,7 +672,7 @@ async def _begin_player_burst(
     hits = sum(1 for r in shot_results if r.get("hit"))
     out.insert(0, _combat_burst_event(db, session_id, actor, weapon, shot_results))
     actor["acted_this_round"] = True
-    engine.advance_turn(state)
+    rs.combat.advance_turn(state)
     _save_combat(db, session_id, state)   # 先落库（推进）再驱动，避免覆盖 drive 里的结束清场
     drive_chunks, drive_beats = await drive_npcs(db, session_id, state, agent, scene_hint)
     beats = [f"{actor['name']} 用 {weapon} 连射 {len(shots)} 发，命中 {hits} 发"] + drive_beats
@@ -679,6 +688,7 @@ async def resolve_combat_roll(
     db: Session, session_id: str, actor_id: str, agent=None, scene_hint: str = "",
 ) -> list[str]:
     """真人攻击第二段：玩家亲自掷伤害（3D 骰事件）→ 扣血、推进先攻、续跑 NPC 驱动。"""
+    rs = _rules(db, session_id)
     session = db.get(GameSession, session_id)
     state = get_combat(session)
     if not state:
@@ -698,7 +708,7 @@ async def resolve_combat_roll(
     out = [_combat_roll_event(db, session_id, dmg_content, _damage_dice_detail(dmg))]
 
     hit_beat = ""
-    if victim and engine.is_active(victim):
+    if victim and rs.combat.is_active(victim):
         for line in apply_damage(db, state, victim, dmg["total"], reason=pr["reason"],
                                  session_id=session_id):
             out.append(_combat_line(db, session_id, line))
@@ -712,7 +722,7 @@ async def resolve_combat_roll(
     if not pr.get("no_advance"):
         if actor:
             actor["acted_this_round"] = True
-        engine.advance_turn(state)
+        rs.combat.advance_turn(state)
     _save_combat(db, session_id, state)   # 先落库（清 pending_roll+推进），再驱动；
     # 绝不在 drive_npcs 之后再存 state——否则会把 drive 里 _end_combat 的「清空战斗」覆盖回去。
     drive_chunks, drive_beats = await drive_npcs(db, session_id, state, agent, scene_hint)
@@ -737,6 +747,7 @@ def stage_aoe_damage(
     返回 (combat_state chunk, 是否挂上)。已在战斗中、无未决投掷、能解析到存活目标才挂。dedup_key
     与 state.last_aoe_key 相同则跳过（幂等，防重新生成重复挂）。
     """
+    rs = _rules(db, session_id)
     session = db.get(GameSession, session_id)
     state = get_combat(session)
     if not state or state.get("pending_roll"):
@@ -750,19 +761,19 @@ def stage_aoe_damage(
         # 换成了对外称呼（玩家还没认出这东西时）。只按 name 匹配会定位不到目标。
         v = next((p for p in state.get("initiative") or []
                   if _name_matches(p, name)), None)
-        if v and engine.is_active(v) and v.get("side") == "enemy" and v["id"] not in [x["id"] for x in victims]:
+        if v and rs.combat.is_active(v) and v.get("side") == "enemy" and v["id"] not in [x["id"] for x in victims]:
             victims.append(v)
     if not victims:
         return None, False
 
-    w = engine.resolve_weapon(weapon) if weapon else None
+    w = rs.combat.resolve_weapon(weapon) if weapon else None
     if w and w.get("name") not in ("徒手格斗", None):
-        dmg = engine.roll_weapon_damage(w, "0")
+        dmg = rs.combat.roll_weapon_damage(w, "0")
         if any(k in (w.get("dam") or "") for k in ("烧", "燃烧")):
             burning = True
         weapon_name = w.get("name")
     else:
-        dmg = engine.roll_weapon_damage({"dam": formula or "1D6"}, "0")
+        dmg = rs.combat.roll_weapon_damage({"dam": formula or "1D6"}, "0")
         weapon_name = weapon or "范围攻击"
 
     thrower = _find(state, thrower_id)
@@ -787,6 +798,7 @@ async def _resolve_aoe_roll(
 ) -> list[str]:
     """AoE 伤害第二段：玩家掷出的一份伤害应用到所有被波及敌人（+可选燃烧）。不推进先攻——
     它是投掷动作的后果、非独立回合；仅可能因致死而结束战斗。"""
+    rs = _rules(db, session_id)
     dmg = pr["damage"]
     weapon = pr.get("weapon") or "范围攻击"
     who = actor["name"] if actor else "攻击者"
@@ -796,7 +808,7 @@ async def _resolve_aoe_roll(
     hit_names: list[str] = []
     for vid in pr.get("victim_ids") or []:
         victim = _find(state, vid)
-        if victim and engine.is_active(victim):
+        if victim and rs.combat.is_active(victim):
             for line in apply_damage(db, state, victim, dmg["total"], reason=pr["reason"],
                                      session_id=session_id):
                 out.append(_combat_line(db, session_id, line))
@@ -806,7 +818,7 @@ async def _resolve_aoe_roll(
                     conds.append("burning")
             hit_names.append(victim["name"])
     state["pending_roll"] = None
-    end = engine.check_combat_end(state.get("initiative") or [])
+    end = rs.combat.check_combat_end(state.get("initiative") or [])
     if end:
         out += _end_combat(db, session_id, state, end)   # 内含清空战斗
         return out
@@ -829,6 +841,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
     P2 待接：fight_back 反击目前引擎硬编码徒手估伤（resolve_attack 的 _UNARMED + defender._db 恒 0），
     守方持械反击尚未接线；届时再给本函数与 resolve_attack 补 defender 武器入参。
     """
+    rs = _rules(db, session_id)
     session = db.get(GameSession, session_id)
     state = get_combat(session)
     if not state:
@@ -842,18 +855,17 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
     defender = _find(state, pr["defender_id"])
     out: list[str] = []
     beats: list[str] = []
-    if attacker and defender and engine.is_active(attacker) and engine.is_active(defender):
+    if attacker and defender and rs.combat.is_active(attacker) and rs.combat.is_active(defender):
         # 攻方若已被缴械 → 强制徒手结算（与 _apply_one_action 的攻击分支一致）
         atk_disarmed = "disarmed" in (attacker.get("conditions") or [])
         # 方格：攻方抵近射击 +1 奖励骰；守方（玩家）被夹击 → 反应检定吃夹击惩罚骰
-        atk_pb = (positioning.point_blank_bonus(positioning.cell_distance(attacker, defender), pr["ranged"])
+        atk_pb = (rs.positioning.point_blank_bonus(rs.positioning.cell_distance(attacker, defender), pr["ranged"])
                   if state.get("grid") else 0)
-        res = engine.resolve_attack(
-            _char_data(attacker), attacker.get("db", "0"), _attack_weapon(attacker, pr["weapon"]),
+        res = rs.combat.resolve_attack(
+            _char_data(attacker), attacker.get("db", "0"), _attack_weapon(attacker, pr["weapon"], rs=rs),
             defender_data=_char_data(defender), defense=choice, ranged=pr["ranged"],
             attacker_disarmed=atk_disarmed, bonus=atk_pb,
-            defense_penalty=_flank_penalty(state, defender),
-            options=_rule_options(db, session_id),
+            defense_penalty=_flank_penalty(state, defender, rs=rs),
         )
         # 玩家亲手做的这次反应检定 → 走 3D 骰动画 + 对抗卡（守方是玩家，动画呈现守方这一掷）
         react_content = _combat_dice_content(attacker, defender, pr["weapon"], res)
@@ -867,7 +879,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
             # 再挂 pending_roll(no_advance)，由玩家经 /combat/roll 结算伤害。不在此自动扣血。
             state["pending_reaction"] = None
             attacker["acted_this_round"] = True
-            engine.advance_turn(state)
+            rs.combat.advance_turn(state)
             dmg = res["damage"]
             state["pending_roll"] = {
                 "id": uuid.uuid4().hex, "actor_id": defender["id"], "kind": "damage",
@@ -891,7 +903,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
     state["pending_reaction"] = None
     if attacker:
         attacker["acted_this_round"] = True
-    engine.advance_turn(state)
+    rs.combat.advance_turn(state)
     drive_chunks, drive_beats = await drive_npcs(db, session_id, state, agent, scene_hint)
     beats += drive_beats
     narr: list[str] = []
@@ -904,6 +916,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
 
 def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, action: dict) -> tuple[list[str], str]:
     """结算某参战方的一个行动（玩家/NPC 共用）。返回 (chunks, 机械结算摘要行 供子代理叙述)。"""
+    rs = _rules(db, session_id)
     chunks: list[str] = []
     atype = action.get("type") or action.get("action") or "other"
 
@@ -943,7 +956,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
             s = f"{actor['name']} 想为 {target['name']} 急救，但这处伤已被处理过"
             chunks.append(_combat_line(db, session_id, s + "。"))
             return chunks, s
-        r = engine.resolve_first_aid(_char_data(actor), options=_rule_options(db, session_id))
+        r = rs.combat.resolve_first_aid(_char_data(actor))
         for line in r["lines"]:
             chunks.append(_combat_line(db, session_id, f"{actor['name']}｜{line}"))
         heal_lines: list[str] = []
@@ -967,7 +980,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
         return chunks, summary
 
     if atype == "observe":
-        r = engine.resolve_observe(_char_data(actor), options=_rule_options(db, session_id))
+        r = rs.combat.resolve_observe(_char_data(actor))
         for line in r["lines"]:
             chunks.append(_combat_line(db, session_id, f"{actor['name']}｜{line}"))
         state["log"].append({"round": state["round"], "actor": actor["name"], "action": "observe",
@@ -977,14 +990,13 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
 
     if atype == "maneuver":
         target = _find(state, action.get("target_id"))
-        if target is None or not engine.is_active(target):
+        if target is None or not rs.combat.is_active(target):
             s = f"{actor['name']} 的机动目标已不在场"
             chunks.append(_combat_line(db, session_id, s + "。"))
             return chunks, s
         kind = action.get("kind") or "grapple"
-        r = engine.resolve_maneuver(
+        r = rs.combat.resolve_maneuver(
             _char_data(actor), _char_data(target), kind=kind,
-            options=_rule_options(db, session_id),
         )
         for line in r["lines"]:
             chunks.append(_combat_line(db, session_id, f"{actor['name']} → {target['name']}｜{line}"))
@@ -1014,7 +1026,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
 
     # attack
     target = _find(state, action.get("target_id"))
-    if target is None or not engine.is_active(target):
+    if target is None or not rs.combat.is_active(target):
         s = f"{actor['name']} 的目标已不在场"
         chunks.append(_combat_line(db, session_id, s + "。"))
         return chunks, s
@@ -1023,18 +1035,17 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
     disarmed = "disarmed" in (actor.get("conditions") or [])
     if disarmed:
         weapon = "徒手格斗"
-    ranged = _weapon_is_firearm(weapon)
+    ranged = _weapon_is_firearm(weapon, rs=rs)
     aim_bonus = 1 if actor.get("aim") else 0
     # NPC 防御者被擒抱 → 近战无法闪避，收窄到反击（与真人 pending_reaction.allowed 对称）
     target_grappled = "grappled" in (target.get("conditions") or [])
     defense = None if ranged else (
         action.get("defense")
-        or engine.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
-    res = engine.resolve_attack(
-        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon),
+        or rs.combat.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
+    res = rs.combat.resolve_attack(
+        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon, rs=rs),
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus,
-        options=_rule_options(db, session_id),
     )
     if actor.get("aim"):
         actor["aim"] = False   # 瞄准一次性消费（aim 只在此攻击分支清；observe/maneuver 不碰它，
@@ -1061,10 +1072,11 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
 async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scene_hint: str = "") -> tuple[list[str], list[str]]:
     """从**当前行动者**起自动跑非真人回合（关键 NPC 走 agent.decide，杂兵走启发式），停在真人回合
     或战斗结束。返回 (chunks, 各回合摘要行)。"""
+    rs = _rules(db, session_id)
     chunks: list[str] = []
     beats: list[str] = []
     for _ in range(64):  # 安全上限，防死循环
-        end = engine.check_combat_end(state.get("initiative") or [])
+        end = rs.combat.check_combat_end(state.get("initiative") or [])
         if end:
             chunks += _end_combat(db, session_id, state, end)
             return chunks, beats
@@ -1072,19 +1084,19 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
         if actor is None:
             break
         # 燃烧 tick：着火者回合开始先烧一次（1D6），可能致其濒死/死亡 → 须在 is_active 判断前。
-        if "burning" in (actor.get("conditions") or []) and engine.is_active(actor):
-            burn = engine.roll_weapon_damage({"dam": "1D6"}, "0")["total"]
+        if "burning" in (actor.get("conditions") or []) and rs.combat.is_active(actor):
+            burn = rs.combat.roll_weapon_damage({"dam": "1D6"}, "0")["total"]
             for line in apply_damage(db, state, actor, burn, reason="持续燃烧",
                                      ignore_armor=True, session_id=session_id):
                 chunks.append(_combat_line(db, session_id, line))
             _save_combat(db, session_id, state)
         # 濒死者回合开始先跑体质 tick（须在 is_active 跳过之前，否则永远不掷）
         if actor.get("status") == "dying":
-            for line in engine.tick_dying(actor, options=_rule_options(db, session_id)):
+            for line in rs.wound.tick_dying(actor):
                 chunks.append(_combat_line(db, session_id, line))
             _save_combat(db, session_id, state)
-        if not engine.is_active(actor):   # 当前指针落在失能者 → 跳过
-            engine.advance_turn(state)
+        if not rs.combat.is_active(actor):   # 当前指针落在失能者 → 跳过
+            rs.combat.advance_turn(state)
             continue
         _save_combat(db, session_id, state)
         chunks.append(_combat_state_chunk(state))
@@ -1093,20 +1105,20 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
         # 关键 NPC 走子代理决策；失败/杂兵回落启发式
         action = None
         if agent and actor.get("is_key"):
-            action = _validate_npc_action(state, actor, await agent.decide(state, actor, scene_hint))
+            action = _validate_npc_action(state, actor, await agent.decide(state, actor, scene_hint), rs=rs)
         if action is None:
-            action = engine.heuristic_npc_action(state, actor)
+            action = rs.combat.heuristic_npc_action(state, actor)
         atype = action.get("type") or action.get("action")
         # 方格：NPC 想攻击但目标够不着（近战不相邻/超射程/无视线）→ 本回合改为走位接近。
         if atype == "attack" and state.get("grid") and actor.get("pos"):
             tgt = _find(state, action.get("target_id"))
-            if tgt and engine.is_active(tgt):
+            if tgt and rs.combat.is_active(tgt):
                 wpn = action.get("weapon") or actor.get("weapon") or "徒手格斗"
-                _, _, reachable, _, _ = _attack_geometry(state, actor, tgt, wpn, _weapon_is_firearm(wpn))
+                _, _, reachable, _, _ = _attack_geometry(state, actor, tgt, wpn, _weapon_is_firearm(wpn, rs=rs), rs=rs)
                 if not reachable:
                     occ = {f'{p["pos"]["x"]},{p["pos"]["y"]}' for p in (state.get("initiative") or [])
-                           if p.get("pos") and p["id"] != actor["id"] and engine.is_active(p)}
-                    dest = positioning.step_toward(   # 走位接近即 NPC 的整回合行动 → 用满 mov（冲刺）
+                           if p.get("pos") and p["id"] != actor["id"] and rs.combat.is_active(p)}
+                    dest = rs.positioning.step_toward(   # 走位接近即 NPC 的整回合行动 → 用满 mov（冲刺）
                         actor, tgt, int(actor.get("mov") or _DEFAULT_MOV),
                         state["grid"], occ)
                     if dest:
@@ -1114,23 +1126,23 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
                         actor["move_left"] = 0        # 走位即用掉本回合行动
                         actor["acted_this_round"] = True
                         beats.append(f'{actor["name"]} 向 {tgt["name"]} 移动接近')
-                        engine.advance_turn(state)
+                        rs.combat.advance_turn(state)
                         _save_combat(db, session_id, state)
                         chunks.append(_combat_state_chunk(state))
                         continue
         # 攻击真人防御者 → 暂停驱动，落 pending_reaction、广播提示，等真人经端点回选择
         if atype == "attack":
             target = _find(state, action.get("target_id"))
-            if target and engine.is_active(target) and target.get("is_human"):
+            if target and rs.combat.is_active(target) and target.get("is_human"):
                 weapon = action.get("weapon") or actor.get("weapon") or "徒手格斗"
-                is_fire = _weapon_is_firearm(weapon)
+                is_fire = _weapon_is_firearm(weapon, rs=rs)
                 # 名字一并落进 pending_reaction：广播与断线重连（_combat_meta 透传）都要用它渲染
                 # 提示文案，否则重连回来缺 *_name 会显示「undefined 用 X 攻击你」。
                 state["pending_reaction"] = {
                     "attacker_id": actor["id"], "defender_id": target["id"],
                     "attacker_name": actor["name"], "defender_name": target["name"],
                     "weapon": weapon, "ranged": is_fire,
-                    "allowed": engine.allowed_reactions(
+                    "allowed": rs.combat.allowed_reactions(
                         is_fire, defender_grappled="grappled" in (target.get("conditions") or [])),
                 }
                 _save_combat(db, session_id, state)
@@ -1141,19 +1153,20 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
         if s:
             beats.append(s)
         actor["acted_this_round"] = True
-        engine.advance_turn(state)
+        rs.combat.advance_turn(state)
     _save_combat(db, session_id, state)
     return chunks, beats
 
 
-def _validate_npc_action(state: dict, actor: dict, action: dict | None) -> dict | None:
+def _validate_npc_action(state: dict, actor: dict, action: dict | None, *, rs: Ruleset | None = None) -> dict | None:
     """校正子代理给的行动：attack 目标须存活且属敌对方；非法则丢弃（回落启发式）。"""
+    rs = rs or _raw_rules()
     if not action or action.get("action") not in ("attack", "flee", "dodge"):
         return None
     if action.get("action") != "attack":
         return {"type": action["action"]}
     target = _find(state, action.get("target_id"))
-    hostile = target and engine.is_active(target) and target.get("side") != actor.get("side")
+    hostile = target and rs.combat.is_active(target) and target.get("side") != actor.get("side")
     if not hostile:
         return None
     return {"type": "attack", "target_id": action["target_id"],
@@ -1162,12 +1175,13 @@ def _validate_npc_action(state: dict, actor: dict, action: dict | None) -> dict 
 
 def add_combatant(db: Session, session_id: str, spec: dict, side: str = "enemy") -> dict:
     """中途加入敌/友，按先攻插入当前序（下一轮重排时归位）。"""
+    rs = _rules(db, session_id)
     session = db.get(GameSession, session_id)
     state = get_combat(session)
     if not state:
         raise ValueError("当前不在战斗中")
-    p = _npc_participant(spec, side) if side == "enemy" or not spec.get("char_id") else spec
-    state["initiative"] = engine.roll_initiative((state["initiative"] or []) + [p])
+    p = _npc_participant(spec, side, rs=rs) if side == "enemy" or not spec.get("char_id") else spec
+    state["initiative"] = rs.combat.roll_initiative((state["initiative"] or []) + [p])
     _save_combat(db, session_id, state)
     return state
 

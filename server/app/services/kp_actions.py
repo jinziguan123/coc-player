@@ -77,12 +77,14 @@ def _exec_start_chase(
     pursuer_str: str, trigger: str,
 ) -> list[str]:
     """start_chase 工具：玩家作逃方，pursuer 按名字解析模组 NPC（匹配不到按临场追兵建）。返回 chunks。"""
-    from app.services import chase_service
+    from app.services import chase_service, rule_options_service
 
     nm = (pursuer_str or "").strip() or "追兵"
     spec = next((n for n in (module.npcs or []) if n.get("name") == nm or n.get("id") == nm), None)
     pursuer = chase_service._pursuer_from_npc(
-        spec or {"name": nm, "attributes": {"DEX": 50, "CON": 50, "SIZ": 50}, "skills": {"运动": 45}})
+        spec or {"name": nm, "attributes": {"DEX": 50, "CON": 50, "SIZ": 50}, "skills": {"运动": 45}},
+        rule_options_service.ruleset_by_id(db, session_id),
+    )
     quarry = chase_service._quarry_from_char(player_char)
     _state, chunks = chase_service.start_chase(db, session_id, quarry, pursuer, trigger=trigger)
     return chunks

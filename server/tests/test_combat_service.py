@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module
+from app.rules.coc import combat as coc_combat
 from app.services import combat_service
 
 
@@ -329,12 +330,12 @@ def test_burst_switch_target_accumulates_penalty(db_factory, monkeypatch):
     hp = combat_service._find(state, hero.id); hp["skills"] = {"射击(手枪)": 60}
     combat_service._save_combat(db, sid, state)
     seen_pen: list = []
-    orig = combat_service.engine.resolve_attack
+    orig = coc_combat.resolve_attack
 
     def spy(*a, **k):
         seen_pen.append(k.get("penalty"))
         return orig(*a, **k)
-    monkeypatch.setattr(combat_service.engine, "resolve_attack", spy)
+    monkeypatch.setattr(coc_combat, "resolve_attack", spy)
     _fix_rolls(monkeypatch, [50] * 20, die=2)
     action = {"type": "attack", "weapon": ".38(9mm)左轮", "shots": ["e1", "e1", "e2"]}
     asyncio.run(combat_service.resolve_player_action(db, sid, hero.id, action))
@@ -434,12 +435,12 @@ def test_reaction_flank_penalty_applied(db_factory, monkeypatch):
                                  "allowed": ["fight_back", "dodge"]}
     combat_service._save_combat(db, sid, state)
     seen: dict = {}
-    orig = combat_service.engine.resolve_attack
+    orig = coc_combat.resolve_attack
 
     def spy(*a, **k):
         seen["dp"] = k.get("defense_penalty")
         return orig(*a, **k)
-    monkeypatch.setattr(combat_service.engine, "resolve_attack", spy)
+    monkeypatch.setattr(coc_combat, "resolve_attack", spy)
     _fix_rolls(monkeypatch, [50] * 10, die=2)
     asyncio.run(combat_service.resolve_reaction(db, sid, hero.id, "dodge"))
     assert seen["dp"] == 1   # 默认紧凑布阵下 hero 与两敌都相邻 → 夹击 -1
@@ -452,12 +453,12 @@ def test_player_pointblank_bonus_applied(db_factory, monkeypatch):
     combat_service._find(state, hero.id)["skills"] = {"射击(手枪)": 60}
     _cluster_adjacent(db, sid, state)   # hero 与目标相邻（抵近 ≤2 格）
     seen: dict = {}
-    orig = combat_service.engine.resolve_attack
+    orig = coc_combat.resolve_attack
 
     def spy(*a, **k):
         seen["b"] = k.get("bonus")
         return orig(*a, **k)
-    monkeypatch.setattr(combat_service.engine, "resolve_attack", spy)
+    monkeypatch.setattr(coc_combat, "resolve_attack", spy)
     _fix_rolls(monkeypatch, [50] * 8, die=2)
     asyncio.run(combat_service.resolve_player_action(
         db, sid, hero.id, {"type": "attack", "target_id": "e1", "weapon": ".38(9mm)左轮"}))
@@ -1086,12 +1087,12 @@ def test_grappled_npc_defender_forced_fight_back(db_factory, monkeypatch):
     thug["conditions"].append("grappled")   # NPC 已被擒抱
 
     captured = {}
-    real = combat_service.engine.resolve_attack
+    real = coc_combat.resolve_attack
 
     def _spy(*args, **kwargs):
         captured["defense"] = kwargs.get("defense")
         return real(*args, **kwargs)
-    monkeypatch.setattr(combat_service.engine, "resolve_attack", _spy)
+    monkeypatch.setattr(coc_combat, "resolve_attack", _spy)
 
     _fix_rolls(monkeypatch, [10, 80], die=3)
     actor = combat_service._find(state, hero.id)
@@ -1139,14 +1140,14 @@ def test_reaction_disarmed_attacker_uses_unarmed(db_factory, monkeypatch):
     combat_service._save_combat(db, sid, state)
 
     captured = {}
-    real = combat_service.engine.resolve_attack
+    real = coc_combat.resolve_attack
 
     def _spy(*args, **kwargs):
         r = real(*args, **kwargs)
         captured["disarmed"] = kwargs.get("attacker_disarmed")
         captured["weapon"] = r["weapon"]
         return r
-    monkeypatch.setattr(combat_service.engine, "resolve_attack", _spy)
+    monkeypatch.setattr(coc_combat, "resolve_attack", _spy)
 
     # 火器 pending 但攻方被缴械：反应结算走徒手；choice 用 dodge（火器 allowed 含 dodge）
     _fix_rolls(monkeypatch, [50, 90], die=3)

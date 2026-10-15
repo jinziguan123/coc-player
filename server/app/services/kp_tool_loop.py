@@ -24,7 +24,6 @@ from app.ai.provider import ToolCall
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.rules.registry import get_engine
 from app.services import (
     chat_event_writer,
     command_protocol,
@@ -312,8 +311,7 @@ def _build_kp_tool_executor(
         descs: list[str] = []
         chunks = [
             c async for c in _resolve_opposed(
-                db, session_id, kv, get_engine(module.rule_system),
-                module, player_char, teammates, descs,
+                db, session_id, kv, module, player_char, teammates, descs,
             )
         ]
         if not descs:
@@ -853,8 +851,6 @@ async def _process_commands(
         for chunk in hp_chunks:
             yield chunk
 
-    engine = get_engine(module.rule_system)
-
     for match in DICE_CHECK_RE.finditer(kp_text):
         kv = _parse_tag_kv(match.group(1))
         dice_chunks, dice_descs, pending = await _exec_dice_check(
@@ -873,7 +869,7 @@ async def _process_commands(
         try:
             async for chunk in _resolve_opposed(
                 db, session_id, _parse_tag_kv(match.group(1)),
-                engine, module, player_char, teammates, dice_descriptions,
+                module, player_char, teammates, dice_descriptions,
             ):
                 yield chunk
         except ValueError as error:

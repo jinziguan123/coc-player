@@ -1162,7 +1162,9 @@ def update_session_rule_options(
     session = db.get(GameSession, session_id)
     if not session:
         return None
-    session.rule_options = rule_options_service.normalized(raw)
+    session.rule_options = rule_options_service.normalized(
+        raw, rule_options_service.rule_system_of(db, session),
+    )
     db.commit()
     db.refresh(session)
     return session

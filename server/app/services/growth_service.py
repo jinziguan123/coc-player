@@ -11,8 +11,6 @@ from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.rules.coc import options as coc_options
-from app.rules.registry import get_engine
 from app.services import rule_options_service, session_service
 
 # 达成等级/结果里代表「成功」的取值——只要成功用过一次即获得该技能的成长机会。
@@ -31,7 +29,7 @@ def eligible_skills(db: Session, session_id: str, character_id: str) -> list[dic
         return []
     skills = char.skills or {}
     events = session_service.get_session_events(db, session_id, limit=0)
-    options = coc_options.from_dict(rule_options_service.effective_by_id(db, session_id))
+    options = rule_options_service.ruleset_by_id(db, session_id).options
     used: set[str] = set()
     for e in events:
         if getattr(e, "event_type", None) != "dice":
@@ -64,15 +62,14 @@ def settle_growth(db: Session, session_id: str, character_id: str) -> dict | Non
     module = db.get(Module, session.module_id) if session.module_id else None
     if module is None:
         return None
-    engine = get_engine(module.rule_system)
-    rule_options = rule_options_service.effective(db, session)
+    growth = rule_options_service.ruleset(db, session).growth
 
     skills = dict(char.skills or {})
     results: list[dict] = []
     for item in eligible_skills(db, session_id, character_id):
         s = item["skill"]
         current = skills.get(s, item["value"])
-        res = engine.improvement_check(current, rule_options)
+        res = growth.improvement_check(current)
         if res is None:
             continue  # 该规则系统不支持成长，或本局村规关掉了成长
         if res.get("improved") and res.get("new_value", current) > current:

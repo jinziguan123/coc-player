@@ -9,8 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.rules.coc.checks import display_skill_name
-from app.rules.registry import get_engine
+from app.rules import ruleset_for
 from app.services import npc_identity, rule_options_service, session_service
 from app.services.event_protocol import event_to_chunk, make_chunk
 
@@ -291,7 +290,7 @@ def _exec_generic_roll(
         raise ValueError("骰子修正值必须在 -10000 到 10000 之间")
 
     notation = f"{count}d{sides}" + (f"{modifier:+d}" if modifier else "")
-    result = get_engine(module.rule_system).roll_dice(notation)
+    result = ruleset_for(module.rule_system).dice.roll(notation)
     reason = str(payload.get("reason") or "临场裁定").strip() or "临场裁定"
     if len(reason) > 200:
         raise ValueError("掷骰用途不能超过 200 个字符")
@@ -451,7 +450,7 @@ def _resolve_dice_group_targets(
 
 
 async def _resolve_opposed(
-    db, session_id, kv, engine, module, player_char, teammates, dice_descriptions,
+    db, session_id, kv, module, player_char, teammates, dice_descriptions,
 ):
     """对抗骰：两方各投一次，比成功等级；同级比技能值高者胜，再平则平局。
 
@@ -460,8 +459,9 @@ async def _resolve_opposed(
     a_ref = (kv.get("a") or kv.get("actor") or "").strip()
     b_ref = (kv.get("b") or kv.get("target") or "").strip()
     # 同 [DICE_CHECK]：英文属性键换回中文再示人
-    a_skill = display_skill_name((kv.get("a_skill") or kv.get("skill") or "").strip())
-    b_skill = display_skill_name((kv.get("b_skill") or a_skill).strip())
+    rs = rule_options_service.ruleset_by_id(db, session_id)
+    a_skill = rs.check.display_skill_name((kv.get("a_skill") or kv.get("skill") or "").strip())
+    b_skill = rs.check.display_skill_name((kv.get("b_skill") or a_skill).strip())
     if not a_ref or not b_ref or not a_skill or not b_skill:
         raise ValueError("对抗检定必须选择双方对象并填写双方技能")
 
@@ -484,12 +484,11 @@ async def _resolve_opposed(
 
     a_bonus, a_penalty = _parse_bonus_penalty(kv, "a_")
     b_bonus, b_penalty = _parse_bonus_penalty(kv, "b_")
-    rule_options = rule_options_service.effective_by_id(db, session_id)
-    a_res = engine.resolve_check(
-        a_data, a_skill, "normal", bonus=a_bonus, penalty=a_penalty, options=rule_options,
+    a_res = rs.check.resolve_skill_check(
+        a_data, a_skill, "normal", bonus=a_bonus, penalty=a_penalty,
     )
-    b_res = engine.resolve_check(
-        b_data, b_skill, "normal", bonus=b_bonus, penalty=b_penalty, options=rule_options,
+    b_res = rs.check.resolve_skill_check(
+        b_data, b_skill, "normal", bonus=b_bonus, penalty=b_penalty,
     )
 
     ar, br = _OUTCOME_RANK.get(a_res.outcome, 1), _OUTCOME_RANK.get(b_res.outcome, 1)

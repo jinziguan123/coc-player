@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.module import Module
 from app.models.rulebook import RuleSystemOptions
 from app.models.session import GameSession
-from app.rules.coc import options as coc_options
+from app.rules import Ruleset, get_system
 
 DEFAULT_RULE_SYSTEM = "coc"
 
@@ -75,7 +75,7 @@ def save_village_options(
     if row is None:
         row = RuleSystemOptions(rule_system=rule_system)
         db.add(row)
-    row.options = normalized(raw)
+    row.options = normalized(raw, rule_system)
     if notes is not None:
         row.table_notes = (notes or "").strip()[:TABLE_NOTES_MAX]
     if enabled is not None:
@@ -85,12 +85,12 @@ def save_village_options(
 
 
 def effective(db: Session, game_session: GameSession | None) -> dict:
-    """取本局生效的规则改动（可直接喂给 ``engine.resolve_check(options=...)``）。"""
+    """取本局生效的村规 dict（合并后、未解析）。结算请走 :func:`ruleset`，它已把这份注入好。"""
     if game_session is None:
         return {}
     module = db.get(Module, game_session.module_id) if game_session.module_id else None
     rule_system = getattr(module, "rule_system", None) or DEFAULT_RULE_SYSTEM
-    return coc_options.merge(
+    return get_system(rule_system).merge_options(
         getattr(module, "default_rule_options", None),
         village_options(db, rule_system),
         getattr(game_session, "rule_options", None),
@@ -102,24 +102,44 @@ def effective_by_id(db: Session, session_id: str) -> dict:
     return effective(db, db.get(GameSession, session_id))
 
 
-def normalized(raw: dict | None) -> dict:
+def rule_system_of(db: Session, game_session: GameSession | None) -> str:
+    module = (
+        db.get(Module, game_session.module_id)
+        if game_session is not None and game_session.module_id else None
+    )
+    return getattr(module, "rule_system", None) or DEFAULT_RULE_SYSTEM
+
+
+def ruleset(db: Session, game_session: GameSession | None) -> Ruleset:
+    """本局的生效规则：业务层结算的唯一入口（``rs.<槽位>.<导出>``，村规已注入）。
+
+    没有会话（或会话没挂模组）时返回默认规则系统的 RAW。
+    """
+    return get_system(rule_system_of(db, game_session)).ruleset(effective(db, game_session))
+
+
+def ruleset_by_id(db: Session, session_id: str) -> Ruleset:
+    return ruleset(db, db.get(GameSession, session_id))
+
+
+def normalized(raw: dict | None, rule_system: str = DEFAULT_RULE_SYSTEM) -> dict:
     """把外部提交的配置白名单化 + 钳进合法区间，只留与规则原文不同的项。
 
     落库前一律过这一道：这是从界面填进来的外部输入，非法值不该有机会流进掷骰逻辑
     （「大成功阈值 = 100」会让每一骰都是大成功）。只存差异项，日后规则默认值调整时，
     没显式改过的项会跟着走，不会被一份陈旧的全量快照钉死。
     """
-    return coc_options.from_dict(raw).diff_from_default()
+    return get_system(rule_system).parse_options(raw).diff_from_default()
 
 
 def resolved_view(db: Session, game_session: GameSession | None) -> dict:
     """给界面看的完整生效值（含未被改动的默认项），供设置面板回显。"""
-    return coc_options.from_dict(effective(db, game_session)).to_dict()
+    return ruleset(db, game_session).options.to_dict()
 
 
 def village_view(db: Session, rule_system: str) -> dict:
     """村规面板的回显值：村规叠在规则原文上的完整结果。"""
-    return coc_options.from_dict(village_options(db, rule_system)).to_dict()
+    return get_system(rule_system).parse_options(village_options(db, rule_system)).to_dict()
 
 
 def context_block(db: Session, game_session: GameSession | None) -> str:
@@ -134,10 +154,8 @@ def context_block(db: Session, game_session: GameSession | None) -> str:
     """
     if game_session is None:
         return ""
-    module = db.get(Module, game_session.module_id) if game_session.module_id else None
-    rule_system = getattr(module, "rule_system", None) or DEFAULT_RULE_SYSTEM
-    diffs = coc_options.describe(coc_options.from_dict(effective(db, game_session)))
-    notes = table_notes(db, rule_system)
+    diffs = ruleset(db, game_session).describe()
+    notes = table_notes(db, rule_system_of(db, game_session))
     if not diffs and not notes:
         return ""
 

@@ -51,8 +51,18 @@ extend-exclude = ["alembic/versions"]
 # 保守起步，只选当前代码已干净、且高信噪比的规则：pyflakes(F) 抓未用导入/变量/未定义名，
 # E9 抓语法/缩进等硬错误。后续可逐步收紧到 I(导入排序)/UP/B(bugbear) —— 那批约百处、
 # 含 22 处 B904 需手工加 `raise ... from e`，宜单独一 PR 做，不混进本次 CI 接线。
-select = ["F", "E9"]
+select = ["F", "E9", "TID251"]
 ignore = []
+
+# 规则引擎边界（docs/plans/2026-10-14-规则引擎组件化-design.md）：业务层只经
+# `app.rules`（ruleset_for / rule_options_service.ruleset）取规则，不许直接碰组件实现。
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"app.rules.coc".msg = "规则组件实现不对外：经 app.rules.ruleset_for 或 rule_options_service.ruleset 取生效规则"
+"app.rules.registry".msg = "旧引擎注册表仅供规则包内部与测试：业务层用 app.rules.ruleset_for"
+
+[tool.ruff.lint.per-file-ignores]
+"app/rules/**" = ["TID251"]
+"tests/**" = ["TID251"]
 
 [tool.pytest.ini_options]
 markers = [

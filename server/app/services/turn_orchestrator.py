@@ -26,10 +26,6 @@ from app.ai.prompts.kp_system import (
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.rules.coc import luck as coc_luck
-from app.rules.coc import options as coc_options
-from app.rules.coc.checks import display_skill_name
-from app.rules.registry import get_engine
 from app.services import (
     character_chronicle,
     chat_event_writer,
@@ -1721,7 +1717,8 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
             )
             return
 
-        skill = display_skill_name(check["skill"])
+        rs = rule_options_service.ruleset(db, game_session)
+        skill = rs.check.display_skill_name(check["skill"])
         difficulty = check.get("difficulty", "normal")
         source = check.get("source", "")
         bonus = int(check.get("bonus") or 0)
@@ -1738,9 +1735,8 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
             bonus, penalty, str(check.get("modifier_reason") or ""),
         )
         # 临时疯狂：症状波及该技能域 → 自动加惩罚骰（确定性，不问 KP 当初有没有标 penalty）。
-        from app.rules.coc import madness as coc_madness
         madness_state = (char_data.get("system_data") or {}).get("madness")
-        madness_penalty = coc_madness.check_penalty(madness_state, skill)
+        madness_penalty = rs.madness.check_penalty(madness_state, skill)
         if madness_penalty:
             penalty += madness_penalty
             label = str((madness_state or {}).get("label") or "").strip()
@@ -1748,10 +1744,8 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
                 "kind": "penalty", "n": madness_penalty,
                 "reason": f"临时疯狂{f'·{label}' if label else ''}影响了这项技能",
             })
-        engine = get_engine(module.rule_system)
-        result = engine.resolve_check(
+        result = rs.check.resolve_skill_check(
             char_data, skill, difficulty, bonus=bonus, penalty=penalty,
-            options=rule_options_service.effective(db, game_session),
         )
         tier_cn = TIER_LABEL.get(result.tier, result.tier)
 
@@ -1788,9 +1782,8 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
 
         # 幸运消费（村规开启时）：这一骰差几点够得着？够得着就**停在这里**问玩家买不买。
         # 必须停：后面的物品发货、线索记账、KP 续写都以成败为输入，一旦跑起来就回不了头了。
-        offer = coc_luck.rescue_offer(
+        offer = rs.luck.rescue_offer(
             result, difficulty, char_data,
-            coc_options.from_dict(rule_options_service.effective(db, game_session)),
             in_combat=bool(combat_service.get_combat(game_session)),
         )
         if offer and char_id:
@@ -1872,9 +1865,7 @@ async def _run_luck_decision(session_id: str, spend: bool, reroll: bool = False)
 
         if spend or reroll:
             char = db.get(Character, str(pending.get("char_id") or ""))
-            options = coc_options.from_dict(
-                rule_options_service.effective(db, game_session),
-            )
+            luck = rule_options_service.ruleset(db, game_session).luck
             char_data = {
                 "base_attributes": char.base_attributes if char else {},
                 "skills": char.skills if char else {},
@@ -1884,8 +1875,8 @@ async def _run_luck_decision(session_id: str, spend: bool, reroll: bool = False)
             cost = int(offer.get("reroll_cost" if reroll else "cost") or 0)
             # 重新校验而不是照单全收：这份 offer 是上一步存下来的，中间幸运值可能已被
             # 别处扣掉（同一轮的另一次消费、KP 手动改卡）。
-            if char is not None and cost > 0 and coc_luck.available_luck(char_data) >= cost:
-                deduction = coc_luck.deduct(char_data, cost)
+            if char is not None and cost > 0 and luck.available_luck(char_data) >= cost:
+                deduction = luck.deduct(char_data, cost)
                 if deduction["path"].startswith("system_data."):
                     turn_effects._update_character_stat(
                         db, char, deduction["path"].split(".", 1)[1], deduction["new"],
@@ -1894,13 +1885,12 @@ async def _run_luck_decision(session_id: str, spend: bool, reroll: bool = False)
                     _set_attr_luck(db, char, deduction["new"])
                 if reroll:
                     # 整骰重来，结果照单全收（含重掷出大失败）——买的是机会不是成功
-                    result = coc_luck.apply_reroll(
+                    result = luck.apply_reroll(
                         char_data, skill, difficulty,
                         int(check.get("bonus") or 0), int(check.get("penalty") or 0),
-                        options,
                     )
                 else:
-                    result = coc_luck.apply_rescue(result, difficulty, cost, options)
+                    result = luck.apply_rescue(result, difficulty, cost)
                 spent = cost
                 _broadcast_luck_applied(
                     db, session_id, pending, result, cost, deduction, reroll=reroll,

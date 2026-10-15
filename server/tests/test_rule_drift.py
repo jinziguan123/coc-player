@@ -126,13 +126,13 @@ def test_combat_service_passes_session_options(db_factory, monkeypatch):
     combat_service._save_combat(db, sid, state)
 
     seen = {}
-    real = combat_service.engine.resolve_attack
+    real = combat.resolve_attack
 
     def spy(*a, **k):
         r = real(*a, **k)
         seen["outcome"] = r["attacker_check"].outcome
         return r
-    monkeypatch.setattr(combat_service.engine, "resolve_attack", spy)
+    monkeypatch.setattr(combat, "resolve_attack", spy)
     monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([3, 90] + [50] * 20))
     monkeypatch.setattr("app.rules.coc.combat.random.randint", lambda a, b: 1)
     asyncio.run(combat_service.resolve_player_action(
@@ -162,5 +162,8 @@ def test_describe_flat_insanity_uses_same_text():
 def test_status_severity_single_source():
     from app.rules.coc.status import STATUS_SEVERITY
 
+    from app.rules import ruleset_for
+
     assert not hasattr(turn_effects, "_STATUS_SEVERITY")
-    assert turn_effects.STATUS_SEVERITY is STATUS_SEVERITY
+    # 业务层经生效规则取表（P1 收口后不再直接 import），拿到的必须就是 status.py 那一份
+    assert ruleset_for("coc").status.STATUS_SEVERITY is STATUS_SEVERITY

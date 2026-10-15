@@ -14,11 +14,7 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
-from app.rules.coc import options as coc_options
-from app.rules.coc.checks import display_skill_name
-from app.rules.coc.combat import is_major_wound
-from app.rules.coc.status import STATUS_SEVERITY
-from app.rules.registry import get_engine
+from app.rules import Ruleset, ruleset_for
 from app.services import (
     dice_runtime,
     human_kp_service,
@@ -72,6 +68,7 @@ def _update_character_stat(db: Session, char: Character, path: str, value) -> No
 
 def _apply_madness_status(
     db: Session, char: Character, new_san: int, went_insane: bool,
+    rs: Ruleset | None = None,
 ) -> str | None:
     """据 SAN 结果落疯狂状态（确定性）：SAN 归零→永久疯狂；一次损失≥当前SAN/5→临时疯狂。
 
@@ -83,15 +80,16 @@ def _apply_madness_status(
         target = "temporary_insanity"
     else:
         return None
+    rs = rs or ruleset_for(rule_options_service.DEFAULT_RULE_SYSTEM)
+    severity = rs.status.STATUS_SEVERITY
     cur = char.status or "active"
-    if STATUS_SEVERITY.get(target, 0) <= STATUS_SEVERITY.get(cur, 0):
+    if severity.get(target, 0) <= severity.get(cur, 0):
         return None  # 既有状态已同等或更严重，不降级
     char.status = target
     if target == "temporary_insanity":
         # 一阵疯狂：掷 1D10 随机症状 + 1D10 回合时长，存进角色卡（影响检定与言行，到期自动解除）。
-        from app.rules.coc import madness as coc_madness
         sd = dict(char.system_data or {})
-        sd["madness"] = coc_madness.make_bout()
+        sd["madness"] = rs.madness.make_bout()
         char.system_data = sd
     db.add(char)
     db.commit()
@@ -223,7 +221,10 @@ async def _exec_san_check(
         session_service.add_pending_check(db, session_id, pending)
         # 走同一张映射表而不是再硬编码一次「理智」：两条路径各写各的，
         # 迟早会出现一边显示「理智」、另一边显示「SAN」这种对不上的情况。
-        prompt_text = _check_prompt_text(tchar.name, display_skill_name("SAN"), "normal")
+        prompt_text = _check_prompt_text(
+            tchar.name, rule_options_service.ruleset(db, game_session).check.display_skill_name("SAN"),
+            "normal",
+        )
         meta = {"check_request": True, **pending}
         ev = session_service.add_event(
             db, session_id, "system", prompt_text, actor_name="系统", metadata=meta,
@@ -263,18 +264,13 @@ def _settle_san_target(
     mark_checked: bool = True,
 ) -> tuple[list[str], str]:
     """掷出并结算单个角色的 SAN；自动路径与玩家点击后的路径共用。"""
-    from app.rules.coc.checks import san_check
-
+    rs = rule_options_service.ruleset(db, game_session)
     char_data = {
         "base_attributes": tchar.base_attributes,
         "skills": tchar.skills,
         "system_data": tchar.system_data,
     }
-    from app.rules.coc import options as coc_options
-    result = san_check(
-        char_data, success_loss, failure_loss,
-        options=coc_options.from_dict(rule_options_service.effective(db, game_session)),
-    )
+    result = rs.sanity.san_check(char_data, success_loss, failure_loss)
     check = result["check"]
     _update_character_stat(db, tchar, "sanity.current", result["new_san"])
 
@@ -285,7 +281,7 @@ def _settle_san_target(
         f"{tchar.name}｜理智检定：{check.description}\n"
         f"SAN 损失：{result['san_loss']}（{result['old_san']} → {result['new_san']}）"
     )
-    madness = _apply_madness_status(db, tchar, result["new_san"], result["went_insane"])
+    madness = _apply_madness_status(db, tchar, result["new_san"], result["went_insane"], rs)
     if madness == "permanent_insanity":
         dice_content += "\n永久疯狂！SAN 归零，调查员就此永远失常。"
     elif madness == "temporary_insanity":
@@ -443,7 +439,7 @@ async def _exec_hp_change(
     """执行一条 HP 变化结算（target=player/主角 或队友名；NPC/匹配不到则不结算）。返回 chunks。
 
     确定性规则钩子（CoC 7e，不依赖 KP 自觉）：单次伤害 ≥ 最大 HP 一半即重伤（阈值随本局村规
-    major_wound_divisor，与战斗结算 combat.is_major_wound 同一口径）——
+    major_wound_divisor，与战斗结算 rs.wound.is_major_wound 同一口径）——
     落 major_wound 状态并**系统自动**过一次体质（CON）检定，失败则昏迷（unconscious）。
     昏迷判定是被动生理反应而非玩家主动行动，故不走「待玩家投骰」、直接自动掷。
     队友受伤同样结算（多人局队友也会重伤/昏迷）。
@@ -468,13 +464,13 @@ async def _exec_hp_change(
         char.system_data = sd; db.add(char); db.commit()
 
     chunks: list[str] = []
+    rs = rule_options_service.ruleset_by_id(db, session_id)
     if delta < 0:
         dmg = abs(delta)
         hp_content = f"{char.name} 受到 {dmg} 点伤害（HP {old_hp} → {new_hp}）"
         if reason:
             hp_content += f"——{reason}"
-        rule_opts = coc_options.from_dict(rule_options_service.effective_by_id(db, session_id))
-        major_wound = max_hp > 0 and is_major_wound(dmg, max_hp, rule_opts)
+        major_wound = max_hp > 0 and rs.wound.is_major_wound(dmg, max_hp)
         already_major = char.status == "major_wound"
         if max_hp > 0 and dmg > max_hp:
             # 单次伤害 > 最大 HP → 当场毙命（CoC 7e）
@@ -511,16 +507,12 @@ async def _exec_hp_change(
             char.status = "major_wound"
             db.add(char)
             db.commit()
-            engine = get_engine(module.rule_system)
             cdata = {
                 "base_attributes": char.base_attributes,
                 "skills": char.skills,
                 "system_data": char.system_data,
             }
-            result = engine.resolve_check(
-                cdata, "体质", "normal",
-                options=rule_options_service.effective_by_id(db, session_id),
-            )
+            result = rs.check.resolve_skill_check(cdata, "体质", "normal")
             con_content = (
                 f"{char.name}｜重伤体质检定（判定是否昏迷）：{result.description}"
             )
@@ -595,7 +587,8 @@ async def _exec_dice_check(
     descs: list[str] = []
     # 英文属性键（KP 偶尔写 skill=STR）在这里换回中文：取值那层认得英文键，
     # 但检定提示与结果卡都直接拿它示人，不换就成了「STR 检定」这种机器话。
-    skill_name = display_skill_name((kv.get("skill") or "").strip())
+    rs = rule_options_service.ruleset(db, game_session)
+    skill_name = rs.check.display_skill_name((kv.get("skill") or "").strip())
     if not skill_name:
         return chunks, descs, False
     difficulty = (kv.get("difficulty") or "normal").strip() or "normal"
@@ -768,10 +761,8 @@ async def _auto_roll_check(
     shown = public_name or disp_name
     chunks: list[str] = []
     descs: list[str] = []
-    engine = get_engine(module.rule_system)
-    result = engine.resolve_check(
+    result = rule_options_service.ruleset(db, game_session).check.resolve_skill_check(
         char_data, skill_name, difficulty, bonus=bonus, penalty=penalty,
-        options=rule_options_service.effective(db, game_session),
     )
     tier_cn = TIER_LABEL.get(result.tier, result.tier)
 

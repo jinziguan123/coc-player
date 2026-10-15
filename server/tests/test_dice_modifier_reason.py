@@ -71,8 +71,8 @@ def test_combat_geometry_reports_why(monkeypatch):
     actor = {"pos": {"x": 0, "y": 0}}
     target = {"pos": {"x": 6, "y": 0}}
     # 手枪基础射程折成格数后 6 格属于超程但可及
-    monkeypatch.setattr(combat_service.positioning, "range_in_cells", lambda *a, **k: 3)
-    monkeypatch.setattr(combat_service.positioning, "has_line_of_sight", lambda *a, **k: True)
+    monkeypatch.setattr("app.rules.coc.positioning.range_in_cells", lambda *a, **k: 3)
+    monkeypatch.setattr("app.rules.coc.positioning.has_line_of_sight", lambda *a, **k: True)
 
     _b, penalty, reachable, _why, notes = combat_service._attack_geometry(
         state, actor, target, "手枪", True,
