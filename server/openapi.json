@@ -2649,6 +2649,17 @@
             ],
             "title": "Metadata"
           },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
           "type": {
             "enum": [
               "generating",
@@ -7680,6 +7691,7 @@
     },
     "/api/sessions/{session_id}/events": {
       "get": {
+        "description": "事件分页。``after_seq`` 用于断线补漏，``types`` 逗号分隔（如 ``ooc``）。",
         "operationId": "get_events_api_sessions__session_id__events_get",
         "parameters": [
           {
@@ -7697,6 +7709,8 @@
             "required": false,
             "schema": {
               "default": 50,
+              "maximum": 500,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -7715,6 +7729,38 @@
                 }
               ],
               "title": "Before Seq"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_seq",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Seq"
+            }
+          },
+          {
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Types"
             }
           }
         ],
@@ -10276,7 +10322,7 @@
     },
     "/api/sessions/{session_id}/typing": {
       "post": {
-        "description": "大厅/游戏：广播'正在输入'（短暂、ephemeral，不入库）。",
+        "description": "大厅/游戏：广播'正在输入'（短暂、ephemeral，不入库）。\n\n带上席位号：前端按席位而不是按名字认人——没选角色的席位都叫「玩家」，按名字比对\n会把别人的输入当成自己的（不显示），或把自己的当成别人的。",
         "operationId": "typing_api_sessions__session_id__typing_post",
         "parameters": [
           {

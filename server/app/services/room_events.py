@@ -143,6 +143,8 @@ class RoomEvent(BaseModel):
     metadata: dict | None = None
     id: str | None = None
     actor_id: str | None = None
+    #: 持久事件的序号（event_logs.sequence_num）：客户端据此记水位线，断线后 after_seq 补漏
+    seq: int | None = None
 
     def as_wire(self) -> dict:
         return self.model_dump(exclude_none=True)

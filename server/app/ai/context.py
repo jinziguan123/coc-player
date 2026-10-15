@@ -740,7 +740,20 @@ def _events_to_messages(
     primary_char_id: str | None = None,
     party_char_ids: set[str] | None = None,
 ) -> list[dict]:
-    """把事件流转成对话消息。
+    """把事件流转成对话消息（见 ``_events_to_messages_indexed``）。"""
+    return _events_to_messages_indexed(events, primary_char_id, party_char_ids)[0]
+
+
+def _events_to_messages_indexed(
+    events: list[EventLog],
+    primary_char_id: str | None = None,
+    party_char_ids: set[str] | None = None,
+) -> tuple[list[dict], list[int]]:
+    """把事件流转成对话消息，并给出每条消息**起始于第几条事件**。
+
+    消息与事件不是一一对应：system/ooc 被跳过，同角色相邻事件会合并成一条。调用方要按
+    「放进全文的消息」反推「剩下哪些事件交给兜底摘要」时，必须用这份起点映射，不能拿
+    消息条数去切事件列表（曾经这样切，摘要会漏掉或重复一截剧情）。
 
     ``party_char_ids`` 是玩家方全部角色（含房主角色与 AI 队友）的 id 集合：他们的发言/
     行动都算 user 侧输入，**不会被误判成 KP 自己的 assistant 输出**。所有玩家角色**一视同仁**，
@@ -751,9 +764,11 @@ def _events_to_messages(
         party.add(primary_char_id)
 
     raw: list[dict] = []
-    for ev in events:
+    origin: list[int] = []
+    for i, ev in enumerate(events):
         if ev.event_type in ("system", "ooc"):
             continue
+        n = len(raw)
         if ev.event_type in ("narration", "dice"):
             raw.append({"role": "assistant", "content": ev.content})
         elif ev.event_type == "dialogue":
@@ -770,8 +785,11 @@ def _events_to_messages(
                 raw.append({"role": "user", "content": f"[{name} 行动] " + ev.content})
             else:
                 raw.append({"role": "user", "content": "[行动] " + ev.content})
+        if len(raw) > n:
+            origin.append(i)
     merged: list[dict] = []
-    for msg in raw:
+    starts: list[int] = []
+    for msg, i in zip(raw, origin):
         if merged and merged[-1]["role"] == msg["role"]:
             merged[-1] = {
                 **merged[-1],
@@ -779,7 +797,8 @@ def _events_to_messages(
             }
         else:
             merged.append(msg)
-    return merged
+            starts.append(i)
+    return merged, starts
 
 
 def _format_party_member(char: Character) -> str:
@@ -1547,7 +1566,7 @@ def _assemble_kp_messages(
         persist_summary = world_memory.story_summary_text(ws)
         recent_pool = [e for e in events if (e.sequence_num or 0) > cursor]
 
-        all_msgs = _events_to_messages(
+        all_msgs, msg_starts = _events_to_messages_indexed(
             recent_pool, primary_char_id=player_char.id, party_char_ids=party_char_ids,
         )
 
@@ -1569,7 +1588,8 @@ def _assemble_kp_messages(
                 remaining -= msg_tokens
 
             if len(recent_msgs) < len(all_msgs):
-                older_events = recent_pool[:len(recent_pool) - len(recent_msgs)]
+                # 第一条放进全文的消息起始于哪条事件，它之前的事件才交给兜底摘要
+                older_events = recent_pool[:msg_starts[len(all_msgs) - len(recent_msgs)]]
                 older_summary = _summarize_old_events(older_events, max_tokens=min(MAX_SUMMARY_TOKENS, max(remaining, 500)))
             else:
                 older_summary = ""
@@ -1963,6 +1983,8 @@ def _summarize_old_events(events: list[EventLog], max_tokens: int = 1500) -> str
     lines: list[str] = []
     token_count = 0
     for ev in reversed(events):
+        if ev.event_type == "ooc":
+            continue  # 场外发言是玩家之间的话，任何路径都不进 KP 上下文
         line = _event_skeleton(ev)
         if not line:
             continue

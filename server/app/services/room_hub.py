@@ -89,7 +89,12 @@ class RoomHub:
     def online_tokens(self, room_id: str) -> set[str]:
         return set(self._presence.get(room_id, {}).keys())
 
-    def broadcast(self, room_id: str, chunk: RoomEvent) -> None:
+    def broadcast(self, room_id: str, chunk: RoomEvent, *, ephemeral: bool = False) -> None:
+        """下发给房间所有订阅者。
+
+        ``ephemeral``：转瞬即逝的提示（如「正在输入」），不进 in-flight buffer——
+        否则生成期间中途接入的人会收到一串早已过期的「某某正在输入」。
+        """
         if not isinstance(chunk, RoomEvent):
             # 曾经踩过：combat_service / chase_service 各自拼 SSE 字符串绕开 make_chunk，
             # 事件类型既不在注册表也不受校验，直到 stream_room 编码时才炸——而且只炸在
@@ -98,7 +103,7 @@ class RoomHub:
                 f"broadcast 只接受 RoomEvent，收到 {type(chunk).__name__}；"
                 "请用 event_protocol.make_chunk 构造事件，不要自己拼 SSE 字符串"
             )
-        buf = self._inflight.get(room_id)
+        buf = None if ephemeral else self._inflight.get(room_id)
         if buf is not None:
             buf.append(chunk)
         for q in self._subs.get(room_id, []):

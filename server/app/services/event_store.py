@@ -45,22 +45,37 @@ def get_session_events(
 
 
 def get_latest_events(
-    db: Session, session_id: str, limit: int = 50, before_seq: int | None = None,
+    db: Session,
+    session_id: str,
+    limit: int = 50,
+    before_seq: int | None = None,
+    after_seq: int | None = None,
+    types: list[str] | None = None,
 ) -> tuple[list[EventLog], bool]:
-    """前端历史/重连分页用的最新事件页（升序返回）。
+    """前端历史/重连分页用的事件页（升序返回）。
+
+    - 缺省：最新的 ``limit`` 条；``before_seq`` 往前翻页。
+    - ``after_seq``：断线补漏——取该序号**之后**最早的 ``limit`` 条，``has_more`` 表示后面还有。
+    - ``types``：只要这几类事件（如大厅聊天只要 ``ooc``），免得取一页剧情再在前端筛。
 
     「仅 KP 可见」事件（visibility 含 kp 哨兵，如幕后推演）在此过滤——本端点面向
     所有玩家，幕后事件永远不下发前端。过滤在取页之后做（幕后事件稀疏），某页可能
     略少于 limit，但 has_more/before_seq 分页语义不受影响。
     """
     q = db.query(EventLog).filter(EventLog.session_id == session_id)
+    if types:
+        q = q.filter(EventLog.event_type.in_(types))
     if before_seq is not None:
         q = q.filter(EventLog.sequence_num < before_seq)
-    q = q.order_by(EventLog.sequence_num.desc())
+    if after_seq is not None:
+        q = q.filter(EventLog.sequence_num > after_seq).order_by(EventLog.sequence_num.asc())
+    else:
+        q = q.order_by(EventLog.sequence_num.desc())
     rows = q.limit(limit + 1).all()
     has_more = len(rows) > limit
     results = [e for e in rows[:limit] if not is_kp_only_event(e)]
-    results.reverse()
+    if after_seq is None:
+        results.reverse()
     return results, has_more
 
 

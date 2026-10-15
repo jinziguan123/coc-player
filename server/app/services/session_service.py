@@ -962,6 +962,20 @@ def resolve_ooc_actor(
     return char.id, char.name
 
 
+def ooc_seat_order(db: Session, session_id: str, token: str | None) -> int | None:
+    """这个 token 坐在哪个真人/KP 席（席位号）；没有归属的旧式本机会话返回 None。"""
+    if not token:
+        return None
+    seat = next(
+        (
+            p for p in get_participants(db, session_id)
+            if p.owner_token == token and p.role in ("human", "kp")
+        ),
+        None,
+    )
+    return seat.seat_order if seat else None
+
+
 def resolve_token_actor(
     db: Session,
     session_id: str,

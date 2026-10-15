@@ -69,6 +69,7 @@ import {
   useKnownLocations, useMyWeapons, usePanelCharacter,
   type KnownLocation,
 } from '@/features/game-session/useSessionResources'
+import { useTypers, useTypingNotifier, type TypingSignal } from '@/features/chat/typing'
 
 
 // 距底多少像素以内算「已经在最新处」。留一点余量：markdown 渲染完成后高度会有零点几像素的
@@ -326,14 +327,14 @@ export function GameSessionPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const openingTriggered = useRef(false)
   const composingRef = useRef(false)
-  const [typingName, setTypingName] = useState('')
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastTypingSent = useRef(0)
-  const myName = myPlayerSeat?.character_name ?? null
+  // 场外身份（排除自己的「正在输入」用）：玩家席优先，真人 KP 用 KP 席
+  const myChatSeat = myPlayerSeat
+    ?? currentSession?.participants?.find((p) => p.is_mine && p.role === 'kp') ?? null
+  const typers = useTypers({ seat: myChatSeat?.seat_order, name: myChatSeat?.character_name })
+  const { onTyping, onSpoke } = typers
+  const notifyTyping = useTypingNotifier(currentSession?.id, true)
   // 房主 = 我认领的席位是 0 号（房主锚点）；仅房主可收编临场角色
   const isHost = myPlayerSeat?.seat_order === 0
-  const myNameRef = useRef<string | null>(null)
-  myNameRef.current = myName
   const [liveConnected, setLiveConnected] = useState(true)
 
   // 入场动效：只对「新到达」的消息播放一次淡入/骰子弹入，历史与重连恢复的整批消息绝不逐条弹入。
@@ -721,14 +722,7 @@ export function GameSessionPage() {
       setEndVote(v && v.open ? v : null)
       return
     }
-    if (t === 'typing') {
-      if (chunk.actor_name && chunk.actor_name !== myNameRef.current) {
-        setTypingName(chunk.actor_name)
-        if (typingTimer.current) clearTimeout(typingTimer.current)
-        typingTimer.current = setTimeout(() => setTypingName(''), 3000)
-      }
-      return
-    }
+    if (t === 'typing') { onTyping(chunk as TypingSignal); return }
     if (t === 'narration') {
       setThinking(false); setTailNote('')  // 有新叙述 token → 不再是"思考中/收尾中"
       // 分头行动按组生成时，narration chunk 带 metadata.group；切换分组要另起一条流式消息，
@@ -754,7 +748,7 @@ export function GameSessionPage() {
     if (t === 'lobby' || t === 'started') return
     // 走到这里说明有 stream/sync 类型没被处理——加了新事件就必须在上面补一支。
     assertAllNonLogHandled(t)
-  }, [refetchSession, resyncHistory, addMessage, removeMessage, updateMessage, patchMessageMetadata, endStream, startStreamMessage, appendToStream, isKp])
+  }, [refetchSession, resyncHistory, addMessage, removeMessage, updateMessage, patchMessageMetadata, endStream, startStreamMessage, appendToStream, isKp, onTyping])
 
   // log 类：进消息流的持久事件。公共前导 = 按 id 去重（与历史/重连对齐）+ 收流。
   const handleLogChunk = useCallback((chunk: ChunkPayload, t: LogEventType) => {
@@ -804,9 +798,13 @@ export function GameSessionPage() {
     // 比长连接上的推送先到（联机走隧道时尤其明显）。那时整批历史已经把
     // maxSeqSeen 抬过了这颗骰子，它就被误判成「历史事件」，动画被跳过、直接出结果。
     if (chunk.id) liveArrivedIds.current.add(chunk.id)
-    if (categoryOf(t) === 'log') { handleLogChunk(chunk, t as LogEventType); return }
+    if (categoryOf(t) === 'log') {
+      onSpoke(chunk.actor_name)   // 说出口了，就不再「正在输入」
+      handleLogChunk(chunk, t as LogEventType)
+      return
+    }
     handleNonLogChunk(chunk, t as NonLogEventType)
-  }, [handleLogChunk, handleNonLogChunk])
+  }, [handleLogChunk, handleNonLogChunk, onSpoke])
 
 
   useEffect(() => {
@@ -1285,6 +1283,7 @@ export function GameSessionPage() {
     if (!input.trim() || !currentSession || streaming) return
     const text = input.trim()
     setInput('')
+    notifyTyping('')
     if (inputRef.current) inputRef.current.style.height = 'auto'
 
     // fire-and-forget：不做本地乐观回显，自己的消息同样经 /live 广播回来渲染，
@@ -2097,9 +2096,9 @@ export function GameSessionPage() {
         {chase && (
           <ChasePanel chase={chase} sessionId={currentSession.id} />
         )}
-        {typingName && (
+        {typers.label && (
           <div className="px-3 pb-1 text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
-            {typingName} 正在输入…
+            {typers.label}
           </div>
         )}
         {aiConfigured === false && currentSession.kp_mode !== 'human' && (
@@ -2222,12 +2221,7 @@ export function GameSessionPage() {
               setInput(e.target.value)
               e.target.style.height = 'auto'
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
-              // 节流上报"正在输入"给同房间其他人
-              const now = Date.now()
-              if (currentSession && e.target.value && now - lastTypingSent.current > 2000) {
-                lastTypingSent.current = now
-                api.post(`/sessions/${currentSession.id}/typing`).catch(() => {})
-              }
+              notifyTyping(e.target.value)   // 节流上报"正在输入"给同房间其他人
             }}
             onCompositionStart={() => { composingRef.current = true }}
             onCompositionEnd={() => { composingRef.current = false }}

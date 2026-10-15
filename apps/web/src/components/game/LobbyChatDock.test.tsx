@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LobbyChatDock, type ChatLine } from './LobbyChatDock'
 
 const line = (i: number): ChatLine => ({ id: String(i), name: '甲', content: `第 ${i} 句` })
-const base = { typingName: '', canSpeak: true, onSend: vi.fn(), onTyping: vi.fn() }
+const base = { typingLabel: '', canSpeak: true, onSend: vi.fn(), onTyping: vi.fn() }
 
 describe('LobbyChatDock', () => {
   beforeEach(() => localStorage.clear())
@@ -36,5 +36,24 @@ describe('LobbyChatDock', () => {
     const { container } = render(<LobbyChatDock {...base} lines={[line(1)]} />)
     expect(container.querySelector('.chat-dock')).not.toBeNull()
     expect(container.querySelector('.chat-dock--overlay')).toBeNull()
+  })
+})
+
+describe('LobbyChatDock 未读', () => {
+  beforeEach(() => localStorage.setItem('trpg.lobbyChat.open', '0'))
+
+  it('收着进房：拉到的历史不算未读，之后新来的才算', () => {
+    const { rerender } = render(<LobbyChatDock {...base} lines={[]} loaded={false} />)
+    rerender(<LobbyChatDock {...base} lines={[line(1), line(2)]} loaded />)
+    expect(screen.getByLabelText('展开大厅聊天')).not.toHaveTextContent(/\d/)
+    rerender(<LobbyChatDock {...base} lines={[line(1), line(2), line(3)]} loaded />)
+    expect(screen.getByLabelText('展开大厅聊天')).toHaveTextContent('1')
+  })
+
+  it('记录封顶后条数不变，未读仍按新消息增长', () => {
+    const window = (from: number) => Array.from({ length: 3 }, (_, i) => line(from + i))
+    const { rerender } = render(<LobbyChatDock {...base} lines={window(1)} />)
+    rerender(<LobbyChatDock {...base} lines={window(3)} />)
+    expect(screen.getByLabelText('展开大厅聊天')).toHaveTextContent('2')
   })
 })

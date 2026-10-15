@@ -1466,7 +1466,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Events */
+        /**
+         * Get Events
+         * @description 事件分页。``after_seq`` 用于断线补漏，``types`` 逗号分隔（如 ``ooc``）。
+         */
         get: operations["get_events_api_sessions__session_id__events_get"];
         put?: never;
         post?: never;
@@ -2402,6 +2405,9 @@ export interface paths {
         /**
          * Typing
          * @description 大厅/游戏：广播'正在输入'（短暂、ephemeral，不入库）。
+         *
+         *     带上席位号：前端按席位而不是按名字认人——没选角色的席位都叫「玩家」，按名字比对
+         *     会把别人的输入当成自己的（不显示），或把自己的当成别人的。
          */
         post: operations["typing_api_sessions__session_id__typing_post"];
         delete?: never;
@@ -4088,6 +4094,8 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             } | null;
+            /** Seq */
+            seq?: number | null;
             /**
              * Type
              * @enum {string}
@@ -7247,6 +7255,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 before_seq?: number | null;
+                after_seq?: number | null;
+                types?: string | null;
             };
             header?: never;
             path: {

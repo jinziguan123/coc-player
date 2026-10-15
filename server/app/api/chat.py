@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -23,10 +23,12 @@ from app.schemas.event import (
     TravelRequest,
 )
 from app.schemas.session import KpActionRequest
-from app.services import human_kp_service, module_service, session_service
+from app.services import human_kp_service, module_service, rate_limit, session_service
 from app.services.event_protocol import (
+    MAX_OOC_CHARS,
     event_to_chunk,
     make_chunk as _make_chunk,
+    ooc_text,
     split_ooc,
     split_speech_action,
 )
@@ -41,6 +43,7 @@ from app.services.turn_orchestrator import (
     run_travel_generation,
 )
 from app.services.generation_manager import generation_manager
+from app.services.rate_limit import limiter
 from app.services.room_hub import room_hub
 
 router = APIRouter(prefix="/api/sessions", tags=["chat"])
@@ -67,7 +70,9 @@ def _continue_human_kp_turn(
 
 
 @router.post("/{session_id}/ooc")
+@limiter.limit(rate_limit.OOC_LIMIT, exempt_when=rate_limit.exempt_local)
 def post_ooc(
+    request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
     session_id: str,
     data: ChatRequest,
     db: Session = Depends(get_db),
@@ -81,8 +86,11 @@ def post_ooc(
         db, session_id, token, data.acting_character_id,
     )
 
-    _, ooc = split_ooc(data.content)
-    text = ooc or data.content.strip()
+    text = ooc_text(data.content)
+    if not text:
+        raise HTTPException(400, "消息不能为空")
+    if len(text) > MAX_OOC_CHARS:
+        raise HTTPException(400, f"消息太长了（上限 {MAX_OOC_CHARS} 字）")
     ev = session_service.add_event(
         db, session_id, "ooc", text,
         actor_id=actor_id, actor_name=actor_name,
@@ -113,11 +121,7 @@ async def chat(
 
     in_character, ooc = split_ooc(data.content)
     if not in_character:
-        ev = session_service.add_event(
-            db, session_id, "ooc", ooc or data.content.strip(),
-            actor_id=player_char.id, actor_name=player_char.name,
-        )
-        room_hub.broadcast(session_id, event_to_chunk(ev))
+        # 只拒绝、不落库：从前这里先存了一条 OOC 再报错，发送方看到失败、别人却已收到
         raise HTTPException(400, "该消息为纯场外发言，请使用 OOC 通道")
 
     # 正式行动：按引号约定把言（dialogue）与行（action）分流，按原文顺序逐条落库。

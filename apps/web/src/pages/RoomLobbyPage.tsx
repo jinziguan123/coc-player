@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useSyncBackOnVisit } from '@/features/characters/useSyncBack'
@@ -7,7 +7,9 @@ import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { CharacterPortrait } from '../components/character/CharacterPortrait'
 import { SeatIcon, seatKind } from '../components/game/SeatIcon'
-import { LobbyChatDock, type ChatLine } from '../components/game/LobbyChatDock'
+import { LobbyChatDock } from '../components/game/LobbyChatDock'
+import { useLobbyChat } from '@/features/chat/lobbyChat'
+import { useTypers, useTypingNotifier } from '@/features/chat/typing'
 import { AiTeammateDialog } from '../components/game/AiTeammateDialog'
 import { QuickCharacterCreateDialog } from '../components/game/QuickCharacterCreateDialog'
 import {
@@ -42,9 +44,6 @@ interface RoomData {
   participants: SessionParticipant[]
 }
 
-/** 大厅聊天最多留这么多条：房间挂一晚上，DOM 不能跟着无限涨。 */
-const MAX_CHAT_LINES = 200
-
 interface CharacterEvaluation {
   compatible: boolean
   warnings: string[]
@@ -52,7 +51,10 @@ interface CharacterEvaluation {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Chunk = { type: string; id?: string; content?: string; actor_name?: string }
+type Chunk = {
+  type: string; id?: string; seq?: number; content?: string; actor_name?: string
+  metadata?: { seat?: number | null } | null
+}
 
 export function RoomLobbyPage() {
   // 补漏：上次可能是异常退出（关窗口/掉线/房主先退），来不及同步。
@@ -72,7 +74,8 @@ export function RoomLobbyPage() {
   const [localChars, setLocalChars] = useState<Character[]>([])
   /** 角色库搜索词：卡多了得能找，而不是滚半天。只在超过 6 张时才露出输入框。 */
   const [charFilter, setCharFilter] = useState('')
-  const [chat, setChat] = useState<ChatLine[]>([])
+  const chat = useLobbyChat(sessionId)
+  const { catchUp, onOoc } = chat
   const [busy, setBusy] = useState(false)
   /** 「快速创建角色卡」对话框：复用角色页的编辑弹窗，从一张空白草稿开始。 */
   const [quickCreateOpen, setQuickCreateOpen] = useState(false)
@@ -91,16 +94,14 @@ export function RoomLobbyPage() {
   const [preview, setPreview] = useState<CharacterPick | null>(null)
   const [evaluation, setEvaluation] = useState<CharacterEvaluation | null>(null)
   const [evaluating, setEvaluating] = useState(false)
-  const [typingName, setTypingName] = useState('')
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastTypingSent = useRef(0)
-  const myNameRef = useRef<string | null>(null)
   const myPlayerSeat = room?.participants.find((p) => p.is_mine && p.role !== 'kp') ?? null
   const myKpSeat = room?.participants.find((p) => p.is_mine && p.role === 'kp') ?? null
   const myChatSeat = room?.participants.find(
     (p) => p.is_mine && (p.role === 'human' || p.role === 'kp'),
   ) ?? null
-  myNameRef.current = myPlayerSeat?.character_name ?? null
+  const typers = useTypers({ seat: myChatSeat?.seat_order, name: myChatSeat?.character_name })
+  const notifyTyping = useTypingNotifier(room?.id, !!myChatSeat)
+  const { onTyping, onSpoke } = typers
 
   const mySeat = myPlayerSeat
   const needsCharacter = !!mySeat && mySeat.role === 'human' && !mySeat.character_id
@@ -171,20 +172,10 @@ export function RoomLobbyPage() {
         if (c.type !== 'presence') void refreshCharPools()
         return
       }
-      if (c.type === 'typing') {
-        if (c.actor_name && c.actor_name !== myNameRef.current) {
-          setTypingName(c.actor_name)
-          if (typingTimer.current) clearTimeout(typingTimer.current)
-          typingTimer.current = setTimeout(() => setTypingName(''), 3000)
-        }
-        return
-      }
-      if (c.type === 'ooc') {
-        setChat((prev) => prev.some((x) => x.id === c.id)
-          ? prev
-          : [...prev, { id: c.id || `${Date.now()}`, name: c.actor_name || '玩家', content: c.content || '' }]
-            .slice(-MAX_CHAT_LINES))
-      }
+      // 每次（重）连上都补一次聊天：先连后拉，开连接与拉历史之间、断线期间的消息都不会漏
+      if (c.type === 'ready') { void catchUp(); return }
+      if (c.type === 'typing') { onTyping(c); return }
+      if (c.type === 'ooc') { onOoc(c); onSpoke(c.actor_name) }
     }
 
     const init = async () => {
@@ -211,12 +202,6 @@ export function RoomLobbyPage() {
       setSeatRange(parsePlayerRange(mod?.world_setting))
       await refreshCharPools()
       if (cancelled) return
-      const ev = await api.get<{ events: { id: string; event_type: string; actor_name: string; content: string }[] }>(`/sessions/${sessionId}/events`)
-      if (cancelled) return
-      setChat(ev.events
-        .filter((e) => e.event_type === 'ooc')
-        .map((e) => ({ id: e.id, name: e.actor_name, content: e.content }))
-        .slice(-MAX_CHAT_LINES))
 
       while (!cancelled) {
         try {
@@ -231,7 +216,7 @@ export function RoomLobbyPage() {
     }
     init().catch(() => navigate('/game', { replace: true }))
     return () => { cancelled = true; ac.abort() }
-  }, [sessionId, navigate, refreshRoom, refreshCharPools])
+  }, [sessionId, navigate, refreshRoom, refreshCharPools, catchUp, onOoc, onTyping, onSpoke])
 
   const claimWithChar = async (charId: string, notify = true): Promise<string | null> => {
     if (!room) return '房间状态尚未加载'
@@ -326,16 +311,6 @@ export function RoomLobbyPage() {
         ...(myChatSeat.character_id ? { acting_character_id: myChatSeat.character_id } : {}),
       })
     } catch (e) { toast.error(e instanceof Error ? e.message : '发送失败') }
-  }
-
-  /** 「正在输入」广播：每 2 秒最多一次，别把敲键盘变成刷接口。 */
-  const notifyTyping = () => {
-    if (!room || !myChatSeat) return
-    const now = Date.now()
-    if (now - lastTypingSent.current > 2000) {
-      lastTypingSent.current = now
-      api.post(`/sessions/${room.id}/typing`).catch(() => {})
-    }
   }
 
   const kick = async (seatOrder: number) => {
@@ -1005,8 +980,9 @@ export function RoomLobbyPage() {
       {/* 聊天是右侧浮层：收起成一颗圆 token，展开是一张悬浮卡。它不占布局宽度、
           也不参与页面高度——「聊得再多也不会把大厅顶长」。 */}
       <LobbyChatDock
-        lines={chat}
-        typingName={typingName}
+        lines={chat.lines}
+        loaded={chat.loaded}
+        typingLabel={typers.label}
         canSpeak={!!myChatSeat}
         onSend={(text) => void sendChat(text)}
         onTyping={notifyTyping}

@@ -37,6 +37,21 @@ def split_ooc(text: str) -> tuple[str, str]:
     return in_character, ooc
 
 
+#: 一条场外发言的长度上限（字）。
+MAX_OOC_CHARS = 500
+
+
+def ooc_text(text: str) -> str:
+    """场外发言要落库的正文。
+
+    整条都包在括号里（游戏内「（等我一下）」的写法）才去掉括号；否则原样保留——
+    大厅里「我带医生（开玩笑）」是一句完整的话，从前一律只留括号里的「开玩笑」。
+    """
+    raw = (text or "").strip()
+    in_character, ooc = split_ooc(raw)
+    return ooc if not in_character and ooc else raw
+
+
 def luck_offer_event_id(dice_event_id: str) -> str:
     """幸运询价卡的稳定 id。
 
@@ -54,6 +69,7 @@ def make_chunk(
     metadata: dict | None = None,
     event_id: str | None = None,
     actor_id: str | None = None,
+    seq: int | None = None,
 ) -> RoomEvent:
     """构造一条房间事件。
 
@@ -68,6 +84,7 @@ def make_chunk(
         metadata=metadata or None,
         id=event_id or None,
         actor_id=actor_id or None,
+        seq=seq,
     )
 
 
@@ -88,4 +105,5 @@ def event_to_chunk(event) -> RoomEvent:
         metadata=event.metadata_ or None,
         event_id=event.id,
         actor_id=event.actor_id,
+        seq=getattr(event, "sequence_num", None),
     )

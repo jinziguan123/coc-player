@@ -6,13 +6,15 @@ export interface ChatLine { id: string; name: string; content: string }
 
 interface Props {
   lines: ChatLine[]
-  /** 谁在输入（自己不算）；空串表示无人。 */
-  typingName: string
+  /** 历史是否已拉到：拉到之前不计未读，免得进房就把历史全算成未读。缺省视为已拉到。 */
+  loaded?: boolean
+  /** 「某某 正在输入…」整句（自己不算）；空串表示无人。 */
+  typingLabel: string
   /** 没入座的人只能看，不能说。 */
   canSpeak: boolean
   onSend: (text: string) => void
-  /** 每次敲键都会调；节流由调用方负责。 */
-  onTyping: () => void
+  /** 每次输入都会调，传入当前全文；节流由调用方负责。 */
+  onTyping: (text: string) => void
   /** 右栏（角色卡预览）开着时往左让一个栏宽，别把人家盖住。 */
   shifted?: boolean
   /** 选人舞台等专注模式：默认收成圆形浮标，点开后以浮层盖在上面（不挤占版面），离开该模式即收起。 */
@@ -20,6 +22,8 @@ interface Props {
 }
 
 const OPEN_KEY = 'trpg.lobbyChat.open'
+/** 与后端 event_protocol.MAX_OOC_CHARS 对齐。 */
+const MAX_OOC_CHARS = 500
 /** 判定「已经贴在底部」的容差：差这点像素也算贴着，否则滚动条的亚像素误差会让自动贴底失效。 */
 const STICK_SLACK = 24
 
@@ -36,7 +40,7 @@ const STICK_SLACK = 24
  * 占掉主栏一整条宽度——大厅真正要办的事（配座位、开局）拿回全部版面。
  */
 export function LobbyChatDock({
-  lines, typingName, canSpeak, onSend, onTyping, shifted, compact,
+  lines, loaded = true, typingLabel, canSpeak, onSend, onTyping, shifted, compact,
 }: Props) {
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== '0')
   /** 专注模式下临时展开（不写进 OPEN_KEY，退出专注模式即收起）。 */
@@ -49,23 +53,29 @@ export function LobbyChatDock({
   /** 用户往上翻历史时不要把他拽回底部——只在原本就贴着底时才自动跟随。 */
   const [pinned, setPinned] = useState(true)
   const logRef = useRef<HTMLDivElement>(null)
-  const seen = useRef(lines.length)
+  /** 最后看过的那条的 id：undefined = 还没定基线，null = 定基线时一条都没有。按 id 而不是条数记，
+   *  记录封顶 200 条后条数不再增长，按条数算未读会永远停在 0。 */
+  const seenId = useRef<string | null | undefined>(undefined)
 
   useEffect(() => { localStorage.setItem(OPEN_KEY, open ? '1' : '0') }, [open])
   useEffect(() => { if (!compact) setPeek(false) }, [compact])
 
-  // 看得见时 seen 一路跟着长度走，未读恒为 0；收起后 seen 冻在那一刻，差值就是未读。
+  // 看得见时基线一路跟到最新一条，未读恒为 0；收起后基线冻在那一刻，之后的条数就是未读。
+  // 历史拉到之前不定基线；拉到那一刻若是收着的，历史本身记为已读。
   useEffect(() => {
-    if (visible) { seen.current = lines.length; setUnread(0) }
-    else setUnread(Math.max(0, lines.length - seen.current))
-  }, [visible, lines.length])
+    if (!loaded) return
+    const lastId = lines.length ? lines[lines.length - 1].id : null
+    if (visible || seenId.current === undefined) { seenId.current = lastId; setUnread(0); return }
+    const idx = seenId.current == null ? -1 : lines.findIndex((l) => l.id === seenId.current)
+    setUnread(idx < 0 ? lines.length : lines.length - 1 - idx)
+  }, [visible, lines, loaded])
 
   // useLayoutEffect：要在浏览器绘制之前贴底，否则新消息会先闪一下再跳。
   useLayoutEffect(() => {
     if (!visible || !pinned) return
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [lines.length, typingName, visible, pinned])
+  }, [lines.length, typingLabel, visible, pinned])
 
   const onScroll = () => {
     const el = logRef.current
@@ -77,6 +87,7 @@ export function LobbyChatDock({
     const text = draft.trim()
     if (!text) return
     setDraft('')
+    onTyping('')   // 让节流器知道输入框清空了，下一句重新算「变长」
     setPinned(true)   // 自己说话必然要看到自己那句
     onSend(text)
   }
@@ -134,12 +145,12 @@ export function LobbyChatDock({
         >回到最新</button>
       )}
 
-      <div className="chat-dock-typing">{typingName ? `${typingName} 正在输入…` : ''}</div>
+      <div className="chat-dock-typing">{typingLabel}</div>
 
       <div className="chat-dock-send">
         <input
           value={draft}
-          onChange={(e) => { setDraft(e.target.value); onTyping() }}
+          onChange={(e) => { setDraft(e.target.value); onTyping(e.target.value) }}
           onKeyDown={(e) => {
             // 输入法合成中（中文选词/确认）的回车不当作发送
             if (e.nativeEvent.isComposing) return
@@ -147,6 +158,7 @@ export function LobbyChatDock({
           }}
           placeholder={canSpeak ? '说点什么…' : '加入房间后可发言'}
           disabled={!canSpeak}
+          maxLength={MAX_OOC_CHARS}
           className="input flex-1 min-w-0 !py-1 text-sm"
         />
         <button onClick={send} disabled={!canSpeak || !draft.trim()} className="btn-primary !px-2.5 !py-1 text-sm">

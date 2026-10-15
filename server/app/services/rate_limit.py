@@ -28,6 +28,12 @@ JOIN_LIMIT = "10/minute"
 # 那需要的是房间级配额，不是按 IP 限速，见 ADR-007 的未决项。
 AI_TRIGGER_LIMIT = "10/minute"
 
+# 场外聊天：正常聊天到不了这个量，只挡刷屏。
+OOC_LIMIT = "30/minute"
+
+# 「正在输入」：前端每 2 秒最多发一次（30/分钟），留点余量。
+TYPING_LIMIT = "40/minute"
+
 
 def _key(request: Request) -> str:
     """计数桶。

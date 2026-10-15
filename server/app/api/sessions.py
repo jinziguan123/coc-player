@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -393,16 +393,24 @@ def assign_seat_character(
 
 
 @router.post("/{session_id}/typing")
+@limiter.limit(rate_limit.TYPING_LIMIT, exempt_when=rate_limit.exempt_local)
 def typing(
+    request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
     session_id: str,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    """大厅/游戏：广播'正在输入'（短暂、ephemeral，不入库）。"""
+    """大厅/游戏：广播'正在输入'（短暂、ephemeral，不入库）。
+
+    带上席位号：前端按席位而不是按名字认人——没选角色的席位都叫「玩家」，按名字比对
+    会把别人的输入当成自己的（不显示），或把自己的当成别人的。
+    """
     _actor_id, actor_name = require_session_ooc_actor(db, session_id, token, None)
+    seat = session_service.ooc_seat_order(db, session_id, token)
     room_hub.broadcast(
         session_id,
-        _make_chunk("typing", actor_name=actor_name),
+        _make_chunk("typing", actor_name=actor_name, metadata={"seat": seat}),
+        ephemeral=True,
     )
     return {"ok": True}
 
@@ -703,14 +711,18 @@ def cancel_end_module_vote(
 @router.get("/{session_id}/events")
 def get_events(
     session_id: str,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=500),
     before_seq: int | None = None,
+    after_seq: int | None = None,
+    types: str | None = None,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
+    """事件分页。``after_seq`` 用于断线补漏，``types`` 逗号分隔（如 ``ooc``）。"""
     require_session_viewer(db, session_id, token)
     events, has_more = session_service.get_latest_events(
-        db, session_id, limit=limit, before_seq=before_seq,
+        db, session_id, limit=limit, before_seq=before_seq, after_seq=after_seq,
+        types=[t.strip() for t in types.split(",") if t.strip()] if types else None,
     )
     return {
         "events": [EventRead.model_validate(e).model_dump() for e in events],
