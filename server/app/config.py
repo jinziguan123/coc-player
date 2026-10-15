@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # 终检/去口癖这类「检查与改写」任务是否先用快模型、不可用再回退叙事模型。
     # 默认开启：快模型槽位通常关思考，这两步能省下每次 20~40s；设为 false 全部走叙事模型。
     checks_use_fast_model: bool = True
+    # KP 上下文的易变档（线索台账、NPC 记忆、幕后动态、摘录、封路……）放在哪：
+    # true = 作为一条「当前局面」快照放到历史尾部（最后一条玩家消息之前），系统提示只剩
+    #        静态+半静态两档，「系统提示 + 剧情摘要 + 历史」成为跨回合稳定的缓存前缀；
+    # false = 旧装配，易变档紧跟在系统提示末尾（排在历史之前，每轮都让整段历史缓存失效）。
+    # 留着开关是为了对比两种摆法的叙事质量，见 app.ai.context._assemble_kp_messages。
+    kp_volatile_tail: bool = True
 
     # extra="ignore"：.env 里的历史遗留变量（如已废弃的 OPENAI_API_KEY）不该让进程起不来。
     # pydantic-settings 默认是 forbid，于是从仓库根启动后端会崩在一句难懂的校验错误上；

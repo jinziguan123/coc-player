@@ -233,11 +233,11 @@ def test_capability_advertised_only_when_there_is_somewhere_to_go(seeded):
     from app.ai import context as ctx
 
     db, module, session, hero = seeded
-    system = ctx.build_kp_context(session, module, hero, [])[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, hero, []))
     assert "TRAVEL_SUGGEST" in system
 
     module.scenes = [SCENES[0]]
-    only_one = ctx.build_kp_context(session, module, hero, [])[0]["content"]
+    only_one = ctx.system_text(ctx.build_kp_context(session, module, hero, []))
     assert "TRAVEL_SUGGEST" not in only_one
 
 
@@ -381,7 +381,7 @@ def test_kp_context_lists_currently_blocked_paths(train):
     turn_effects.set_path_block(
         db, session.id, session, module, "s2", "那东西还堵在车厢里", blocked=True,
     )
-    system = ctx.build_kp_context(session, module, hero, [])[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, hero, []))
     assert "当前封着的路" in system
     assert "2号车厢" in system and "那东西还堵在车厢里" in system
     assert "UNBLOCK_PATH" in system

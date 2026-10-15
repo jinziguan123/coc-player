@@ -8,7 +8,8 @@ import httpx
 
 from app.ai import usage_tracker
 from app.ai.provider import (
-    CACHE_BLOCKS_KEY, LLMProvider, StreamDelta, ToolCall, clean_headers, iter_sse_data_lines,
+    CACHE_BLOCKS_KEY, CACHE_BREAK_KEY, LLMProvider, StreamDelta, ToolCall, clean_headers,
+    iter_sse_data_lines, strip_provider_keys,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,21 @@ def messages_to_anthropic(messages: list[dict]) -> list[dict]:
         else:
             out.append(msg)
     return out
+
+
+def _with_cache_break(msg: dict) -> dict:
+    """在这条消息的末尾打缓存断点（返回副本，不改调用方数据）。
+
+    字符串 content 要先展开成 text 块才能挂 cache_control；带 tool_calls 的 assistant
+    消息由 messages_to_anthropic 另行翻译，这里不碰（历史尾部本就不会是它）。
+    """
+    content = msg.get("content")
+    mark = {"type": "ephemeral", "ttl": "1h"}
+    if isinstance(content, str) and content and not msg.get("tool_calls"):
+        return {**msg, "content": [{"type": "text", "text": content, "cache_control": mark}]}
+    if isinstance(content, list) and content:
+        return {**msg, "content": [*content[:-1], {**content[-1], "cache_control": mark}]}
+    return msg
 
 
 class AnthropicProvider(LLMProvider):
@@ -140,6 +156,9 @@ class AnthropicProvider(LLMProvider):
            打断点：第三块每轮都变，打了也永远不命中。断点上限是每请求 4 个，这里用 2 个。
            块太小（不足模型的最小可缓存前缀）时服务端静默不缓存、也不计缓存写入费，
            因此无需按大小判断要不要打。
+           易变档挪到历史尾部之后（settings.kp_volatile_tail），上下文层会在快照前那条
+           历史消息上挂 CACHE_BREAK_KEY：在那里再打第 3 个断点，整段剧情历史跨回合命中。
+           下一轮新增的消息一般不到 20 个块，落在服务端的回溯窗口内，能找回上一轮的断点。
         """
         system_blocks: list[dict] = []
         rest: list[dict] = []
@@ -152,10 +171,12 @@ class AnthropicProvider(LLMProvider):
                         {"type": "text", "text": b} for b in blocks if b
                     )
                 else:
-                    rest.append({"role": "user", "content": msg.get("content", "")})
+                    rest.append({**msg, "role": "user"})
                 continue
             in_leading_system = False
             rest.append(msg)
+        rest = [_with_cache_break(m) if m.get(CACHE_BREAK_KEY) else m for m in rest]
+        rest = strip_provider_keys(rest)
 
         if not system_blocks:
             return None, rest

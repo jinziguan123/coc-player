@@ -14,8 +14,13 @@ from dataclasses import dataclass, field
 # 否则会作为未知字段发给服务端（OpenAI 兼容端点会 400）。
 CACHE_BLOCKS_KEY = "_cache_blocks"
 
+# 同一契约的另一半：上下文组装方可以在**历史中的某条**消息上挂这个键（值恒为 True），
+# 表示「到这条为止是跨回合稳定的前缀」。需要显式断点的 Provider（Anthropic）在这条消息
+# 末尾打缓存断点；前缀自动缓存的服务端（DeepSeek / OpenAI）用不上，剔除即可。
+CACHE_BREAK_KEY = "_cache_break"
+
 # 仅供 Provider 内部消费、不得出现在请求体里的键（未来新增同类元数据一并加到这里）。
-_PROVIDER_ONLY_KEYS = (CACHE_BLOCKS_KEY,)
+_PROVIDER_ONLY_KEYS = (CACHE_BLOCKS_KEY, CACHE_BREAK_KEY)
 
 
 def strip_provider_keys(messages: list[dict]) -> list[dict]:

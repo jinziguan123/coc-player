@@ -58,12 +58,12 @@ def test_context_advertises_rule_lookup_only_when_enabled(db_factory):
     module, char, session = _seed(db)
     events = session_service.get_session_events(db, session.id)
 
-    on = ctx.build_kp_context(
+    on = ctx.system_text(ctx.build_kp_context(
         session, module, char, events, rules_lookup_enabled=True,
-    )[0]["content"]
-    off = ctx.build_kp_context(
+    ))
+    off = ctx.system_text(ctx.build_kp_context(
         session, module, char, events, rules_lookup_enabled=False,
-    )[0]["content"]
+    ))
 
     assert "[RULE_LOOKUP" in on
     assert "[RULE_LOOKUP" not in off
@@ -372,10 +372,10 @@ def test_kp_context_injects_rule_excerpts_section(db_factory):
     events = session_service.get_session_events(db, session.id)
 
     long_text = "规" * (ctx.RULE_EXCERPT_MAX_CHARS + 100)
-    system = ctx.build_kp_context(
+    system = ctx.system_text(ctx.build_kp_context(
         session, module, char, events,
         rule_excerpts=[{"text": long_text}, {"text": "短条文"}],
-    )[0]["content"]
+    ))
 
     assert "规则要点" in system
     assert "裁定时优先遵此执行" in system
@@ -383,5 +383,5 @@ def test_kp_context_injects_rule_excerpts_section(db_factory):
     assert long_text[:ctx.RULE_EXCERPT_MAX_CHARS] + "…" in system
     assert "短条文" in system
 
-    plain = ctx.build_kp_context(session, module, char, events)[0]["content"]
+    plain = ctx.system_text(ctx.build_kp_context(session, module, char, events))
     assert "规则要点" not in plain

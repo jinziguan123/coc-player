@@ -12,7 +12,13 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ai import turn_planner, turn_validator
 from app.ai.agents import backstage_agent
-from app.ai.context import build_kp_context, build_npc_context, build_team_context
+from app.ai.context import (
+    KP_SNAPSHOT_LABEL,
+    build_kp_context,
+    build_npc_context,
+    build_team_context,
+    system_text,
+)
 from app.models.base import Base
 from app.models.character import Character
 from app.models.event_log import EventLog
@@ -444,13 +450,16 @@ def test_kp_context_gets_backstage_section(db_factory):
     session, module, player, kp_ev = _seed_with_backstage_event(db)
     events = session_service.get_session_events(db, session.id)
     messages = build_kp_context(session, module, player, events)
-    system = messages[0]["content"]
+    system = system_text(messages)
     assert "幕后动态" in system
     assert "把尸体从地窖移到井里" in system
     assert "玩家不可见" in system and "绝不直接复述" in system
     assert "flag_body_moved" in system            # suggest_flags 作为建议给 KP
     # 幕后事件不重复混入对话消息流（system 事件本就不进 _events_to_messages）
-    tail = "\n".join(m["content"] for m in messages[1:])
+    # （「当前局面」快照是挪到尾部的系统提示易变档，不属于对话消息流）
+    tail = "\n".join(
+        m["content"] for m in messages[1:] if not m["content"].startswith(KP_SNAPSHOT_LABEL)
+    )
     assert "地窖" not in tail
 
 
@@ -460,7 +469,7 @@ def test_kp_context_without_backstage_unchanged(db_factory):
     session_service.add_event(db, session.id, "narration", "大厅里烛火摇曳。", actor_name="KP")
     events = session_service.get_session_events(db, session.id)
     messages = build_kp_context(session, module, player, events)
-    assert "幕后动态" not in messages[0]["content"]  # 无幕后事件不注入（向后兼容）
+    assert "幕后动态" not in system_text(messages)  # 无幕后事件不注入（向后兼容）
 
 
 def test_isolation_f_story_summary_excludes_backstage(db_factory):

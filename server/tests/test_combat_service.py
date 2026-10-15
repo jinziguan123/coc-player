@@ -695,7 +695,7 @@ def test_kp_end_combat_clears_state_and_records_manual_summary(db_factory):
 
 def test_combat_result_folds_into_kp_context(db_factory):
     """战斗结果摘要注入主 KP 上下文（只给结论、供续写余波）。"""
-    from app.ai.context import build_kp_context
+    from app.ai.context import build_kp_context, system_text
     db = db_factory()
     sid, hero = _seed(db)
     session = db.get(GameSession, sid)
@@ -707,7 +707,7 @@ def test_combat_result_folds_into_kp_context(db_factory):
     session.world_state = ws
     db.commit()
 
-    sys = build_kp_context(session, module, hero, [])[0]["content"]
+    sys = system_text(build_kp_context(session, module, hero, []))
     assert "刚结束的交战" in sys and "调查员一方获胜" in sys and "打手" in sys
 
 
@@ -718,7 +718,7 @@ def test_active_combat_folds_into_kp_context(db_factory):
     把冲突就地收了尾——「那东西松开手缩回门里，香澄把他拉出来」——而战斗轮还立着，
     下一条就是那只已经缩回去的东西扑上来。叙事与机制当场对撞。
     """
-    from app.ai.context import build_kp_context
+    from app.ai.context import build_kp_context, system_text
     db = db_factory()
     sid, hero = _seed(db)
     session = db.get(GameSession, sid)
@@ -730,19 +730,19 @@ def test_active_combat_folds_into_kp_context(db_factory):
     )
     db.refresh(session)
 
-    sys = build_kp_context(session, module, hero, [])[0]["content"]
+    sys = system_text(build_kp_context(session, module, hero, []))
     assert "战斗进行中" in sys and "不明存在" in sys
     assert "写敌人退走或放弃" in sys and "留在僵持中" in sys
 
 
 def test_no_active_combat_no_injection(db_factory):
     """不在战斗中就不注入（旧行为不变）。"""
-    from app.ai.context import build_kp_context
+    from app.ai.context import build_kp_context, system_text
     db = db_factory()
     sid, hero = _seed(db)
     session = db.get(GameSession, sid)
     module = db.get(Module, session.module_id)
-    assert "战斗进行中" not in build_kp_context(session, module, hero, [])[0]["content"]
+    assert "战斗进行中" not in system_text(build_kp_context(session, module, hero, []))
 
 
 def test_key_npc_uses_agent_decision(db_factory):

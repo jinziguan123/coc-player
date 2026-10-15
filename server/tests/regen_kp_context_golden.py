@@ -11,10 +11,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.config import settings
 from tests._kp_context_corpus import CASES, render
 
 
 def main() -> None:
+    settings.kp_volatile_tail = False   # 快照钉的是旧装配，见 test_kp_context_golden 文档
     snapshot = {name: render(kwargs) for name, kwargs in CASES}
     out = Path(__file__).parent / "fixtures" / "kp_context_golden.json"
     out.parent.mkdir(exist_ok=True)

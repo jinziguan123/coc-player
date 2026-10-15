@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.ai import story_summarizer, turn_planner
-from app.ai.context import build_kp_context, build_npc_context
+from app.ai.context import build_kp_context, build_npc_context, system_text
 from app.models.base import Base
 from app.models.character import Character
 from app.models.event_log import EventLog
@@ -184,7 +184,7 @@ def test_kp_context_contains_clue_ledger_and_npc_memory():
         _mem_session(ws, navigation={"visited_scenes": ["scene_hall"]}),
         _mem_module(), _mem_char(), _one_event(),
     )
-    system = messages[0]["content"]
+    system = system_text(messages)
     assert "线索台账" in system
     assert "书房钥匙" in system and "完全掌握" in system
     assert "亨利" in system                       # discovered_by 的 id 已映射成角色名
@@ -204,7 +204,7 @@ def test_kp_context_empty_ledger_still_lists_visible_clues():
         _mem_session({}, navigation={"visited_scenes": ["scene_hall"]}),
         _mem_module(), _mem_char(), _one_event(),
     )
-    system = messages[0]["content"]
+    system = system_text(messages)
     assert "线索台账" in system
     assert "书房钥匙" in system and "尚未给出" in system
     assert "NPC 记忆" not in system   # NPC 记忆仍是「有才注入」，行为不变
@@ -213,7 +213,7 @@ def test_kp_context_empty_ledger_still_lists_visible_clues():
 def test_kp_context_opening_never_injects_ledger():
     ws = {"clue_ledger": {"clue_key": {"status": "known"}}}
     messages = build_kp_context(_mem_session(ws), _mem_module(), _mem_char(), [])
-    assert "线索台账" not in messages[0]["content"]  # 开场隔离照旧
+    assert "线索台账" not in system_text(messages)  # 开场隔离照旧
 
 
 def test_kp_context_ledger_never_lists_unreached_clues():
@@ -223,10 +223,10 @@ def test_kp_context_ledger_never_lists_unreached_clues():
         {"id": "clue_key", "name": "书房钥匙", "location": "scene_hall"},
         {"id": "clue_far", "name": "地窖账本", "location": "scene_cellar"},
     ]
-    system = build_kp_context(
+    system = system_text(build_kp_context(
         _mem_session({}, navigation={"visited_scenes": ["scene_hall"]}),
         module, _mem_char(), _one_event(),
-    )[0]["content"]
+    ))
     assert "书房钥匙" in system
     assert "地窖账本" not in system      # 玩家还没去过地窖
 
@@ -238,14 +238,14 @@ def test_kp_context_injects_scene_events_progress():
         {"trigger": "阅读村规", "kind": "san_check"},
         {"trigger": "进入最里面的小屋被拖拽", "kind": "dice_check", "skill": "STR"},
     ]}]
-    system = build_kp_context(
+    system = system_text(build_kp_context(
         _mem_session(
             {},
             navigation={"visited_scenes": ["scene_hall"]},
             ledger={"scene_events_seen": {"scene_hall:1": {"seq": 317, "note": ""}}},
         ),
         module, _mem_char(), _one_event(),
-    )[0]["content"]
+    ))
     assert "本场景机制点进度" in system
     assert "- 阅读村规：尚未发生" in system
     assert "- 进入最里面的小屋被拖拽：已发生" in system

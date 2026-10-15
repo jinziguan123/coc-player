@@ -261,7 +261,7 @@ def test_kp_context_without_excerpts_has_no_section(db_factory):
     module, char, session = _seed_session(db)
     events = session_service.get_session_events(db, session.id)
 
-    system = ctx.build_kp_context(session, module, char, events)[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, char, events))
     assert "模组原文摘录" not in system
     assert "[MODULE_LOOKUP" not in system
 
@@ -273,11 +273,11 @@ def test_kp_context_with_excerpts_injects_section_with_warning(db_factory):
 
     # 超过单块上限 → 应被截断到 MODULE_EXCERPT_MAX_CHARS 字（不写死字数，随常量走）
     long_text = "原" * (ctx.MODULE_EXCERPT_MAX_CHARS + 200)
-    system = ctx.build_kp_context(
+    system = ctx.system_text(ctx.build_kp_context(
         session, module, char, events,
         module_excerpts=[{"text": long_text}, {"text": "短摘录"}],
         module_lookup_enabled=True,
-    )[0]["content"]
+    ))
 
     assert "模组原文摘录" in system
     # 泄密警示措辞（设计稿 4.2 的硬性要求）

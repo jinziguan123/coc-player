@@ -11,6 +11,9 @@
 
 **快照怎么更新**：只在**有意**改变装配时更新，且必须说明改了哪几条。
 重新生成：``.venv/bin/python -m tests.regen_kp_context_golden``。
+
+快照钉的是 ``kp_volatile_tail`` **关闭**时的旧装配（易变档紧跟系统提示）；开启时只是把
+易变档挪到历史尾部，由 test_kp_context_tail 断言「除了位置，内容逐字相同」。
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from app.ai.context import build_kp_context
+from app.config import settings
 from tests._kp_context_corpus import CASES, render
 
 GOLDEN = json.loads(
@@ -34,7 +38,8 @@ def _text(kwargs: dict) -> str:
 
 
 @pytest.mark.parametrize("name,kwargs", CASES, ids=[c[0] for c in CASES])
-def test_装配与金标准一致(name, kwargs):
+def test_装配与金标准一致(name, kwargs, monkeypatch):
+    monkeypatch.setattr(settings, "kp_volatile_tail", False)
     assert name in GOLDEN, f"语料新增了用例 {name!r}，请重新生成金标准快照"
     assert render(kwargs) == GOLDEN[name]
 

@@ -208,7 +208,7 @@ def test_kp_context_lists_handouts_without_content(db_factory):
     module, char, session = _seed(db)
     events = session_service.get_session_events(db, session.id)
 
-    system = ctx.build_kp_context(session, module, char, events)[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, char, events))
 
     assert "[HANDOUT" in system
     assert "handout_letter" in system and "父亲的遗书" in system
@@ -224,7 +224,7 @@ def test_kp_context_excludes_issued_handouts(db_factory):
     db.refresh(session)
     events = session_service.get_session_events(db, session.id)
 
-    system = ctx.build_kp_context(session, module, char, events)[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, char, events))
 
     # 已发放的从「可发放清单」消失（清单行格式 id｜类型｜标题｜条件），未发放的仍在；
     # 已发放的经线索台账自然呈现
@@ -239,7 +239,7 @@ def test_kp_context_no_handout_section_when_module_has_none(db_factory):
     module, char, session = _seed(db, handouts=[])
     events = session_service.get_session_events(db, session.id)
 
-    system = ctx.build_kp_context(session, module, char, events)[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, char, events))
 
     assert "[HANDOUT" not in system
     assert "手书发放" not in system
@@ -250,7 +250,7 @@ def test_kp_context_no_handout_section_at_opening(db_factory):
     db = db_factory()
     module, char, session = _seed(db)
 
-    system = ctx.build_kp_context(session, module, char, [])[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, char, []))
 
     assert "[HANDOUT" not in system
 
@@ -265,7 +265,7 @@ def test_kp_context_section_gone_when_all_issued(db_factory):
     db.refresh(session)
     events = session_service.get_session_events(db, session.id)
 
-    system = ctx.build_kp_context(session, module, char, events)[0]["content"]
+    system = ctx.system_text(ctx.build_kp_context(session, module, char, events))
 
     assert "手书发放" not in system  # 全发完 → 小节不再注入（台账仍呈现已发放）
 

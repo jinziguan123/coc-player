@@ -10,7 +10,7 @@ from evals.common import dict_to_model, load_fixture, row_to_dict
 from evals.judge import ADVISORY_RUBRIC, RUBRIC, _parse_judge_output, build_judge_messages
 from evals.run import build_replay_messages
 
-from app.ai.context import build_kp_context
+from app.ai.context import build_kp_context, system_text
 from app.ai.prompts.kp_system import KP_DICE_CONTINUATION_PROMPT
 from app.models import EventLog
 
@@ -549,7 +549,7 @@ class TestImprovisedNpcContainment:
             case.session, case.module, case.player_char, case.events,
             teammates=case.teammates or None,
         )
-        sys_msg = messages[0]["content"]
+        sys_msg = system_text(messages)
         assert "临场角色名单" in sys_msg
         assert "门房老赵" in sys_msg
         assert "带货" in sys_msg or "不携带线索" in sys_msg
@@ -560,7 +560,7 @@ class TestImprovisedNpcContainment:
             case.session, case.module, case.player_char, case.events,
             teammates=case.teammates or None,
         )
-        assert "临场角色名单" not in messages[0]["content"]
+        assert "临场角色名单" not in system_text(messages)
 
     def test_planner_payload_含正典与临场名单(self):
         from app.ai import turn_planner

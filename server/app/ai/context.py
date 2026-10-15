@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 from app.ai import profile_store
-from app.ai.provider import CACHE_BLOCKS_KEY
+from app.ai.provider import CACHE_BLOCKS_KEY, CACHE_BREAK_KEY
+from app.config import settings
 from app.models.character import Character
 from app.models.event_log import EventLog
 from app.models.module import Module
@@ -192,6 +193,24 @@ SYS_TIER_VOLATILE = 2    # 每轮都可能变：摘录、台账、记忆、幕�
 _SYS_TIERS = (SYS_TIER_STATIC, SYS_TIER_SEMI, SYS_TIER_VOLATILE)
 
 # 分块结果挂在 system 消息的 CACHE_BLOCKS_KEY 上（契约定义见 app.ai.provider）。
+#
+# 易变档放在哪由 settings.kp_volatile_tail 决定：
+# · 开（默认）：系统提示只含静态+半静态两档，易变档渲染成一条「当前局面」快照消息，
+#   插在历史尾部（最后一条玩家消息之前）。DeepSeek / OpenAI 的缓存是前缀匹配，易变档
+#   只要还排在历史前面，每轮一变就让其后整段剧情历史全部失效——挪到尾部之后，
+#   「系统提示 + 剧情摘要 + 历史」才是跨回合逐字不变的前缀。
+# · 关：旧装配，易变档作为第三块紧跟系统提示。
+# 两种摆法的超预算丢弃完全相同：_assemble_system 照旧对三档整体算预算、按 priority 丢。
+KP_SNAPSHOT_LABEL = "[当前局面·供 KP 参考]"
+_KP_SNAPSHOT_HEAD = (
+    KP_SNAPSHOT_LABEL + "\n"
+    "以下是截至本轮的最新局面资料（每轮重新生成，与前文历史有出入时以这里为准）。"
+    "它和系统提示一样只给你看：用来裁定与安排剧情，不要向玩家复述其中的幕后信息。\n"
+)
+
+
+def _is_kp_snapshot(msg: dict) -> bool:
+    return msg.get("role") == "system" and (msg.get("content") or "").startswith(KP_SNAPSHOT_LABEL)
 
 
 class _Seg(NamedTuple):
@@ -240,10 +259,11 @@ def _assemble_system(segs: list[_Seg], max_tokens: int) -> tuple[list[str], int]
 
 
 def system_text(messages: list[dict]) -> str:
-    """把**开头连续**的 system 消息拼回完整的系统提示。
+    """把**开头连续**的 system 消息拼回完整的系统提示（含尾部的「当前局面」快照）。
 
-    系统提示按缓存稳定性拆成多条 system 消息，但「系统提示里有没有某段内容」这个问题
-    与拆法无关，调用方（测试、用量估算、provider）一律走这里。
+    系统提示按缓存稳定性拆成多条 system 消息，易变档还可能被挪到历史尾部（见
+    KP_SNAPSHOT_LABEL），但「系统提示里有没有某段内容」这个问题与拆法、摆放位置都无关，
+    调用方（测试、用量估算）一律走这里。
 
     「开头连续」是关键：夹在历史消息之间的 system 消息（滚动摘要、回合边界提示、格式
     提醒、文风纠偏）是**位置敏感**的——它们靠所处位置表达「这段已展示」「接下来该
@@ -254,6 +274,7 @@ def system_text(messages: list[dict]) -> str:
         if m.get("role") != "system":
             break
         out.append(m.get("content") or "")
+    out.extend(m["content"] for m in messages if _is_kp_snapshot(m))
     return "".join(out)
 
 
@@ -1504,11 +1525,15 @@ def _assemble_kp_messages(
     # system blocks 并在稳定块末尾打断点。不认这个键的 provider 直接用 content 即可，
     # 行为与放宽前完全一致。**provider 必须在发请求前剔除该键**（见 _strip_cache_blocks）。
     sys_blocks, system_tokens = _assemble_system(segs, MAX_SYSTEM_TOKENS)
+    # 预算口径不变：system_tokens 仍是三档之和，挪到尾部的快照照样占事件区的预算。
+    volatile_tail = settings.kp_volatile_tail
+    head_blocks = sys_blocks[:2] if volatile_tail else sys_blocks
     messages = [{
         "role": "system",
-        "content": "".join(sys_blocks),
-        CACHE_BLOCKS_KEY: [b for b in sys_blocks if b],
+        "content": "".join(head_blocks),
+        CACHE_BLOCKS_KEY: [b for b in head_blocks if b],
     }]
+    snapshot = sys_blocks[2] if volatile_tail else ""
 
     if not events:
         ws = module.world_setting or {}
@@ -1550,6 +1575,7 @@ def _assemble_kp_messages(
                 + "\n（除此之外，玩家此刻一无所知；不要把这段之外的任何信息当成玩家已知。）"
             )
         messages.append({"role": "user", "content": opening})
+        _insert_kp_snapshot(messages, snapshot)
     else:
         # 组装预算：调用方显式传入优先；否则按当前激活模型窗口自适应（≤64K 回落下限）。
         # 再乘以本会话的在线校准系数——启发式估算相对真实 BPE 有系统性偏差，不校准就等于
@@ -1601,6 +1627,8 @@ def _assemble_kp_messages(
                 "content": "[之前发生的剧情摘要]\n" + summary,
             })
         messages.extend(recent_msgs)
+        # 先插快照再插回合交接：交接提示要紧贴玩家消息，快照排在它们前面。
+        _insert_kp_snapshot(messages, snapshot)
         # 事件正文可以因滚动摘要被裁剪，但回合边界必须从完整事件流计算，不能把上一轮输入
         # 误判成“本轮已展示”或反过来漏掉当前回合的玩家消息。
         handoff = _format_turn_handoff(events, party_char_ids)
@@ -1616,7 +1644,8 @@ def _assemble_kp_messages(
         # 工具要求台词走 say()，它要求台词写进旁白。模型照着写一次，那条旁白就作为 assistant
         # 消息回灌进下一轮，自我模仿把违规率越滚越高（闇暗山存档实测：前期 say 17:漏 8，
         # 后期反转成 6:11）。故只保留「不许省略台词」，出口一律指回 say()/[SAY]。
-        if len(messages) >= 3 and messages[-1]["role"] == "user":
+        # 快照不算历史：有没有它都不该改变「历史够不够长、要不要提醒」的判断。
+        if len(messages) - bool(snapshot) >= 3 and messages[-1]["role"] == "user":
             messages.insert(-1, {
                 "role": "system",
                 "content": (
@@ -1701,6 +1730,21 @@ def _assemble_kp_messages(
             })
 
     return messages
+
+
+def _insert_kp_snapshot(messages: list[dict], snapshot: str) -> None:
+    """把易变档快照插到历史尾部，并在它前面那条历史消息上标出稳定前缀的终点。
+
+    位置规则与回合交接提示相同：末尾是玩家消息就插在它之前（玩家的话留在最后，最贴近
+    生成点），否则追加到末尾。快照之前的部分跨回合逐字不变（新一轮只会在后面追加消息），
+    故在其前一条打 CACHE_BREAK_KEY；那一条若就是开头的系统提示，系统块自己已有断点，不重复标。
+    """
+    if not snapshot:
+        return
+    pos = len(messages) - 1 if messages[-1]["role"] == "user" else len(messages)
+    if pos > 1:
+        messages[pos - 1] = {**messages[pos - 1], CACHE_BREAK_KEY: True}
+    messages.insert(pos, {"role": "system", "content": _KP_SNAPSHOT_HEAD + snapshot})
 
 
 def build_kp_context(

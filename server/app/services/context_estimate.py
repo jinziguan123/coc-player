@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import profile_store
 from app.ai.context import (
+    KP_SNAPSHOT_LABEL,
     RESERVE_FOR_OUTPUT,
     _estimate_tokens,
     budget_scale,
@@ -82,7 +83,8 @@ def estimate_session_context(db: Session, session_id: str) -> dict | None:
         toks = _estimate_tokens(m.get("content") or "")
         role = m.get("role")
         content = m.get("content") or ""
-        if i == 0 and role == "system":
+        # 挪到历史尾部的「当前局面」快照本质是系统提示的易变档，仍算进 system。
+        if (i == 0 or content.startswith(KP_SNAPSHOT_LABEL)) and role == "system":
             system_tokens += toks
         elif role == "system" and content.startswith(_SUMMARY_PREFIX):
             summary_tokens += toks

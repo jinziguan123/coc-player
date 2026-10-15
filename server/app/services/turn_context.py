@@ -777,6 +777,23 @@ def _record_rag(
         db.rollback()
 
 
+def _cache_usage(u: dict) -> dict:
+    """把各家 usage 里的缓存读写量归一成 ``cache_read_tokens`` / ``cache_write_tokens``。
+
+    · Anthropic（provider 已归一）：cache_read_input_tokens / cache_creation_input_tokens；
+    · DeepSeek：prompt_cache_hit_tokens / prompt_cache_miss_tokens——未命中部分会被服务端
+      落盘缓存，供下一轮复用，语义上就是「写入」；
+    · OpenAI：prompt_tokens_details.cached_tokens，不报写入量。
+    """
+    details = u.get("prompt_tokens_details") or {}
+    read = (
+        u.get("cache_read_input_tokens") or u.get("prompt_cache_hit_tokens")
+        or (details.get("cached_tokens") if isinstance(details, dict) else 0) or 0
+    )
+    write = u.get("cache_creation_input_tokens") or u.get("prompt_cache_miss_tokens") or 0
+    return {"cache_read_tokens": read, "cache_write_tokens": write}
+
+
 def _record_turn_usage(
     db: Session, game_session: GameSession, llm, events: list,
     messages: list[dict] | None = None,
@@ -803,10 +820,14 @@ def _record_turn_usage(
             # prompt caching 读写量（无缓存能力的 Provider 恒为 0）。带上它，前端的
             # 「上下文占用」才能显示命中率——命中率长期为 0 就说明提示词前缀里混进了
             # 每轮都变的内容，那是要去 app.ai.context 的分段装配里查的。
-            "cache_read_tokens": u.get("cache_read_input_tokens") or 0,
-            "cache_write_tokens": u.get("cache_creation_input_tokens") or 0,
+            **_cache_usage(u),
             "at_seq": (events[-1].sequence_num if events else 0) or 0,
         }
+        # 每轮一行，便于事后按日志对比命中率（turn_usage 只留最近一轮）。
+        logger.info(
+            "缓存|会话 %s seq=%s 输入 %s 命中 %s 写入 %s",
+            game_session.id, tu["at_seq"], pt, tu["cache_read_tokens"], tu["cache_write_tokens"],
+        )
         if messages:
             from app.ai.context import _estimate_tokens, update_budget_scale
             estimated = sum(_estimate_tokens(m.get("content") or "") for m in messages)
