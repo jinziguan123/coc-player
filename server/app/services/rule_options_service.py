@@ -18,6 +18,7 @@ from app.models.module import Module
 from app.models.rulebook import RuleSystemOptions
 from app.models.session import GameSession
 from app.rules import Ruleset, get_system, house_rules
+from app.rules import data as rule_data
 
 DEFAULT_RULE_SYSTEM = "coc"
 
@@ -60,22 +61,124 @@ def table_notes(db: Session, rule_system: str) -> str:
     return (row.table_notes or "").strip()
 
 
-def save_village_options(
-    db: Session, rule_system: str, raw: dict | None, notes: str | None = None,
-    enabled: bool | None = None,
-) -> tuple[dict, str]:
-    """整份替换某套规则系统的村规与桌面约定，返回落库后的 (差异项, 约定原文)。
+def village_data(db: Session, rule_system: str) -> dict:
+    """某套规则系统的村规数据补丁（表名 → 补丁行）；没配过或总开关关着则空。"""
+    row = village_row(db, rule_system)
+    if row is None or not row.enabled:
+        return {}
+    return dict(row.data_patches or {})
 
-    ``notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）；
-    ``enabled=None`` 同理不动总开关。落库的始终是**配置本身**——关掉开关不清空它们，
-    只是读的时候当作没配过。
+
+class RuleDataError(ValueError):
+    """数据表补丁校验失败；``errors`` 是逐行的可读原因。"""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("；".join(errors[:5]) + (f"……等 {len(errors)} 处" if len(errors) > 5 else ""))
+        self.errors = errors
+
+
+def validated_data(rule_system: str, data: dict | None) -> dict:
+    """严格校验一份数据补丁（表名 → 补丁行），返回规范化后的补丁；有错抛 :class:`RuleDataError`。
+
+    补丁一律相对**官方数据**（村规与模组两层各自独立编辑，不互为基准）。
     """
+    system = get_system(rule_system)
+    out: dict = {}
+    errors: list[str] = []
+    for name, patches in (data or {}).items():
+        try:
+            table = system.data_table(name)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        norm, errs = rule_data.validate_patch(table, table.official_rows, patches)
+        errors += errs
+        if norm:
+            out[name] = norm
+    if errors:
+        raise RuleDataError(errors)
+    return out
+
+
+def table_patch_from_rows(rule_system: str, table_name: str, rows: list) -> list[dict]:
+    """编辑器提交的整张表 → 相对官方数据的最小补丁；有错抛 :class:`RuleDataError`。"""
+    table = get_system(rule_system).data_table(table_name)
+    norm, errors = rule_data.normalize_desired(table, rows)
+    if errors:
+        raise RuleDataError(errors)
+    return rule_data.diff_rows(table, table.official_rows, norm)
+
+
+def table_view(rule_system: str, table_name: str, patches: list | None) -> dict:
+    """编辑器读一层补丁：合并后的行、每行状态、被删掉的官方行。"""
+    table = get_system(rule_system).data_table(table_name)
+    return rule_data.layer_view(table, table.official_rows, patches)
+
+
+def save_village_table(db: Session, rule_system: str, table_name: str, rows: list) -> list[dict]:
+    """整张表替换村规里这张表的补丁（编辑器保存）。返回落库的补丁。"""
+    patch = table_patch_from_rows(rule_system, table_name, rows)
+    row = _village_row_for_write(db, rule_system)
+    data = dict(row.data_patches or {})
+    if patch:
+        data[table_name] = patch
+    else:
+        data.pop(table_name, None)
+    row.data_patches = data
+    db.commit()
+    return patch
+
+
+def save_module_table(db: Session, module: Module, table_name: str, rows: list) -> list[dict]:
+    """整张表替换模组自带的这张表的补丁。返回落库的补丁。"""
+    patch = table_patch_from_rows(module.rule_system or DEFAULT_RULE_SYSTEM, table_name, rows)
+    data = dict(module.default_rule_data or {})
+    if patch:
+        data[table_name] = patch
+    else:
+        data.pop(table_name, None)
+    module.default_rule_data = data
+    db.commit()
+    return patch
+
+
+def data_labels(rule_system: str, data: dict | None) -> list[str]:
+    """数据补丁的摘要标签，如「武器表：新增 2、修改 1」。"""
+    system = get_system(rule_system)
+    out: list[str] = []
+    for table in system.data_tables:
+        text = rule_data.summarize(table, table.official_rows, (data or {}).get(table.name))
+        if text:
+            out.append(text)
+    return out
+
+
+def _village_row_for_write(db: Session, rule_system: str) -> RuleSystemOptions:
     rule_system = (rule_system or DEFAULT_RULE_SYSTEM).strip()
     row = db.get(RuleSystemOptions, rule_system)
     if row is None:
         row = RuleSystemOptions(rule_system=rule_system)
         db.add(row)
+    return row
+
+
+def save_village_options(
+    db: Session, rule_system: str, raw: dict | None, notes: str | None = None,
+    enabled: bool | None = None, data: dict | None = None,
+) -> tuple[dict, str]:
+    """整份替换某套规则系统的村规与桌面约定，返回落库后的 (差异项, 约定原文)。
+
+    ``notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）；
+    ``enabled=None`` 同理不动总开关；``data=None`` 不动数据表补丁（给了就整份替换，
+    先严格校验，有错抛 :class:`RuleDataError` 且什么都不改）。落库的始终是**配置本身**——
+    关掉开关不清空它们，只是读的时候当作没配过。
+    """
+    rule_system = (rule_system or DEFAULT_RULE_SYSTEM).strip()
+    checked = validated_data(rule_system, data) if data is not None else None
+    row = _village_row_for_write(db, rule_system)
     row.options = normalized(raw, rule_system)
+    if checked is not None:
+        row.data_patches = checked
     if notes is not None:
         row.table_notes = (notes or "").strip()[:TABLE_NOTES_MAX]
     if enabled is not None:
@@ -110,12 +213,34 @@ def rule_system_of(db: Session, game_session: GameSession | None) -> str:
     return getattr(module, "rule_system", None) or DEFAULT_RULE_SYSTEM
 
 
+def data_layers(db: Session, game_session: GameSession | None) -> list[dict]:
+    """本局的数据补丁层，自底向上：模组自带 → 村规。"""
+    if game_session is None:
+        return []
+    module = db.get(Module, game_session.module_id) if game_session.module_id else None
+    rule_system = getattr(module, "rule_system", None) or DEFAULT_RULE_SYSTEM
+    return [getattr(module, "default_rule_data", None) or {}, village_data(db, rule_system)]
+
+
 def ruleset(db: Session, game_session: GameSession | None) -> Ruleset:
-    """本局的生效规则：业务层结算的唯一入口（``rs.<槽位>.<导出>``，村规已注入）。
+    """本局的生效规则：业务层结算的唯一入口（``rs.<槽位>.<导出>``，村规与数据表已注入）。
 
     没有会话（或会话没挂模组）时返回默认规则系统的 RAW。
     """
-    return get_system(rule_system_of(db, game_session)).ruleset(effective(db, game_session))
+    return get_system(rule_system_of(db, game_session)).ruleset(
+        effective(db, game_session), data_layers(db, game_session),
+    )
+
+
+def village_ruleset(db: Session, rule_system: str, module: Module | None = None) -> Ruleset:
+    """不在某一局里时（建卡、规则资料接口）的生效规则：村规（参数 + 数据），可叠上某个模组。"""
+    rule_system = (rule_system or DEFAULT_RULE_SYSTEM).strip()
+    system = get_system(rule_system)
+    options = system.merge_options(
+        getattr(module, "default_rule_options", None), village_options(db, rule_system),
+    )
+    layers = [getattr(module, "default_rule_data", None) or {}, village_data(db, rule_system)]
+    return system.ruleset(options, layers)
 
 
 def ruleset_by_id(db: Session, session_id: str) -> Ruleset:
@@ -141,15 +266,19 @@ def village_labels(db: Session, rule_system: str) -> list[str]:
     """存着的村规（不看总开关）与规则原文不同之处的短标签，供规矩摘要显示。"""
     row = village_row(db, rule_system)
     system = get_system(rule_system)
-    return system.option_labels(system.parse_options(dict((row.options if row else None) or {})))
+    labels = system.option_labels(system.parse_options(dict((row.options if row else None) or {})))
+    return labels + data_labels(rule_system, (row.data_patches if row else None) or {})
 
 
 def export_house_rules(db: Session, rule_system: str) -> str:
-    """把这一桌存着的村规与桌面约定导出成房规文件（YAML）。不看总开关：导出的是配置本身。"""
+    """把这一桌存着的村规、数据表改动与桌面约定导出成房规文件（YAML）。不看总开关：导出的是配置本身。"""
     row = village_row(db, rule_system)
     system = get_system(rule_system)
     diff = system.parse_options(dict((row.options if row else None) or {})).diff_from_default()
-    return house_rules.export_text(system, diff, (row.table_notes if row else "") or "")
+    return house_rules.export_text(
+        system, diff, (row.table_notes if row else "") or "",
+        data=(row.data_patches if row else None) or {},
+    )
 
 
 def preview_house_rules(rule_system: str, text: str) -> tuple[house_rules.HouseRulesPreview, list[str]]:
@@ -160,7 +289,10 @@ def preview_house_rules(rule_system: str, text: str) -> tuple[house_rules.HouseR
     """
     system = get_system(rule_system)
     preview = house_rules.parse_text(system, text, notes_max=TABLE_NOTES_MAX)
-    labels = system.option_labels(system.parse_options(preview.options)) if preview.ok else []
+    labels = (
+        system.option_labels(system.parse_options(preview.options))
+        + data_labels(rule_system, preview.data)
+    ) if preview.ok else []
     return preview, labels
 
 

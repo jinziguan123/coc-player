@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 
 export interface SpecItem { name: string; init: number }
@@ -55,31 +55,81 @@ export function normalizeWeapon(w: Record<string, unknown>): CharWeapon {
   }
 }
 
-let _specCache: Specializations | null = null
-let _weaponCache: WeaponData | null = null
+// 规则资料按「这一桌的村规 + 当前模组自带的数据」取：房主或模组作者可以改武器、专精表。
+// 建卡/编辑卡片时由页面用 RuleModuleContext 声明当前模组；没声明就只看村规。
 
-/** 专精类别（母语/外语/格斗/射击/科学/生存/技艺/驾驶），进程内缓存。 */
-export function useSpecializations() {
-  const [data, setData] = useState<Specializations | null>(_specCache)
+/** 当前建卡/编卡所属的模组（决定是否叠上模组自带的数据表）。 */
+export const RuleModuleContext = createContext<string | null>(null)
+
+/** 规则资料接口的查询串：带上模组时叠加模组自带的数据。 */
+export function ruleQuery(moduleId?: string | null): string {
+  return moduleId ? `?module_id=${encodeURIComponent(moduleId)}` : ''
+}
+
+// 进程内缓存，按模组分开；数据表编辑器保存后清空（见 invalidateRuleDataCache）。
+const _specCache = new Map<string, Specializations>()
+const _weaponCache = new Map<string, WeaponData>()
+
+/** 数据表改动后调用：下次取专精/武器表时重新拉取。 */
+export function invalidateRuleDataCache(): void {
+  _specCache.clear()
+  _weaponCache.clear()
+}
+
+/** 专精类别（母语/外语/格斗/射击/科学/生存/技艺/驾驶），按模组缓存。
+ *  ``module`` 不传则取上层 RuleModuleContext 声明的模组。 */
+export function useSpecializations(module?: string | null) {
+  const ctx = useContext(RuleModuleContext)
+  const moduleId = module !== undefined ? module : ctx
+  const key = moduleId ?? ''
+  const [data, setData] = useState<Specializations | null>(_specCache.get(key) ?? null)
   useEffect(() => {
-    if (_specCache) return
-    api.get<Specializations>('/rules/coc/specializations')
-      .then((d) => { _specCache = d; setData(d) })
+    const hit = _specCache.get(key)
+    if (hit) { setData(hit); return }
+    api.get<Specializations>(`/rules/coc/specializations${ruleQuery(moduleId)}`)
+      .then((d) => { _specCache.set(key, d); setData(d) })
       .catch(() => setData({ categories: {}, single: [] }))
-  }, [])
+  }, [key, moduleId])
   return data
 }
 
-/** CoC 武器表 + 大类顺序，进程内缓存。 */
-export function useWeapons() {
-  const [data, setData] = useState<WeaponData | null>(_weaponCache)
+/** 武器表 + 大类顺序（这一桌的村规 + 当前模组），按模组缓存。
+ *  ``module`` 不传则取上层 RuleModuleContext 声明的模组。 */
+export function useWeapons(module?: string | null) {
+  const ctx = useContext(RuleModuleContext)
+  const moduleId = module !== undefined ? module : ctx
+  const key = moduleId ?? ''
+  const [data, setData] = useState<WeaponData | null>(_weaponCache.get(key) ?? null)
   useEffect(() => {
-    if (_weaponCache) return
-    api.get<WeaponData>('/rules/coc/weapons')
-      .then((d) => { _weaponCache = d; setData(d) })
+    const hit = _weaponCache.get(key)
+    if (hit) { setData(hit); return }
+    api.get<WeaponData>(`/rules/coc/weapons${ruleQuery(moduleId)}`)
+      .then((d) => { _weaponCache.set(key, d); setData(d) })
       .catch(() => setData({ weapons: [], categories: [] }))
-  }, [])
+  }, [key, moduleId])
   return data
+}
+
+export interface OccupationDef {
+  name: string
+  credit_min: number
+  credit_max: number
+  skill_formula: string
+  skills: string[]
+  choices: number
+  category?: string
+}
+
+/** 职业表与大类顺序（这一桌的村规 + 当前模组）。模组一换就重取：模组可以带专属职业。 */
+export function useOccupations(moduleId: string | null) {
+  const [occupations, setOccupations] = useState<OccupationDef[]>([])
+  const [categories, setCategories] = useState<string[]>([])
+  useEffect(() => {
+    const q = ruleQuery(moduleId)
+    api.get<OccupationDef[]>(`/rules/coc/occupations${q}`).then(setOccupations).catch(() => {})
+    api.get<string[]>(`/rules/coc/occupation-categories${q}`).then(setCategories).catch(() => {})
+  }, [moduleId])
+  return { occupations, categories }
 }
 
 // ---- 资产：按信用评级换算现金/消费水平/资产（CoC 7 版标准表，1920s 美元） ----

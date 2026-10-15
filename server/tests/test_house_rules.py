@@ -111,7 +111,7 @@ def test_export_then_import_roundtrip():
     text = house_rules.export_text(COC, {"critical_max": 5, "luck_spend": True}, "重调查轻战斗")
     assert text.startswith("# CoC Player 房规文件")
     doc = yaml.safe_load(text)
-    assert doc["format_version"] == 1 and doc["base_preset"] == "coc@1"
+    assert doc["format_version"] == 2 and doc["base_preset"] == "coc@1"
     p = _preview(text)
     assert p.ok and p.warnings == []
     assert p.options == {"critical_max": 5, "luck_spend": True}
@@ -178,7 +178,7 @@ def client(tmp_path):
 def test_api_manifest(client):
     r = client.get("/api/rulebooks/village-rules/coc/manifest")
     assert r.status_code == 200
-    assert r.json()["house_rules_format_version"] == 1
+    assert r.json()["house_rules_format_version"] == 2
     assert client.get("/api/rulebooks/village-rules/dnd/manifest").status_code == 404
 
 

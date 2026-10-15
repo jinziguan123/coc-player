@@ -10,7 +10,7 @@ import { NumberField } from '@/components/ui/number-field'
 import { dossierNo } from '@/features/characters/dossier'
 import { SpecializationDialog } from './SpecializationDialog'
 import { WeaponsEditor } from './WeaponsEditor'
-import { useSpecializations, normalizeWeapon, type CharWeapon } from './useCocData'
+import { useSpecializations, normalizeWeapon, RuleModuleContext, type CharWeapon } from './useCocData'
 import type { CharacterExperience } from '@/features/characters/api'
 import {
   AssetsPanel, MythosEditor, RelationsEditor, ModuleHistoryEditor,
@@ -31,6 +31,8 @@ interface CharacterData {
   avatar_url?: string | null
   /** 系统自动归档的模组经历，只读。 */
   experiences?: CharacterExperience[]
+  /** 角色所属模组：规则资料（武器、专精）叠上该模组自带的数据 */
+  module_id?: string | null
 }
 
 const ATTR_KEYS = ['STR', 'CON', 'SIZ', 'DEX', 'APP', 'INT', 'POW', 'EDU'] as const
@@ -121,7 +123,7 @@ export function CharacterEditModal({
   saveWith?: (characterId: string, payload: Record<string, unknown>) => Promise<CharacterData>
 }) {
   const sd = character.system_data || {}
-  const spec = useSpecializations()
+  const spec = useSpecializations(character.module_id ?? null)
   const [name, setName] = useState(character.name)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(character.avatar_url ?? null)
   // 自动归档的经历：最近的排前面，与角色卡「档案」页同序
@@ -235,6 +237,7 @@ export function CharacterEditModal({
   }
 
   return (
+    <RuleModuleContext.Provider value={character.module_id ?? null}>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!max-w-4xl !h-[88vh] flex flex-col overflow-hidden">
         <DialogHeader>
@@ -497,5 +500,6 @@ export function CharacterEditModal({
         />
       )}
     </Dialog>
+    </RuleModuleContext.Provider>
   )
 }

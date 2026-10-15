@@ -5,6 +5,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+
+from app.rules.config import RuleConfig, table_of
+from app.rules.data import DataTable, frozen_mapping
 from app.rules.dice import roll
 from app.rules.kernel import Component, Provide
 
@@ -23,20 +30,30 @@ ATTRIBUTE_ROLLS = {
 # 2d6+6 的属性列表
 PLUS_SIX_ATTRS = {"SIZ", "INT", "EDU"}
 
-COC_DEFAULT_SKILLS: dict[str, int] = {
-    "会计": 5, "人类学": 1, "估价": 5, "考古学": 1, "取悦": 15,
-    "攀爬": 20, "计算机使用": 5, "信用评级": 0, "克苏鲁神话": 0,
-    "乔装": 5, "闪避": 0, "驾驶": 20, "汽车驾驶": 20, "电气维修": 10, "电子学": 1,
-    "话术": 5, "格斗(斗殴)": 25, "射击(手枪)": 20, "射击(步枪)": 25,
-    "急救": 30, "历史": 5, "恐吓": 15, "跳跃": 20, "母语": 0,
-    "法律": 5, "图书馆使用": 20, "聆听": 20, "锁匠": 1, "机械维修": 10,
-    "医学": 1, "博物学": 10, "导航": 10, "神秘学": 5, "操作重型机械": 1,
-    "说服": 10, "摄影": 5, "精神分析": 1, "心理学": 10, "骑术": 5,
-    "科学": 1, "妙手": 10, "侦查": 25, "潜行": 20, "游泳": 20, "潜水": 1,
-    "投掷": 20, "追踪": 10, "驯兽": 5,
-    # 专精占位（运行时可经专精弹窗细化为「外语(法语)」等）
-    "外语": 1, "生存": 5, "技艺": 5,
-}
+# ── 技能表（数据表 skills；官方数据见 data/skills.yaml）────────────────────
+
+
+class SkillRow(BaseModel):
+    """技能表的一行：技能名与起始值。母语与闪避由属性派生，表里的 0 只是占位。"""
+
+    name: str = Field(min_length=1, title="技能")
+    base: int = Field(0, ge=0, le=99, title="起始值")
+
+
+SKILLS = DataTable(
+    name="skills", title="技能表", row_model=SkillRow, key="name",
+    source=Path(__file__).parent / "data" / "skills.yaml",
+    description="技能起始值：建卡、检定（角色卡上没有这项技能时按起始值算）共用",
+    build=lambda rows: frozen_mapping(rows, "name", "base"),
+)
+
+#: 官方技能表（技能名 → 起始值，只读）。结算请经 :func:`default_skills` 取本局的表。
+COC_DEFAULT_SKILLS = SKILLS.official
+
+
+def default_skills(options: RuleConfig | None = None) -> Mapping[str, int]:
+    """本局的技能表（官方 + 模组 + 村规补丁）。"""
+    return table_of(options, "skills", COC_DEFAULT_SKILLS)
 
 
 def roll_attributes() -> dict[str, int]:
@@ -299,9 +316,9 @@ def apply_attr_derived_skills(
     return skills
 
 
-def build_default_skills(attrs: dict[str, int]) -> dict[str, int]:
-    """基于属性构建默认技能列表（全部基础技能 + 母语/闪避派生值）"""
-    return apply_attr_derived_skills(dict(COC_DEFAULT_SKILLS), attrs)
+def build_default_skills(attrs: dict[str, int], options: RuleConfig | None = None) -> dict[str, int]:
+    """基于属性构建默认技能列表（本局技能表的全部技能 + 母语/闪避派生值）"""
+    return apply_attr_derived_skills(dict(default_skills(options)), attrs)
 
 
 # ── 建卡入口（原 CoCRuleEngine）────────────────────────────────────────
@@ -318,7 +335,7 @@ ATTRIBUTE_SCHEMA = [
 ]
 
 
-def get_character_schema() -> dict:
+def get_character_schema(options: RuleConfig | None = None) -> dict:
     """角色卡字段定义。注意：母语/闪避在 default_skills 里是占位的 0——它们由属性派生，
     静态表填不了真值；要拿「这组属性下的真实起始值」请走 :func:`base_skills`。"""
     return {
@@ -326,21 +343,21 @@ def get_character_schema() -> dict:
         "attributes": ATTRIBUTE_SCHEMA,
         "derived": ["HP", "MP", "SAN", "MOV", "伤害加值", "体格", "幸运"],
         "system_specific_fields": ["sanity", "luck", "age", "occupation"],
-        "default_skills": COC_DEFAULT_SKILLS,
+        "default_skills": dict(default_skills(options)),
     }
 
 
-def base_skills(attrs: dict[str, int]) -> dict[str, int]:
+def base_skills(attrs: dict[str, int], options: RuleConfig | None = None) -> dict[str, int]:
     """这组属性下、**未加任何点**时的技能起始值：静态表 + 母语(=EDU)、闪避(=DEX//2)。
 
     建卡界面必须拿这一份而不是 schema 里的 default_skills：后者的母语/闪避是占位的 0，
     界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的
     ``max(提交值, 派生值)`` 顶掉，凭空蒸发。
     """
-    return build_default_skills(attrs)
+    return build_default_skills(attrs, options)
 
 
-def create_character(data: dict) -> dict:
+def create_character(data: dict, options: RuleConfig | None = None) -> dict:
     """根据输入创建角色，自动计算派生属性。"""
     attrs = data.get("base_attributes", {})
     if not attrs:
@@ -357,7 +374,7 @@ def create_character(data: dict) -> dict:
 
     skills = data.get("skills")
     if not skills:
-        skills = build_default_skills(attrs)
+        skills = build_default_skills(attrs, options)
     else:
         # 客户端自带 skills（如前端加点）时，静态默认表缺少母语/闪避的属性
         # 派生值，这里兜底补齐，避免绕过 build_default_skills 导致两者为 0
@@ -393,14 +410,17 @@ def roll_attribute_sets(count: int = 3) -> list[dict[str, int]]:
 COMPONENT = Component(
     id="coc7.character", title="属性与建卡",
     requires=("coc7.dice",),
+    data=(SKILLS,),
     provides={"character": Provide(
         __name__,
+        bound=(
+            "default_skills", "build_default_skills", "get_character_schema", "base_skills",
+            "create_character",
+        ),
         plain=(
-            "ATTRIBUTE_ROLLS", "COC_DEFAULT_SKILLS", "roll_attributes", "apply_age_modifiers",
+            "ATTRIBUTE_ROLLS", "roll_attributes", "apply_age_modifiers",
             "roll_luck", "damage_bonus", "compute_derived", "derive_assets",
-            "build_default_skills", "apply_attr_derived_skills",
-            "get_character_schema", "base_skills", "create_character", "validate_character",
-            "roll_attribute_sets",
+            "apply_attr_derived_skills", "validate_character", "roll_attribute_sets",
         ),
     )},
 )

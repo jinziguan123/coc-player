@@ -7,51 +7,55 @@ incapacitated 者发作期间无法正常自主行动、由系统/KP 接管）�
 from __future__ import annotations
 
 import random
+from pathlib import Path
+from typing import Literal
 
+from pydantic import BaseModel, Field
+
+from app.rules.config import RuleConfig, rule_field, table_of
+from app.rules.data import DataTable
 from app.rules.kernel import Component, Provide
 
-# 每种症状：key（稳定标识）/ label（中文）/ manifest（一句话表现，注入叙事与播报）/
-# penalty_skills（命中这些技能域的检定加一颗惩罚骰）/ incapacitated（发作期间无法正常自主行动=
-# 系统接管，由 KP 叙述其不自主的疯狂行为）/ override（接管时的强制行为：violence/faint/flee）。
-BOUT_SYMPTOMS: list[dict] = [
-    {"key": "amnesia", "label": "失忆",
-     "manifest": "对刚刚发生的一切一片空白，茫然地反复追问自己身在何处、方才发生了什么",
-     "penalty_skills": ["灵感", "知识", "教育", "历史", "回忆"], "incapacitated": False, "override": ""},
-    {"key": "blindness", "label": "癔症性失明",
-     "manifest": "眼前骤然陷入漆黑，什么也看不见，只能伸手摸索",
-     "penalty_skills": ["侦查", "观察", "图书馆使用", "阅读", "追踪", "侦察"],
-     "incapacitated": False, "override": ""},
-    {"key": "deafness", "label": "癔症性失聪",
-     "manifest": "世界骤然沉入死寂，听不见任何声音，答非所问",
-     "penalty_skills": ["聆听"], "incapacitated": False, "override": ""},
-    {"key": "violence", "label": "暴力冲动",
-     "manifest": "被无法遏制的暴力冲动攫住，对最近的目标（甚至同伴）发起攻击",
-     "penalty_skills": [], "incapacitated": True, "override": "violence"},
-    {"key": "paranoia", "label": "偏执妄想",
-     "manifest": "疑神疑鬼，坚信身边有人（包括同伴）正密谋加害自己，拒绝信任与配合",
-     "penalty_skills": ["话术", "取悦", "魅惑", "说服", "社交", "信用评级"],
-     "incapacitated": False, "override": ""},
-    {"key": "significant_person", "label": "认错至亲",
-     "manifest": "把在场某人错认成生命中挥之不去的重要之人，纠缠不休、情绪失控",
-     "penalty_skills": ["话术", "侦查", "灵感"], "incapacitated": False, "override": ""},
-    {"key": "faint", "label": "昏厥",
-     "manifest": "承受不住冲击，当场两眼一黑、瘫软昏厥倒地",
-     "penalty_skills": [], "incapacitated": True, "override": "faint"},
-    {"key": "flee", "label": "惊恐逃窜",
-     "manifest": "彻底被恐惧支配，尖叫着不顾一切地夺路逃离现场，无视危险",
-     "penalty_skills": [], "incapacitated": True, "override": "flee"},
-    {"key": "hysteria", "label": "歇斯底里",
-     "manifest": "情绪彻底失控，无法自抑地嚎啕大哭 / 狂笑 / 浑身剧烈颤抖",
-     "penalty_skills": ["意志", "话术", "取悦", "社交"], "incapacitated": False, "override": ""},
-    {"key": "phobia_mania", "label": "恐惧发作",
-     "manifest": "一种突如其来的强烈恐惧攫住理智，本能地回避、退缩、语无伦次",
-     "penalty_skills": ["意志"], "incapacitated": False, "override": ""},
-]
+
+class SymptomRow(BaseModel):
+    """一种「一阵疯狂」症状。"""
+
+    key: str = Field(min_length=1, pattern=r"^[a-z0-9_]+$", title="标识",
+                     description="稳定英文标识（小写字母、数字、下划线），存进角色卡")
+    label: str = Field(min_length=1, title="名称")
+    manifest: str = Field(min_length=1, title="言行表现", description="一句话表现，注入叙事与播报")
+    penalty_skills: list[str] = Field(default_factory=list, title="受惩罚的技能域",
+                                      description="检定技能名命中其一即加一颗惩罚骰")
+    incapacitated: bool = Field(False, title="发作期间失能", description="开启后由系统接管，KP 叙述其不自主的行为")
+    override: Literal["", "violence", "faint", "flee"] = rule_field(
+        "", title="接管时的强制行为", choices={
+            "": ("无", "不强制行为"),
+            "violence": ("暴力", "攻击身边的人"),
+            "faint": ("昏厥", "倒地不起"),
+            "flee": ("逃跑", "不顾一切地逃离"),
+        },
+    )
 
 
-def roll_symptom() -> dict:
-    """掷 1D10 随机一种一阵疯狂症状（返回症状定义的浅拷贝）。"""
-    return dict(BOUT_SYMPTOMS[random.randint(0, len(BOUT_SYMPTOMS) - 1)])
+SYMPTOMS = DataTable(
+    name="madness_symptoms", title="疯狂症状表", row_model=SymptomRow, key="key",
+    source=Path(__file__).parent / "data" / "madness_symptoms.yaml",
+    description="进入临时疯狂时随机抽取的症状",
+)
+
+#: 官方症状表（未经任何补丁）。
+BOUT_SYMPTOMS = SYMPTOMS.official
+
+
+def symptoms(options: RuleConfig | None = None) -> tuple[dict, ...]:
+    """本局的症状表（官方 + 模组 + 村规补丁）。"""
+    return table_of(options, "madness_symptoms", BOUT_SYMPTOMS)
+
+
+def roll_symptom(options: RuleConfig | None = None) -> dict:
+    """随机抽一种一阵疯狂症状（官方表 10 种即 1D10；返回症状定义的浅拷贝）。"""
+    table = symptoms(options) or BOUT_SYMPTOMS   # 房主把症状删光时退回官方表，别让发作掷不出来
+    return dict(table[random.randint(0, len(table) - 1)])
 
 
 def roll_duration() -> int:
@@ -59,9 +63,9 @@ def roll_duration() -> int:
     return random.randint(1, 10)
 
 
-def make_bout() -> dict:
+def make_bout(options: RuleConfig | None = None) -> dict:
     """生成一次发作的状态对象，存进 char.system_data['madness']；turns_left 到 0 自动解除。"""
-    s = roll_symptom()
+    s = roll_symptom(options)
     return {
         "symptom": s["key"], "label": s["label"], "manifest": s["manifest"],
         "penalty_skills": s["penalty_skills"], "incapacitated": s["incapacitated"],
@@ -83,7 +87,9 @@ def check_penalty(madness: dict | None, skill: str) -> int:
 COMPONENT = Component(
     id="coc7.madness", title="疯狂发作",
     requires=("coc7.sanity",),
-    provides={"madness": Provide(__name__, plain=(
-        "BOUT_SYMPTOMS", "make_bout", "roll_symptom", "roll_duration", "check_penalty",
-    ))},
+    data=(SYMPTOMS,),
+    provides={"madness": Provide(
+        __name__, bound=("symptoms", "make_bout", "roll_symptom"),
+        plain=("roll_duration", "check_penalty"),
+    )},
 )

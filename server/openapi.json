@@ -1218,6 +1218,12 @@
       "HouseRulesPreviewRead": {
         "description": "房规文件的导入预览。``errors`` 为空才能保存；``warnings`` 只是提示。",
         "properties": {
+          "data": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Data",
+            "type": "object"
+          },
           "description": {
             "default": "",
             "title": "Description",
@@ -2735,7 +2741,7 @@
         "type": "object"
       },
       "RuleSystemManifest": {
-        "description": "规则系统的组件目录：前端村规面板据此渲染，房规文件据此校验。",
+        "description": "规则系统的组件目录：前端村规面板与数据表编辑器据此渲染，房规文件据此校验。",
         "properties": {
           "components": {
             "items": {
@@ -2751,6 +2757,14 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "tables": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RuleTableManifest"
+            },
+            "title": "Tables",
+            "type": "array"
           },
           "title": {
             "title": "Title",
@@ -2769,6 +2783,121 @@
           "components"
         ],
         "title": "RuleSystemManifest",
+        "type": "object"
+      },
+      "RuleTableManifest": {
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "row_schema": {
+            "additionalProperties": true,
+            "title": "Row Schema",
+            "type": "object"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "key",
+          "component",
+          "row_schema"
+        ],
+        "title": "RuleTableManifest",
+        "type": "object"
+      },
+      "RuleTableUpdate": {
+        "description": "编辑器保存：提交想要的**整张表**，服务端校验并算出相对官方数据的最小补丁。",
+        "properties": {
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "RuleTableUpdate",
+        "type": "object"
+      },
+      "RuleTableView": {
+        "description": "数据表编辑器读一层补丁：合并后的行、每行状态（official/modified/added）、被删掉的官方行。",
+        "properties": {
+          "deleted": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Deleted",
+            "type": "array"
+          },
+          "originals": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "default": {},
+            "title": "Originals",
+            "type": "object"
+          },
+          "patches": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Patches",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "status": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Status",
+            "type": "object"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "rows",
+          "status"
+        ],
+        "title": "RuleTableView",
         "type": "object"
       },
       "RulebookRead": {
@@ -3269,6 +3398,18 @@
       "VillageRulesUpdate": {
         "description": "改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。\n\n``table_notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。",
         "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
           "enabled": {
             "anyOf": [
               {
@@ -4646,6 +4787,118 @@
         ]
       }
     },
+    "/api/modules/{module_id}/rule-data/{table}": {
+      "get": {
+        "description": "模组自带的数据表改动（如 1890 年代模组的老式武器）。叠在官方数据之上、村规之下。",
+        "operationId": "read_module_rule_table_api_modules__module_id__rule_data__table__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "module_id",
+            "required": true,
+            "schema": {
+              "title": "Module Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleTableView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Module Rule Table",
+        "tags": [
+          "modules"
+        ]
+      },
+      "put": {
+        "description": "保存模组自带的数据表改动：提交整张表，服务端校验并只存与官方数据的差异。",
+        "operationId": "update_module_rule_table_api_modules__module_id__rule_data__table__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "module_id",
+            "required": true,
+            "schema": {
+              "title": "Module Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleTableUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleTableView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Module Rule Table",
+        "tags": [
+          "modules"
+        ]
+      }
+    },
     "/api/modules/{module_id}/scene-map": {
       "patch": {
         "description": "沙盘编辑：把场景移到指定 hex 格（KP 拖拽修正），可顺带改地貌。撞格等非法情形 400。\n\n两种调用语境，授权方式不同：\n\n- **局内**（带 ``session_id``）：真人 KP 在大地图上拖动修正。KP 可能是连进来的\n  客人，所以不能按「仅限本机」把关——那会让远程 KP 根本拖不动；要按**该局的\n  KP 席位**授权（``require_session_kp``），并确认这局用的确实是本模组，\n  免得拿一个自己是 KP 的房间去改别人的模组。\n- **模组管理**（不带 ``session_id``）：房主在自己机器上整理模组，沿用 ADR-007\n  的仅限本机。",
@@ -5218,6 +5471,118 @@
         ]
       }
     },
+    "/api/rulebooks/village-rules/{rule_system}/data/{table}": {
+      "get": {
+        "description": "数据表编辑器：这一桌对某张表的改动（合并后的行 + 每行状态 + 被删的官方行）。\n\n读的是**存着的**补丁，不看总开关——同村规参数面板，关掉开关不该让配置看起来没了。",
+        "operationId": "read_village_table_api_rulebooks_village_rules__rule_system__data__table__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleTableView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Village Table",
+        "tags": [
+          "rulebooks"
+        ]
+      },
+      "put": {
+        "description": "保存这一桌对某张表的改动：提交整张表，服务端校验并只存与官方数据的差异。\n\n限本机：与改村规同属桌面配置操作。对所有用这套规则的房间即时生效（含进行中的局）。",
+        "operationId": "update_village_table_api_rulebooks_village_rules__rule_system__data__table__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "title": "Table",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleTableUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleTableView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Village Table",
+        "tags": [
+          "rulebooks"
+        ]
+      }
+    },
     "/api/rulebooks/village-rules/{rule_system}/export": {
       "get": {
         "description": "把这一桌的村规导出成房规文件（YAML 原文 + 建议文件名），前端存成文件发给别人导入。\n\n不限本机：读村规本就公开，导出只是换个格式。",
@@ -5410,6 +5775,22 @@
               "title": "Rule System",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
           }
         ],
         "requestBody": {
@@ -5463,6 +5844,22 @@
               "title": "Rule System",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
           }
         ],
         "requestBody": {
@@ -5515,6 +5912,22 @@
               "title": "Rule System",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
           }
         ],
         "requestBody": {
@@ -5564,6 +5977,22 @@
             "schema": {
               "title": "Rule System",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
             }
           }
         ],
@@ -5625,6 +6054,22 @@
               "title": "Credit Rating",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
           }
         ],
         "responses": {
@@ -5655,7 +6100,7 @@
     },
     "/api/rules/{rule_system}/occupation-categories": {
       "get": {
-        "description": "职业大类的展示顺序（前端两级选择用）。",
+        "description": "职业大类的展示顺序（前端两级选择用）：官方大类在前，房主/模组新增的追加。",
         "operationId": "get_occupation_categories_api_rules__rule_system__occupation_categories_get",
         "parameters": [
           {
@@ -5665,6 +6110,22 @@
             "schema": {
               "title": "Rule System",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
             }
           }
         ],
@@ -5705,6 +6166,22 @@
             "schema": {
               "title": "Rule System",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
             }
           }
         ],
@@ -5747,6 +6224,22 @@
               "title": "Rule System",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
           }
         ],
         "responses": {
@@ -5788,6 +6281,22 @@
               "title": "Rule System",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
           }
         ],
         "responses": {
@@ -5818,7 +6327,7 @@
     },
     "/api/rules/{rule_system}/weapons": {
       "get": {
-        "description": "CoC 武器表 + 大类展示顺序，供武器选择器两级筛选使用。",
+        "description": "本桌的武器表 + 大类展示顺序，供武器选择器两级筛选使用。",
         "operationId": "get_weapons_api_rules__rule_system__weapons_get",
         "parameters": [
           {
@@ -5828,6 +6337,22 @@
             "schema": {
               "title": "Rule System",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
             }
           }
         ],

@@ -44,6 +44,24 @@ class VillageRulesRead(BaseModel):
     labels: list[str] = []
 
 
+class RuleTableView(BaseModel):
+    """数据表编辑器读一层补丁：合并后的行、每行状态（official/modified/added）、被删掉的官方行。"""
+
+    table: str
+    rows: list[dict]
+    status: dict[str, str]
+    deleted: list[dict] = []
+    #: 被改过的官方行的原样（主键 → 行），供「恢复官方」
+    originals: dict[str, dict] = {}
+    patches: list[dict] = []
+
+
+class RuleTableUpdate(BaseModel):
+    """编辑器保存：提交想要的**整张表**，服务端校验并算出相对官方数据的最小补丁。"""
+
+    rows: list[dict]
+
+
 class VillageRulesUpdate(BaseModel):
     """改某套规则系统的村规。整份替换，``{}`` = 全改回规则原文。
 
@@ -54,6 +72,8 @@ class VillageRulesUpdate(BaseModel):
     table_notes: str | None = None
     #: ``None`` = 本次不动总开关（只改参数时不必把它一并回传）
     enabled: bool | None = None
+    #: 数据表补丁（表名 → 补丁行），整份替换；``None`` = 本次不动（导入房规时才带）
+    data: dict | None = None
 
 
 class HouseRulesExport(BaseModel):
@@ -77,6 +97,8 @@ class HouseRulesPreviewRead(BaseModel):
     description: str = ""
     options: dict = {}
     table_notes: str = ""
+    #: 数据表补丁（表名 → 补丁行），已严格校验
+    data: dict = {}
     labels: list[str] = []
     errors: list[str] = []
     warnings: list[str] = []
@@ -96,11 +118,24 @@ class RuleComponentManifest(BaseModel):
     config_schema: dict | None = None
 
 
+class RuleTableManifest(BaseModel):
+    name: str
+    title: str
+    description: str = ""
+    #: 行主键字段（编辑器据此对齐、查重）
+    key: str
+    #: 声明这张表的组件
+    component: str
+    #: 行的 JSON Schema（编辑器据此生成表单）
+    row_schema: dict
+
+
 class RuleSystemManifest(BaseModel):
-    """规则系统的组件目录：前端村规面板据此渲染，房规文件据此校验。"""
+    """规则系统的组件目录：前端村规面板与数据表编辑器据此渲染，房规文件据此校验。"""
 
     id: str
     title: str
     version: int
     house_rules_format_version: int
+    tables: list[RuleTableManifest] = []
     components: list[RuleComponentManifest]

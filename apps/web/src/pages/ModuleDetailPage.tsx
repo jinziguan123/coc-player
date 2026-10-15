@@ -8,7 +8,7 @@ import { GiReturnArrow, GiScrollUnfurled, GiPadlock } from 'react-icons/gi'
 import {
   Plus, Trash2, Pencil, Save, X, Eye, Network, FileText, GitBranch, Hexagon, Sparkles, ListChecks, Image,
   Link2, Unlink, Wheat, Trees, Waves, ShipWheel, Sun, Mountain, Droplets, Building2, Castle, DoorOpen, Route,
-  type LucideIcon,
+  Table2, type LucideIcon,
 } from 'lucide-react'
 import { ModuleGraph } from '../components/module/ModuleGraph'
 import { HexSandbox } from '../components/game/HexSandbox'
@@ -25,6 +25,7 @@ import { StylePicker } from '@/components/style/StylePicker'
 import { useStyleOptions, type StyleOption } from '@/components/style/useStyleOptions'
 import { ModuleHero } from '@/components/module/ModuleHero'
 import { ModuleViewTabs } from '@/components/module/ModuleViewTabs'
+import { RuleDataEditor } from '@/components/game/RuleDataEditor'
 
 /** 只读态显示成人话：命中预设显示预设名，自定义显示原文，空串返回空串。 */
 function styleLabel(options: StyleOption[] | undefined, value: string): string {
@@ -245,7 +246,7 @@ export function ModuleDetailPage() {
   const [data, setData] = useState<ModuleData>(BLANK)
   const styleOptions = useStyleOptions()
   const [edit, setEdit] = useState(isNew)
-  const [view, setView] = useState<'detail' | 'graph' | 'timeline' | 'sandbox'>('detail')
+  const [view, setView] = useState<'detail' | 'graph' | 'timeline' | 'sandbox' | 'rules'>('detail')
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [enriching, setEnriching] = useState(false)
@@ -595,6 +596,7 @@ export function ModuleDetailPage() {
             { id: 'detail', icon: <FileText size={14} />, label: '详情' },
             ...(edit ? [] : [{ id: 'graph' as const, icon: <Network size={14} />, label: '关系图' }, { id: 'timeline' as const, icon: <GitBranch size={14} />, label: '时间线' }]),
             { id: 'sandbox', icon: <Hexagon size={14} />, label: '沙盘' },
+            ...(edit ? [] : [{ id: 'rules' as const, icon: <Table2 size={14} />, label: '规则数据' }]),
           ]} />
         )}
         <div className="ml-auto flex gap-2 items-center">
@@ -611,13 +613,19 @@ export function ModuleDetailPage() {
       </div>
 
       {!isNew && !edit && view === 'detail' && <ModuleHero title={data.title} cover={data.scenes[0]?.image} facts={[data.world_setting.era, data.world_setting.region, data.world_setting.player_count && `${String(data.world_setting.player_count)} 人`].filter(Boolean).map(String)} />}
-      {!edit && (
+      {!edit && view !== 'rules' && (
         <div className="card mb-4 flex items-center gap-2 text-sm" style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}>
           <Eye size={15} /> 剧透警告：{view === 'graph' ? '关系图含线索归属等剧情结构' : view === 'timeline' ? '时间线含剧情推进与 NPC 生死等结构' : view === 'sandbox' ? '沙盘展示全部地点的地理分布（含玩家尚未发现的场景）' : '以下含 NPC 秘密、线索与真相'}。若你打算亲自游玩本模组，请勿继续阅读。
         </div>
       )}
 
-      {view === 'graph' && !edit ? (
+      {view === 'rules' && !edit && data.id ? (
+        // 模组自带的数据表改动（如 1890 年代模组的老式武器、职业）：叠在官方数据之上、
+        // 村规之下。它有自己的保存按钮、直接写库，与上面模组正文的编辑草稿互不相干。
+        <div className="card">
+          <RuleDataEditor scope={{ kind: 'module', ruleSystem: data.rule_system || 'coc', moduleId: data.id }} />
+        </div>
+      ) : view === 'graph' && !edit ? (
         <ModuleGraph moduleId={data.id} scenes={data.scenes} npcs={data.npcs} clues={data.clues} onImageRegenerated={onGraphImageRegenerated} />
       ) : view === 'timeline' && !edit ? (
         <ModuleTimeline scenes={data.scenes} npcs={data.npcs} triggers={data.triggers} />

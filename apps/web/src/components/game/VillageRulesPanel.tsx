@@ -168,7 +168,7 @@ function ImportPreview({ preview, onConfirm, onCancel, busy }: {
             </div>
           )}
           {preview.table_notes && <div className="mt-1.5">附带桌面约定：{preview.table_notes}</div>}
-          <div className="mt-1.5">导入会<b>整份替换</b>当前的村规与桌面约定。</div>
+          <div className="mt-1.5">导入会<b>整份替换</b>当前的村规参数、数据表改动与桌面约定。</div>
         </div>
       ) : (
         <ul className="mt-2 text-xs list-disc pl-4" style={{ color: 'var(--color-danger)' }}>
@@ -233,12 +233,15 @@ export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
 
   const patch = (next: RuleValues) => setRules((cur) => (cur ? { ...cur, ...next } : cur))
 
-  const persist = async (options: RuleValues, tableNotes: string, message: string) => {
+  const persist = async (
+    options: RuleValues, tableNotes: string, message: string, data?: Record<string, unknown>,
+  ) => {
     setSaving(true)
     try {
-      // 整份提交，后端负责白名单化、钳区间、只存与规则原文的差异
+      // 整份提交，后端负责白名单化、钳区间、只存与规则原文的差异。
+      // data 只在导入房规时带（整份替换数据表改动）；平时保存参数不动数据表。
       const saved = await api.put<VillageRulesRead>(`/rulebooks/village-rules/${ruleSystem}`, {
-        options, table_notes: tableNotes, enabled,
+        options, table_notes: tableNotes, enabled, ...(data ? { data } : {}),
       })
       if (saved?.effective) {
         setRules(saved.effective)
@@ -296,6 +299,7 @@ export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
     if (!preview) return
     const ok = await persist(
       preview.options ?? {}, preview.table_notes ?? '', `已导入「${preview.name || '房规'}」`,
+      preview.data ?? {},
     )
     if (ok) setPreview(null)
   }

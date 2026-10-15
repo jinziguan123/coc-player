@@ -7,7 +7,10 @@ import { CharacterPanel } from '../components/character/CharacterPanel'
 import { CharacterEditModal } from '../components/character/CharacterEditModal'
 import { SpecializationDialog } from '../components/character/SpecializationDialog'
 import { WeaponsEditor } from '../components/character/WeaponsEditor'
-import { useSpecializations, normalizeWeapon, deriveAssets, type CharWeapon } from '../components/character/useCocData'
+import {
+  useSpecializations, useOccupations, normalizeWeapon, deriveAssets, ruleQuery, RuleModuleContext,
+  type CharWeapon, type OccupationDef,
+} from '../components/character/useCocData'
 import {
   AssetsPanel, MythosEditor, RelationsEditor, ModuleHistoryEditor,
   type AssetsInfo, type Mythos, type Relation, type ModuleExperience,
@@ -38,16 +41,6 @@ import { deriveStats } from '@/features/characters/cocDerived'
 
 interface AttrSet {
   sets: Array<Record<string, number>>
-}
-
-interface OccupationDef {
-  name: string
-  credit_min: number
-  credit_max: number
-  skill_formula: string
-  skills: string[]
-  choices: number
-  category?: string
 }
 
 const ATTR_LABELS: Record<string, string> = {
@@ -200,13 +193,12 @@ export function CharacterPage() {
   const [settlingAge, setSettlingAge] = useState(false)
 
   // Step 3: 职业
-  const [occupations, setOccupations] = useState<OccupationDef[]>([])
+  const { occupations, categories: occCategories } = useOccupations(moduleId || null)
   const [selectedOcc, setSelectedOcc] = useState<OccupationDef | null>(null)
   const [occPoints, setOccPoints] = useState(0)
   const [intPoints, setIntPoints] = useState(0)
   const [occSearch, setOccSearch] = useState('')
   const [occCat, setOccCat] = useState('')               // 选中的职业大类（空=全部）
-  const [occCategories, setOccCategories] = useState<string[]>([])
 
   // Step 2: 幸运值
   const [luck, setLuck] = useState(0)
@@ -220,7 +212,8 @@ export function CharacterPage() {
   const [extraSkills, setExtraSkills] = useState<string[]>([])              // 经专精弹窗添加的「基名(专精)」技能键
   const [specBaseVals, setSpecBaseVals] = useState<Record<string, number>>({})  // 这些专精技能的基础起始值
   const [specBase, setSpecBase] = useState<string>('')                     // 当前打开专精弹窗的基名
-  const spec = useSpecializations()
+  // 规则资料按「村规 + 选中模组自带的数据」取：模组可以带专属职业、武器、专精
+  const spec = useSpecializations(moduleId || null)
 
   // Step 5: 物品
   const [equipText, setEquipText] = useState('')                           // 随身物品自由文本，以、分隔
@@ -247,9 +240,8 @@ export function CharacterPage() {
   useEffect(() => {
     loadCharacters()
     fetchModules()
-    api.get<OccupationDef[]>('/rules/coc/occupations').then(setOccupations)
-    api.get<string[]>('/rules/coc/occupation-categories').then(setOccCategories).catch(() => {})
   }, [fetchModules])
+
 
   const loadCharacters = async () => {
     const chars = await listCharacters()
@@ -338,7 +330,7 @@ export function CharacterPage() {
     if (selectedOcc.skill_formula === '自定义') return
     let cancelled = false
     api.post<{ occupation_points: number; interest_points: number }>(
-      '/rules/coc/calc-skill-points',
+      `/rules/coc/calc-skill-points${ruleQuery(moduleId)}`,
       { occupation: selectedOcc.name, base_attributes: effectiveAttrs },
     )
       .then((data) => {
@@ -348,7 +340,7 @@ export function CharacterPage() {
       })
       .catch(() => { /* 点数保持原值，界面上仍能看出对不上 */ })
     return () => { cancelled = true }
-  }, [selectedOcc, effectiveAttrs])
+  }, [selectedOcc, effectiveAttrs, moduleId])
 
   const filteredOccs = occupations.filter((o) => {
     if (occCat && (o.category || '其他') !== occCat) return false
@@ -365,9 +357,9 @@ export function CharacterPage() {
     // 会把它顶回派生值：加到 EDU 以下的部分全部凭空蒸发。
     const { skills } = effectiveAttrs
       ? await api.post<{ skills: Record<string, number> }>(
-        '/rules/coc/base-skills', { base_attributes: effectiveAttrs })
+        `/rules/coc/base-skills${ruleQuery(moduleId)}`, { base_attributes: effectiveAttrs })
       : { skills: (await api.get<{ default_skills: Record<string, number> }>(
-        '/rules/coc/character-schema')).default_skills }
+        `/rules/coc/character-schema${ruleQuery(moduleId)}`)).default_skills }
     setDefaultSkills(skills || {})
     if (!isImported) setSkillAlloc({})
     setStep('技能加点')
@@ -877,7 +869,9 @@ export function CharacterPage() {
   })
 
   return (
-    // 只留底部内边距：左右上跟随 main 的 24px，多加一层会让标题比别的页横挪 16px
+    // 下层的武器选择器等按选中模组取规则资料
+    <RuleModuleContext.Provider value={moduleId || null}>
+    {/* 只留底部内边距：左右上跟随 main 的 24px，多加一层会让标题比别的页横挪 16px */}
     <div className="flex h-full min-h-0 flex-col pb-4">
       {/* 建卡流程是线性表单，窄栏更易读、自己滚；名录+详情是一本摊开的书，占满剩余高度 */}
       <div className={`flex min-h-0 flex-1 flex-col ${inCreateFlow ? 'max-w-3xl overflow-auto' : ''}`}>
@@ -1771,5 +1765,6 @@ export function CharacterPage() {
         />
       )}
     </div>
+    </RuleModuleContext.Provider>
   )
 }

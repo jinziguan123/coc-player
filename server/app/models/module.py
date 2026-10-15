@@ -48,6 +48,9 @@ class Module(Base, UUIDMixin, TimestampMixin):
     default_rule_options: Mapped[dict] = mapped_column(
         JSON, default=dict, server_default="{}",
     )
+    # 本模组自带的数据表补丁（表名 → 补丁行列表，如 1890 年代模组自带的老式武器）。
+    # 叠在官方数据之上、村规之下（村规是这一桌的规矩，盖得过本子）。见 app.rules.data。
+    default_rule_data: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
 
 class ModuleChunk(Base, UUIDMixin):

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { m } from 'motion/react'
 import { spring } from '@/lib/motion'
 
-export type ModuleView = 'detail' | 'graph' | 'timeline' | 'sandbox'
+export type ModuleView = 'detail' | 'graph' | 'timeline' | 'sandbox' | 'rules'
 
 /** 模组详情的视图切换：分段控件，当前项的黄铜底在各项之间滑动 */
 export function ModuleViewTabs({ view, items, onPick }: {

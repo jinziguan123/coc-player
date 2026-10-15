@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import player_token, require_local_client, require_session_kp
 from app.database import SessionLocal, get_db
+from app.models.module import Module
+from app.rules import get_system
 from app.schemas.module import ModuleRead, ModuleUploadResponse, ModuleWrite
+from app.schemas.rulebook import RuleTableUpdate, RuleTableView
 from app.services import (
     hex_map,
     image_store,
@@ -20,6 +23,7 @@ from app.services import (
     module_ocr,
     module_rag_service,
     module_service,
+    rule_options_service,
 )
 from app.services.event_protocol import make_chunk
 from app.services.room_hub import room_hub
@@ -555,6 +559,49 @@ class SceneMapPatch(BaseModel):
     biome: str | None = None
     session_id: str | None = None
     """局内拖拽时带上：据此按「该局的真人 KP」授权。省略则按模组管理处理，仅限本机。"""
+
+
+@router.get("/{module_id}/rule-data/{table}", response_model=RuleTableView)
+def read_module_rule_table(module_id: str, table: str, db: Session = Depends(get_db)):
+    """模组自带的数据表改动（如 1890 年代模组的老式武器）。叠在官方数据之上、村规之下。"""
+    module = _module_or_404(db, module_id)
+    rule_system = module.rule_system or rule_options_service.DEFAULT_RULE_SYSTEM
+    _module_table_or_404(rule_system, table)
+    patches = (module.default_rule_data or {}).get(table)
+    return RuleTableView(table=table, **rule_options_service.table_view(rule_system, table, patches))
+
+
+@router.put(
+    "/{module_id}/rule-data/{table}",
+    dependencies=[Depends(require_local_client)],
+    response_model=RuleTableView,
+)
+def update_module_rule_table(
+    module_id: str, table: str, data: RuleTableUpdate, db: Session = Depends(get_db),
+):
+    """保存模组自带的数据表改动：提交整张表，服务端校验并只存与官方数据的差异。"""
+    module = _module_or_404(db, module_id)
+    rule_system = module.rule_system or rule_options_service.DEFAULT_RULE_SYSTEM
+    _module_table_or_404(rule_system, table)
+    try:
+        patches = rule_options_service.save_module_table(db, module, table, data.rows)
+    except rule_options_service.RuleDataError as e:
+        raise HTTPException(400, "\n".join(e.errors)) from e
+    return RuleTableView(table=table, **rule_options_service.table_view(rule_system, table, patches))
+
+
+def _module_or_404(db: Session, module_id: str) -> Module:
+    module = db.get(Module, module_id)
+    if module is None:
+        raise HTTPException(404, "模组不存在")
+    return module
+
+
+def _module_table_or_404(rule_system: str, table: str) -> None:
+    try:
+        get_system(rule_system).data_table(table)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
 
 
 @router.patch("/{module_id}/scene-map")

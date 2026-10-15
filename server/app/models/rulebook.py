@@ -56,3 +56,5 @@ class RuleSystemOptions(Base, TimestampMixin):
     #: 村规总开关。关掉时 options 与 table_notes 一律按「没配过」处理，整桌回到规则原文——
     #: 配置本身留着，随时能开回来，不必把每一项手动改回默认。
     enabled: Mapped[bool] = mapped_column(default=True, server_default=sa.true())
+    #: 数据表补丁（表名 → 补丁行列表），只存与官方数据的差异；同受总开关管。见 app.rules.data。
+    data_patches: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")

@@ -2,7 +2,368 @@
   "id": "coc",
   "title": "克苏鲁的呼唤 第七版",
   "version": 1,
-  "house_rules_format_version": 1,
+  "house_rules_format_version": 2,
+  "tables": [
+    {
+      "name": "skills",
+      "title": "技能表",
+      "description": "技能起始值：建卡、检定（角色卡上没有这项技能时按起始值算）共用",
+      "key": "name",
+      "component": "coc7.character",
+      "row_schema": {
+        "description": "技能表的一行：技能名与起始值。母语与闪避由属性派生，表里的 0 只是占位。",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "技能",
+            "type": "string"
+          },
+          "base": {
+            "default": 0,
+            "maximum": 99,
+            "minimum": 0,
+            "title": "起始值",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SkillRow",
+        "type": "object"
+      }
+    },
+    {
+      "name": "occupations",
+      "title": "职业表",
+      "description": "建卡时可选的职业、技能点公式与本职技能",
+      "key": "name",
+      "component": "coc7.occupation",
+      "row_schema": {
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "职业",
+            "type": "string"
+          },
+          "category": {
+            "default": "其他",
+            "minLength": 1,
+            "title": "大类",
+            "type": "string"
+          },
+          "credit_min": {
+            "default": 0,
+            "maximum": 99,
+            "minimum": 0,
+            "title": "信用评级下限",
+            "type": "integer"
+          },
+          "credit_max": {
+            "default": 99,
+            "maximum": 99,
+            "minimum": 0,
+            "title": "信用评级上限",
+            "type": "integer"
+          },
+          "skill_formula": {
+            "default": "EDU*4",
+            "description": "属性*倍数，用 + 相加，| 取较高者，如 EDU*2+STR|DEX*2",
+            "pattern": "^(?:STR|CON|SIZ|DEX|APP|INT|POW|EDU)(?:\\|(?:STR|CON|SIZ|DEX|APP|INT|POW|EDU))*\\*\\d+(?:\\+(?:STR|CON|SIZ|DEX|APP|INT|POW|EDU)(?:\\|(?:STR|CON|SIZ|DEX|APP|INT|POW|EDU))*\\*\\d+)*$",
+            "title": "技能点公式",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "本职技能",
+            "type": "array"
+          },
+          "choices": {
+            "default": 0,
+            "maximum": 10,
+            "minimum": 0,
+            "title": "可自选技能数",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "OccupationRow",
+        "type": "object"
+      }
+    },
+    {
+      "name": "specializations",
+      "title": "专精表",
+      "description": "外语、格斗、射击等技能下可选的专精及起始值",
+      "key": "category",
+      "component": "coc7.occupation",
+      "row_schema": {
+        "$defs": {
+          "SpecializationItem": {
+            "properties": {
+              "name": {
+                "minLength": 1,
+                "title": "专精",
+                "type": "string"
+              },
+              "init": {
+                "default": 0,
+                "maximum": 99,
+                "minimum": 0,
+                "title": "起始值",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "title": "SpecializationItem",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "category": {
+            "description": "如 外语、格斗、射击、科学",
+            "minLength": 1,
+            "title": "类别",
+            "type": "string"
+          },
+          "base_init": {
+            "default": 0,
+            "description": "未在下面列出的专精用这个起始值",
+            "maximum": 99,
+            "minimum": 0,
+            "title": "其他专精起始值",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/$defs/SpecializationItem"
+            },
+            "title": "专精列表",
+            "type": "array"
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "title": "SpecializationRow",
+        "type": "object"
+      }
+    },
+    {
+      "name": "equipment",
+      "title": "装备表",
+      "description": "建卡时按时代与信用评级可选的随身装备",
+      "key": "name",
+      "component": "coc7.equipment",
+      "row_schema": {
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "名称",
+            "type": "string"
+          },
+          "category": {
+            "minLength": 1,
+            "title": "分类",
+            "type": "string"
+          },
+          "era": {
+            "description": "1920s、modern 等",
+            "items": {
+              "type": "string"
+            },
+            "title": "适用时代",
+            "type": "array"
+          },
+          "min_credit": {
+            "default": 0,
+            "maximum": 99,
+            "minimum": 0,
+            "title": "最低信用评级",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "category"
+        ],
+        "title": "EquipmentRow",
+        "type": "object"
+      }
+    },
+    {
+      "name": "weapons",
+      "title": "武器表",
+      "description": "人物卡与战斗结算共用的武器数据",
+      "key": "name",
+      "component": "coc7.combat",
+      "row_schema": {
+        "description": "武器表的一行。字段沿用克苏鲁公社人物卡生成器的口径（多为文本，如射程「接触」）。",
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "名称",
+            "type": "string"
+          },
+          "skill": {
+            "description": "如 格斗(斗殴)、射击(手枪)",
+            "minLength": 1,
+            "title": "使用技能",
+            "type": "string"
+          },
+          "dam": {
+            "description": "骰式，可含 DB / 半DB；霰弹按射程分段用 / 隔开",
+            "minLength": 1,
+            "title": "伤害",
+            "type": "string"
+          },
+          "tho": {
+            "default": 0,
+            "description": "1 = 贯穿武器（极难成功/大成功加伤）",
+            "maximum": 1,
+            "minimum": 0,
+            "title": "贯穿",
+            "type": "integer"
+          },
+          "range": {
+            "default": "",
+            "description": "米数，近战写「接触」",
+            "title": "射程",
+            "type": "string"
+          },
+          "round": {
+            "default": "1",
+            "description": "如 1、1(3)（括号内为连发上限）、1/2",
+            "title": "每轮次数",
+            "type": "string"
+          },
+          "num": {
+            "default": "",
+            "title": "装弹量",
+            "type": "string"
+          },
+          "price": {
+            "default": "",
+            "title": "价格",
+            "type": "string"
+          },
+          "err": {
+            "default": "",
+            "title": "故障率",
+            "type": "string"
+          },
+          "time": {
+            "default": "",
+            "title": "时代",
+            "type": "string"
+          },
+          "category": {
+            "default": "常规",
+            "minLength": 1,
+            "title": "大类",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "skill",
+          "dam"
+        ],
+        "title": "WeaponRow",
+        "type": "object"
+      }
+    },
+    {
+      "name": "madness_symptoms",
+      "title": "疯狂症状表",
+      "description": "进入临时疯狂时随机抽取的症状",
+      "key": "key",
+      "component": "coc7.madness",
+      "row_schema": {
+        "description": "一种「一阵疯狂」症状。",
+        "properties": {
+          "key": {
+            "description": "稳定英文标识（小写字母、数字、下划线），存进角色卡",
+            "minLength": 1,
+            "pattern": "^[a-z0-9_]+$",
+            "title": "标识",
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "title": "名称",
+            "type": "string"
+          },
+          "manifest": {
+            "description": "一句话表现，注入叙事与播报",
+            "minLength": 1,
+            "title": "言行表现",
+            "type": "string"
+          },
+          "penalty_skills": {
+            "description": "检定技能名命中其一即加一颗惩罚骰",
+            "items": {
+              "type": "string"
+            },
+            "title": "受惩罚的技能域",
+            "type": "array"
+          },
+          "incapacitated": {
+            "default": false,
+            "description": "开启后由系统接管，KP 叙述其不自主的行为",
+            "title": "发作期间失能",
+            "type": "boolean"
+          },
+          "override": {
+            "default": "",
+            "enum": [
+              "",
+              "violence",
+              "faint",
+              "flee"
+            ],
+            "title": "接管时的强制行为",
+            "type": "string",
+            "x-choices": [
+              {
+                "hint": "不强制行为",
+                "label": "无",
+                "value": ""
+              },
+              {
+                "hint": "攻击身边的人",
+                "label": "暴力",
+                "value": "violence"
+              },
+              {
+                "hint": "倒地不起",
+                "label": "昏厥",
+                "value": "faint"
+              },
+              {
+                "hint": "不顾一切地逃离",
+                "label": "逃跑",
+                "value": "flee"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "manifest"
+        ],
+        "title": "SymptomRow",
+        "type": "object"
+      }
+    }
+  ],
   "components": [
     {
       "id": "coc7.dice",

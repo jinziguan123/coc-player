@@ -18,7 +18,7 @@ import typing
 from typing import Any
 
 import annotated_types
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class RuleConfig(BaseModel):
@@ -30,6 +30,15 @@ class RuleConfig(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="ignore")
+
+    #: 本局合并后的数据表（表名 → 运行时形态）。由 Ruleset 在注入前附上；
+    #: 不参与相等与哈希——缓存键另算（见 kernel._build）。
+    _tables: Any = PrivateAttr(default=None)
+
+    def table(self, name: str, official: Any) -> Any:
+        """取本局的某张数据表；没附表（未经 Ruleset 注入，如单测直接调）时用官方数据。"""
+        tables = self._tables
+        return tables[name] if tables is not None and name in tables else official
 
     def describe(self) -> list[str]:
         return []
@@ -105,6 +114,11 @@ def _kind(model: type[RuleConfig], name: str) -> str:
         return "enum"
     annotation = model.model_fields[name].annotation
     return "bool" if annotation is bool else "int"
+
+
+def table_of(options: RuleConfig | None, name: str, official: Any) -> Any:
+    """组件算法取数据表的统一入口：``options`` 为 None（未传村规）时用官方数据。"""
+    return official if options is None else options.table(name, official)
 
 
 def parse_lenient(model: type[RuleConfig], raw: dict | None, default: RuleConfig) -> RuleConfig:

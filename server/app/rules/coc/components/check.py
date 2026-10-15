@@ -10,7 +10,7 @@ import re
 from typing import Literal
 
 from app.rules.base import CheckResult
-from app.rules.coc.components.character import COC_DEFAULT_SKILLS
+from app.rules.coc.components.character import default_skills
 from app.rules.config import RuleConfig, rule_field
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile
 from app.rules.kernel import Component, Provide
@@ -145,7 +145,7 @@ def normalize_skill_name(name: str) -> str:
     return _SKILL_ALIAS.get(s, s)
 
 
-def _base_skill_value(skill_name: str, attrs: dict) -> int:
+def _base_skill_value(skill_name: str, attrs: dict, options: CheckConfig | None = None) -> int:
     """技能的规则基础值（角色卡没写这项时的底线）。
 
     CoC 里技能都有基础值：格斗(斗殴) 25、射击(手枪) 20、闪避 DEX/2……「没写」不等于 0。
@@ -156,10 +156,12 @@ def _base_skill_value(skill_name: str, attrs: dict) -> int:
         return attrs.get("DEX", 0) // 2
     if skill_name == "母语":
         return attrs.get("EDU", 0)
-    return COC_DEFAULT_SKILLS.get(skill_name, 0)
+    return default_skills(options).get(skill_name, 0)
 
 
-def resolve_skill_value(character_data: dict, skill_name: str) -> int:
+def resolve_skill_value(
+    character_data: dict, skill_name: str, options: CheckConfig | None = None,
+) -> int:
     """取一次检定的技能值。查找顺序：精确 → 归一化 → 专精基础名 → 属性(含别名) → 幸运/理智 → 规则基础值。"""
     skills = character_data.get("skills") or {}
     attrs = character_data.get("base_attributes") or {}
@@ -194,7 +196,7 @@ def resolve_skill_value(character_data: dict, skill_name: str) -> int:
         sanity = (character_data.get("system_data") or {}).get("sanity") or {}
         value = sanity.get("current") or 0
     if not value:   # 都没有 → 该技能的规则基础值（而不是 0）
-        value = _base_skill_value(normalize_skill_name(skill_name), attrs)
+        value = _base_skill_value(normalize_skill_name(skill_name), attrs, options)
     return value
 
 # 「达成等级」中文标签：纯按骰值算出的六档（与要求难度无关），用于检定提示与分层反馈。
@@ -287,7 +289,7 @@ def resolve_skill_check(
     ``options`` 是本局村规（大成功/大失败阈值、奖惩骰上限）；缺省即 RAW。
     """
     opts = options or _RAW
-    skill_value = resolve_skill_value(character_data, skill_name)
+    skill_value = resolve_skill_value(character_data, skill_name, options)
     # 奖惩骰上限也是村规：净奖惩先各自钳到上限内，再抵消。
     bonus = max(0, min(bonus, opts.dice_pool_cap))
     penalty = max(0, min(penalty, opts.dice_pool_cap))
@@ -334,7 +336,7 @@ COMPONENT = Component(
     config=CheckConfig, group="判定",
     provides={"check": Provide(
         __name__,
-        bound=("resolve_skill_check", "is_fumble", "achieved_tier", "judge"),
-        plain=("TIER_LABEL_CN", "display_skill_name", "normalize_skill_name", "resolve_skill_value"),
+        bound=("resolve_skill_check", "is_fumble", "achieved_tier", "judge", "resolve_skill_value"),
+        plain=("TIER_LABEL_CN", "display_skill_name", "normalize_skill_name"),
     )},
 )

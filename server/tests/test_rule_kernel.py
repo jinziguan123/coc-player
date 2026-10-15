@@ -63,9 +63,9 @@ def test_caller_may_not_pass_options():
 
 
 def test_plain_exports_pass_through_unchanged():
-    from app.rules.coc.components import combat
+    from app.rules.coc.components import wound
 
-    assert ruleset_for("coc").combat.COC_WEAPONS is combat.COC_WEAPONS
+    assert ruleset_for("coc").wound.CHARACTER_STATUSES is wound.CHARACTER_STATUSES
 
 
 # ── 缓存与读时查找 ────────────────────────────────────────────────────────

@@ -16,18 +16,15 @@ from sqlalchemy.orm import Session
 
 from app.ai.llm_factory import get_llm
 from app.models.module import Module
-from app.rules import ruleset_for
+from app.rules import Ruleset, ruleset_for
+from app.services import rule_options_service
 
 logger = logging.getLogger(__name__)
 
 
-# AI 建卡目前只服务 CoC（与 api 层回包里的 rule_system 一致），按 RAW 取规则。
-def _character():
-    return ruleset_for("coc").character
-
-
-def _occupation():
-    return ruleset_for("coc").occupation
+def _raw() -> Ruleset:
+    """没给生效规则时（单测直接调内部函数）按 CoC 规则书原文。"""
+    return ruleset_for("coc")
 
 # 建卡时不可分配的技能：克苏鲁神话恒为 0；母语 = EDU，由引擎设置
 #: 真正不可加点的只有克苏鲁神话。母语曾经也在这里，但它的特殊之处是**基础值等于 EDU**，
@@ -69,13 +66,15 @@ async def generate_ai_character(
     if not module:
         raise ValueError("模组不存在")
 
-    attrs = _character().roll_attributes()
+    # 按这一桌的村规与该模组自带的数据建卡：房主新增的职业、技能要能被 AI 选到
+    rs = rule_options_service.village_ruleset(db, module.rule_system, module)
+    attrs = rs.character.roll_attributes()
 
     ai: dict | None = None
     try:
         llm = get_llm()
         raw = await llm.complete(
-            messages=[{"role": "user", "content": _build_prompt(module, hint, attrs)}],
+            messages=[{"role": "user", "content": _build_prompt(module, hint, attrs, rs=rs)}],
             response_format={"type": "json_object"},
             temperature=0.8,
         )
@@ -84,18 +83,19 @@ async def generate_ai_character(
         logger.exception("AI 建卡 LLM 调用失败: module=%s", module_id)
 
     if ai is None:
-        return _rule_only_fallback(module, attrs)
+        return _rule_only_fallback(module, attrs, rs=rs)
 
-    return _assemble(module, attrs, ai)
+    return _assemble(module, attrs, ai, rs=rs)
 
 
 # --------------------------------------------------------------------------- #
 # Prompt 构造
 # --------------------------------------------------------------------------- #
-def _build_prompt(module: Module, hint: str, attrs: dict[str, int]) -> str:
+def _build_prompt(module: Module, hint: str, attrs: dict[str, int], *, rs: Ruleset | None = None) -> str:
+    rs = rs or _raw()
     era = (module.world_setting or {}).get("era", "1920s")
-    occ_names = "、".join(o.name for o in _occupation().COC_OCCUPATIONS)
-    skill_names = "、".join(k for k in _character().COC_DEFAULT_SKILLS if k not in NON_ALLOCATABLE)
+    occ_names = "、".join(o.name for o in rs.occupation.occupations())
+    skill_names = "、".join(k for k in rs.character.default_skills() if k not in NON_ALLOCATABLE)
     attrs_str = "、".join(f"{k}={v}" for k, v in attrs.items())
     hint_line = f"\n## 角色概念提示\n{hint}\n" if hint and hint.strip() else ""
 
@@ -152,20 +152,23 @@ def _parse_json(raw: Any) -> dict | None:
 # --------------------------------------------------------------------------- #
 # 组装 + 技能钳制（合法性保证全在这里）
 # --------------------------------------------------------------------------- #
-def _assemble(module: Module, attrs: dict[str, int], ai: dict) -> dict[str, Any]:
+def _assemble(
+    module: Module, attrs: dict[str, int], ai: dict, *, rs: Ruleset | None = None,
+) -> dict[str, Any]:
+    rs = rs or _raw()
     age = _clamp_int(ai.get("age"), 15, 89, 25)
 
-    occ = _occupation().get_occupation(str(ai.get("occupation", "")))
+    occ = rs.occupation.get_occupation(str(ai.get("occupation", "")))
     if occ is None:
-        occ = _default_occupation(module)
+        occ = _default_occupation(module, rs=rs)
     occ_name = occ.name
 
     cr = _clamp_int(ai.get("credit_rating"), occ.credit_min, occ.credit_max, occ.credit_min)
-    occ_points = _occupation().calc_occupation_points(occ.name, attrs)
-    int_points = _occupation().calc_interest_points(attrs)
+    occ_points = rs.occupation.calc_occupation_points(occ.name, attrs)
+    int_points = rs.occupation.calc_interest_points(attrs)
     occ_points_remaining = max(0, occ_points - cr)  # 信用评级占用本职点
 
-    base = _character().build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
+    base = rs.character.build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
     base["信用评级"] = 0
 
     # 仅保留名单内、可分配的技能
@@ -209,19 +212,20 @@ def _assemble(module: Module, attrs: dict[str, int], ai: dict) -> dict[str, Any]
     final["克苏鲁神话"] = 0
     # 90 是「建卡时加点不得超过」的上限，不该去砍属性派生的**基础值**：EDU 上限 99，
     # 一个 EDU=95 的角色母语就该是 95。收口之后重新兜一次底线，与手动建卡同一个函数。
-    _character().apply_attr_derived_skills(final, attrs)
+    rs.character.apply_attr_derived_skills(final, attrs)
 
-    return _build_result(attrs, age, occ_name, cr, final, ai)
+    return _build_result(attrs, age, occ_name, cr, final, ai, rs=rs)
 
 
 def _build_result(
     attrs: dict[str, int], age: int, occ_name: str, cr: int,
-    skills: dict[str, int], ai: dict,
+    skills: dict[str, int], ai: dict, *, rs: Ruleset | None = None,
 ) -> dict[str, Any]:
-    system_data = _character().compute_derived(attrs, age)
+    rs = rs or _raw()
+    system_data = rs.character.compute_derived(attrs, age)
     system_data["occupation"] = occ_name
     system_data["creditRating"] = cr
-    _fill_assets(system_data, cr)
+    _fill_assets(system_data, cr, rs=rs)
     for key in ("gender", "residence", "birthplace"):
         val = str(ai.get(key) or "").strip()
         if val:
@@ -256,14 +260,15 @@ def _build_result(
     }
 
 
-def _fill_assets(system_data: dict[str, Any], cr: int) -> None:
+def _fill_assets(system_data: dict[str, Any], cr: int, *, rs: Ruleset | None = None) -> None:
+    rs = rs or _raw()
     """按信用评级把现金/消费水平/资产算进 system_data。
 
     这一步此前完全缺席：AI 建出来的卡只有一个 creditRating，现金与资产是空的，
     要玩家自己去编辑器里点一次「按信用评级换算」才补上——可那正是一步纯查表，
     没有任何需要人来决定的东西。字段名与前端编辑器读写的一致（见 readAssets）。
     """
-    d = _character().derive_assets(cr)
+    d = rs.character.derive_assets(cr)
     system_data["cash"] = d["cash"]
     system_data["spendingLevel"] = d["spendingLevel"]
     # assets 在角色卡上是一行自由描述；换算给出的是金额，与编辑器那颗按钮同样的写法
@@ -273,12 +278,15 @@ def _fill_assets(system_data: dict[str, Any], cr: int) -> None:
 # --------------------------------------------------------------------------- #
 # 兜底：LLM 完全不可用时，用纯规则产出一张合法卡
 # --------------------------------------------------------------------------- #
-def _rule_only_fallback(module: Module, attrs: dict[str, int]) -> dict[str, Any]:
-    occ = _default_occupation(module)
+def _rule_only_fallback(
+    module: Module, attrs: dict[str, int], *, rs: Ruleset | None = None,
+) -> dict[str, Any]:
+    rs = rs or _raw()
+    occ = _default_occupation(module, rs=rs)
     cr = occ.credit_min
-    occ_points_remaining = max(0, _occupation().calc_occupation_points(occ.name, attrs) - cr)
+    occ_points_remaining = max(0, rs.occupation.calc_occupation_points(occ.name, attrs) - cr)
 
-    base = _character().build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
+    base = rs.character.build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
     base["信用评级"] = cr
 
     occ_skills = [s for s in occ.skills if s in base and s not in NON_ALLOCATABLE]
@@ -291,12 +299,12 @@ def _rule_only_fallback(module: Module, attrs: dict[str, int]) -> dict[str, Any]
         if k != "克苏鲁神话":
             base[k] = min(90, max(0, base[k]))
     base["克苏鲁神话"] = 0
-    _character().apply_attr_derived_skills(base, attrs)   # 同 _assemble：90 不该砍属性派生的基础值
+    rs.character.apply_attr_derived_skills(base, attrs)   # 同 _assemble：90 不该砍属性派生的基础值
 
-    system_data = _character().compute_derived(attrs, 25)
+    system_data = rs.character.compute_derived(attrs, 25)
     system_data["occupation"] = occ.name
     system_data["creditRating"] = cr
-    _fill_assets(system_data, cr)
+    _fill_assets(system_data, cr, rs=rs)
 
     return {
         "name": "待命名调查员",
@@ -329,7 +337,8 @@ def _clamp_int(val: Any, lo: int, hi: int, default: int) -> int:
     return max(lo, min(hi, v))
 
 
-def _default_occupation(module: Module) -> Any:  # 职业条目（occupations.Occupation）
+def _default_occupation(module: Module, *, rs: Ruleset | None = None) -> Any:  # 职业条目
+    rs = rs or _raw()
     era = (module.world_setting or {}).get("era", "1920s")
-    occ = _occupation().get_occupation(DEFAULT_OCCUPATION_BY_ERA.get(era, "记者"))
-    return occ or _occupation().COC_OCCUPATIONS[0]
+    occ = rs.occupation.get_occupation(DEFAULT_OCCUPATION_BY_ERA.get(era, "记者"))
+    return occ or rs.occupation.occupations()[0]

@@ -21,15 +21,18 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Iterable
+from collections import OrderedDict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Any
 
+from app.rules import data as rule_data
 from app.rules.config import RuleConfig, parse_lenient, parse_strict
+from app.rules.data import DataTable
 
 #: 房规文件格式版本（见设计文档 6.3）。升级时在 house_rules 里补一个迁移函数。
-HOUSE_RULES_FORMAT_VERSION = 1
+#: v2（P3）：新增 ``data`` 段——数据表补丁。
+HOUSE_RULES_FORMAT_VERSION = 2
 
 
 class RulesetError(ValueError):
@@ -86,6 +89,8 @@ class Component:
     group: str = ""
     #: 给房主看的一句说明（可选组件的开关行下方显示它）。
     description: str = ""
+    #: 本组件的数据表（房主/模组作者可以补丁改动的那些表）。表名在规则系统内唯一。
+    data: tuple[DataTable, ...] = ()
 
     @property
     def option_keys(self) -> tuple[str, ...]:
@@ -111,17 +116,43 @@ class RuleSystem:
     _slots: dict[str, tuple[str, Provide]] = field(default_factory=dict, repr=False)
     _active: tuple[Component, ...] = field(default=(), repr=False)
     _default: Any = field(default=None, repr=False)
+    _tables: dict[str, tuple[str, DataTable]] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_default", self.options_model())
-        active, slots = _resolve(self)
+        active, slots, tables = _resolve(self)
         object.__setattr__(self, "_active", active)
         object.__setattr__(self, "_slots", slots)
+        object.__setattr__(self, "_tables", tables)
 
     @property
     def active_components(self) -> tuple[Component, ...]:
         """预设内的组件，按预设顺序。"""
         return self._active
+
+    # ── 数据表 ──
+
+    @property
+    def data_tables(self) -> tuple[DataTable, ...]:
+        """预设内所有组件的数据表，按预设顺序。"""
+        return tuple(t for _, t in self._tables.values())
+
+    def data_table(self, name: str) -> DataTable:
+        try:
+            return self._tables[name][1]
+        except KeyError:
+            raise ValueError(f"规则系统 {self.id} 没有数据表 {name}") from None
+
+    def resolve_rows(self, layers: Sequence[Mapping | None] = ()) -> dict[str, tuple[dict, ...]]:
+        """官方数据依次叠上各层补丁（如 模组 → 村规），返回 表名 → 合并后的行。"""
+        out: dict[str, tuple[dict, ...]] = {}
+        for name, (_cid, table) in self._tables.items():
+            rows = table.official_rows
+            for layer in layers:
+                if layer and layer.get(name):
+                    rows = rule_data.apply_patches(table, rows, layer[name])
+            out[name] = rows
+        return out
 
     # ── 村规 ──
 
@@ -162,12 +193,19 @@ class RuleSystem:
     # ── 组件 ──
 
     def manifest(self) -> dict:
-        """前端村规面板与房规文件的契约：组件目录 + 各组件参数的 JSON Schema。"""
+        """前端村规面板、数据表编辑器与房规文件的契约：组件目录、各组件参数与数据表的 schema。"""
         return {
             "id": self.id,
             "title": self.title,
             "version": self.version,
             "house_rules_format_version": HOUSE_RULES_FORMAT_VERSION,
+            "tables": [
+                {
+                    "name": t.name, "title": t.title, "description": t.description,
+                    "key": t.key, "component": cid, "row_schema": t.schema(),
+                }
+                for cid, t in self._tables.values()
+            ],
             "components": [
                 {
                     "id": c.id,
@@ -183,9 +221,14 @@ class RuleSystem:
             ],
         }
 
-    def ruleset(self, options: dict | None = None) -> Ruleset:
-        """按村规取生效规则（同一份村规返回同一个缓存对象）。"""
-        return _build(self, self.parse_options(options))
+    def ruleset(
+        self, options: dict | None = None, data_layers: Sequence[Mapping | None] = (),
+    ) -> Ruleset:
+        """按村规参数与数据补丁层取生效规则（内容相同则返回同一个缓存对象）。
+
+        ``data_layers`` 自底向上（如 [模组补丁, 村规补丁]），每层是 表名 → 补丁行列表。
+        """
+        return _build(self, self.parse_options(options), tuple(layer or {} for layer in data_layers))
 
 
 class Service:
@@ -225,17 +268,28 @@ class Service:
 class Ruleset:
     """一份生效规则：``rs.<槽位>.<导出>``，例如 ``rs.check.resolve_skill_check(...)``。"""
 
-    __slots__ = ("system", "options", "components", "_services")
+    __slots__ = ("system", "options", "components", "_services", "_rows", "_tables")
 
-    def __init__(self, system: RuleSystem, options: Any) -> None:
+    def __init__(self, system: RuleSystem, options: Any, rows: dict[str, tuple[dict, ...]]) -> None:
         self.system = system.id
-        self.options = options
+        self._rows = rows
+        self._tables = {
+            name: table.runtime(rows[name]) for name, (_cid, table) in system._tables.items()
+        }
+        # 「本局规则」= 参数 + 数据表：把合并好的表附在注入给组件函数的那个对象上
+        ctx = options.model_copy()
+        ctx._tables = self._tables
+        self.options = ctx
         #: 本份村规下实际启用的组件（可选组件随其开关参数进出）。
         self.components = tuple(c.id for c in system._active if c.is_enabled(options))
         self._services = {
-            slot: Service(slot, provide, options)
+            slot: Service(slot, provide, ctx)
             for slot, (_cid, provide) in system._slots.items()
         }
+
+    def rows(self, table: str) -> tuple[dict, ...]:
+        """某张数据表本局合并后的行（官方 + 各层补丁），供接口与编辑器展示。"""
+        return self._rows[table]
 
     def __getattr__(self, slot: str) -> Service:
         try:
@@ -292,13 +346,29 @@ def ruleset_for(rule_system: str, options: dict | None = None) -> Ruleset:
 # ── 内部 ──────────────────────────────────────────────────────────────────
 
 
-@lru_cache(maxsize=256)
-def _build(system: RuleSystem, options: Any) -> Ruleset:
-    return Ruleset(system, options)
+_CACHE: OrderedDict[tuple, Ruleset] = OrderedDict()
+_CACHE_MAX = 256
 
 
-def _resolve(system: RuleSystem) -> tuple[tuple[Component, ...], dict[str, tuple[str, Provide]]]:
-    """校验预设并算出（预设内组件, 槽位 → (组件 id, 导出)）。任何问题都在这里一次性报全。"""
+def _build(system: RuleSystem, options: Any, layers: tuple[Mapping, ...]) -> Ruleset:
+    """按（规则系统, 参数, 数据补丁内容）缓存生效规则；最久未用的先淘汰。"""
+    data_key = rule_data.digest(layers) if any(layers) else ""
+    key = (id(system), options, data_key)
+    hit = _CACHE.get(key)
+    if hit is not None:
+        _CACHE.move_to_end(key)
+        return hit
+    rs = Ruleset(system, options, system.resolve_rows(layers))
+    _CACHE[key] = rs
+    if len(_CACHE) > _CACHE_MAX:
+        _CACHE.popitem(last=False)
+    return rs
+
+
+def _resolve(system: RuleSystem) -> tuple[
+    tuple[Component, ...], dict[str, tuple[str, Provide]], dict[str, tuple[str, DataTable]],
+]:
+    """校验预设并算出（预设内组件, 槽位 → 导出, 表名 → 数据表）。任何问题都在这里一次性报全。"""
     catalog: dict[str, Component] = {}
     errors: list[str] = []
     for comp in system.components:
@@ -331,11 +401,24 @@ def _resolve(system: RuleSystem) -> tuple[tuple[Component, ...], dict[str, tuple
             else:
                 slots[slot] = (comp.id, provide)
 
+    tables: dict[str, tuple[str, DataTable]] = {}
+    for comp in active:
+        for table in comp.data:
+            if table.name in tables:
+                errors.append(f"数据表 {table.name} 同时由 {tables[table.name][0]} 与 {comp.id} 声明")
+                continue
+            try:
+                table.official_rows  # 官方数据在启动时就校验，坏数据不留到结算才暴露
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"组件 {comp.id} 的官方数据 {table.name} 无效：{e}")
+                continue
+            tables[table.name] = (comp.id, table)
+
     errors += _check_option_owners(active, tuple(system.options_model.model_fields))
     errors += _check_toggles(active)
     if errors:
         raise RulesetError(f"规则系统 {system.id} 组装失败：\n- " + "\n- ".join(errors))
-    return tuple(active), slots
+    return tuple(active), slots, tables
 
 
 def _check_option_owners(active: Iterable[Component], option_fields: tuple[str, ...]) -> list[str]:

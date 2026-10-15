@@ -13,13 +13,20 @@ import math
 import random
 import re
 
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+
 from app.rules.coc.components.check import CheckConfig, resolve_skill_check
+from app.rules.config import table_of
+from app.rules.data import DataTable
 from app.rules.kernel import Component, Provide
 
-# ── 武器表（106 件），取自克苏鲁公社人物卡生成器 ──────────────────────────
-# 字段：name 名称 / skill 使用技能 / dam 伤害 / tho 是否贯穿(0/1) /
-# range 射程 / round 次数(a/b) / num 装弹量 / price 价格 / err 故障率 / time 时代 / category 大类。
+# ── 武器表（数据表 weapons；官方数据见 data/weapons.yaml，房主/模组作者以补丁改动）────────
 
+_DATA = Path(__file__).parent / "data"
+
+#: 官方武器大类的展示顺序；房主新增的大类排在其后（见 :func:`weapon_categories`）。
 WEAPON_CATEGORY_ORDER: list[str] = [
     "常规",
     "手枪",
@@ -32,114 +39,41 @@ WEAPON_CATEGORY_ORDER: list[str] = [
     "其他",
 ]
 
-COC_WEAPONS: list[dict] = [
-    {"name": "徒手格斗", "skill": "格斗(斗殴)", "dam": "1D3+DB", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "弓箭", "skill": "射击(弓弩)", "dam": "1D6+半DB", "tho": 0, "range": "30", "round": "1", "num": "1", "price": "7/75", "err": "97", "time": "1920s，现代", "category": "常规"},
-    {"name": "黄铜指虎", "skill": "格斗(斗殴)", "dam": "1D3+1+DB", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "1/10", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "长鞭", "skill": "格斗(鞭)", "dam": "1D3+半DB", "tho": 0, "range": "3", "round": "1", "num": "", "price": "5/50", "err": "97", "time": "1920s", "category": "常规"},
-    {"name": "燃烧的火把", "skill": "格斗(斗殴)", "dam": "1D6+燃烧", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "0.05/0.5", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "链锯", "skill": "格斗(链锯)", "dam": "2D8", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "-/300", "err": "95", "time": "现代", "category": "常规"},
-    {"name": "包革金属棒(大头棍、护身棒)", "skill": "格斗(斗殴)", "dam": "1D8+DB", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "2/15", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "大棒(棒球棒、拨火棍)", "skill": "格斗(斗殴)", "dam": "1D8+DB", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "3/35", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "小型棍棒(警棍)", "skill": "格斗(斗殴)", "dam": "1D6+DB", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "3/35", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "弩", "skill": "射击(弓弩)", "dam": "1D8+2", "tho": 1, "range": "50", "round": "1/2", "num": "1", "price": "10/100", "err": "96", "time": "1920s，现代", "category": "常规"},
-    {"name": "绞索", "skill": "格斗(绞索)", "dam": "1D6+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "0.5/3", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "手斧/手镰", "skill": "格斗(斧)", "dam": "1D6+1+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "3/9", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "大型刀(甘蔗刀等)", "skill": "格斗(斗殴)", "dam": "1D8+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "4/50", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "中型刀(切肉餐刀等)", "skill": "格斗(斗殴)", "dam": "1D4+2+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "2/15", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "小型刀(弹簧折叠刀等)", "skill": "格斗(斗殴)", "dam": "1D4+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "2/6", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "220V通电导线", "skill": "格斗(斗殴)", "dam": "2D8+晕", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "", "err": "95", "time": "现代", "category": "常规"},
-    {"name": "催泪喷雾", "skill": "格斗(斗殴)", "dam": "晕", "tho": 0, "range": "2", "round": "1", "num": "25", "price": "-/10", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "双节棍", "skill": "格斗(链枷)", "dam": "1D8+DB", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "1/10", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "投石", "skill": "投掷", "dam": "1D4+半DB", "tho": 0, "range": "STR/5m", "round": "1", "num": "", "price": "", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "手里剑", "skill": "投掷", "dam": "1D3+半DB", "tho": 1, "range": "STR/5m", "round": "2", "num": "1", "price": "0.5/3", "err": "100", "time": "1920s，现代", "category": "常规"},
-    {"name": "矛、骑士长枪", "skill": "格斗(矛)", "dam": "1D8+1", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "25/150", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "投矛", "skill": "投掷", "dam": "1D8+半DB", "tho": 1, "range": "STR/5m", "round": "1", "num": "", "price": "42760", "err": "", "time": "稀有", "category": "常规"},
-    {"name": "大型剑(马刀)", "skill": "格斗(刀剑)", "dam": "1D8+1+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "30/75", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "中型剑(佩剑、重剑)", "skill": "格斗(刀剑)", "dam": "1D6+1+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "15/100", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "轻型剑(花剑、剑杖)", "skill": "格斗(刀剑)", "dam": "1D6+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "25/100", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "电棍", "skill": "格斗(斗殴)", "dam": "1D3+晕", "tho": 0, "range": "接触", "round": "1", "num": "", "price": "-/200", "err": "97", "time": "现代", "category": "常规"},
-    {"name": "电击枪", "skill": "射击(手枪)", "dam": "1D3+晕", "tho": 0, "range": "5", "round": "1", "num": "3", "price": "-/400", "err": "95", "time": "现代", "category": "常规"},
-    {"name": "战斗回力镖", "skill": "投掷", "dam": "1D8+半DB", "tho": 0, "range": "STR/5m", "round": "1", "num": "", "price": "2/4", "err": "", "time": "稀有", "category": "常规"},
-    {"name": "伐木斧", "skill": "格斗(斧)", "dam": "1D8+2+DB", "tho": 1, "range": "接触", "round": "1", "num": "", "price": "5/10", "err": "", "time": "1920s，现代", "category": "常规"},
-    {"name": "燧发手枪", "skill": "射击(手枪)", "dam": "1D6+1", "tho": 1, "range": "10", "round": "1/4", "num": "1", "price": "30/300", "err": "95", "time": "稀有", "category": "手枪"},
-    {"name": ".22(5.6mm)小型自动手枪", "skill": "射击(手枪)", "dam": "1D6", "tho": 1, "range": "10", "round": "1(3)", "num": "6", "price": "25/190", "err": "100", "time": "1920s，现代", "category": "手枪"},
-    {"name": ".25(6.35mm)短口手枪(单管)", "skill": "射击(手枪)", "dam": "1D6", "tho": 1, "range": "3", "round": "1", "num": "1", "price": "12/55", "err": "100", "time": "1920s", "category": "手枪"},
-    {"name": ".32(7.65mm)左轮", "skill": "射击(手枪)", "dam": "1D8", "tho": 1, "range": "15", "round": "1(3)", "num": "6", "price": "15/200", "err": "100", "time": "1920s，现代", "category": "手枪"},
-    {"name": ".32(7.65mm)自动手枪", "skill": "射击(手枪)", "dam": "1D8", "tho": 1, "range": "15", "round": "1(3)", "num": "8", "price": "20/350", "err": "99", "time": "1920s，现代", "category": "手枪"},
-    {"name": ".357马格南左轮", "skill": "射击(手枪)", "dam": "1D8+1D4", "tho": 1, "range": "15", "round": "1(3)", "num": "6", "price": "425", "err": "100", "time": "现代", "category": "手枪"},
-    {"name": ".38(9mm)左轮", "skill": "射击(手枪)", "dam": "1D10", "tho": 1, "range": "15", "round": "1(3)", "num": "6", "price": "25/200", "err": "100", "time": "1920s，现代", "category": "手枪"},
-    {"name": ".38(9mm)自动手枪", "skill": "射击(手枪)", "dam": "1D10", "tho": 1, "range": "15", "round": "1(3)", "num": "8", "price": "30/375", "err": "99", "time": "1920s，现代", "category": "手枪"},
-    {"name": "贝瑞塔M9", "skill": "射击(手枪)", "dam": "1D10", "tho": 1, "range": "15", "round": "1(3)", "num": "15", "price": "-/500", "err": "98", "time": "现代", "category": "手枪"},
-    {"name": "9mm格洛克17", "skill": "射击(手枪)", "dam": "1D10", "tho": 1, "range": "15", "round": "1(3)", "num": "17", "price": "-/500", "err": "98", "time": "现代", "category": "手枪"},
-    {"name": "9mm鲁格P08", "skill": "射击(手枪)", "dam": "1D10", "tho": 1, "range": "15", "round": "1(3)", "num": "8", "price": "75/600", "err": "99", "time": "1920s，现代", "category": "手枪"},
-    {"name": ".41(10.4mm)左轮", "skill": "射击(手枪)", "dam": "1D10", "tho": 1, "range": "15", "round": "1(3)", "num": "8", "price": "30/-", "err": "100", "time": "1920s稀有", "category": "手枪"},
-    {"name": ".44(11.2mm)马格南左轮", "skill": "射击(手枪)", "dam": "1D10+1D4+2", "tho": 1, "range": "15", "round": "1(3)", "num": "6", "price": "-/475", "err": "100", "time": "现代", "category": "手枪"},
-    {"name": ".45(11.43mm)左轮", "skill": "射击(手枪)", "dam": "1D10+2", "tho": 1, "range": "15", "round": "1(3)", "num": "6", "price": "30/300", "err": "100", "time": "1920s，现代", "category": "手枪"},
-    {"name": ".45(11.43mm)自动手枪", "skill": "射击(手枪)", "dam": "1D10+2", "tho": 1, "range": "15", "round": "1(3)", "num": "7", "price": "40/375", "err": "100", "time": "1920s，现代", "category": "手枪"},
-    {"name": "IMI 沙漠之鹰", "skill": "射击(手枪)", "dam": "1D10+1D6+3", "tho": 1, "range": "15", "round": "1(3)", "num": "7", "price": "-/650", "err": "94", "time": "现代", "category": "手枪"},
-    {"name": ".58 (14.7mm)1855年式春田步枪", "skill": "射击(步/霰)", "dam": "1D10+4", "tho": 1, "range": "60", "round": "1/4", "num": "1", "price": "25/350", "err": "95", "time": "稀有", "category": "半自动步枪"},
-    {"name": ".22 (5.6mm)栓式枪机步枪", "skill": "射击(步/霰)", "dam": "1D6+1", "tho": 1, "range": "30", "round": "1", "num": "6", "price": "13/70", "err": "99", "time": "1920s，现代", "category": "半自动步枪"},
-    {"name": ".30 (7.62mm)杠杆式枪机步枪", "skill": "射击(步/霰)", "dam": "2D6", "tho": 1, "range": "50", "round": "1", "num": "6", "price": "19/150", "err": "98", "time": "1920s，现代", "category": "半自动步枪"},
-    {"name": ".45 (11.43mm)马蒂尼-亨利步枪", "skill": "射击(步/霰)", "dam": "1D8+1D6+3", "tho": 1, "range": "80", "round": "1/3", "num": "1", "price": "20/200", "err": "100", "time": "1920s", "category": "半自动步枪"},
-    {"name": "莫兰上校的气动步枪③", "skill": "射击(步/霰)", "dam": "2D6+1", "tho": 1, "range": "20", "round": "1/3", "num": "1", "price": "200/-", "err": "88", "time": "1920s", "category": "半自动步枪"},
-    {"name": "加兰德M1、M2步枪", "skill": "射击(步/霰)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "1", "num": "8", "price": "-/400", "err": "100", "time": "二战及以后", "category": "半自动步枪"},
-    {"name": "SKS半自动步枪(56半)", "skill": "射击(步/霰)", "dam": "2D6+1", "tho": 1, "range": "90", "round": "1(2)", "num": "10", "price": "-/500", "err": "97", "time": "现代", "category": "半自动步枪"},
-    {"name": ".303(7.7mm)李-恩菲尔德", "skill": "射击(步/霰)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "1", "num": "5", "price": "50/300", "err": "100", "time": "1920s，现代", "category": "半自动步枪"},
-    {"name": ".30-06(7.62mm)手动枪机步枪", "skill": "射击(步/霰)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "1", "num": "5", "price": "75/175", "err": "100", "time": "1920s，现代", "category": "半自动步枪"},
-    {"name": ".30-06(7.62mm)半自动步枪", "skill": "射击(步/霰)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "1", "num": "5", "price": "-/275", "err": "100", "time": "现代", "category": "半自动步枪"},
-    {"name": ".444(11.28mm)马林步枪", "skill": "射击(步/霰)", "dam": "2D8+4", "tho": 1, "range": "110", "round": "1", "num": "5", "price": "-/400", "err": "98", "time": "现代", "category": "半自动步枪"},
-    {"name": "猎象枪(双管)", "skill": "射击(步/霰)", "dam": "3D6+4", "tho": 1, "range": "100", "round": "1或2", "num": "2", "price": "400/1000", "err": "100", "time": "1920s，现代", "category": "半自动步枪"},
-    {"name": "AK-47或AKM", "skill": "射击(步/霰)", "dam": "2D6+1", "tho": 1, "range": "100", "round": "1(2)或全自动", "num": "30", "price": "200", "err": "100", "time": "现代", "category": "全自动步枪"},
-    {"name": "AK-74", "skill": "射击(步/霰)", "dam": "2D6+1", "tho": 1, "range": "110", "round": "1(2)或全自动", "num": "30", "price": "1000", "err": "97", "time": "现代", "category": "全自动步枪"},
-    {"name": "M1918式勃朗宁自动步枪", "skill": "射击(机枪)", "dam": "2D6+4", "tho": 1, "range": "90", "round": "1(2)或全自动", "num": "20", "price": "800/1500", "err": "100", "time": "1920s", "category": "机枪"},
-    {"name": "FN FAL 突击步枪", "skill": "射击(步/霰)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "1-3发点射", "num": "20", "price": "1500", "err": "97", "time": "现代", "category": "全自动步枪"},
-    {"name": "加利尔突击步枪", "skill": "射击(步/霰)", "dam": "2D6", "tho": 1, "range": "110", "round": "1(2)或全自动", "num": "20", "price": "2000", "err": "98", "time": "现代", "category": "全自动步枪"},
-    {"name": "M16A2", "skill": "射击(步/霰)", "dam": "2D6", "tho": 1, "range": "110", "round": "1-3发点射", "num": "30", "price": "", "err": "97", "time": "现代", "category": "全自动步枪"},
-    {"name": "M4", "skill": "射击(步/霰)", "dam": "2D6", "tho": 1, "range": "90", "round": "1或3发点射", "num": "30", "price": "", "err": "97", "time": "现代", "category": "全自动步枪"},
-    {"name": "斯泰尔AUG", "skill": "射击(步/霰)", "dam": "2D6", "tho": 1, "range": "110", "round": "1(2)或全自动", "num": "30", "price": "1100", "err": "99", "time": "现代", "category": "全自动步枪"},
-    {"name": "贝雷塔AR70/90", "skill": "射击(步/霰)", "dam": "2D6", "tho": 1, "range": "110", "round": "1或全自动", "num": "30", "price": "2800", "err": "99", "time": "现代", "category": "全自动步枪"},
-    {"name": "20号霰弹枪(双管)", "skill": "射击(步/霰)", "dam": "2D6/1D6/1D3", "tho": 0, "range": "10/20/50", "round": "1或2", "num": "2", "price": "35/稀", "err": "100", "time": "1920s", "category": "霰弹枪"},
-    {"name": "16号霰弹枪(双管)", "skill": "射击(步/霰)", "dam": "2D6+2/1D6+1/1D4", "tho": 0, "range": "10/20/50", "round": "1或2", "num": "2", "price": "40/稀", "err": "100", "time": "1920s", "category": "霰弹枪"},
-    {"name": "12号霰弹枪(双管)", "skill": "射击(步/霰)", "dam": "4D6/2D6/1D6", "tho": 0, "range": "10/20/50", "round": "1或2", "num": "2", "price": "40/200", "err": "100", "time": "1920s，现代", "category": "霰弹枪"},
-    {"name": "12号霰弹枪(手压式)", "skill": "射击(步/霰)", "dam": "4D6/2D6/1D6", "tho": 0, "range": "10/20/50", "round": "1", "num": "5", "price": "45/100", "err": "100", "time": "现代", "category": "霰弹枪"},
-    {"name": "12号霰弹枪(半自动)", "skill": "射击(步/霰)", "dam": "4D6/2D6/1D6", "tho": 0, "range": "10/20/50", "round": "1(2)", "num": "5", "price": "45/100", "err": "100", "time": "现代", "category": "霰弹枪"},
-    {"name": "12号霰弹枪(双管,锯短)", "skill": "射击(步/霰)", "dam": "4D6/1D6", "tho": 0, "range": "5/10", "round": "1或2", "num": "2", "price": "", "err": "100", "time": "1920s", "category": "霰弹枪"},
-    {"name": "10号霰弹枪(双管)", "skill": "射击(步/霰)", "dam": "4D6+2/2D6+1/1D4", "tho": 0, "range": "10/20/50", "round": "1或2", "num": "2", "price": "稀", "err": "100", "time": "1920s稀有", "category": "霰弹枪"},
-    {"name": "12号贝里尼M3(折叠式枪托)", "skill": "射击(步/霰)", "dam": "4D6/2D6/1D6", "tho": 0, "range": "10/20/50", "round": "1(2)", "num": "7", "price": "-/895", "err": "100", "time": "现代", "category": "霰弹枪"},
-    {"name": "12号SPAS (折叠式枪托)", "skill": "射击(步/霰)", "dam": "4D6/2D6/1D6", "tho": 0, "range": "10/20/50", "round": "1", "num": "8", "price": "-/600", "err": "98", "time": "现代", "category": "霰弹枪"},
-    {"name": "MP18I/M现代28II", "skill": "射击(冲锋枪)", "dam": "1D10", "tho": 1, "range": "20", "round": "1(2)或全自动", "num": "20/30/32", "price": "1000/20000", "err": "96", "time": "1920s", "category": "冲锋枪"},
-    {"name": "MP5", "skill": "射击(冲锋枪)", "dam": "1D10", "tho": 1, "range": "20", "round": "1(2)或全自动", "num": "15/30", "price": "", "err": "97", "time": "现代", "category": "冲锋枪"},
-    {"name": "MAC-11", "skill": "射击(冲锋枪)", "dam": "1D10", "tho": 1, "range": "15", "round": "1(3)或全自动", "num": "32", "price": "-/750", "err": "96", "time": "现代", "category": "冲锋枪"},
-    {"name": "蝎式", "skill": "射击(冲锋枪)", "dam": "1D8", "tho": 1, "range": "15", "round": "1(3)或全自动", "num": "20", "price": "", "err": "96", "time": "现代", "category": "冲锋枪"},
-    {"name": "汤普森", "skill": "射击(冲锋枪)", "dam": "1D10+2", "tho": 1, "range": "20", "round": "1或全自动", "num": "20/30/50", "price": "1000/20000", "err": "96", "time": "1920s", "category": "冲锋枪"},
-    {"name": "乌兹", "skill": "射击(冲锋枪)", "dam": "1D10", "tho": 1, "range": "20", "round": "1(2)或全自动", "num": "32", "price": "-/1000", "err": "98", "time": "现代", "category": "冲锋枪"},
-    {"name": "巴雷特M82", "skill": "射击(步/霰)", "dam": "2D10+1D8+6", "tho": 1, "range": "250", "round": "1", "num": "11", "price": "3000", "err": "96", "time": "现代", "category": "狙击步枪"},
-    {"name": "PTRD-41反坦克步枪", "skill": "射击(步/霰)", "dam": "2D10+1D10+8", "tho": 1, "range": "230", "round": "1", "num": "5", "price": "1500", "err": "94", "time": "现代", "category": "狙击步枪"},
-    {"name": "1882年式加特林", "skill": "射击(机枪)", "dam": "2D6+4", "tho": 1, "range": "100", "round": "全自动", "num": "200", "price": "2000/14000", "err": "96", "time": "1920s稀有", "category": "机枪"},
-    {"name": "勃朗宁M1917A1(7.62mm)", "skill": "射击(机枪)", "dam": "2D6+4", "tho": 1, "range": "150", "round": "全自动", "num": "250", "price": "3000/3万", "err": "96", "time": "1920s", "category": "机枪"},
-    {"name": "布伦轻机枪", "skill": "射击(机枪)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "1或全自动", "num": "30/100", "price": "3000/5万", "err": "96", "time": "1920s", "category": "机枪"},
-    {"name": "路易斯Ⅰ型机枪", "skill": "射击(机枪)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "全自动", "num": "27/97", "price": "3000/2万", "err": "96", "time": "1920s", "category": "机枪"},
-    {"name": "GE M134式7.62mm速射机枪", "skill": "射击(机枪)", "dam": "2D6+4", "tho": 1, "range": "200", "round": "全自动", "num": "4000", "price": "", "err": "98", "time": "现代", "category": "机枪"},
-    {"name": "FN 米尼米，弹夹/弹带", "skill": "射击(机枪)", "dam": "2D6", "tho": 1, "range": "110", "round": "全自动", "num": "30/200", "price": "", "err": "99", "time": "现代", "category": "机枪"},
-    {"name": "维克斯.303机枪", "skill": "射击(机枪)", "dam": "2D6+4", "tho": 1, "range": "110", "round": "全自动", "num": "250", "price": "", "err": "99", "time": "1920s", "category": "机枪"},
-    {"name": "莫洛托夫鸡尾酒", "skill": "投掷", "dam": "2D6 烧", "tho": 1, "range": "STRft", "round": "1/2", "num": "一次性", "price": "", "err": "95", "time": "1920s，现代", "category": "其他"},
-    {"name": "信号枪(信号弹枪)", "skill": "射击(手枪)", "dam": "1D10+1D3 烧", "tho": 1, "range": "10", "round": "1/2", "num": "1", "price": "15/75", "err": "100", "time": "1920s，现代", "category": "其他"},
-    {"name": "M79式40mm榴弹发射器", "skill": "射击(重武器)", "dam": "3D10/2码", "tho": 1, "range": "20", "round": "1/3", "num": "1", "price": "", "err": "99", "time": "现代", "category": "其他"},
-    {"name": "炸药棒", "skill": "投掷", "dam": "4D10/3码", "tho": 1, "range": "STRft", "round": "1/2", "num": "一次性", "price": "2/5", "err": "99", "time": "1920s，现代", "category": "其他"},
-    {"name": "雷管", "skill": "电气维修", "dam": "2D10/1码", "tho": 1, "range": "", "round": "", "num": "一次性", "price": "20/整盒", "err": "100", "time": "1920s，现代", "category": "其他"},
-    {"name": "爆破筒", "skill": "爆破", "dam": "1D10/3码", "tho": 1, "range": "即地", "round": "1", "num": "一次性", "price": "　", "err": "95", "time": "1920s，现代", "category": "其他"},
-    {"name": "塑胶炸弹(C-4)，4盎司", "skill": "爆破", "dam": "6D10/3码", "tho": 1, "range": "即地", "round": "1", "num": "一次性", "price": "", "err": "99", "time": "现代", "category": "其他"},
-    {"name": "手榴弹", "skill": "投掷", "dam": "4D10/3码", "tho": 1, "range": "STRft", "round": "1/2", "num": "一次性", "price": "", "err": "99", "time": "1920s，现代", "category": "其他"},
-    {"name": "81mm迫击炮", "skill": "炮术", "dam": "6D10/6码", "tho": 1, "range": "500", "round": "1", "num": "独立装弹", "price": "", "err": "100", "time": "现代", "category": "其他"},
-    {"name": "75mm野战火炮", "skill": "炮术", "dam": "10D10/2码", "tho": 1, "range": "500", "round": "1/4", "num": "独立装弹", "price": "1500/-", "err": "99", "time": "1920s，现代", "category": "其他"},
-    {"name": "120mm坦克主炮", "skill": "炮术", "dam": "10D10/2码", "tho": 1, "range": "2000", "round": "1", "num": "独立装弹", "price": "", "err": "100", "time": "现代", "category": "其他"},
-    {"name": "5英寸(127mm)舰炮", "skill": "炮术", "dam": "15D10/4码", "tho": 1, "range": "3000", "round": "1", "num": "自动上弹", "price": "", "err": "98", "time": "1920s，现代", "category": "其他"},
-    {"name": "反步兵地雷", "skill": "爆破", "dam": "4D10/5码", "tho": 1, "range": "即地", "round": "1", "num": "一次性", "price": "", "err": "99", "time": "现代", "category": "其他"},
-    {"name": "阔剑地雷", "skill": "爆破", "dam": "6D6/20码", "tho": 1, "range": "即地", "round": "1", "num": "一次性", "price": "", "err": "99", "time": "现代", "category": "其他"},
-    {"name": "火焰喷射器", "skill": "射击(喷射器)", "dam": "2D6+烧", "tho": 1, "range": "25", "round": "1", "num": "至少10", "price": "", "err": "93", "time": "1920s，现代", "category": "其他"},
-    {"name": "M72式单发轻型反坦克炮", "skill": "射击(重武器)", "dam": "8D10/1码", "tho": 1, "range": "150", "round": "1", "num": "1", "price": "", "err": "98", "time": "现代", "category": "其他"},
-]
+
+class WeaponRow(BaseModel):
+    """武器表的一行。字段沿用克苏鲁公社人物卡生成器的口径（多为文本，如射程「接触」）。"""
+
+    name: str = Field(min_length=1, title="名称")
+    skill: str = Field(min_length=1, title="使用技能", description="如 格斗(斗殴)、射击(手枪)")
+    dam: str = Field(min_length=1, title="伤害", description="骰式，可含 DB / 半DB；霰弹按射程分段用 / 隔开")
+    tho: int = Field(0, ge=0, le=1, title="贯穿", description="1 = 贯穿武器（极难成功/大成功加伤）")
+    range: str = Field("", title="射程", description="米数，近战写「接触」")
+    round: str = Field("1", title="每轮次数", description="如 1、1(3)（括号内为连发上限）、1/2")
+    num: str = Field("", title="装弹量")
+    price: str = Field("", title="价格")
+    err: str = Field("", title="故障率")
+    time: str = Field("", title="时代")
+    category: str = Field("常规", min_length=1, title="大类")
+
+
+WEAPONS = DataTable(
+    name="weapons", title="武器表", row_model=WeaponRow, key="name",
+    source=_DATA / "weapons.yaml", description="人物卡与战斗结算共用的武器数据",
+)
+
+#: 官方武器表（未经任何补丁）。结算请经 :func:`weapons` 取本局的表。
+COC_WEAPONS = WEAPONS.official
+
+
+def weapons(options: CheckConfig | None = None) -> tuple[dict, ...]:
+    """本局的武器表（官方 + 模组 + 村规补丁）。"""
+    return table_of(options, "weapons", COC_WEAPONS)
+
+
+def weapon_categories(options: CheckConfig | None = None) -> list[str]:
+    """武器大类的展示顺序：官方大类在前，房主新增的按出现顺序追加。"""
+    extra = [w["category"] for w in weapons(options) if w["category"] not in WEAPON_CATEGORY_ORDER]
+    return WEAPON_CATEGORY_ORDER + list(dict.fromkeys(extra))
 
 
 # ── 战斗规则 ──────────────────────────────────────────────────────────────
@@ -153,7 +87,6 @@ OUTCOME_RANK = {
     "fumble": 0,
 }
 
-WEAPON_BY_NAME: dict[str, dict] = {w["name"]: w for w in COC_WEAPONS}
 
 _UNARMED = {"name": "徒手格斗", "skill": "格斗(斗殴)", "dam": "1D3+DB", "tho": 0}
 
@@ -162,7 +95,7 @@ _FIGHT_PREFIXES = ("格斗", "斗殴")
 _SHOOT_PREFIXES = ("射击", "枪")
 
 
-def lookup_weapon(name: str | None) -> dict | None:
+def lookup_weapon(name: str | None, options: CheckConfig | None = None) -> dict | None:
     """在武器表里查武器：精确 → 子串。**查不到返回 None**（区别于 resolve_weapon 的回落徒手）。
 
     调用方需要区分「这是人类武器表里的东西」与「这是怪物自己的攻击方式（撕咬/触手/爪击）」时用它。
@@ -170,23 +103,25 @@ def lookup_weapon(name: str | None) -> dict | None:
     if not name:
         return None
     n = name.strip()
-    if n in WEAPON_BY_NAME:
-        return WEAPON_BY_NAME[n]
-    for w in COC_WEAPONS:
+    table = weapons(options)
+    for w in table:
+        if w["name"] == n:
+            return w
+    for w in table:
         if n in w["name"] or w["name"] in n:
             return w
     return None
 
 
-def resolve_weapon(name: str | None) -> dict:
+def resolve_weapon(name: str | None, options: CheckConfig | None = None) -> dict:
     """按名字取武器数据：精确 → 子串 → 回落徒手。名字可为 KP 给的通俗名（如「匕首」）。"""
-    return lookup_weapon(name) or _UNARMED
+    return lookup_weapon(name, options) or _UNARMED
 
 
-def burst_capacity(weapon: str | dict) -> int:
+def burst_capacity(weapon: str | dict, options: CheckConfig | None = None) -> int:
     """一轮最多射击发数：武器 round 字段括号内数字（如 '1(3)'→3）。
     无括号（'1' 单发栓动）或慢速装填（'1/2'）→ 1，即不可连发。"""
-    w = resolve_weapon(weapon) if isinstance(weapon, str) else weapon
+    w = resolve_weapon(weapon, options) if isinstance(weapon, str) else weapon
     m = re.search(r"\((\d+)\)", str(w.get("round") or "1"))
     return int(m.group(1)) if m else 1
 
@@ -241,13 +176,15 @@ def _substitute_db(dam: str, db: str) -> str:
     return expr
 
 
-def roll_weapon_damage(weapon: str | dict, db: str = "0", *, impale: bool = False) -> dict:
+def roll_weapon_damage(
+    weapon: str | dict, db: str = "0", *, impale: bool = False, options: CheckConfig | None = None,
+) -> dict:
     """掷武器伤害。weapon 可为武器名或武器 dict。impale=贯穿/大成功（贯穿武器）→ 最大骰点 + 再掷一次。
 
     返回 {total, rolls, notation, flags}。flags 收 燃烧/晕/贯穿 等注记（供叙述），不计入数值。
     霰弹/射程分段公式（'2D6+2/1D6+1/1D4'）取首段（近距离）。伤害不为负。
     """
-    w = resolve_weapon(weapon) if isinstance(weapon, str) else weapon
+    w = resolve_weapon(weapon, options) if isinstance(weapon, str) else weapon
     dam = (w.get("dam") or "1D3").split("/")[0].strip()   # 取首段（近距离）
     flags = [kw for kw in ("燃烧", "烧", "晕") if kw in dam]
     expr = _substitute_db(dam, db)
@@ -324,7 +261,7 @@ def _fight_skill_of(data: dict) -> str:
     return "格斗(斗殴)"
 
 
-def attack_skill_of(data: dict, weapon: str | dict | None) -> str:
+def attack_skill_of(data: dict, weapon: str | dict | None, options: CheckConfig | None = None) -> str:
     """这次攻击该掷哪一项技能。
 
     ① 攻击者技能表里有与这件武器/攻击方式同名的技能 → 用它（怪物的「撕咬」「触手」）；
@@ -340,7 +277,7 @@ def attack_skill_of(data: dict, weapon: str | dict | None) -> str:
         return own
     if isinstance(weapon, dict):
         return weapon.get("skill") or _fight_skill_of(data)
-    return (lookup_weapon(weapon) or {}).get("skill") or _fight_skill_of(data)
+    return (lookup_weapon(weapon, options) or {}).get("skill") or _fight_skill_of(data)
 
 
 def allowed_reactions(is_firearm: bool, defender_grappled: bool = False) -> list[str]:
@@ -444,10 +381,10 @@ def resolve_attack(
     """
     if attacker_disarmed:
         weapon = _UNARMED
-    w = resolve_weapon(weapon) if isinstance(weapon, str) else weapon
+    w = resolve_weapon(weapon, options) if isinstance(weapon, str) else weapon
     # 注意用原始入参 weapon（可能是「撕咬」这类怪物攻击方式）取技能，不能用回落后的 w——
     # w 已经是徒手格斗了，取出来只会是 格斗(斗殴)。
-    atk_skill = attack_skill_of(attacker_data, weapon)
+    atk_skill = attack_skill_of(attacker_data, weapon, options)
     atk = resolve_skill_check(
         attacker_data, atk_skill, difficulty, bonus=bonus, penalty=penalty, options=options,
     )
@@ -459,7 +396,7 @@ def resolve_attack(
 
     def _damage(tier: str) -> dict:
         impale = bool(w.get("tho")) and tier in ("extreme", "critical")
-        return roll_weapon_damage(w, attacker_db, impale=impale)
+        return roll_weapon_damage(w, attacker_db, impale=impale, options=options)
 
     # 远程：无反应 → 达标即命中；扑掩体/闪避 → 射手转困难难度（扑向掩体），无反击
     if ranged:
@@ -603,13 +540,17 @@ def heuristic_npc_action(state: dict, actor: dict) -> dict:
 COMPONENT = Component(
     id="coc7.combat", title="战斗轮",
     requires=("coc7.check", "coc7.wound"),
+    data=(WEAPONS,),
     provides={"combat": Provide(
         __name__,
-        bound=("resolve_attack", "resolve_first_aid", "resolve_observe", "resolve_maneuver"),
+        bound=(
+            "resolve_attack", "resolve_first_aid", "resolve_observe", "resolve_maneuver",
+            "weapons", "weapon_categories", "lookup_weapon", "resolve_weapon", "burst_capacity",
+            "roll_weapon_damage", "attack_skill_of",
+        ),
         plain=(
-            "COC_WEAPONS", "WEAPON_CATEGORY_ORDER", "OUTCOME_RANK", "lookup_weapon",
-            "resolve_weapon", "burst_capacity", "roll_weapon_damage", "combat_skill_value",
-            "roll_initiative", "compare_checks", "attack_skill_of", "allowed_reactions",
+            "OUTCOME_RANK", "combat_skill_value",
+            "roll_initiative", "compare_checks", "allowed_reactions",
             "is_active", "check_combat_end", "advance_turn", "heuristic_defense",
             "heuristic_npc_action",
         ),

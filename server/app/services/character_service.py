@@ -2,19 +2,17 @@ from sqlalchemy.orm import Session
 
 from app.models.character import Character
 from app.rules import ruleset_for
+from app.services import rule_options_service
 
 
 def roll_attribute_sets(rule_system: str, count: int = 3) -> list[dict[str, int]]:
     return ruleset_for(rule_system).character.roll_attribute_sets(count)
 
 
-def get_character_schema(rule_system: str) -> dict:
-    return ruleset_for(rule_system).character.get_character_schema()
-
-
 def create_character(db: Session, data: dict) -> Character:
     rule_system = data["rule_system"]
-    character_rules = ruleset_for(rule_system).character
+    # 按这一桌的村规建卡：房主改过的技能表（新增技能、起始值）要体现在新卡上
+    character_rules = rule_options_service.village_ruleset(db, rule_system).character
 
     computed = character_rules.create_character(data)
 

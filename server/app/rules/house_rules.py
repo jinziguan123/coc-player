@@ -20,6 +20,7 @@ from datetime import date
 
 import yaml
 
+from app.rules import data as rule_data
 from app.rules.kernel import HOUSE_RULES_FORMAT_VERSION, RuleSystem
 
 FORMAT = "coc-player/house-rules"
@@ -28,10 +29,17 @@ MAX_BYTES = 64 * 1024
 
 _KNOWN_KEYS = {
     "format", "format_version", "rule_system", "base_preset", "meta", "options", "table_notes",
+    "data",
 }
 
-#: format_version → 把该版本迁到下一版本的纯函数。v1 是首版，暂无迁移。
-_MIGRATIONS: dict[int, Callable[[dict], dict]] = {}
+
+def _v1_to_v2(doc: dict) -> dict:
+    """v1 没有数据表段；v2 新增 ``data``（表名 → 补丁行）。v1 文件迁过来就是「没改数据」。"""
+    return {**doc, "data": doc.get("data") or {}, "format_version": 2}
+
+
+#: format_version → 把该版本迁到下一版本的纯函数。导入时逐级迁到当前版本。
+_MIGRATIONS: dict[int, Callable[[dict], dict]] = {1: _v1_to_v2}
 
 
 @dataclass
@@ -40,6 +48,8 @@ class HouseRulesPreview:
 
     options: dict = field(default_factory=dict)
     table_notes: str = ""
+    #: 数据表补丁（表名 → 补丁行），已严格校验
+    data: dict = field(default_factory=dict)
     name: str = ""
     description: str = ""
     errors: list[str] = field(default_factory=list)
@@ -52,7 +62,7 @@ class HouseRulesPreview:
 
 def export_text(
     system: RuleSystem, options_diff: dict, table_notes: str, *,
-    name: str = "", description: str = "", today: date | None = None,
+    data: dict | None = None, name: str = "", description: str = "", today: date | None = None,
 ) -> str:
     doc = {
         "format": FORMAT,
@@ -71,11 +81,15 @@ def export_text(
             if key in options_diff
         },
         "table_notes": table_notes or "",
+        # 数据表补丁按组件顺序写；只写有改动的表
+        "data": {t.name: (data or {})[t.name] for t in system.data_tables if (data or {}).get(t.name)},
     }
     body = yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=100)
     return (
         "# CoC Player 房规文件。导入时只读取数据，不执行任何代码。\n"
         "# options 里只列与官方规则不同的参数；没写的都照规则书原文。\n"
+        "# data 里是对数据表（武器、职业、技能……）的改动：按主键对齐，只写改了的字段；\n"
+        "# 写 $delete: true 删除一行，主键不存在的行即新增。\n"
         + body
     )
 
@@ -137,6 +151,25 @@ def parse_text(system: RuleSystem, text: str, *, notes_max: int) -> HouseRulesPr
             "（可能来自本机没装的组件，或是拼错了）",
         )
     preview.options = options
+
+    data = doc.get("data")
+    if data is not None and not isinstance(data, dict):
+        preview.errors.append("data 应为「表名: 补丁行列表」的映射")
+    else:
+        known = {t.name for t in system.data_tables}
+        unknown_tables = sorted(str(k) for k in (data or {}) if k not in known)
+        if unknown_tables:
+            preview.warnings.append(
+                f"本机没有这些数据表，导入时忽略：{', '.join(unknown_tables)}",
+            )
+        for table in system.data_tables:
+            patches = (data or {}).get(table.name)
+            if patches is None:
+                continue
+            norm, errs = rule_data.validate_patch(table, table.official_rows, patches)
+            preview.errors += errs
+            if norm:
+                preview.data[table.name] = norm
 
     notes = doc.get("table_notes")
     if notes is None:

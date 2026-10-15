@@ -1,0 +1,55 @@
+# CoC 7e 装备目录（官方数据）。主键：name。
+# 字段：name 名称 / category 分类 / era 适用时代 / min_credit 需要的最低信用评级
+
+- {name: 火柴/打火机, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 笔记本与铅笔, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 怀表, category: 个人物品, era: [1920s], min_credit: 0}
+- {name: 手表, category: 个人物品, era: [modern], min_credit: 0}
+- {name: 钱包, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 香烟盒, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 小镜子, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 幸运符/护身符, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 手帕, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 雨伞, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 眼镜, category: 个人物品, era: [1920s, modern], min_credit: 0}
+- {name: 手电筒, category: 照明, era: [1920s, modern], min_credit: 0}
+- {name: 油灯, category: 照明, era: [1920s], min_credit: 0}
+- {name: 蜡烛 (6支), category: 照明, era: [1920s, modern], min_credit: 0}
+- {name: 绳索 (15米), category: 工具, era: [1920s, modern], min_credit: 0}
+- {name: 粉笔, category: 工具, era: [1920s, modern], min_credit: 0}
+- {name: 小刀/折叠刀, category: 工具, era: [1920s, modern], min_credit: 0}
+- {name: 锁匠工具, category: 工具, era: [1920s, modern], min_credit: 20}
+- {name: 撬棍, category: 工具, era: [1920s, modern], min_credit: 0}
+- {name: 锤子与钉子, category: 工具, era: [1920s, modern], min_credit: 0}
+- {name: 望远镜, category: 工具, era: [1920s, modern], min_credit: 20}
+- {name: 指南针, category: 工具, era: [1920s, modern], min_credit: 0}
+- {name: 放大镜, category: 工具, era: [1920s, modern], min_credit: 10}
+- {name: 急救箱, category: 医疗, era: [1920s, modern], min_credit: 10}
+- {name: 绷带, category: 医疗, era: [1920s, modern], min_credit: 0}
+- {name: 吗啡注射剂, category: 医疗, era: [1920s], min_credit: 30}
+- {name: 照相机, category: 记录/通讯, era: [1920s, modern], min_credit: 20}
+- {name: 日记本, category: 记录/通讯, era: [1920s, modern], min_credit: 0}
+- {name: 钢笔与墨水, category: 记录/通讯, era: [1920s, modern], min_credit: 0}
+- {name: 报纸, category: 记录/通讯, era: [1920s, modern], min_credit: 0}
+- {name: 地图（本地）, category: 记录/通讯, era: [1920s, modern], min_credit: 0}
+- {name: 手机, category: 记录/通讯, era: [modern], min_credit: 10}
+- {name: 厚皮外套, category: 防护, era: [1920s, modern], min_credit: 0}
+- {name: 防弹背心, category: 防护, era: [modern], min_credit: 50}
+- {name: 头盔, category: 防护, era: [1920s, modern], min_credit: 20}
+- {name: 防毒面具, category: 防护, era: [1920s, modern], min_credit: 30}
+- {name: 拐杖/手杖, category: 武器, era: [1920s, modern], min_credit: 0}
+- {name: 小型刀具, category: 武器, era: [1920s, modern], min_credit: 0}
+- {name: 斧头, category: 武器, era: [1920s, modern], min_credit: 10}
+- {name: .22 口径手枪, category: 武器, era: [1920s], min_credit: 20}
+- {name: .32 口径手枪, category: 武器, era: [1920s], min_credit: 30}
+- {name: .45 口径手枪, category: 武器, era: [1920s], min_credit: 40}
+- {name: 9mm 手枪, category: 武器, era: [modern], min_credit: 30}
+- {name: 猎枪, category: 武器, era: [1920s, modern], min_credit: 30}
+- {name: 步枪, category: 武器, era: [1920s, modern], min_credit: 40}
+- {name: 自行车, category: 交通, era: [1920s, modern], min_credit: 10}
+- {name: 普通轿车, category: 交通, era: [1920s, modern], min_credit: 30}
+- {name: 摩托车, category: 交通, era: [modern], min_credit: 20}
+- {name: 图书馆借阅证, category: 特殊, era: [1920s, modern], min_credit: 0}
+- {name: 十字架/宗教圣物, category: 特殊, era: [1920s, modern], min_credit: 0}
+- {name: 威士忌酒壶, category: 特殊, era: [1920s, modern], min_credit: 0}
+- {name: 烟斗, category: 特殊, era: [1920s, modern], min_credit: 0}

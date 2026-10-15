@@ -14,6 +14,8 @@ from app.schemas.rulebook import (
     RuleSearchResponse,
     RulebookRead,
     RuleSystemManifest,
+    RuleTableUpdate,
+    RuleTableView,
     VillageRulesRead,
     VillageRulesUpdate,
 )
@@ -126,9 +128,12 @@ def update_village_rules(
     限本机：村规和规则书管理同属「这台机器上的桌面配置」，不该由联机进来的客人改动。
     改动对**所有**用这套规则的房间即时生效（含进行中的局）。
     """
-    saved, notes = rule_options_service.save_village_options(
-        db, rule_system, data.options, data.table_notes, data.enabled,
-    )
+    try:
+        saved, notes = rule_options_service.save_village_options(
+            db, rule_system, data.options, data.table_notes, data.enabled, data.data,
+        )
+    except rule_options_service.RuleDataError as e:
+        raise HTTPException(400, "\n".join(e.errors)) from e
     return VillageRulesRead(
         rule_system=rule_system,
         options=saved,
@@ -172,9 +177,48 @@ def preview_house_rules(rule_system: str, data: HouseRulesImportRequest):
     preview, labels = rule_options_service.preview_house_rules(rule_system, data.text)
     return HouseRulesPreviewRead(
         ok=preview.ok, name=preview.name, description=preview.description,
-        options=preview.options, table_notes=preview.table_notes, labels=labels,
+        options=preview.options, table_notes=preview.table_notes, data=preview.data, labels=labels,
         errors=preview.errors, warnings=preview.warnings,
     )
+
+
+@router.get("/village-rules/{rule_system}/data/{table}", response_model=RuleTableView)
+def read_village_table(rule_system: str, table: str, db: Session = Depends(get_db)):
+    """数据表编辑器：这一桌对某张表的改动（合并后的行 + 每行状态 + 被删的官方行）。
+
+    读的是**存着的**补丁，不看总开关——同村规参数面板，关掉开关不该让配置看起来没了。
+    """
+    _table_or_404(rule_system, table)
+    row = rule_options_service.village_row(db, rule_system)
+    patches = ((row.data_patches if row else None) or {}).get(table)
+    return RuleTableView(table=table, **rule_options_service.table_view(rule_system, table, patches))
+
+
+@router.put(
+    "/village-rules/{rule_system}/data/{table}",
+    dependencies=[Depends(require_local_client)],
+    response_model=RuleTableView,
+)
+def update_village_table(
+    rule_system: str, table: str, data: RuleTableUpdate, db: Session = Depends(get_db),
+):
+    """保存这一桌对某张表的改动：提交整张表，服务端校验并只存与官方数据的差异。
+
+    限本机：与改村规同属桌面配置操作。对所有用这套规则的房间即时生效（含进行中的局）。
+    """
+    _table_or_404(rule_system, table)
+    try:
+        patches = rule_options_service.save_village_table(db, rule_system, table, data.rows)
+    except rule_options_service.RuleDataError as e:
+        raise HTTPException(400, "\n".join(e.errors)) from e
+    return RuleTableView(table=table, **rule_options_service.table_view(rule_system, table, patches))
+
+
+def _table_or_404(rule_system: str, table: str):
+    try:
+        return _system_or_404(rule_system).data_table(table)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
 
 
 def _system_or_404(rule_system: str):

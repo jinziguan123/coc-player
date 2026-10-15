@@ -176,7 +176,8 @@ describe('房规导入', () => {
   it('先预览、确认后才保存，保存的是文件里的参数', async () => {
     post.mockResolvedValue({
       ok: true, name: '老张的桌', description: '', options: { critical_max: 5 },
-      table_notes: '重调查', labels: ['大成功 ≤ 5'], errors: [], warnings: [],
+      table_notes: '重调查', data: { weapons: [{ name: '雷霆之锤', dam: '2D8' }] },
+      labels: ['大成功 ≤ 5', '武器表：新增 1'], errors: [], warnings: [],
     })
     const user = await upload()
 
@@ -187,7 +188,10 @@ describe('房规导入', () => {
     await user.click(screen.getByRole('button', { name: '确认导入' }))
     await waitFor(() => expect(put).toHaveBeenCalledWith(
       '/rulebooks/village-rules/coc',
-      { options: { critical_max: 5 }, table_notes: '重调查', enabled: true },
+      {
+        options: { critical_max: 5 }, table_notes: '重调查', enabled: true,
+        data: { weapons: [{ name: '雷霆之锤', dam: '2D8' }] },
+      },
     ))
   })
 

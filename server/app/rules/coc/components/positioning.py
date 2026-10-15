@@ -14,6 +14,7 @@ import math
 import re
 from collections import deque
 
+from app.rules.coc.components.check import CheckConfig
 from app.rules.coc.components.combat import resolve_weapon
 from app.rules.kernel import Component, Provide
 
@@ -40,10 +41,10 @@ def is_adjacent(a: dict, b: dict) -> bool:
     return cell_distance(a, b) <= 1
 
 
-def range_in_cells(weapon: str | dict, cell_m: float) -> int:
+def range_in_cells(weapon: str | dict, cell_m: float, options: CheckConfig | None = None) -> int:
     """武器射程（米）→ 格数。"接触"→1（近战须相邻）；纯数字米按 ceil(米/格边) 折；
     投掷式（"STR/5m" 等无前导数字）MVP 保守回落 5 格。"""
-    w = resolve_weapon(weapon) if isinstance(weapon, str) else weapon
+    w = resolve_weapon(weapon, options) if isinstance(weapon, str) else weapon
     rng = str(w.get("range") or "接触").strip()
     if "接触" in rng:
         return 1
@@ -229,8 +230,8 @@ def reachable_cells(start: dict, budget: int, grid: dict, occupied: set[str]) ->
 COMPONENT = Component(
     id="coc7.positioning", title="方格站位",
     requires=("coc7.combat",),
-    provides={"positioning": Provide(__name__, plain=(
-        "cell_distance", "is_adjacent", "range_in_cells", "range_check", "has_line_of_sight",
+    provides={"positioning": Provide(__name__, bound=("range_in_cells",), plain=(
+        "cell_distance", "is_adjacent", "range_check", "has_line_of_sight",
         "cover_penalty", "point_blank_bonus", "flank_penalty", "sweep_targets",
         "default_deployment", "step_toward", "reachable_cells",
     ))},

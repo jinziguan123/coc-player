@@ -18,12 +18,13 @@ from app.schemas.character import (
     CharacterUpdate,
     RollAttributesResponse,
 )
-from app.rules import ruleset_for
+from app.rules import Ruleset
 from app.services import (
     ai_character_service,
     character_avatar,
     character_service,
     image_store,
+    rule_options_service,
     session_service,
 )
 from app.services.excel_import import parse_coc_character_sheet
@@ -31,25 +32,31 @@ from app.services.excel_import import parse_coc_character_sheet
 router = APIRouter(prefix="/api", tags=["characters"])
 
 
-def _rules_slot(rule_system: str, slot: str, what: str = ""):
-    """取规则系统的某个服务槽位；系统未注册或没有这块规则都按 400「暂不支持」回。"""
+def _rules(rule_system: str, module_id: str | None = None, db: Session = Depends(get_db)) -> Ruleset:
+    """建卡与规则资料接口用的生效规则：这一桌的村规（参数 + 数据表），给了 module_id 再叠上
+    该模组自带的数据（如模组专属的职业、武器）。系统未注册按 400「暂不支持」回。"""
+    module = db.get(Module, module_id) if module_id else None
     try:
-        return getattr(ruleset_for(rule_system), slot)
-    except (ValueError, AttributeError):
-        raise HTTPException(400, f"暂不支持 {rule_system}{f' 的{what}' if what else ''}")
+        return rule_options_service.village_ruleset(db, rule_system, module)
+    except ValueError:
+        raise HTTPException(400, f"暂不支持 {rule_system}")
+
+
+def _slot(rs: Ruleset, slot: str, what: str = ""):
+    """取某个服务槽位；这套规则系统没有这块规则时按 400「暂不支持」回。"""
+    if not rs.has(slot):
+        raise HTTPException(400, f"暂不支持 {rs.system}{f' 的{what}' if what else ''}")
+    return getattr(rs, slot)
 
 
 @router.get("/rules/{rule_system}/character-schema")
-def get_character_schema(rule_system: str):
-    try:
-        return character_service.get_character_schema(rule_system)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+def get_character_schema(rs: Ruleset = Depends(_rules)):
+    return _slot(rs, "character").get_character_schema()
 
 
 @router.get("/rules/{rule_system}/occupations")
-def get_occupations(rule_system: str):
-    occ = _rules_slot(rule_system, "occupation", "职业列表")
+def get_occupations(rs: Ruleset = Depends(_rules)):
+    occ = _slot(rs, "occupation", "职业列表")
     return [
         {
             "name": o.name,
@@ -58,22 +65,22 @@ def get_occupations(rule_system: str):
             "skill_formula": o.skill_formula,
             "skills": o.skills,
             "choices": o.choices,
-            "category": occ.OCCUPATION_CATEGORY.get(o.name, "其他"),
+            "category": o.category,
         }
-        for o in occ.COC_OCCUPATIONS
+        for o in occ.occupations()
     ]
 
 
 @router.get("/rules/{rule_system}/occupation-categories")
-def get_occupation_categories(rule_system: str):
-    """职业大类的展示顺序（前端两级选择用）。"""
-    return _rules_slot(rule_system, "occupation").OCCUPATION_CATEGORY_ORDER
+def get_occupation_categories(rs: Ruleset = Depends(_rules)):
+    """职业大类的展示顺序（前端两级选择用）：官方大类在前，房主/模组新增的追加。"""
+    return _slot(rs, "occupation").occupation_categories()
 
 
 @router.get("/rules/{rule_system}/statuses")
-def get_statuses(rule_system: str):
+def get_statuses(rs: Ruleset = Depends(_rules)):
     """角色状态可选项（正常/重伤/昏迷/死亡/临时·不定期·永久疯狂）。"""
-    return _rules_slot(rule_system, "wound").CHARACTER_STATUSES
+    return _slot(rs, "wound").CHARACTER_STATUSES
 
 
 class SkillPointsRequest(BaseModel):
@@ -82,8 +89,8 @@ class SkillPointsRequest(BaseModel):
 
 
 @router.post("/rules/{rule_system}/calc-skill-points")
-def calc_skill_points(rule_system: str, data: SkillPointsRequest):
-    occ = _rules_slot(rule_system, "occupation")
+def calc_skill_points(data: SkillPointsRequest, rs: Ruleset = Depends(_rules)):
+    occ = _slot(rs, "occupation")
     return {
         "occupation_points": occ.calc_occupation_points(data.occupation, data.base_attributes),
         "interest_points": occ.calc_interest_points(data.base_attributes),
@@ -91,22 +98,22 @@ def calc_skill_points(rule_system: str, data: SkillPointsRequest):
 
 
 @router.get("/rules/{rule_system}/equipment")
-def get_equipment(rule_system: str, era: str = "1920s", credit_rating: int = 0):
-    return _rules_slot(rule_system, "equipment").get_available_equipment(era, credit_rating)
+def get_equipment(era: str = "1920s", credit_rating: int = 0, rs: Ruleset = Depends(_rules)):
+    return _slot(rs, "equipment").get_available_equipment(era, credit_rating)
 
 
 @router.get("/rules/{rule_system}/weapons")
-def get_weapons(rule_system: str):
-    """CoC 武器表 + 大类展示顺序，供武器选择器两级筛选使用。"""
-    combat = _rules_slot(rule_system, "combat", "武器表")
-    return {"weapons": combat.COC_WEAPONS, "categories": combat.WEAPON_CATEGORY_ORDER}
+def get_weapons(rs: Ruleset = Depends(_rules)):
+    """本桌的武器表 + 大类展示顺序，供武器选择器两级筛选使用。"""
+    combat = _slot(rs, "combat", "武器表")
+    return {"weapons": list(combat.weapons()), "categories": combat.weapon_categories()}
 
 
 @router.get("/rules/{rule_system}/specializations")
-def get_specializations(rule_system: str):
+def get_specializations(rs: Ruleset = Depends(_rules)):
     """专精技能类别（母语/外语/格斗/射击/科学/生存/技艺/驾驶）及各专精起始值。"""
-    spec = _rules_slot(rule_system, "occupation", "专精列表")
-    return {"categories": spec.SPECIALIZATIONS, "single": sorted(spec.SINGLE_SPEC)}
+    spec = _slot(rs, "occupation", "专精列表")
+    return {"categories": spec.specializations(), "single": sorted(spec.SINGLE_SPEC)}
 
 
 class EvaluateRequest(BaseModel):
@@ -201,13 +208,13 @@ def roll_attributes(rule_system: str = "coc", count: int = 3):
 
 
 @router.post("/rules/{rule_system}/apply-age", response_model=ApplyAgeResponse)
-def apply_age(data: ApplyAgeRequest, rule_system: str = "coc"):
+def apply_age(data: ApplyAgeRequest, rs: Ruleset = Depends(_rules)):
     """按年龄修正属性并掷幸运（CoC 7e 建卡第 3 步）。
 
     EDU 增强检定由服务端自动掷，掷点写进 notes——面团习惯是玩家自己掷，
     但这里是单机流程，把骰点亮出来比来回问一次更顺，也照样看得见运气好坏。
     """
-    character = _rules_slot(rule_system, "character")
+    character = _slot(rs, "character")
     attrs, notes = character.apply_age_modifiers(data.base_attributes, data.age)
     luck, luck_rolls = character.roll_luck(data.age)
     return ApplyAgeResponse(
@@ -216,7 +223,7 @@ def apply_age(data: ApplyAgeRequest, rule_system: str = "coc"):
 
 
 @router.post("/rules/{rule_system}/base-skills", response_model=BaseSkillsResponse)
-def base_skills(data: BaseSkillsRequest, rule_system: str = "coc"):
+def base_skills(data: BaseSkillsRequest, rs: Ruleset = Depends(_rules)):
     """这组属性下、未加任何点时的技能起始值（母语=EDU、闪避=DEX//2 已填好）。
 
     建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避
@@ -224,7 +231,7 @@ def base_skills(data: BaseSkillsRequest, rule_system: str = "coc"):
     `max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 coc7.character 组件里实现一次。
     """
     try:
-        character = _rules_slot(rule_system, "character")
+        character = _slot(rs, "character")
         return BaseSkillsResponse(skills=character.base_skills(data.base_attributes))
     except ValueError as e:
         raise HTTPException(400, str(e))

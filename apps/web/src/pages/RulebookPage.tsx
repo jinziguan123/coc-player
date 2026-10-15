@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { api, getApiBase, getPlayerToken, localApi } from '../api/client'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { GiBookCover, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
+import { GiArchiveRegister, GiBookCover, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
+import { RuleDataEditor } from '@/components/game/RuleDataEditor'
 import { VillageRulesPanel } from '@/components/game/VillageRulesPanel'
 import { VillageRulesSummary } from '@/components/game/VillageRulesSummary'
 import { ArchiveHead } from '@/components/layout/ArchiveHead'
@@ -110,6 +111,7 @@ export function RulebookPage() {
 
   const [rules, setRules] = useState<VillageRulesBrief | null>(null)
   const [rulesOpen, setRulesOpen] = useState(false)
+  const [dataOpen, setDataOpen] = useState(false)
 
   const runSearch = async () => {
     const q = query.trim()
@@ -173,6 +175,25 @@ export function RulebookPage() {
           <Collapse open={rulesOpen}>
             <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
               <VillageRulesPanel ruleSystem={ruleSystem} twoColumn onSaved={fetchRules} />
+            </div>
+          </Collapse>
+        </div>
+
+        {/* 数据表：武器、职业、技能……房主可以增删改。和村规参数一样是这一桌的长期设定、
+            低频操作，默认收起；改动的摘要已经并进上面「本桌规矩」的标签里。 */}
+        <div className="card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="card-title !mb-0 flex items-center gap-2">
+              <GiArchiveRegister /> 数据表 · {ruleSystem.toUpperCase()}
+            </h3>
+            <button onClick={() => setDataOpen((v) => !v)} aria-expanded={dataOpen}
+              className="btn-secondary btn-sm">
+              {dataOpen ? '收起' : '编辑'}
+            </button>
+          </div>
+          <Collapse open={dataOpen}>
+            <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
+              {dataOpen && <RuleDataEditor scope={{ kind: 'village', ruleSystem }} onSaved={fetchRules} />}
             </div>
           </Collapse>
         </div>

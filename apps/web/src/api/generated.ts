@@ -493,6 +493,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/modules/{module_id}/rule-data/{table}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Module Rule Table
+         * @description 模组自带的数据表改动（如 1890 年代模组的老式武器）。叠在官方数据之上、村规之下。
+         */
+        get: operations["read_module_rule_table_api_modules__module_id__rule_data__table__get"];
+        /**
+         * Update Module Rule Table
+         * @description 保存模组自带的数据表改动：提交整张表，服务端校验并只存与官方数据的差异。
+         */
+        put: operations["update_module_rule_table_api_modules__module_id__rule_data__table__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/modules/{module_id}/scene-map": {
         parameters: {
             query?: never;
@@ -745,6 +769,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rulebooks/village-rules/{rule_system}/data/{table}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Village Table
+         * @description 数据表编辑器：这一桌对某张表的改动（合并后的行 + 每行状态 + 被删的官方行）。
+         *
+         *     读的是**存着的**补丁，不看总开关——同村规参数面板，关掉开关不该让配置看起来没了。
+         */
+        get: operations["read_village_table_api_rulebooks_village_rules__rule_system__data__table__get"];
+        /**
+         * Update Village Table
+         * @description 保存这一桌对某张表的改动：提交整张表，服务端校验并只存与官方数据的差异。
+         *
+         *     限本机：与改村规同属桌面配置操作。对所有用这套规则的房间即时生效（含进行中的局）。
+         */
+        put: operations["update_village_table_api_rulebooks_village_rules__rule_system__data__table__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rulebooks/village-rules/{rule_system}/export": {
         parameters: {
             query?: never;
@@ -933,7 +985,7 @@ export interface paths {
         };
         /**
          * Get Occupation Categories
-         * @description 职业大类的展示顺序（前端两级选择用）。
+         * @description 职业大类的展示顺序（前端两级选择用）：官方大类在前，房主/模组新增的追加。
          */
         get: operations["get_occupation_categories_api_rules__rule_system__occupation_categories_get"];
         put?: never;
@@ -1010,7 +1062,7 @@ export interface paths {
         };
         /**
          * Get Weapons
-         * @description CoC 武器表 + 大类展示顺序，供武器选择器两级筛选使用。
+         * @description 本桌的武器表 + 大类展示顺序，供武器选择器两级筛选使用。
          */
         get: operations["get_weapons_api_rules__rule_system__weapons_get"];
         put?: never;
@@ -3223,6 +3275,13 @@ export interface components {
          */
         HouseRulesPreviewRead: {
             /**
+             * Data
+             * @default {}
+             */
+            data: {
+                [key: string]: unknown;
+            };
+            /**
              * Description
              * @default
              */
@@ -3985,7 +4044,7 @@ export interface components {
         };
         /**
          * RuleSystemManifest
-         * @description 规则系统的组件目录：前端村规面板据此渲染，房规文件据此校验。
+         * @description 规则系统的组件目录：前端村规面板与数据表编辑器据此渲染，房规文件据此校验。
          */
         RuleSystemManifest: {
             /** Components */
@@ -3994,10 +4053,84 @@ export interface components {
             house_rules_format_version: number;
             /** Id */
             id: string;
+            /**
+             * Tables
+             * @default []
+             */
+            tables: components["schemas"]["RuleTableManifest"][];
             /** Title */
             title: string;
             /** Version */
             version: number;
+        };
+        /** RuleTableManifest */
+        RuleTableManifest: {
+            /** Component */
+            component: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Row Schema */
+            row_schema: {
+                [key: string]: unknown;
+            };
+            /** Title */
+            title: string;
+        };
+        /**
+         * RuleTableUpdate
+         * @description 编辑器保存：提交想要的**整张表**，服务端校验并算出相对官方数据的最小补丁。
+         */
+        RuleTableUpdate: {
+            /** Rows */
+            rows: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * RuleTableView
+         * @description 数据表编辑器读一层补丁：合并后的行、每行状态（official/modified/added）、被删掉的官方行。
+         */
+        RuleTableView: {
+            /**
+             * Deleted
+             * @default []
+             */
+            deleted: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Originals
+             * @default {}
+             */
+            originals: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /**
+             * Patches
+             * @default []
+             */
+            patches: {
+                [key: string]: unknown;
+            }[];
+            /** Rows */
+            rows: {
+                [key: string]: unknown;
+            }[];
+            /** Status */
+            status: {
+                [key: string]: string;
+            };
+            /** Table */
+            table: string;
         };
         /** RulebookRead */
         RulebookRead: {
@@ -4232,6 +4365,10 @@ export interface components {
          *     ``table_notes=None`` 表示本次不动桌面约定（只改参数时不必把整段文字回传一遍）。
          */
         VillageRulesUpdate: {
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            } | null;
             /** Enabled */
             enabled?: boolean | null;
             /**
@@ -5202,6 +5339,74 @@ export interface operations {
             };
         };
     };
+    read_module_rule_table_api_modules__module_id__rule_data__table__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module_id: string;
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleTableView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_module_rule_table_api_modules__module_id__rule_data__table__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module_id: string;
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleTableUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleTableView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_scene_map_api_modules__module_id__scene_map_patch: {
         parameters: {
             query?: never;
@@ -5602,6 +5807,74 @@ export interface operations {
             };
         };
     };
+    read_village_table_api_rulebooks_village_rules__rule_system__data__table__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleTableView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_village_table_api_rulebooks_village_rules__rule_system__data__table__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleTableUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleTableView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     export_house_rules_api_rulebooks_village_rules__rule_system__export_get: {
         parameters: {
             query?: never;
@@ -5732,7 +6005,9 @@ export interface operations {
     };
     apply_age_api_rules__rule_system__apply_age_post: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -5767,7 +6042,9 @@ export interface operations {
     };
     base_skills_api_rules__rule_system__base_skills_post: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -5802,7 +6079,9 @@ export interface operations {
     };
     calc_skill_points_api_rules__rule_system__calc_skill_points_post: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -5837,7 +6116,9 @@ export interface operations {
     };
     get_character_schema_api_rules__rule_system__character_schema_get: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -5871,6 +6152,7 @@ export interface operations {
             query?: {
                 era?: string;
                 credit_rating?: number;
+                module_id?: string | null;
             };
             header?: never;
             path: {
@@ -5902,7 +6184,9 @@ export interface operations {
     };
     get_occupation_categories_api_rules__rule_system__occupation_categories_get: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -5933,7 +6217,9 @@ export interface operations {
     };
     get_occupations_api_rules__rule_system__occupations_get: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -5964,7 +6250,9 @@ export interface operations {
     };
     get_specializations_api_rules__rule_system__specializations_get: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -5995,7 +6283,9 @@ export interface operations {
     };
     get_statuses_api_rules__rule_system__statuses_get: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
@@ -6026,7 +6316,9 @@ export interface operations {
     };
     get_weapons_api_rules__rule_system__weapons_get: {
         parameters: {
-            query?: never;
+            query?: {
+                module_id?: string | null;
+            };
             header?: never;
             path: {
                 rule_system: string;
