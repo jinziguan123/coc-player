@@ -27,6 +27,9 @@ DEFAULT_RULE_SYSTEM = "coc"
 #: 在为它付 token；而且越长模型越容易只记住开头几条。
 TABLE_NOTES_MAX = 800
 
+#: 数据表改动摘要的长度上限（同理每回合都进上下文）。超出先退成只列名字，再不够就「等 N 项」。
+DATA_CHANGES_MAX = 600
+
 
 def village_row(db: Session, rule_system: str) -> RuleSystemOptions | None:
     return db.get(RuleSystemOptions, (rule_system or DEFAULT_RULE_SYSTEM).strip())
@@ -333,6 +336,48 @@ def village_view(db: Session, rule_system: str) -> dict:
     return get_system(rule_system).parse_options(village_options(db, rule_system)).to_dict()
 
 
+def data_changes_text(changes: list[tuple[str, list[tuple[str, str]]]], limit: int = DATA_CHANGES_MAX) -> str:
+    """数据表改动（:meth:`Ruleset.data_changes`）→ 给 KP 的几行文字，总长不超过 ``limit``。
+
+    先给带要点的全文；超了就只列名字；还超就每张表列到装不下为止，余下记「等 N 项」。
+    """
+    def render(detail: bool) -> str:
+        return "\n".join(
+            f"- {title}：" + "；".join(full if detail else short for full, short in items)
+            for title, items in changes
+        )
+
+    for detail in (True, False):
+        text = render(detail)
+        if len(text) <= limit:
+            return text
+    lines: list[str] = []
+    used = 0
+    for title, items in changes:
+        shown: list[str] = []
+        head = f"- {title}："
+        for _full, short in items:
+            if used + len(head) + len("；".join([*shown, short])) + 8 > limit:
+                break
+            shown.append(short)
+        rest = len(items) - len(shown)
+        line = head + "；".join(shown) + (f"等 {rest} 项" if shown and rest else f"改了 {rest} 项" if rest else "")
+        lines.append(line)
+        used += len(line) + 1
+    return "\n".join(lines)
+
+
+def _condition_lines(db: Session, game_session: GameSession, rs: Ruleset) -> list[str]:
+    """队伍成员角色卡上的持续状态（如流血）各一行，说明由挂上它的组件给（钩子 ``condition_notes``）。"""
+    from app.services import session_service   # 局部导入：session_service 处在更上层
+
+    lines: list[str] = []
+    for char in session_service.get_party_members(db, game_session.id):
+        notes = rs.wound.condition_notes((char.system_data or {}).get("conditions")) if rs.has("wound") else []
+        lines += [f"- {char.name}｜{note}" for note in notes]
+    return lines
+
+
 def context_block(db: Session, game_session: GameSession | None) -> str:
     """注入 KP 与规划器的一段「本局按什么规则跑」；全默认且没写约定时返回空串。
 
@@ -345,9 +390,12 @@ def context_block(db: Session, game_session: GameSession | None) -> str:
     """
     if game_session is None:
         return ""
-    diffs = ruleset(db, game_session).describe()
+    rs = ruleset(db, game_session)
+    diffs = rs.describe()
+    data = data_changes_text(rs.data_changes())
     notes = table_notes(db, rule_system_of(db, game_session))
-    if not diffs and not notes:
+    conditions = _condition_lines(db, game_session, rs)
+    if not diffs and not data and not notes and not conditions:
         return ""
 
     parts: list[str] = []
@@ -357,6 +405,13 @@ def context_block(db: Session, game_session: GameSession | None) -> str:
             "但**说话要跟它对得上**，别照规则书原文解释：\n"
             + "\n".join(f"- {line}" for line in diffs)
         )
+    if data:
+        parts.append(
+            "【本桌改过的数据表】建卡、检定与战斗已按改后的表结算；"
+            "描写武器伤害、职业、疯狂发作时**以此为准**，别照规则书原文：\n" + data
+        )
+    if conditions:
+        parts.append("【角色身上的持续状态】\n" + "\n".join(conditions))
     if notes:
         parts.append(
             "【本桌的约定】玩家定下的跑团口径，按它调整叙事与裁定倾向：\n"

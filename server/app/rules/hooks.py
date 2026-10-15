@@ -57,6 +57,13 @@ class RuleHookSpecs:
     def first_aid_applied(self, target: dict, options: Any) -> dict | None:
         """急救成功之后：返回 ``{"conditions_remove": [...], "lines": [...]}``。"""
 
+    @hookspec
+    def condition_notes(self, conditions: list[str], options: Any) -> list[str] | None:
+        """角色卡上挂着持续状态（``system_data.conditions``）时，告诉 KP 怎么演、何时结算。
+
+        战斗外没有「回合」，持续状态不自动结算；这几句话进 KP 上下文，由它按叙事时间裁定。
+        """
+
 
 def new_manager() -> pluggy.PluginManager:
     pm = pluggy.PluginManager(PROJECT)

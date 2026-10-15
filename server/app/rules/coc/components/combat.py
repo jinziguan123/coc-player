@@ -59,6 +59,11 @@ class WeaponRow(BaseModel):
 WEAPONS = DataTable(
     name="weapons", title="武器表", row_model=WeaponRow, key="name",
     source=_DATA / "weapons.yaml", description="人物卡与战斗结算共用的武器数据",
+    brief=lambda r: "，".join(
+        [r["skill"], f"伤害 {r['dam']}"]
+        + (["贯穿"] if r["tho"] else [])
+        + ([f"射程 {r['range']}"] if r["range"] and r["range"] != "接触" else [])
+    ),
 )
 
 #: 官方武器表（未经任何补丁）。结算请经 :func:`weapons` 取本局的表。

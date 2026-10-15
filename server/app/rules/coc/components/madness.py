@@ -42,6 +42,8 @@ SYMPTOMS = DataTable(
     name="madness_symptoms", title="疯狂症状表", row_model=SymptomRow, key="key",
     source=Path(__file__).parent / "data" / "madness_symptoms.yaml",
     description="进入临时疯狂时随机抽取的症状",
+    display="label",
+    brief=lambda r: r["manifest"] + ("，发作期间失能" if r["incapacitated"] else ""),
 )
 
 #: 官方症状表（未经任何补丁）。

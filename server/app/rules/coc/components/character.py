@@ -46,6 +46,7 @@ SKILLS = DataTable(
     source=Path(__file__).parent / "data" / "skills.yaml",
     description="技能起始值：建卡、检定（角色卡上没有这项技能时按起始值算）共用",
     build=lambda rows: frozen_mapping(rows, "name", "base"),
+    brief=lambda r: f"起始值 {r['base']}",
 )
 
 #: 官方技能表（技能名 → 起始值，只读）。结算请经 :func:`default_skills` 取本局的表。

@@ -64,11 +64,18 @@ OCCUPATIONS = DataTable(
     name="occupations", title="职业表", row_model=OccupationRow, key="name",
     source=_DATA / "occupations.yaml", description="建卡时可选的职业、技能点公式与本职技能",
     build=lambda rows: tuple(Occupation(**r) for r in rows),
+    brief=lambda r: f"信用评级 {r['credit_min']}-{r['credit_max']}"
+    + (f"，本职技能 {'、'.join(r['skills'])}" if r["skills"] else ""),
 )
 SPECIALIZATIONS_TABLE = DataTable(
     name="specializations", title="专精表", row_model=SpecializationRow, key="category",
     source=_DATA / "specializations.yaml", description="外语、格斗、射击等技能下可选的专精及起始值",
     build=lambda rows: {r["category"]: {"base_init": r["base_init"], "items": r["items"]} for r in rows},
+    brief=lambda r: "、".join(
+        [f"{i['name']} {i['init']}" for i in r["items"][:6]]
+        + ([f"等 {len(r['items'])} 项"] if len(r["items"]) > 6 else [])
+        + [f"其他专精起始值 {r['base_init']}"]
+    ),
 )
 
 #: 官方数据（未经任何补丁）。结算请经下面的函数取本局的表。

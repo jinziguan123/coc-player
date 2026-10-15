@@ -377,6 +377,15 @@ class Ruleset:
         """本份村规与 RAW 不同之处的人话描述（供注入 KP 与规划器）。"""
         return _SYSTEMS[self.system].describe_options(self.options)
 
+    def data_changes(self) -> list[tuple[str, list[tuple[str, str]]]]:
+        """本局数据表相对官方数据改了什么（供注入 KP）：[(表名, [(全文, 短文), ...])]，只列有改动的表。"""
+        out: list[tuple[str, list[tuple[str, str]]]] = []
+        for table in _SYSTEMS[self.system].data_tables:
+            items = rule_data.changes(table, table.official_rows, self._rows[table.name])
+            if items:
+                out.append((table.title, items))
+        return out
+
     def labels(self) -> list[str]:
         """本份村规与 RAW 不同之处的短标签（给玩家看）。"""
         return _SYSTEMS[self.system].option_labels(self.options)
