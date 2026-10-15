@@ -146,6 +146,8 @@ def test_optional_component_follows_its_toggle():
     ((_comp("a", keys=("k", "zzz")),), None, "未知的村规键 zzz"),
     ((_comp("a", keys=("k",)),), ("a", "ghost"), "不存在的组件：ghost"),
     ((_comp("a", keys=("k",)), _comp("a")), None, "组件 id 重复"),
+    ((_comp("a", keys=("k",), conditions={"x": "甲"}), _comp("b", conditions={"x": "乙"})), None,
+     "战斗状态 x 同时由 a 与 b 声明"),
     ((_comp("a", keys=("k",), toggle="nope"),), None, "开关 nope 不是它自己的参数"),
     ((_comp("a", keys=("k",), toggle="k"),), None, "必须是布尔参数"),
 ])
@@ -169,6 +171,25 @@ def test_provide_rejects_missing_export():
 def test_provide_rejects_name_in_both_groups():
     with pytest.raises(RulesetError, match="同时出现在 bound 与 plain"):
         Provide(_mod, bound=("g",), plain=("g",))
+
+
+def test_manifest_lists_declared_conditions():
+    """组件声明的战斗状态进 manifest 与 condition_labels（可选组件关着也算：状态名与开关无关）。"""
+    model = create_model("ToyCondOptions", __base__=RuleConfig, k=(int, 0), on=(bool, False))
+    opt = Component(id="opt", title="opt", config=_cfg(flag="on"), toggle="on",
+                    conditions={"poisoned": "中毒"})
+    system = _system(_comp("a", keys=("k",), conditions={"dazed": "眩晕"}), opt, options_model=model)
+    assert system.manifest()["conditions"] == [
+        {"key": "dazed", "label": "眩晕", "component": "a"},
+        {"key": "poisoned", "label": "中毒", "component": "opt"},
+    ]
+    assert system.ruleset().condition_labels == {"dazed": "眩晕", "poisoned": "中毒"}
+
+
+def test_official_conditions_are_declared():
+    labels = get_system("coc").condition_labels
+    assert labels["bleeding"] == "流血"
+    assert {"grappled", "disarmed", "burning"} <= set(labels)
 
 
 def test_registered_system_is_the_official_one():

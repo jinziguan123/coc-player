@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { turnsUntil } from './meta'
+import { CONDITION_META, GENERIC_CONDITION_ICON, conditionBadges, turnsUntil } from './meta'
 import type { Combatant, CombatStatus } from './types'
 
 const 人 = (id: string, status: CombatStatus = 'ok'): Combatant => ({
@@ -37,5 +37,27 @@ describe('turnsUntil', () => {
     expect(turnsUntil([人('a', 'dead'), 人('b')], 'a', 'b')).toBe(0)
     expect(turnsUntil(序, null, 'a')).toBe(0)
     expect(turnsUntil(序, 'a', null)).toBe(0)
+  })
+})
+
+describe('conditionBadges', () => {
+  const 带状态 = (conditions: string[], condition_labels?: Record<string, string>): Combatant => ({
+    ...人('a'), conditions, condition_labels,
+  })
+
+  it('内置状态用专属图标与中文名', () => {
+    const [b] = conditionBadges(带状态(['bleeding'], { bleeding: '流血' }))
+    expect(b).toEqual({ key: 'bleeding', label: '流血', Icon: CONDITION_META.bleeding.Icon })
+  })
+
+  it('插件新增的状态不再被滤掉：通用徽标 + 组件声明的中文名', () => {
+    const [b] = conditionBadges(带状态(['plugin_dazed'], { plugin_dazed: '眩晕' }))
+    expect(b).toEqual({ key: 'plugin_dazed', label: '眩晕', Icon: GENERIC_CONDITION_ICON })
+  })
+
+  it('没人声明中文名时才回落到键名', () => {
+    const [b] = conditionBadges(带状态(['mystery']))
+    expect(b.label).toBe('mystery')
+    expect(b.Icon).toBe(GENERIC_CONDITION_ICON)
   })
 })

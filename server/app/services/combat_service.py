@@ -316,6 +316,8 @@ def start_combat(db: Session, session_id: str, player_side: list[dict], enemies:
         "active": True, "round": 1, "turn_index": 0, "initiative": order,
         "log": [], "trigger": trigger, "flee_to_chase": None, "started_seq": started_seq,
         "grid": grid,
+        # 各规则组件声明的战斗状态名（含第三方插件）→ 前端给不认识的状态显示中文名
+        "condition_labels": dict(rs.condition_labels),
     }
     _save_combat(db, session_id, state)
     return state
@@ -347,6 +349,7 @@ async def start(db: Session, session_id: str, party: list[Character], enemies: l
 
 def _combat_meta(state: dict) -> dict:
     actor = current_actor(state)
+    labels = state.get("condition_labels") or {}
     return {
         "round": state.get("round"),
         "turn": actor.get("id") if actor else None,
@@ -358,6 +361,8 @@ def _combat_meta(state: dict) -> dict:
                    "move_left": int(p.get("move_left") or 0),
                    # P2 正交条件（grappled/disarmed）与瞄准态 → 前端 HUD 徽标（被擒/缴械/瞄准中）
                    "conditions": list(p.get("conditions") or []), "aim": bool(p.get("aim")),
+                   # 本参战方身上各状态的中文名（组件声明；旧存档没有就省略，前端回落键名）
+                   "condition_labels": {k: labels[k] for k in p.get("conditions") or [] if k in labels},
                    # 战棋轮廓（KP 挑的剪影）→ 前端画令牌。缺省由前端按阵营回落，
                    # 因为这里没有任何「这是人还是东西」的信息可供推断。
                    "figure": p.get("figure") or ""}

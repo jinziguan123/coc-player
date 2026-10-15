@@ -1,7 +1,7 @@
 // 单张参战方卡片：名字 + HP 条/数字 + 状态/条件徽标 + 武器，带掉血/回血动画。
 import { GiShield, GiCrosshair, GiDeathSkull } from 'react-icons/gi'
 import type { Combatant, HpDiff } from './types'
-import { CONDITION_META, STATUS_META, isOut, pctOf } from './meta'
+import { STATUS_META, conditionBadges, isOut, pctOf } from './meta'
 
 export function CombatantCard({ c, mine, active, diff }: {
   c: Combatant
@@ -12,7 +12,7 @@ export function CombatantCard({ c, mine, active, diff }: {
   const out = isOut(c)
   const hpColor = c.side === 'enemy' ? 'var(--color-danger)' : 'var(--color-accent)'
   const sm = c.status !== 'ok' ? STATUS_META[c.status] : null
-  const conds = (c.conditions || []).filter((k) => CONDITION_META[k])
+  const conds = conditionBadges(c)
   // 动画类：delta<0 掉血（红闪+抖）、>0 回血（绿涨）。用 seq 做 key 让连续同向变化也重播。
   const dmg = diff && diff.delta < 0
   const heal = diff && diff.delta > 0
@@ -90,14 +90,11 @@ export function CombatantCard({ c, mine, active, diff }: {
             {c.aim && !out && (
               <span className="chip chip--accent"><GiCrosshair size={10} /> 瞄准</span>
             )}
-            {conds.map((k) => {
-              const { label, Icon } = CONDITION_META[k]
-              return (
-                <span key={k} className="chip chip--danger">
-                  <Icon size={10} /> {label}
-                </span>
-              )
-            })}
+            {conds.map(({ key, label, Icon }) => (
+              <span key={key} className="chip chip--danger">
+                <Icon size={10} /> {label}
+              </span>
+            ))}
           </div>
         )}
         {c.weapon && (

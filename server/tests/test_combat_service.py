@@ -546,6 +546,19 @@ def test_combat_meta_order_carries_conditions_aim_weapon(db_factory):
     assert by_id[hero.id]["weapon"]   # 玩家武器非空（默认徒手格斗）
 
 
+def test_combat_meta_carries_condition_labels(db_factory):
+    """各参战方身上状态的中文名随 order 下发（组件声明的，含插件）；没声明的不带，前端回落键名。"""
+    db = db_factory()
+    sid, hero = _seed(db)
+    state = combat_service.start_combat(
+        db, sid, [combat_service._char_participant(hero, "player", is_human=True, rs=ruleset_for("coc"))], [])
+    state["condition_labels"]["plugin_dazed"] = "眩晕"   # 模拟插件组件声明的状态
+    hero_p = combat_service._find(state, hero.id)
+    hero_p["conditions"] = ["bleeding", "plugin_dazed", "mystery"]
+    meta = combat_service._combat_meta(state)
+    assert meta["order"][0]["condition_labels"] == {"bleeding": "流血", "plugin_dazed": "眩晕"}
+
+
 def test_combat_meta_carries_started_seq_boundary(db_factory):
     """start_combat 记本场起点 seq，_combat_meta 透传——重连让日志抽屉只收本场（seq>started_seq）。
 

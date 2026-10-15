@@ -2778,6 +2778,30 @@
         "title": "RuleComponentManifest",
         "type": "object"
       },
+      "RuleConditionManifest": {
+        "description": "组件声明的一种战斗状态（如流血）：前端战斗界面据此显示状态名。",
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "component"
+        ],
+        "title": "RuleConditionManifest",
+        "type": "object"
+      },
       "RuleHit": {
         "properties": {
           "page": {
@@ -2908,6 +2932,14 @@
               "$ref": "#/components/schemas/RuleComponentManifest"
             },
             "title": "Components",
+            "type": "array"
+          },
+          "conditions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RuleConditionManifest"
+            },
+            "title": "Conditions",
             "type": "array"
           },
           "house_rules_format_version": {
@@ -5944,6 +5976,56 @@
           }
         },
         "summary": "Read Rule Manifest",
+        "tags": [
+          "rulebooks"
+        ]
+      }
+    },
+    "/api/rulebooks/weapon-holders/{rule_system}": {
+      "get": {
+        "description": "武器名 → 持有它的角色数。数据表编辑器删武器时据此提示「有 N 个角色持有这把武器」。",
+        "operationId": "read_weapon_holders_api_rulebooks_weapon_holders__rule_system__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "type": "integer"
+                    },
+                    "type": "object"
+                  },
+                  "title": "Response Read Weapon Holders Api Rulebooks Weapon Holders  Rule System  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Weapon Holders",
         "tags": [
           "rulebooks"
         ]

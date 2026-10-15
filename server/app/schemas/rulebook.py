@@ -141,6 +141,15 @@ class RuleTableManifest(BaseModel):
     row_schema: dict
 
 
+class RuleConditionManifest(BaseModel):
+    """组件声明的一种战斗状态（如流血）：前端战斗界面据此显示状态名。"""
+
+    key: str
+    label: str
+    #: 声明这种状态的组件
+    component: str
+
+
 class RuleSystemManifest(BaseModel):
     """规则系统的组件目录：前端规则页与数据表编辑器据此渲染，房规文件据此校验。"""
 
@@ -149,6 +158,7 @@ class RuleSystemManifest(BaseModel):
     version: int
     house_rules_format_version: int
     tables: list[RuleTableManifest] = []
+    conditions: list[RuleConditionManifest] = []
     components: list[RuleComponentManifest]
 
 

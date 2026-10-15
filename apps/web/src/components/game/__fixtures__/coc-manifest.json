@@ -364,6 +364,28 @@
       }
     }
   ],
+  "conditions": [
+    {
+      "key": "bleeding",
+      "label": "流血",
+      "component": "coc7.bleeding"
+    },
+    {
+      "key": "grappled",
+      "label": "被擒",
+      "component": "coc7.combat"
+    },
+    {
+      "key": "disarmed",
+      "label": "缴械",
+      "component": "coc7.combat"
+    },
+    {
+      "key": "burning",
+      "label": "着火",
+      "component": "coc7.combat"
+    }
+  ],
   "components": [
     {
       "id": "coc7.dice",

@@ -881,6 +881,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rulebooks/weapon-holders/{rule_system}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Weapon Holders
+         * @description 武器名 → 持有它的角色数。数据表编辑器删武器时据此提示「有 N 个角色持有这把武器」。
+         */
+        get: operations["read_weapon_holders_api_rulebooks_weapon_holders__rule_system__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rulebooks/{rulebook_id}": {
         parameters: {
             query?: never;
@@ -4117,6 +4137,18 @@ export interface components {
             /** Toggle */
             toggle?: string | null;
         };
+        /**
+         * RuleConditionManifest
+         * @description 组件声明的一种战斗状态（如流血）：前端战斗界面据此显示状态名。
+         */
+        RuleConditionManifest: {
+            /** Component */
+            component: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+        };
         /** RuleHit */
         RuleHit: {
             /** Page */
@@ -4186,6 +4218,11 @@ export interface components {
         RuleSystemManifest: {
             /** Components */
             components: components["schemas"]["RuleComponentManifest"][];
+            /**
+             * Conditions
+             * @default []
+             */
+            conditions: components["schemas"]["RuleConditionManifest"][];
             /** House Rules Format Version */
             house_rules_format_version: number;
             /** Id */
@@ -6140,6 +6177,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RuleSystemManifest"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_weapon_holders_api_rulebooks_weapon_holders__rule_system__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: {
+                            [key: string]: number;
+                        };
+                    };
                 };
             };
             /** @description Validation Error */
