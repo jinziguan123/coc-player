@@ -138,7 +138,9 @@ REGISTRY: tuple[ToolSpec, ...] = (
                 "type": "integer",
                 "description": (
                     "惩罚骰数量（缺省 0）。情境明显不利（黑暗/受伤/干扰/时间紧迫等）时填 1，"
-                    "系统多掷一个十位取更差。奖励骰与惩罚骰互相抵消，别与 difficulty 叠用来重复施压。"
+                    "系统多掷一个十位取更差。奖励骰与惩罚骰互相抵消。同一个不利因素只选 difficulty 或 penalty 其一；"
+                    "临时疯狂的惩罚骰系统会自动加，不要再给。difficulty 已升档又给 penalty 时，"
+                    "不写 modifier_reason 说明另一件事，系统会丢掉惩罚骰。"
                 ),
             },
             "modifier_reason": {

@@ -186,6 +186,8 @@ class CheckPlan(BaseModel):
     reason: str = ""
     bonus: int = 0    # 奖励骰数量：情境明显有利时 1，系统多掷十位取优
     penalty: int = 0  # 惩罚骰数量：情境明显不利时 1，系统多掷十位取劣
+    # 奖惩骰凭什么加：与 difficulty 叠用时没有它，系统按「同一事实重复计入」丢掉惩罚骰
+    modifier_reason: str = ""
 
 
 class CluePolicy(BaseModel):
@@ -707,8 +709,9 @@ def build_turn_plan_messages(
                 "整个骰子系统就不可信了；要让他有退路，正当做法是给出路而非改数字）。它的用处只有三条："
                 "① 危险要摆到明面：快撑不住时 narration_brief 应写出角色自己感受得到的征兆"
                 "（视野发黑、手抖、耳鸣），不能等人死了才让玩家知道情况有多糟；"
-                "② 状态确实会削弱行动能力：重伤、濒死、临时疯狂发作中的角色做需要稳、准、专注的事"
+                "② 状态确实会削弱行动能力：重伤、濒死的角色做需要稳、准、专注的事"
                 "（攀爬、射击、锁匠、话术）该给 penalty=1，这是如实反映处境，不是惩罚玩家；"
+                "临时疯狂发作波及的技能系统已自动加惩罚骰，**不要**再为疯狂给 penalty；"
                 "③ 濒死或 SAN 濒临见底时，direction.nudge 应给一条**明确的脱身出路**"
                 "（哪扇门能退、谁能拉他一把、什么东西能顶一下），而不是继续加压。\n"
                 "【检定裁定准则——决定难度 / 奖惩骰 / 是否免检的核心，按顺序问自己】\n"
@@ -720,7 +723,10 @@ def build_turn_plan_messages(
                 "(2) 若确需掷骰，用**虚构态势**调节难度与奖惩骰（映射到有界档位，别自由捏目标值）：\n"
                 "  · 明显有利（充分准备 / 工具到位 / 对方已松动 / 角度极佳）→ check.bonus=1，或 difficulty 降档；\n"
                 "  · 明显不利（负伤 / 黑暗 / 嘈杂 / 目标已警觉 / 时间紧迫 / 行踪刚暴露）→ check.penalty=1，"
-                "或 difficulty 升到 hard / extreme；check.reason 一句话写清依据（供 KP 入戏解释，不照念）。\n"
+                "或 difficulty 升到 hard / extreme——**同一个不利因素只选其一**，难度和惩罚骰都用时"
+                "必须是两件不同的事，并在 check.modifier_reason 写明惩罚骰的那件（否则系统丢掉惩罚骰）；"
+                "给了 bonus/penalty 就填 check.modifier_reason；"
+                "check.reason 一句话写清依据（供 KP 入戏解释，不照念）。\n"
                 "两条原型：①玩家用手机弄出巨响、把『循声辨位』的怪引来后还想潜行——声音已暴露位置，"
                 "应 penalty 或 difficulty=extreme，甚至 auto_outcome=failure；②玩家用切中 NPC 动机、"
                 "有理有据的现实话术说服对方——应 bonus / 降档，足够精彩则 auto_outcome=success 免检。\n"
@@ -985,6 +991,11 @@ def _check_directive(check: CheckPlan) -> str:
         parts.append(f"bonus={check.bonus}")
     if check.penalty:
         parts.append(f"penalty={check.penalty}")
+    reason = (check.modifier_reason or "").strip()
+    if reason and (check.bonus or check.penalty):
+        # 指令参数按半角逗号切分，理由里的半角逗号/方括号会把指令切坏
+        reason = reason.replace(",", "，").replace("[", "【").replace("]", "】")
+        parts.append(f"modifier_reason={reason}")
     return f"[DICE_CHECK: {', '.join(parts)}]"
 
 

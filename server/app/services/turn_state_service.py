@@ -10,6 +10,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.models.character import Character
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant
 
@@ -18,7 +19,7 @@ from app.services.event_store import get_session_events
 #: turn_state 顶层里不属于「回合确认」的常驻键。旧迁移曾把确认项直接铺在顶层，
 #: 读取时据此把它们与 pending_checks 等区分开。
 _EPHEMERAL_TURN_STATE_KEYS = frozenset({
-    "pending_checks", "pending_item_gains", "item_delta_keys", "pending_luck",
+    "pending_checks", "pending_item_gains", "item_delta_keys", "pending_luck", "san_turn",
 })
 
 
@@ -143,7 +144,7 @@ def find_pending_san_check(
             isinstance(check, dict)
             and check.get("kind") == "san_check"
             and check.get("char_id") == char_id
-            and (check.get("source") or "") == (source or "")
+            and (check.get("san_key") or check.get("source") or "") == (source or "")
         ):
             return dict(check)
     return None
@@ -234,7 +235,10 @@ def rollback_last_kp_output(db: Session, session_id: str) -> int:
       - KP 旁白（narration）
       - NPC 台词（dialogue 且行动者不属于玩家方）
       - 待玩家投骰的检定请求（system + metadata.check_request），并清掉对应 pending_checks
-    刻意**保留**：玩家/队友的行动与发言、已投出的骰子结果（dice，不重掷）、HP/场景等其他 system。
+      - KP 判的扣血/回血（system + metadata.undo，连同随之自动掷的重伤体质骰 metadata.undo_of）：
+        按台账逆序把角色卡的 HP、状态、急救标记、新挂的持续状态复原——否则重生成的 KP
+        再判一次同一处伤害就成了双扣
+    刻意**保留**：玩家/队友的行动与发言、已投出的骰子结果（dice，不重掷）、场景等其他 system。
 
     这样「重新生成」= 拿本轮玩家与队友的既有输入、以及已定的骰子，重新生成 KP 叙事，
     而不会重跑队友回合、也不会重掷已定的检定。返回删除的事件条数。
@@ -259,13 +263,18 @@ def rollback_last_kp_output(db: Session, session_id: str) -> int:
 
     removed = 0
     removed_check_ids: list[str] = []
+    undo_ledger: list[dict] = []
     for ev in events[last_input + 1:]:
         meta = ev.metadata_ or {}
         is_narration = ev.event_type == "narration"
         is_npc_dialogue = ev.event_type == "dialogue" and ev.actor_id not in party_ids
         is_check_request = ev.event_type == "system" and meta.get("check_request")
-        if not (is_narration or is_npc_dialogue or is_check_request):
+        is_state_change = ev.event_type == "system" and isinstance(meta.get("undo"), dict)
+        if not (is_narration or is_npc_dialogue or is_check_request
+                or is_state_change or meta.get("undo_of")):
             continue
+        if is_state_change:
+            undo_ledger.append(meta["undo"])
         if is_check_request and meta.get("id"):
             removed_check_ids.append(meta["id"])
         db.delete(ev)
@@ -279,9 +288,53 @@ def rollback_last_kp_output(db: Session, session_id: str) -> int:
         ts["pending_checks"] = pending
         session.turn_state = ts
 
+    # 本轮已结算的 SAN 转为 credit：重生成的 KP 换个说法再下同一处 SAN 时据此抵扣
+    # （见 turn_effects._consume_san_credit）。SAN 损失本身不回滚，骰子已定。
+    book = (session.turn_state or {}).get("san_turn")
+    if isinstance(book, dict) and book.get("settled"):
+        ts = dict(session.turn_state or {})
+        ts["san_turn"] = {
+            **book,
+            "credit": [*(book.get("credit") or []), *book["settled"]],
+            "settled": [],
+        }
+        session.turn_state = ts
+        db.commit()
+
+    if undo_ledger:
+        _undo_state_changes(db, session_id, undo_ledger)
     if removed:
         db.commit()
     return removed
+
+
+def _undo_state_changes(db: Session, session_id: str, ledger: list[dict]) -> None:
+    """按撤销台账逆序复原角色卡：同一角色多次扣血时，最终落在最早那条之前的状态。"""
+    from app.services import turn_effects   # 惰性：turn_effects 经 session_service 反向依赖本模块
+
+    touched: dict[str, Character] = {}
+    for undo in reversed(ledger):
+        char = db.get(Character, str(undo.get("char_id") or ""))
+        if char is None:
+            continue
+        sd = dict(char.system_data or {})
+        hp = dict(sd.get("hitPoints") or {})
+        hp["current"] = undo.get("hp", hp.get("current", 0))
+        sd["hitPoints"] = hp
+        if undo.get("first_aid_used") is None:
+            sd.pop("firstAidUsed", None)
+        else:
+            sd["firstAidUsed"] = undo["first_aid_used"]
+        added = set(undo.get("conditions_added") or [])
+        if added:
+            sd["conditions"] = [c for c in sd.get("conditions") or [] if c not in added]
+        char.system_data = sd
+        char.status = undo.get("status") or char.status
+        db.add(char)
+        touched[char.id] = char
+    db.commit()
+    for char in touched.values():   # 进行中的战斗态也跟着复原，不然棋盘上的人还是扣过血的
+        turn_effects._sync_combatant_hp(db, session_id, char)
 def human_character_ids(db: Session, session_id: str) -> set[str]:
     """本会话所有真人席位的角色 id（回合确认制里需要逐个确认推进的主体）。"""
     return {p.character_id for p in _human_participants(db, session_id)}

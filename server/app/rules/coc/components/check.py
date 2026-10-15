@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import random
 import re
+from dataclasses import dataclass
 from typing import Literal
 
 from app.rules.base import CheckResult
@@ -269,6 +270,71 @@ def judge(
     return "failure", f"失败 ({d100} > {target})"
 
 
+def _hook_modifiers(
+    character_data: dict, skill_name: str, difficulty: str, options: CheckConfig | None,
+) -> list[dict]:
+    """规则钩子为这次检定追加的奖惩骰（如临时疯狂），原样含 ``fact_keywords``。"""
+    return [
+        m for result in hooks_of(options).check_modifiers(
+            character_data=character_data, skill_name=skill_name, difficulty=difficulty, options=options,
+        ) for m in (result or []) if m.get("n")
+    ]
+
+
+@dataclass(frozen=True)
+class CheckChannels:
+    """渠道归一后 KP/规划器那份奖惩骰的取值；``dropped`` 记被丢掉的原值与缘由，供日志与骰子卡审计。"""
+
+    bonus: int
+    penalty: int
+    dropped: tuple[dict, ...] = ()
+
+
+def normalize_channels(
+    character_data: dict,
+    skill_name: str,
+    difficulty: str,
+    bonus: int,
+    penalty: int,
+    modifier_reason: str = "",
+    options: CheckConfig | None = None,
+) -> CheckChannels:
+    """同一个情境事实只计一次：归一 KP/规划器给的奖惩骰，返回该交给 :func:`resolve_skill_check` 的数量。
+
+    一次检定的修正有三条渠道：难度（任务本身多难）、KP/规划器判的奖惩骰（情境利弊）、
+    规则钩子追加的奖惩骰（系统按角色状态确定性地加，如临时疯狂）。模型常把同一个不利因素
+    既折成升档又折成惩罚骰，或替系统再加一遍疯狂惩罚——这里按两条规则消掉重复：
+
+    1. **钩子优先**：钩子已因某事实加了骰，而 ``modifier_reason`` 提到的正是这件事
+       （命中钩子给的 ``fact_keywords``），KP/规划器的同向骰扣掉同样数量。
+    2. **升档 + 惩罚骰却没写理由**：无法证明惩罚骰说的是另一件事，按同一事实处理——
+       保留难度、丢掉惩罚骰（照 diceframe 的「无理由修正归零」）。写了理由就视作独立事实合法叠加。
+
+    只写奖惩骰、没写理由也没升档的不改：缺理由不足以证明它与别的渠道重复。
+    只用于模型给出的奖惩骰；战斗射程/掩体这类系统算出的骰不经这里。
+    """
+    reason = (modifier_reason or "").strip()
+    dropped: list[dict] = []
+    if penalty and difficulty in ("hard", "extreme") and not reason:
+        dropped.append({"kind": "penalty", "n": penalty, "reason": "已升难度且未说明独立理由"})
+        penalty = 0
+    if reason and (bonus or penalty):
+        for m in _hook_modifiers(character_data, skill_name, difficulty, options):
+            if not any(k and k in reason for k in m.get("fact_keywords") or ()):
+                continue
+            n = int(m["n"])
+            if m.get("kind") == "penalty" and penalty:
+                cut = min(n, penalty)
+                penalty -= cut
+            elif m.get("kind") == "bonus" and bonus:
+                cut = min(n, bonus)
+                bonus -= cut
+            else:
+                continue
+            dropped.append({"kind": m["kind"], "n": cut, "reason": f"与系统已计入的「{m.get('reason')}」重复"})
+    return CheckChannels(bonus=bonus, penalty=penalty, dropped=tuple(dropped))
+
+
 def resolve_skill_check(
     character_data: dict,
     skill_name: str,
@@ -293,9 +359,8 @@ def resolve_skill_check(
     skill_value = resolve_skill_value(character_data, skill_name, options)
     # 规则钩子追加的奖惩骰（如临时疯狂的症状波及这项技能）：所有检定一视同仁
     modifiers = [
-        m for result in hooks_of(options).check_modifiers(
-            character_data=character_data, skill_name=skill_name, difficulty=difficulty, options=options,
-        ) for m in (result or []) if m.get("n")
+        {k: v for k, v in m.items() if k != "fact_keywords"}
+        for m in _hook_modifiers(character_data, skill_name, difficulty, options)
     ]
     bonus += sum(int(m["n"]) for m in modifiers if m.get("kind") == "bonus")
     penalty += sum(int(m["n"]) for m in modifiers if m.get("kind") == "penalty")
@@ -346,7 +411,10 @@ COMPONENT = Component(
     config=CheckConfig, group="检定",
     provides={"check": Provide(
         __name__,
-        bound=("resolve_skill_check", "is_fumble", "achieved_tier", "judge", "resolve_skill_value"),
+        bound=(
+            "resolve_skill_check", "normalize_channels", "is_fumble", "achieved_tier", "judge",
+            "resolve_skill_value",
+        ),
         plain=("TIER_LABEL_CN", "display_skill_name", "normalize_skill_name"),
     )},
 )

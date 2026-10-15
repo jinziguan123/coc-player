@@ -166,6 +166,11 @@ async def _exec_san_check(
         ),
     )
 
+    # KP 没写恐怖源时，用「本轮玩家行动锚点」顶上幂等键：同一轮里同一个人至多被这种
+    # 无名 SAN 扣一次——重新生成时 KP 再发一遍，不会再扣。
+    anchor = _turn_anchor_seq(db, session_id, [player_char, *(teammates or [])])
+    key_source = source or f"turn:{anchor}"
+    _sync_san_turn(db, game_session, anchor)
     # 同一角色对同一恐怖源只检定一次：用 session_ledger.san_checked 记 "source|char_id"。
     led = game_session.ledger
     san_checked = set((led.san_checked if led else []) or [])
@@ -182,21 +187,24 @@ async def _exec_san_check(
     human_targets: list[Character] = []
 
     for tchar in targets:
-        key = f"{source}|{tchar.id}" if source else None
-        if key and key in canonical_checked:
+        key = f"{key_source}|{tchar.id}"
+        if key in canonical_checked:
+            _consume_san_credit(db, game_session, tchar.id, key_source, exact=True)
             continue  # 该角色已对此恐怖源检定过，不重复
-        if session_service.find_pending_san_check(db, session_id, tchar.id, source):
+        if session_service.find_pending_san_check(db, session_id, tchar.id, key_source):
             continue
+        if _consume_san_credit(db, game_session, tchar.id, key_source):
+            canonical_checked.add(key)
+            continue  # 重新生成时换了说法的同一恐怖源：被回滚那版已经扣过
         if session_service.is_human_controlled(db, session_id, tchar.id):
             human_targets.append(tchar)
             continue
         auto_chunks, auto_desc = _settle_san_target(
-            db, session_id, game_session, tchar, success_loss, failure_loss, source,
+            db, session_id, game_session, tchar, success_loss, failure_loss, key_source,
         )
         chunks.extend(auto_chunks)
         descs.append(auto_desc)
-        if key:
-            canonical_checked.add(key)
+        canonical_checked.add(key)
 
     if not human_targets:
         return chunks, descs, False
@@ -213,6 +221,7 @@ async def _exec_san_check(
             "char_id": tchar.id,
             "actor_name": tchar.name,
             "source": source,
+            "san_key": key_source,   # 幂等键（KP 没写 source 时是本轮锚点）；source 留作展示
             "reason": reason,
             "success_loss": success_loss,
             "failure_loss": failure_loss,
@@ -237,6 +246,64 @@ async def _exec_san_check(
     return chunks, descs, True
 
 
+def _turn_anchor_seq(db: Session, session_id: str, party: list[Character]) -> int:
+    """本轮锚点：最后一条玩家方（真人 + AI 队友）行动/发言的序号；重新生成不会动它。"""
+    ids = {c.id for c in party if c is not None}
+    return max(
+        (
+            ev.sequence_num or 0 for ev in session_service.get_session_events(db, session_id)
+            if ev.event_type in ("action", "dialogue") and ev.actor_id in ids
+        ),
+        default=0,
+    )
+
+
+# ── 本轮 SAN 结算簿（turn_state.san_turn）──────────────────────────────────
+# 账本按「恐怖源|角色」去重，挡不住重新生成时 KP 换个说法（「床下的尸体」→「床底那具
+# 尸体」）。模糊匹配措辞又会误合并同场景里真不同的恐怖源，所以改从「重新生成」这个
+# 事实入手：本轮已结算的 SAN 记在 settled；回滚 KP 输出时整体转成 credit。重生成的
+# KP 再给同一角色下 SAN、账本又认不出时，先抵掉该角色一条 credit 不再扣——每次生成
+# 内部的不同恐怖源照常各扣各的，换轮（锚点变化）则整簿清空。
+
+
+def _sync_san_turn(db: Session, game_session: GameSession, anchor: int) -> None:
+    """锚点变了（玩家方又行动了）就开一本新的结算簿。"""
+    ts = dict(game_session.turn_state or {})
+    book = ts.get("san_turn")
+    if isinstance(book, dict) and book.get("anchor") == anchor:
+        return
+    ts["san_turn"] = {"anchor": anchor, "settled": [], "credit": []}
+    game_session.turn_state = ts
+    db.commit()
+
+
+def _consume_san_credit(
+    db: Session, game_session: GameSession, char_id: str, source: str, *, exact: bool = False,
+) -> bool:
+    """抵掉该角色一条回滚留下的 credit（同措辞的优先），抵上了就记账并视同已检定。
+
+    ``exact``：账本已认出同一恐怖源时只销同措辞那条——否则它留着，会被同一版里
+    另一处真不同的恐怖源错抵。抵掉的条目经 _mark_san_checked 回到 settled，
+    再次重新生成仍能抵。
+    """
+    book = dict((game_session.turn_state or {}).get("san_turn") or {})
+    credit = [list(item) for item in book.get("credit") or []]
+    mine = [item for item in credit if item and item[0] == char_id]
+    hit = next((item for item in mine if item[1:] == [source]), None)
+    if hit is None and not exact and mine:
+        hit = mine[0]
+    if hit is None:
+        return False
+    credit.remove(hit)
+    book["credit"] = credit
+    ts = dict(game_session.turn_state or {})
+    ts["san_turn"] = book
+    game_session.turn_state = ts
+    db.commit()
+    _mark_san_checked(db, game_session, source, char_id)
+    return True
+
+
 def _mark_san_checked(
     db: Session, game_session: GameSession, source: str, char_id: str,
 ) -> None:
@@ -250,6 +317,13 @@ def _mark_san_checked(
     checked = set(led.san_checked or [])
     checked.add(f"{source}|{char_id}")
     led.san_checked = sorted(checked)
+    book = (game_session.turn_state or {}).get("san_turn")
+    if isinstance(book, dict):
+        book = dict(book)
+        book["settled"] = [*(book.get("settled") or []), [char_id, source]]
+        ts = dict(game_session.turn_state or {})
+        ts["san_turn"] = book
+        game_session.turn_state = ts
     db.commit()
 
 
@@ -462,6 +536,11 @@ async def _exec_hp_change(
     reason = (reason or "").strip()
     hp_data = char.system_data.get("hitPoints", {})
     old_hp = hp_data.get("current", 0)
+    # 撤销台账：「重新生成」回滚本轮 KP 产物时据此把角色卡复原（见 rollback_last_kp_output），
+    # 否则重生成的 KP 再判一次同一处伤害，就成了双扣。
+    old_status = char.status
+    old_first_aid = (char.system_data or {}).get("firstAidUsed")
+    old_conditions = list((char.system_data or {}).get("conditions") or [])
     max_hp = hp_data.get("max", old_hp)
     new_hp = max(0, min(max_hp, old_hp + delta))
 
@@ -516,7 +595,17 @@ async def _exec_hp_change(
     ev = session_service.add_event(
         db, session_id, "system", hp_content,
         actor_name="系统",
-        metadata={"hp_change": delta, "old_hp": old_hp, "new_hp": new_hp, "actor": char.name},
+        metadata={
+            "hp_change": delta, "old_hp": old_hp, "new_hp": new_hp, "actor": char.name,
+            "undo": {
+                "char_id": char.id, "hp": old_hp, "status": old_status,
+                "first_aid_used": old_first_aid,
+                "conditions_added": [
+                    c for c in (char.system_data or {}).get("conditions") or []
+                    if c not in old_conditions
+                ],
+            },
+        },
     )
     chunks.append(_make_chunk("system", hp_content, event_id=ev.id))
 
@@ -546,6 +635,7 @@ async def _exec_hp_change(
                     "skill": "体质", "roll": result.roll, "target": result.target,
                     "outcome": result.outcome, "actor": char.name,
                     "major_wound_check": True, "dice": _check_dice_detail(result),
+                    "undo_of": ev.id,   # 随这次扣血一起回滚
                 },
             )
             chunks.append(_make_chunk("dice", con_content, event_id=dev.id))
@@ -593,6 +683,22 @@ def _sync_combatant_hp(db: Session, session_id: str, char: Character) -> list[st
             hit["conditions"] = [*(hit.get("conditions") or []), cond]
     combat_service._save_combat(db, session_id, state)
     return [combat_service._combat_state_chunk(state)]
+
+
+def _normalized_dice_pool(
+    rs, char_data: dict, actor: str, skill_name: str, difficulty: str,
+    bonus: int, penalty: int, modifier_reason: str,
+) -> tuple[int, int]:
+    """KP/规划器给的奖惩骰经 rs.check 渠道归一（同一事实只计一次），被丢掉的记日志备查。"""
+    ch = rs.check.normalize_channels(
+        char_data, skill_name, difficulty, bonus, penalty, modifier_reason,
+    )
+    for d in ch.dropped:
+        logger.info(
+            "检定渠道归一：%s·%s（%s）丢弃%s骰×%d——%s",
+            actor, skill_name, difficulty, "奖励" if d["kind"] == "bonus" else "惩罚", d["n"], d["reason"],
+        )
+    return ch.bonus, ch.penalty
 
 
 async def _exec_dice_check(
@@ -654,6 +760,14 @@ async def _exec_dice_check(
         ):
             return chunks, descs, True
 
+        def _pool(c: Character) -> tuple[int, int]:
+            cdata = {
+                "base_attributes": c.base_attributes, "skills": c.skills, "system_data": c.system_data,
+            }
+            return _normalized_dice_pool(
+                rs, cdata, c.name, skill_name, difficulty, bonus, penalty, modifier_reason,
+            )
+
         group_any_success = False
         group_any_fumble = False
         for c in targets:
@@ -664,9 +778,10 @@ async def _exec_dice_check(
                 "skills": c.skills,
                 "system_data": c.system_data,
             }
+            c_bonus, c_penalty = _pool(c)
             rc, rd, succeeded, fumbled = await _auto_roll_check(
                 db, session_id, game_session, module, cdata, c.name, False,
-                skill_name, difficulty, blind, source, bonus, penalty, modifier_reason,
+                skill_name, difficulty, blind, source, c_bonus, c_penalty, modifier_reason,
             )
             chunks += rc
             descs += rd
@@ -678,6 +793,7 @@ async def _exec_dice_check(
         batch_id = uuid.uuid4().hex
         for c in human_targets:
             check_id = uuid.uuid4().hex
+            c_bonus, c_penalty = _pool(c)
             pending = {
                 "id": check_id,
                 "kind": "group_check",
@@ -688,8 +804,8 @@ async def _exec_dice_check(
                 "actor_name": c.name,
                 "source": source,
                 "reason": reason,
-                "bonus": bonus,
-                "penalty": penalty,
+                "bonus": c_bonus,
+                "penalty": c_penalty,
                 "modifier_reason": modifier_reason,
                 "check_batch_id": batch_id,
                 "check_results": list(descs),
@@ -698,7 +814,7 @@ async def _exec_dice_check(
             }
             session_service.add_pending_check(db, session_id, pending)
             prompt_text = _check_prompt_text(
-                c.name, skill_name, difficulty, bonus, penalty, modifier_reason,
+                c.name, skill_name, difficulty, c_bonus, c_penalty, modifier_reason,
             )
             meta = {"check_request": True, **pending}
             ev = session_service.add_event(
@@ -716,6 +832,9 @@ async def _exec_dice_check(
     # 检定卡是玩家可见面：玩家还没认出来的 NPC 用对外称呼。真名留给回灌 KP 的描述——
     # KP 得知道自己在给谁投骰，喂它「不明存在」只会把它自己也绕晕。
     shown_name = npc_identity.build_masker(db, session_id, module)(disp_name)
+    bonus, penalty = _normalized_dice_pool(
+        rs, char_data, disp_name, skill_name, difficulty, bonus, penalty, modifier_reason,
+    )
 
     # req 1/2：真人控制、且非暗投的检定 → 不自动掷，挂成「待玩家投骰」并给出提示；
     # NPC 暗骰 / AI 队友 / 暗投 仍由系统自动掷（无人点投骰，避免卡住）。

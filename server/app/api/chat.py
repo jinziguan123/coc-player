@@ -338,6 +338,8 @@ async def regenerate(
     # ①打断卡住/进行中的旧生成（其半截叙事会先落库，②随后被回滚清掉）
     await generation_manager.cancel(session_id)
     removed = session_service.rollback_last_kp_output(db, session_id)
+    # 回滚可能复原了角色卡（撤销本轮 KP 判的扣血），让各端刷新数值
+    room_hub.broadcast(session_id, _make_chunk("character_update"))
 
     room_hub.broadcast(session_id, _make_chunk("generating"))
     generation_manager.start(session_id, run_regenerate_generation(session_id))

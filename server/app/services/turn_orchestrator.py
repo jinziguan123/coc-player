@@ -1759,7 +1759,7 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
                 room_hub.broadcast(session_id, _make_chunk("done"))
                 return
 
-            source = str(check.get("source") or "")
+            source = str(check.get("san_key") or check.get("source") or "")
             san_chunks, san_desc = turn_effects._settle_san_target(
                 db,
                 session_id,

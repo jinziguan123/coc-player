@@ -96,7 +96,11 @@ def check_modifiers(character_data: dict, skill_name: str) -> list[dict] | None:
     if not n:
         return None
     label = str((madness or {}).get("label") or "").strip()
-    return [{"kind": "penalty", "n": n, "reason": f"临时疯狂{f'·{label}' if label else ''}影响了这项技能"}]
+    return [{
+        "kind": "penalty", "n": n, "reason": f"临时疯狂{f'·{label}' if label else ''}影响了这项技能",
+        # 同一事实的说法：KP/规划器的 modifier_reason 提到其一，就是在重复计这颗骰（见 check.normalize_channels）
+        "fact_keywords": ["疯狂", "发疯", "发狂", *([label] if label else [])],
+    }]
 
 
 COMPONENT = Component(
