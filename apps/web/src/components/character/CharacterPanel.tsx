@@ -203,7 +203,7 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
       {/* 派生数值与雷达图并排（窄栏下自动堆成上下两行） */}
       <div className="char-basic-split">
         <div className="space-y-2">
-          <div className="group-box">
+          <div className="group-box char-derived">
             <InfoRow label="幸运" value={luck} />
             <InfoRow label="移动力" value={mov} />
             <InfoRow label="伤害加值" value={damageBonus} />
@@ -212,7 +212,7 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
             <InfoRow label="信用评级" value={creditRating} />
           </div>
           {(residence || birthplace) && (
-            <div className="group-box">
+            <div className="group-box char-origin">
               {residence && <InfoRow label="居住地" value={residence} />}
               {birthplace && <InfoRow label="出生地" value={birthplace} />}
             </div>
@@ -450,7 +450,7 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
           <h4 className="section-head">随身物品</h4>
           <div className="space-y-1">
             {inventory.map((it, i) => (
-              <div key={it.id || `${it.name}-${i}`} className="text-xs px-2 py-1.5 rounded"
+              <div key={it.id || `${it.name}-${i}`} className="inv-item text-xs px-2 py-1.5 rounded"
                 style={{ background: 'var(--surface-2)' }} title={it.note || undefined}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold truncate">
@@ -463,8 +463,9 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
                     </span>
                   )}
                 </div>
+                {/* 操作行：能悬停的设备上收起，悬停 / 聚焦到这件物品时展开（见 .inv-actions） */}
                 {actions && it.id && (
-                  <div className="flex items-center gap-1.5 mt-1">
+                  <div className="inv-actions"><div className="flex items-center gap-1.5 pt-1">
                     <button className="inv-act" disabled={busy}
                       onClick={() => void post('use', { item_id: it.id })}>用</button>
                     {actions.teammates.length > 0 && (
@@ -485,7 +486,7 @@ function InventoryTab({ character, actions, sessionId, refreshKey }: {
                     )}
                     <button className="inv-act inv-drop" disabled={busy}
                       onClick={() => void post('drop', { item_id: it.id })}>丢</button>
-                  </div>
+                  </div></div>
                 )}
               </div>
             ))}

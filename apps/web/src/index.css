@@ -577,6 +577,99 @@ body {
   .char-backstory > * { break-inside: avoid; margin-bottom: 0.7rem; }
 }
 
+/* ===== 窄栏（对局侧栏 / 大厅预览等，≤ 24rem）：跑团时一眼要看的东西往前、往大放 =====
+   - 抬头：头像缩小，姓名允许折行——「阿尔文·“大夫”·哈桑」这种名字截断成「阿尔文·“…」等于没写；
+   - 体征：三根长条改成三格并排的大号读数，底下各一根细条，一眼扫完 HP / SAN / MP；
+   - 派生数值：六行「标签……值」改成 3×2 小格，竖向省掉一大半；
+   - 雷达图与居住地 / 出生地：跑团中几乎不看，窄栏里让位（角色页宽版照常显示）。 */
+@container (max-width: 24rem) {
+  .char-dossier-head { gap: 0.65rem; align-items: flex-start; }
+  .char-dossier-arch { padding: 2px; }
+  .char-dossier-portrait {
+    width: 2.6rem !important;
+    height: 3.2rem !important;
+    font-size: 1.2rem !important;
+  }
+  .char-dossier-name {
+    font-size: 1.1rem;
+    line-height: 1.3;
+    letter-spacing: 0.06em;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .char-basic .game-vital-group {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+  .char-basic .game-vital-item {
+    gap: 0.35rem;
+    padding: 0.45rem 0.4rem 0.4rem;
+    border: 1px solid var(--color-border);
+    border-radius: 2px;
+    background: var(--surface-sunken);
+  }
+  .char-basic .game-vital-header { flex-direction: column-reverse; align-items: center; gap: 0.25rem; }
+  .char-basic .game-vital-title-group { gap: 0.25rem; }
+  .char-basic .game-vital-sublabel { display: none; }
+  .char-basic .game-vital-label { font-size: var(--text-2xs); letter-spacing: 0.14em; }
+  .char-basic .game-vital-values { padding-left: 0; }
+  .char-basic .game-vital-cur { font-size: 1.55rem; line-height: 1; }
+  .char-basic .game-vital-max { font-size: var(--text-2xs); }
+  .char-basic .game-vital-track { height: 4px; }
+
+  .char-derived {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+  .char-derived .meta-row {
+    flex-direction: column-reverse;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.35rem 0.2rem;
+    border: 1px solid var(--color-border);
+    border-radius: 2px;
+    background: var(--surface-2);
+  }
+  .char-derived .meta-row-label { font-size: var(--text-2xs); letter-spacing: 0.06em; }
+  .char-derived .meta-row-value {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    line-height: 1;
+    color: var(--color-text-primary);
+    text-align: center;
+  }
+  .char-origin, .char-radar-cell { display: none; }
+
+  /* 属性：四列，数值稍收一号，困难 · 极难照常给 */
+  .char-basic .stat-tile-value { font-size: 1.2rem; }
+}
+
+/* ===== 随身物品：操作行平时收起 =====
+   八件物品就是八排「用 / 给 / 丢」，名字反而被控件淹没。能悬停的设备上收起，悬停或键盘
+   聚焦到这件物品时用 grid-rows 0fr→1fr 平滑展开；「给…」下拉打开期间（焦点在弹出层里）
+   保持展开。触屏设备没有悬停，照常常驻。 */
+.inv-item { border-left: 2px solid transparent; transition: border-color 0.2s ease, background 0.2s ease; }
+.inv-item:hover, .inv-item:focus-within { border-left-color: var(--color-accent); }
+@media (hover: hover) {
+  .inv-actions {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+  }
+  .inv-actions > * { min-height: 0; overflow: hidden; }
+  .inv-item:hover .inv-actions,
+  .inv-item:focus-within .inv-actions,
+  .inv-item:has([data-state='open']) .inv-actions { grid-template-rows: 1fr; opacity: 1; }
+}
+
 /* ===== 书本：角色管理的跨页外壳 =====
    左页名录、右页详情，中间一道书脊。质感全部由既有的哥特暗色 + 琥珀金变量推出来——
    真正的「纸黄」只属于 light 主题，暗色下照搬会变成一块脏黄，所以这里用的是
