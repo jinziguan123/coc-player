@@ -5143,16 +5143,18 @@ select.input option {
   box-shadow: 0 6px 20px var(--shadow-color-strong);
   cursor: pointer;
   animation: tokenIn 0.22s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
-  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.2s ease;
+  transition: scale 0.16s ease, border-color 0.16s ease, box-shadow 0.2s ease;
 }
 .chat-token:hover {
-  transform: scale(1.06);
+  scale: 1.06;   /* 用独立的 scale 属性：transform 被入场动画的终态占着，写 transform 不生效 */
   border-color: var(--color-accent);
   box-shadow: 0 0 16px rgba(200, 162, 90, 0.3), 0 6px 20px var(--shadow-color-strong);
 }
+/* 关键帧里要带上 translateY(-50%)：fill-mode both 会让终态 transform 一直生效，
+   只写 scale 就把 .chat-float 的垂直居中冲掉了（浮标会偏下半个身位） */
 @keyframes tokenIn {
-  from { opacity: 0; transform: scale(0.6); }
-  to { opacity: 1; transform: scale(1); }
+  from { opacity: 0; transform: translateY(-50%) scale(0.6); }
+  to { opacity: 1; transform: translateY(-50%) scale(1); }
 }
 .chat-token-dot {
   position: absolute;
@@ -6388,13 +6390,14 @@ select.input option {
    只作用于页面根容器的直接子块（抬头、面板、列表……），不进到列表内部——列表项各自
    有错峰。对局页不参与：那是常驻工作区，切进去要的是立刻可用而不是表演。
    首页有自己的编排（拱门画线），也排除。 */
-.app-shell:not(.game-session-shell) .app-main > :not(.home) > * {
+/* 浮层（大厅聊天）自带入场动画且靠 transform 居中，不参与；否则本动画的终态 transform:none 会把它冲掉 */
+.app-shell:not(.game-session-shell) .app-main > :not(.home) > *:not(.chat-float) {
   animation: pageBlockIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(2) { animation-delay: 0.08s; }
-.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(3) { animation-delay: 0.16s; }
-.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(4) { animation-delay: 0.24s; }
-.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(n + 5) { animation-delay: 0.3s; }
+.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(2):not(.chat-float) { animation-delay: 0.08s; }
+.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(3):not(.chat-float) { animation-delay: 0.16s; }
+.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(4):not(.chat-float) { animation-delay: 0.24s; }
+.app-shell:not(.game-session-shell) .app-main > :not(.home) > :nth-child(n + 5):not(.chat-float) { animation-delay: 0.3s; }
 /* 不加 blur：模组详情里有两千多像素高的卡片，对这种尺寸做模糊滤镜在低配机上会掉帧 */
 @keyframes pageBlockIn {
   from { opacity: 0; transform: translateY(18px); }
