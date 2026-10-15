@@ -2260,7 +2260,7 @@ export function GameSessionPage() {
       {!immersiveOn && showPanel && panelChar && (
         <aside
           data-tour="sheet"
-          className="game-character-panel w-64 flex-shrink-0 border-l overflow-y-auto game-info"
+          className="game-character-panel w-[19rem] flex-shrink-0 border-l overflow-y-auto game-info"
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}
         >
           <div
