@@ -38,6 +38,21 @@ def create_character(db: Session, data: dict) -> Character:
     return character
 
 
+def weapon_holders(db: Session, rule_system: str) -> dict[str, int]:
+    """武器名 → 持有它的角色数（卡上武器栏或战斗默认武器里有它）。
+
+    规则页删武器时提示用：被删的武器，已有角色战斗时会改按卡上的数据结算。"""
+    counts: dict[str, int] = {}
+    rows = db.query(Character.system_data).filter(Character.rule_system == rule_system).all()
+    for (sd,) in rows:
+        sd = sd or {}
+        names = {str(w.get("name") or "").strip() for w in (sd.get("weapons") or []) if isinstance(w, dict)}
+        names.add(str((sd.get("combat") or {}).get("weapon") or "").strip())
+        for n in names - {"", "徒手格斗"}:
+            counts[n] = counts.get(n, 0) + 1
+    return counts
+
+
 def get_character(db: Session, character_id: str) -> Character | None:
     return db.get(Character, character_id)
 

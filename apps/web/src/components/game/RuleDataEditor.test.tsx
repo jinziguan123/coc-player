@@ -12,7 +12,8 @@ vi.mock('../../api/client', () => ({
     put: (...a: unknown[]) => put(...a),
   },
 }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const warning = vi.fn()
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: (...a: unknown[]) => warning(...a) } }))
 
 const BOW = { name: '弓箭', skill: '射击(弓弩)', dam: '1D6+半DB', tho: 0, range: '30', round: '1', num: '1', price: '', err: '97', time: '', category: '常规' }
 const AXE = { name: '斧头', skill: '格斗(斧)', dam: '1D8+DB', tho: 0, range: '接触', round: '1', num: '', price: '', err: '', time: '', category: '常规' }
@@ -29,12 +30,14 @@ let weaponsView: Record<string, unknown>
 beforeEach(() => {
   get.mockReset()
   put.mockReset()
+  warning.mockReset()
   weaponsView = {
     table: 'weapons', rows: [BOW, AXE], status: { 弓箭: 'official', 斧头: 'official' },
     deleted: [], originals: {}, patches: [],
   }
   get.mockImplementation((path: string) => {
     if (path.endsWith('/manifest')) return Promise.resolve(MANIFEST)
+    if (path === '/rulebooks/weapon-holders/coc') return Promise.resolve({ holders: { 斧头: 3 } })
     if (path.endsWith('/weapons')) return Promise.resolve(weaponsView)
     return Promise.resolve(view())
   })
@@ -88,6 +91,17 @@ describe('数据表编辑器', () => {
     expect(screen.getByText(/已删除的官方行（1）/)).toBeInTheDocument()
     await user.click(screen.getByTitle('恢复这一行'))
     expect(screen.queryByText(/已删除的官方行/)).not.toBeInTheDocument()
+  })
+
+  it('删除有角色持有的武器时提醒人数，没人持有的不提醒', async () => {
+    const user = await openWeapons()
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/rulebooks/weapon-holders/coc'))
+    await user.click(screen.getByText('弓箭'))
+    await user.click(screen.getByRole('button', { name: /删除/ }))
+    expect(warning).not.toHaveBeenCalled()
+    await user.click(screen.getByText('斧头'))
+    await user.click(screen.getByRole('button', { name: /删除/ }))
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('有 3 个角色持有这把武器'))
   })
 
   it('新增一行没填主键时不提交，指出是哪一行', async () => {

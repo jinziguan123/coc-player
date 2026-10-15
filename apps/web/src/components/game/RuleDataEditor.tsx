@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { invalidateRuleDataCache } from '@/components/character/useCocData'
 import { DataTableView } from '@/components/game/DataTableView'
+import { useDeleteWarning } from '@/components/game/useDeleteWarning'
 import type { DataRow, RuleTableManifest, RuleTableView } from '@/lib/ruleData'
 import { officialRows } from '@/lib/ruleDraft'
 
@@ -26,6 +27,7 @@ export function RuleDataEditor({ scope }: { scope: RuleDataScope }) {
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
   const url = (table: string) => `/modules/${scope.moduleId}/rule-data/${table}`
+  const deleteWarning = useDeleteWarning(scope.ruleSystem, active)
 
   useEffect(() => {
     let alive = true
@@ -98,7 +100,8 @@ export function RuleDataEditor({ scope }: { scope: RuleDataScope }) {
         {table.description}。这里的改动随模组走，这一桌的村规可以再覆盖它。
       </div>
 
-      <DataTableView key={active} table={table} official={officialRows(view, table.key)} rows={rows} onChange={setRows} />
+      <DataTableView key={active} table={table} official={officialRows(view, table.key)} rows={rows} onChange={setRows}
+        deleteWarning={deleteWarning} />
 
       {errors.length > 0 && (
         <ul role="alert" className="mt-3 text-xs list-disc pl-4" style={{ color: 'var(--color-danger)' }}>

@@ -5,6 +5,7 @@
 // 不在本地另记一份——两边对不上的那类 bug 就无从发生。
 import { useMemo, useState } from 'react'
 import { Plus, RotateCcw, Search, Trash2, Undo2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { NumberField } from '@/components/ui/number-field'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -131,7 +132,9 @@ function RowForm({ fields, row, keyField, keyLocked, onChange }: {
   )
 }
 
-export function DataTableView({ table, official, rows, onChange, query: externalQuery, onlyChanged = false }: {
+export function DataTableView({
+  table, official, rows, onChange, query: externalQuery, onlyChanged = false, deleteWarning,
+}: {
   table: RuleTableManifest
   /** 官方原样的行：判定每行状态与「已删除」的基准 */
   official: DataRow[]
@@ -142,6 +145,8 @@ export function DataTableView({ table, official, rows, onChange, query: external
   query?: string
   /** 只显示与官方不同的行 */
   onlyChanged?: boolean
+  /** 删一行时要提醒的话（如「有 N 个角色持有这把武器」）；返回 null 不提醒 */
+  deleteWarning?: (row: DataRow) => string | null
 }) {
   const key = table.key
   const fields = useMemo(() => tableFields(table), [table])
@@ -165,6 +170,8 @@ export function DataTableView({ table, official, rows, onChange, query: external
     setOwnQuery('')
   }
   const remove = (i: number) => {
+    const warning = deleteWarning?.(rows[i])
+    if (warning) toast.warning(warning)
     onChange(rows.filter((_, j) => j !== i))
     setSelected(null)
   }

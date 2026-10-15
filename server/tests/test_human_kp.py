@@ -14,6 +14,7 @@ from app.schemas.session import KpActionRequest
 from app.services import npc_identity, session_service
 from app.services.chat_service import execute_human_kp_action, initialize_human_session
 from app.services.room_hub import room_hub
+from app.rules import ruleset_for
 
 
 def _db(tmp_path):
@@ -578,10 +579,10 @@ def test_kp_set_token_persists_figure_and_broadcasts(tmp_path):
     # 直接建战斗态，不走 KP 的 start_combat 动作——那条路要 AI 布阵，这里只要一个场上的敌人。
     combat_service.start_combat(
         db, session.id,
-        [combat_service._char_participant(hero, "player", is_human=True)],
+        [combat_service._char_participant(hero, "player", is_human=True, rs=ruleset_for("coc"))],
         [combat_service._npc_participant(
             {"id": "guard", "name": "守门人", "attributes": {"DEX": 40, "CON": 50, "SIZ": 60},
-             "skills": {"格斗(斗殴)": 30}, "weapon": "徒手格斗"}, "enemy")],
+             "skills": {"格斗(斗殴)": 30}, "weapon": "徒手格斗"}, "enemy", rs=ruleset_for("coc"))],
     )
     # expire 而不是 refresh：combat_state 是关系属性，refresh 只重载列，
     # 关系仍挂着开战前的 None。
@@ -629,10 +630,10 @@ def test_kp_hp_change_syncs_into_active_combat(tmp_path):
     db.add(hero); db.commit()
     combat_service.start_combat(
         db, session.id,
-        [combat_service._char_participant(hero, "player", is_human=True)],
+        [combat_service._char_participant(hero, "player", is_human=True, rs=ruleset_for("coc"))],
         [combat_service._npc_participant(
             {"id": "guard", "name": "守门人", "attributes": {"DEX": 40, "CON": 50, "SIZ": 60},
-             "skills": {"格斗(斗殴)": 30}, "weapon": "徒手格斗"}, "enemy")],
+             "skills": {"格斗(斗殴)": 30}, "weapon": "徒手格斗"}, "enemy", rs=ruleset_for("coc"))],
     )
     db.expire_all()
     before = next(p for p in combat_service.get_combat(session)["initiative"] if p["id"] == hero.id)

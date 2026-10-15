@@ -153,7 +153,7 @@ export function useRulesWorkbench(ruleSystem: string) {
   }
 
   return {
-    manifest, saved, sections, tables, index, loadError,
+    ruleSystem, manifest, saved, sections, tables, index, loadError,
     options, setOption, notes, setNotes, enabled, setEnabled,
     views, tableRows, loadTable, setTable,
     pending, dirty, saving, save, discard, applyImport,
