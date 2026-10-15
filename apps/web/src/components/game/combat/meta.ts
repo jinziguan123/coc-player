@@ -61,19 +61,26 @@ export const CONDITION_META: Record<string, { label: string; Icon: typeof GiCros
 // 不认识的状态（如第三方规则插件新增的）用的通用徽标。
 export const GENERIC_CONDITION_ICON = GiAura
 
+export type ConditionBadge = { key: string; label: string; Icon: typeof GiCrossedSwords }
+
 /**
- * 参战方身上的状态 → 徽标（名称 + 图标）。内置状态用专属图标；其余用通用徽标，名称取
- * 组件声明的中文名（后端随 order 下发的 condition_labels），实在没有才显示键名。
+ * 状态键 → 徽标（名称 + 图标）。战斗面板与角色卡共用这一处映射：内置状态用专属图标，
+ * 其余用通用徽标；名称取组件声明的中文名（labels），实在没有才显示键名。
  */
-export function conditionBadges(c: Combatant): { key: string; label: string; Icon: typeof GiCrossedSwords }[] {
-  return (c.conditions || []).map((key) => {
+export function badgesFor(keys: readonly string[] | undefined, labels?: Record<string, string>): ConditionBadge[] {
+  return (keys || []).map((key) => {
     const known = CONDITION_META[key]
     return {
       key,
-      label: c.condition_labels?.[key] || known?.label || key,
+      label: labels?.[key] || known?.label || key,
       Icon: known?.Icon ?? GENERIC_CONDITION_ICON,
     }
   })
+}
+
+/** 参战方身上的状态 → 徽标；中文名取后端随 order 下发的 condition_labels。 */
+export function conditionBadges(c: Combatant): ConditionBadge[] {
+  return badgesFor(c.conditions, c.condition_labels)
 }
 
 // 武器：拳头（徒手格斗）永远可选并置顶；其余从角色卡武器栏（system_data.weapons）来；
