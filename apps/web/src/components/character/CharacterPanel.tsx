@@ -8,6 +8,7 @@ import { api } from '../../api/client'
 import type { CharacterExperience } from '@/features/characters/api'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GameVitalBar } from './GameVitalBar'
+import { ConditionBadges } from './ConditionBadges'
 export { GameVitalBar, StatBar } from './GameVitalBar'
 
 /** 模糊匹配：先看子串，再退化为「按顺序出现的子序列」（如「图使」命中「图书馆使用」）。 */
@@ -32,6 +33,8 @@ interface CharacterData {
   system_data: Record<string, unknown>
   backstory: string
   status: string
+  /** 持续状态的中文名按规则系统取（见 ConditionBadges）；缺省按 coc。 */
+  rule_system?: string
   /** 为空则回落姓名首字纹章（见 CharacterPortrait），不是缺陷态。 */
   avatar_url?: string | null
   /** 模组经历：一局落幕后由后端归档，这里只读。 */
@@ -178,13 +181,16 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
             {gender && <span>· {gender}</span>}
             {age > 0 && <span>· {age}岁</span>}
           </div>
-          {character.status && character.status !== 'active' && (
-            <span
-              className={`chip mt-1 ${STATUS_DANGER.has(character.status) ? 'chip--solid-danger' : ''}`}
-            >
-              {statusLabel(character.status)}
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-1">
+            {character.status && character.status !== 'active' && (
+              <span
+                className={`chip mt-1 ${STATUS_DANGER.has(character.status) ? 'chip--solid-danger' : ''}`}
+              >
+                {statusLabel(character.status)}
+              </span>
+            )}
+            <ConditionBadges systemData={character.system_data} ruleSystem={character.rule_system} />
+          </div>
         </div>
       </div>
 

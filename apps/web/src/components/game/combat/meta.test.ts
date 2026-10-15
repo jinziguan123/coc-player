@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CONDITION_META, GENERIC_CONDITION_ICON, conditionBadges, turnsUntil } from './meta'
+import { CONDITION_META, GENERIC_CONDITION_ICON, badgesFor, conditionBadges, turnsUntil } from './meta'
 import type { Combatant, CombatStatus } from './types'
 
 const 人 = (id: string, status: CombatStatus = 'ok'): Combatant => ({
@@ -59,5 +59,15 @@ describe('conditionBadges', () => {
     const [b] = conditionBadges(带状态(['mystery']))
     expect(b.label).toBe('mystery')
     expect(b.Icon).toBe(GENERIC_CONDITION_ICON)
+  })
+})
+
+describe('badgesFor（战斗面板与角色卡共用）', () => {
+  it('没有中文名表时内置状态用内置中文名', () => {
+    expect(badgesFor(['bleeding'])).toEqual([{ key: 'bleeding', label: '流血', Icon: CONDITION_META.bleeding.Icon }])
+  })
+
+  it('没有状态时给空列表', () => {
+    expect(badgesFor(undefined)).toEqual([])
   })
 })
