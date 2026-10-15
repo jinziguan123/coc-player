@@ -1092,7 +1092,7 @@ def test_event_budget_scales_with_session_calibration(monkeypatch):
     from app.services import generation_housekeeping as gh
 
     monkeypatch.setattr(ctx, "_active_context_budget", lambda: 100_000)
-    reserve = ctx.MAX_SYSTEM_TOKENS + ctx.RESERVE_FOR_OUTPUT
+    reserve = ctx.MAX_SYSTEM_TOKENS + ctx.RESERVE_FOR_OUTPUT + ctx.RESERVE_FOR_TOOLS
     assert gh._event_budget({}) == 100_000 - reserve                       # 未校准 = 1.0
     assert gh._event_budget({"budget_scale": 2.0}) == 200_000 - reserve    # 放大
     assert gh._event_budget({"budget_scale": 0.6}) == 60_000 - reserve     # 收缩

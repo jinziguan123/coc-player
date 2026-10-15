@@ -141,6 +141,11 @@ def _active_context_budget() -> int:
 
 # 输出预留：KP 叙事（尤其分头/多 NPC/tool-loop 多步）可能较长，给足避免被截断。
 RESERVE_FOR_OUTPUT = 7000
+# 工具预留：工具循环每步都要带上 tools schema（全部内置工具约 8k 估算 token，插件工具另加），
+# 后续步还会累积工具往返消息；这些都不在 messages 里，事件区预算得先把它们让出来。
+# 校准系数取的是工具循环第一步「messages + tools」的实测（见 turn_context._record_turn_usage），
+# 不再被工具 schema 与往返压低——这份空间改由这里显式预留。摘要侧 _event_budget 同口径。
+RESERVE_FOR_TOOLS = 12000
 # 系统提示上限。此处装的不只是静态裁定手册，还有模组数据 + RAG 原文摘录（可达 ~2700 token）
 # + 线索台账 + NPC 记忆 + 幕后动态 + handout 清单。KP 手册随能力增强持续变长，12000 下
 # 静态手册被卡在 6000（=MAX-6000 护栏）反复要「加一句砍一句」。提升到 16000：静态手册天花板
@@ -1581,7 +1586,7 @@ def _assemble_kp_messages(
         # 再乘以本会话的在线校准系数——启发式估算相对真实 BPE 有系统性偏差，不校准就等于
         # 白扔掉近一半可用窗口（见 update_budget_scale）。
         budget = effective_context_budget(session.world_state or {}, context_budget)
-        event_budget = budget - system_tokens - RESERVE_FOR_OUTPUT
+        event_budget = budget - system_tokens - RESERVE_FOR_OUTPUT - RESERVE_FOR_TOOLS
 
         # 滚动剧情摘要：已被浓缩进 world_state.story_summary 的老事件（seq ≤ 游标）不再逐条进
         # 上下文，只保留这份持久摘要；游标之后的事件照常按预算给全文，仍超预算的再兜底即时摘要。

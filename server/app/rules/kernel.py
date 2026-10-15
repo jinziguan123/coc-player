@@ -31,6 +31,8 @@ from app.rules import data as rule_data
 from app.rules import hooks as rule_hooks
 from app.rules.config import RuleConfig, parse_lenient, parse_strict
 from app.rules.data import DataTable
+from app.rules.kp_tools import KpTool
+from app.rules.kp_tools import check_tool as check_kp_tool
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +105,9 @@ class Component:
     conditions: dict[str, str] = field(default_factory=dict)
     #: 本组件的钩子实现所在的模块（模块对象或路径，通常写 ``__name__``）。见 app.rules.hooks。
     hooks: Any = None
+    #: 本组件给 KP 新增的工具（见 app.rules.kp_tools）。随组件开关进出；工具名在规则系统内唯一，
+    #: 也不得与内置 KP 工具重名（插件加载时校验，见 app.rules.plugins）。
+    kp_tools: tuple[KpTool, ...] = ()
     #: 组件来源：``official`` 或 ``plugin:<插件名>``（第三方插件加载时填）。
     source: str = "official"
 
@@ -341,7 +346,9 @@ class Service:
 class Ruleset:
     """一份生效规则：``rs.<槽位>.<导出>``，例如 ``rs.check.resolve_skill_check(...)``。"""
 
-    __slots__ = ("system", "options", "components", "condition_labels", "_services", "_rows", "_tables")
+    __slots__ = (
+        "system", "options", "components", "condition_labels", "kp_tools", "_services", "_rows", "_tables",
+    )
 
     def __init__(self, system: RuleSystem, options: Any, rows: dict[str, tuple[dict, ...]]) -> None:
         self.system = system.id
@@ -356,6 +363,8 @@ class Ruleset:
             logger.warning("规则系统 %s 的组件开关组合有问题，已按后者让位处理：%s", system.id, p)
         #: 本份村规下实际启用的组件（可选组件随其开关参数进出）。
         self.components = tuple(c.id for c in enabled)
+        #: 本局启用的组件声明的 KP 工具（见 app.rules.kp_tools）；没有插件工具时为空。
+        self.kp_tools: tuple[KpTool, ...] = tuple(t for c in enabled for t in c.kp_tools)
         # 本局的钩子：只登记启用的组件
         pm = rule_hooks.new_manager()
         for comp in enabled:
@@ -518,6 +527,18 @@ def _resolve(system: RuleSystem) -> tuple[
                 errors.append(f"战斗状态 {key} 同时由 {conditions[key]} 与 {comp.id} 声明")
             else:
                 conditions[key] = comp.id
+
+    tool_owner: dict[str, str] = {}
+    for comp in active:
+        for tool in comp.kp_tools:
+            errors += [f"组件 {comp.id}：{e}" for e in check_kp_tool(tool)]
+            name = getattr(tool, "name", None)
+            if not isinstance(name, str):
+                continue
+            if name in tool_owner:
+                errors.append(f"KP 工具 {name} 同时由 {tool_owner[name]} 与 {comp.id} 声明")
+            else:
+                tool_owner[name] = comp.id
 
     errors += _check_option_owners(active, tuple(system.options_model.model_fields))
     errors += _check_toggles(active)

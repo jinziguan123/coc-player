@@ -41,6 +41,7 @@
 - `hooks`：钩子实现所在的模块，一般写 `__name__`。函数用 `@hookimpl` 标注，函数名就是钩子名。
 - `data`：数据表（`DataTable`），可以被房主在编辑器里改。
 - `conditions`：本组件会给参战方挂的战斗状态，写成 `{"状态键": "中文名"}`，例如 `{"dazed": "眩晕"}`。钩子里 `conditions_add` 用到的状态键都应在这里声明，战斗界面据此显示状态名（用一个通用图标）；状态键不能和已有组件声明的重名。
+- `kp_tools`：给 KP 新增的工具（`KpTool`），见下文「给 KP 加工具」。
 - `provides`：服务槽位，一般用不到。
 
 ### 可用的钩子
@@ -57,6 +58,52 @@
 | `condition_notes(conditions, options)` | 每回合给 KP 组上下文时，角色卡上挂着持续状态 | `["…"]`：告诉 KP 这个状态怎么演、战斗外怎么结算 |
 
 `options` 是本局生效的规则，你的组件参数可以直接从它上面读，例如 `options.wound_penalty_percent`。
+
+## 给 KP 加工具
+
+除了改规则的行为，插件还能给 KP 新增工具：比如掷一张自定的随机遭遇表、查一张本桌的物价表。参考同目录下的 [`random_encounter.py`](random_encounter.py)。
+
+```python
+from app.rules.kp_tools import KpTool, KpToolContext, KpToolResult
+
+def roll_encounter(ctx: KpToolContext, args: dict) -> str:
+    ...
+    return "随机遭遇（1D6=3）：……"   # 这段文字会回给 KP
+
+Component(
+    id="me.random-encounter", ..., toggle="random_encounter",
+    kp_tools=(KpTool(name="roll_encounter", description="……", parameters={...}, execute=roll_encounter),),
+)
+```
+
+| 字段 | 说明 |
+|---|---|
+| `name` | 工具名，小写 snake_case（如 `roll_encounter`） |
+| `description` | 给 KP 看的说明：什么时候用、什么时候别用。写得越具体，KP 越不会乱用 |
+| `parameters` | 参数的 JSON Schema，`{"type": "object", "properties": {...}, "required": [...]}` |
+| `execute(ctx, args)` | 执行函数，普通函数和 `async` 函数都行。`args` 是 KP 给的参数（dict） |
+
+`execute` 能拿到的上下文 `ctx`：
+
+| 字段 | 说明 |
+|---|---|
+| `ctx.db` | 本轮的数据库会话。写了库要自己 `ctx.db.commit()` |
+| `ctx.session_id` / `ctx.game_session` | 本局 |
+| `ctx.module` | 本局模组 |
+| `ctx.player_char` / `ctx.teammates` | 本轮行动的角色与其队友 |
+| `ctx.ruleset` | 本局生效规则。组件参数从 `ctx.ruleset.options` 上读 |
+
+返回值：
+
+- 一段文字（`str`）：回给 KP，KP 据此接着叙述。
+- `KpToolResult(text, suspend=True)`：回给 KP 之后本轮生成就此收束，适合「要等玩家先做点什么」的工具。
+
+规则：
+
+- 工具跟着组件的开关走：房主没在规则页打开这个组件，KP 就看不到它的工具。
+- 工具名**不能**和内置工具（`dice_check`、`hp_change`、`scene_change` 等）重名。内置工具带着检定、扣血这些确定性结算，不允许被覆盖。重名的插件不会加载，原因会显示在规则书页。两个插件的工具重名也一样。
+- `execute` 抛了异常不会让这一轮跑团中断：KP 会收到「工具执行出错，请直接继续叙述」，异常写进日志。
+- 工具只在工具调用模式（默认开启）下可用，旧的文本指令路径看不到插件工具。
 
 ## 已知限制
 

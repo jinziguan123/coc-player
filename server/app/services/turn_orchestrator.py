@@ -493,7 +493,9 @@ async def _run_generation(
     if _tool_loop_active(llm):
         # 新路径：agent loop（标准工具调用）。指令在 loop 内经执行器完成（含文本指令兜底），
         # 不再走 _process_commands；validator 终检/落库/记忆钩子与旧路径共用（见下方）。
-        messages.append(kp_tools.tool_mode_message())
+        # 本局启用的规则组件（含插件）声明的 KP 工具：同时进工具模式说明、原生 schema 与执行器。
+        rs = rule_options_service.ruleset(db, game_session)
+        messages.append(kp_tools.tool_mode_message(rs.kp_tools))
         exclude = set()
         if not rules_enabled:
             exclude.add("rule_lookup")   # 未挂规则书：不提供该工具（镜像旧路径不广告）
@@ -501,26 +503,33 @@ async def _run_generation(
             exclude.add("module_lookup")  # 原文索引未就绪：同上
         execute = _build_kp_tool_executor(
             db, session_id, game_session, module, player_char, teammates, llm, result,
+            ruleset=rs,
         )
         # 本轮基线序号 + 事件广播顺序清单：loop 内工具事件即时落库（较小序号），旁白收尾才落库，
         # 直接 resync 会顺序错乱；收尾按广播偏移把本轮（seq>base_seq）事件重排回交错顺序。
         base_seq = session_service.get_next_sequence_num(db, session_id) - 1
         event_order: list = []
+        tools = kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools)
+        usage_probe: dict = {}
         try:
             async for chunk in _run_kp_agent_loop(
                 llm, messages, result, execute,
-                tools=kp_tools.openai_tool_schemas(exclude=exclude),
+                tools=tools,
                 npcs=matcher_npcs, plan=plan, party_names=party_names,
                 shown_dialogues=shown_dialogues,
                 event_order=event_order,
                 masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+                usage_probe=usage_probe,
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
             _persist_narration(db, session_id, result, event_order, llm=llm)
             _reorder_turn_events(db, session_id, event_order, base_seq)
             raise
-        _record_turn_usage(db, game_session, llm, events, messages)   # validator 前，趁 last_usage 仍是主叙事那次
+        _record_turn_usage(   # validator 前，趁 last_usage 仍是主叙事那次
+            db, game_session, llm, events, messages,
+            tools=tools, calibration_usage=usage_probe.get("first"),
+        )
         await _validate_and_patch_narration(
             llm, plan, result, event_order, seen_context=_recent_seen_text(events),
             turn_inputs=turn_inputs, on_start=_validator_note(session_id),
@@ -1347,7 +1356,8 @@ async def _run_kp_turn_tool_loop(
     ``hold``（申请检定轮）时先攒着 chunk，看完整产物再定旁白去留（见 _check_request_narration_keep）。
     """
     messages = list(messages)
-    messages.append(kp_tools.tool_mode_message())
+    rs = rule_options_service.ruleset(db, game_session)   # 插件 KP 工具，同主路径
+    messages.append(kp_tools.tool_mode_message(rs.kp_tools))
     exclude = set()
     if not rules_enabled:
         exclude.add("rule_lookup")
@@ -1356,7 +1366,7 @@ async def _run_kp_turn_tool_loop(
     res = ["", "", [], [], []]
     execute = _build_kp_tool_executor(
         db, session_id, game_session, module, player_char, party_others, llm, res,
-        pre_gen_seq=pre_gen_seq,
+        pre_gen_seq=pre_gen_seq, ruleset=rs,
     )
     base_seq = session_service.get_next_sequence_num(db, session_id) - 1
     event_order: list = []
@@ -1365,7 +1375,7 @@ async def _run_kp_turn_tool_loop(
     try:
         async for chunk in _run_kp_agent_loop(
             llm, messages, res, execute,
-            tools=kp_tools.openai_tool_schemas(exclude=exclude),
+            tools=kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools),
             npcs=_matcher_npcs(module, party_others, game_session),
             party_names=party_names,
             event_order=event_order,

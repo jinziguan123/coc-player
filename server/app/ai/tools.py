@@ -24,6 +24,7 @@ loop 行为（kind 字段）：
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 
@@ -485,14 +486,23 @@ def openai_schema(spec: ToolSpec) -> dict:
     }
 
 
-def openai_tool_schemas(exclude: set[str] | None = None) -> list[dict]:
+def openai_tool_schemas(exclude: set[str] | None = None, extra: Iterable = ()) -> list[dict]:
     """全部（或剔除 exclude 后的）注册项渲染成 stream_chat 的 tools 列表。
 
     exclude 用于按运行时能力裁剪：未挂规则书时剔除 rule_lookup、模组原文索引
     未就绪时剔除 module_lookup（镜像旧路径「不广告该能力」的门槛）。
+    ``extra`` 是本局启用的组件（含插件）声明的 KP 工具（``app.rules.kp_tools.KpTool``，
+    取 name/description/parameters 三项），排在内置工具之后。
     """
     exclude = exclude or set()
-    return [openai_schema(spec) for spec in REGISTRY if spec.name not in exclude]
+    return [openai_schema(spec) for spec in REGISTRY if spec.name not in exclude] + [
+        openai_schema(t) for t in _plugin_only(extra)
+    ]
+
+
+def _plugin_only(extra: Iterable) -> list:
+    """剔除与内置工具重名的插件工具（加载时已拒绝；这里兜底，免得 tools 列表里出现重名）。"""
+    return [t for t in extra if t.name not in TOOLS_BY_NAME]
 
 
 def render_tag(spec: ToolSpec, arguments: dict | None) -> str:
@@ -504,12 +514,29 @@ def render_tag(spec: ToolSpec, arguments: dict | None) -> str:
     return f"[{spec.tag}: {inner}]"
 
 
-def tool_mode_message() -> dict:
+def tool_mode_message(extra: Iterable = ()) -> dict:
     """loop 路径追加的系统消息：把手写 prompt 里的方括号指令映射到工具调用。
 
     不重写手写指令说明段（各指令的时机与约束照旧生效），只声明表达形式的切换；
     对话改用 say() 工具（结构化出口，从根上取消台词的启发式解析）；GROUP 仍是文本标注。
+    ``extra``（本局插件工具）非空时末尾追加一段清单；为空时消息逐字不变。
     """
+    msg = _tool_mode_base()
+    extra = _plugin_only(extra)
+    if extra:
+        lines = "\n".join(f"- {t.name}：{_first_line(t.description)}" for t in extra)
+        msg["content"] += (
+            "\n\n【本桌规则插件提供的工具】房主为本局启用了以下额外工具（完整说明见工具定义），"
+            "按说明在合适时机调用；它们不替代上面的任何内置工具：\n" + lines
+        )
+    return msg
+
+
+def _first_line(text: str) -> str:
+    return (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+
+
+def _tool_mode_base() -> dict:
     return {
         "role": "system",
         "content": (

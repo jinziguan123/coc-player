@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import re
@@ -24,6 +25,7 @@ from app.ai.provider import ToolCall
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
+from app.rules.kp_tools import KpToolContext, KpToolResult
 from app.services import (
     chat_event_writer,
     command_protocol,
@@ -283,6 +285,7 @@ def _build_kp_tool_executor(
     player_char: Character, teammates: list[Character] | None, llm,
     result: list,
     pre_gen_seq: int | None = None,
+    ruleset=None,
 ):
     """构建 loop 路径的工具执行器：把注册表工具名分发到上面的共用执行函数（不复制逻辑）。
 
@@ -292,8 +295,15 @@ def _build_kp_tool_executor(
 
     ``pre_gen_seq``（本轮生成前基线序号）给定时透传给理智检定：KP 没写 chars 就退回
     「本轮真正行动过的人」而非在场全体，与旧路径 ``_process_commands`` 同一口径。
+
+    ``ruleset``（本局生效规则）给定时，其中启用的组件声明的 KP 工具（``ruleset.kp_tools``，
+    见 app.rules.kp_tools）也可调用。内置工具名优先——插件加载时已拒绝重名，这里不会撞上。
     """
     lookup_used = 0
+    plugin_tools = {
+        t.name: t for t in (getattr(ruleset, "kp_tools", None) or ())
+        if t.name not in kp_tools.TOOLS_BY_NAME
+    }
 
     # 每个工具一个 handler(name, kv)；分发表取代旧的长 if/elif 链。ToolSpec（tools.py）仍是
     # 参数 schema 的单一事实源；此处是「工具名 → 执行」的单一事实源（独立放置以避免与
@@ -513,8 +523,29 @@ def _build_kp_tool_executor(
         "set_mood": _h_set_mood,
     }
 
+    async def _h_plugin(tool, arguments: dict) -> kp_tools.ToolOutcome:
+        ctx = KpToolContext(
+            db=db, session_id=session_id, game_session=game_session, module=module,
+            player_char=player_char, teammates=tuple(teammates or ()), ruleset=ruleset,
+        )
+        out = tool.execute(ctx, dict(arguments))
+        if inspect.isawaitable(out):
+            out = await out
+        if isinstance(out, KpToolResult):
+            return kp_tools.ToolOutcome(str(out.text), suspend=bool(out.suspend))
+        return kp_tools.ToolOutcome("ok" if out is None else str(out))
+
     async def execute(call: ToolCall) -> kp_tools.ToolOutcome:
         name = call.name
+        plugin_tool = plugin_tools.get(name)
+        if plugin_tool is not None:
+            try:
+                return await _h_plugin(plugin_tool, call.arguments or {})
+            except Exception:
+                logger.exception("插件工具执行失败: %s session=%s", name, session_id)
+                return kp_tools.ToolOutcome(
+                    f"工具 {name} 执行出错，请不要重试该工具，直接继续叙述。"
+                )
         kv = {k: str(v).strip() for k, v in (call.arguments or {}).items() if v is not None}
         if kp_tools.TOOLS_BY_NAME.get(name) is None:
             return kp_tools.ToolOutcome(
@@ -584,6 +615,7 @@ async def _run_kp_agent_loop(
     shown_dialogues: list[str] | None = None,
     event_order: list | None = None,
     masker_factory: Callable[[], npc_identity.NameMasker] | None = None,
+    usage_probe: dict | None = None,
 ) -> AsyncIterator[str]:
     """KP agent loop：与 _stream_narration_filtered 并列的新路径（use_tool_calls 开启时用）。
 
@@ -603,6 +635,11 @@ async def _run_kp_agent_loop(
     ``masker_factory``：正文 [SAY] 气泡的遮名器，与 say() 工具同一口径（见
     ``narration_scanner.NarrationScanner._shown_name``）。每步现建一把——上一步的
     npc_act 台词可能已落库；再追加本轮此前 say() / [SAY] 的台词正文（还在 result 里攒着）。
+
+    ``usage_probe``：给定时把**第一步**调用的服务端 usage 写进 ``usage_probe["first"]``。
+    第一步的输入恰好是「调用方的 messages + tools」，是预算校准唯一口径对得上的样本；
+    循环结束后的 ``llm.last_usage`` 是最后一步的，多了前面各步累积的工具往返，拿它校准
+    会让系数随工具步数抖动、系统性偏低（见 turn_context._record_turn_usage）。
     """
     tools = tools if tools is not None else kp_tools.openai_tool_schemas()
     requires_check = bool(plan is not None and plan.requires_check)
@@ -623,6 +660,7 @@ async def _run_kp_agent_loop(
         return masker_factory().with_prose(said)
 
     fold_turn_history_for_tools(messages)
+    usage_before = getattr(llm, "last_usage", None)
 
     def _log_rounds() -> None:
         if used_tools:
@@ -656,6 +694,11 @@ async def _run_kp_agent_loop(
             _merge_step_result(result, step)  # 断流也保住已生成片段（调用方负责落库）
             raise
         _merge_step_result(result, step)
+        if _step == 0 and usage_probe is not None:
+            u = getattr(llm, "last_usage", None)
+            # 与调用前是同一个对象＝本步 Provider 没报 usage，残留的是更早那次调用的，不能拿来校准
+            if isinstance(u, dict) and u is not usage_before:
+                usage_probe["first"] = dict(u)
 
         step_text = (step[1] or "").replace("【", "[").replace("】", "]")
         if not tool_calls:

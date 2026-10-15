@@ -134,9 +134,11 @@ async def lifespan(_app: FastAPI):
         _MIGRATION_ERROR = str(e)
     # 第三方规则插件：逐个校验、失败隔离（坏插件只会让它自己不加载，不影响启动）
     try:
+        from app.ai.tools import TOOLS_BY_NAME
         from app.rules import plugins
 
-        plugins.install_all(settings.plugins_dir)
+        # 内置 KP 工具名：插件的 KP 工具不得与之重名（内置工具带确定性结算，不可覆盖）
+        plugins.install_all(settings.plugins_dir, reserved_tool_names=TOOLS_BY_NAME)
     except Exception:
         logger.exception("加载规则插件时出错，已按无插件运行")
     yield

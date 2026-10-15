@@ -19,7 +19,8 @@
 
 - 必须是**可选组件**（有 ``toggle``）：装上不等于启用，房主在规则页里打开才生效；
 - id 不得以 ``coc7.`` 开头（官方保留），且不得与已有组件、服务槽位、村规参数、数据表重名；
-- 可以声明村规参数（``config``）、数据表（``data``）、钩子（``hooks``）与服务槽位。
+- 可以声明村规参数（``config``）、数据表（``data``）、钩子（``hooks``）、KP 工具（``kp_tools``）
+  与服务槽位；KP 工具名不得与内置工具或其他组件的工具重名。
 
 **失败隔离**：每个插件单独校验——导入报错、版本不符、与官方或其他插件冲突，都只让这一个
 插件不加载并记下原因（规则书页可见），不影响官方规则与其他插件，更不会让应用起不来。
@@ -30,6 +31,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -93,8 +95,15 @@ def load_module(path: Path) -> ModuleType:
     return module
 
 
-def read_plugin(path: Path, rule_system: str) -> tuple[PluginInfo, list[Component]]:
-    """导入一个插件并做静态校验（不涉及与其他组件的冲突）。"""
+def read_plugin(
+    path: Path, rule_system: str, reserved_tool_names: Iterable[str] = (),
+) -> tuple[PluginInfo, list[Component]]:
+    """导入一个插件并做静态校验（不涉及与其他组件的冲突）。
+
+    ``reserved_tool_names`` 是内置 KP 工具名：插件的 KP 工具不得与之重名。由启动方传入——
+    内置工具注册表在 AI 层，规则包不反向依赖它。
+    """
+    reserved = frozenset(reserved_tool_names)
     info = PluginInfo(file=path.parent.name if path.name == "__init__.py" else path.name)
     try:
         module = load_module(path)
@@ -126,6 +135,10 @@ def read_plugin(path: Path, rule_system: str) -> tuple[PluginInfo, list[Componen
             problems.append(f"组件 id「{c.id}」用了官方保留的前缀 {_RESERVED_PREFIX}")
         if not c.optional:
             problems.append(f"组件「{c.id}」必须是可选组件（声明 toggle），装上后由房主决定是否启用")
+        for tool in c.kp_tools:
+            name = getattr(tool, "name", None)
+            if name in reserved:
+                problems.append(f"组件「{c.id}」的 KP 工具 {name} 与内置工具重名（内置工具不可覆盖，请换个名字）")
     if problems:
         info.error = "；".join(problems)
         return info, []
@@ -152,9 +165,12 @@ def assemble(base: RuleSystem, plugins: list[tuple[PluginInfo, list[Component]]]
     return system
 
 
-def install(base: RuleSystem, directory: Path) -> tuple[RuleSystem, list[PluginInfo]]:
+def install(
+    base: RuleSystem, directory: Path, reserved_tool_names: Iterable[str] = (),
+) -> tuple[RuleSystem, list[PluginInfo]]:
     """发现、校验、组装。返回（叠上插件后的规则系统, 每个插件的加载结果）。"""
-    loaded = [read_plugin(p, base.id) for p in discover(directory)]
+    reserved = frozenset(reserved_tool_names)
+    loaded = [read_plugin(p, base.id, reserved) for p in discover(directory)]
     system = assemble(base, loaded)
     infos = [info for info, _ in loaded]
     for info in infos:
@@ -171,11 +187,17 @@ _OFFICIAL: dict[str, RuleSystem] = {}
 _INFOS: dict[str, list[PluginInfo]] = {}
 
 
-def install_all(directory: Path) -> dict[str, list[PluginInfo]]:
-    """应用启动时调用：给每个已注册的规则系统叠上 ``directory`` 里的插件，并替换注册。"""
+def install_all(
+    directory: Path, reserved_tool_names: Iterable[str] = (),
+) -> dict[str, list[PluginInfo]]:
+    """应用启动时调用：给每个已注册的规则系统叠上 ``directory`` 里的插件，并替换注册。
+
+    ``reserved_tool_names``：内置 KP 工具名（启动时传 ``app.ai.tools.TOOLS_BY_NAME``），
+    与之重名的插件拒绝加载。
+    """
     for sid in list_systems():
         base = _OFFICIAL.setdefault(sid, get_system(sid))
-        system, infos = install(base, directory)
+        system, infos = install(base, directory, reserved_tool_names)
         register_system(system, replace=True)
         _INFOS[sid] = [i for i in infos if i.status != "skipped"]
     return dict(_INFOS)

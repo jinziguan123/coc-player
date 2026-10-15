@@ -43,9 +43,12 @@ def _event_budget(ws: dict | None) -> int:
     from app.ai.context import (
         MAX_SYSTEM_TOKENS,
         RESERVE_FOR_OUTPUT,
+        RESERVE_FOR_TOOLS,
         effective_context_budget,
     )
-    return max(effective_context_budget(ws) - MAX_SYSTEM_TOKENS - RESERVE_FOR_OUTPUT, 4000)
+    return max(
+        effective_context_budget(ws) - MAX_SYSTEM_TOKENS - RESERVE_FOR_OUTPUT - RESERVE_FOR_TOOLS, 4000,
+    )
 
 
 def _events_tokens(events: list) -> int:

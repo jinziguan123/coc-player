@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 
@@ -797,6 +798,9 @@ def _cache_usage(u: dict) -> dict:
 def _record_turn_usage(
     db: Session, game_session: GameSession, llm, events: list,
     messages: list[dict] | None = None,
+    *,
+    tools: list[dict] | None = None,
+    calibration_usage: dict | None = None,
 ) -> None:
     """把主叙事那次调用的服务端真实 usage 落到 session_stats.turn_usage，供「上下文占用」显示实测值。
 
@@ -805,6 +809,12 @@ def _record_turn_usage(
 
     给了 ``messages``（本轮真正送进模型的那份）时，顺带用「估算 / 实测」更新本会话的预算
     校准系数：两者口径一致（都含 RAG 摘录等一切实际内容），是校准唯一可靠的取样点。
+
+    工具循环路径另给 ``tools``（本轮送进去的工具 schema）与 ``calibration_usage``（循环**第一步**
+    的 usage）：校准改用第一步的实测、估算补上 tools schema——第一步的输入正好是
+    「messages + tools」，两边才对得上。``last_usage`` 是最后一步的，含前面各步的工具往返，
+    只用于「上下文占用」显示（那是本轮的峰值）。工具路径拿不到第一步实测时宁可这轮不校准，
+    也不拿口径不一致的最后一步凑数。
     """
     u = getattr(llm, "last_usage", None)
     if not isinstance(u, dict):
@@ -828,14 +838,21 @@ def _record_turn_usage(
             "缓存|会话 %s seq=%s 输入 %s 命中 %s 写入 %s",
             game_session.id, tu["at_seq"], pt, tu["cache_read_tokens"], tu["cache_write_tokens"],
         )
-        if messages:
+        calib_pt = pt
+        if tools is not None:
+            cu = calibration_usage if isinstance(calibration_usage, dict) else {}
+            calib_pt = cu.get("prompt_tokens") if isinstance(cu.get("prompt_tokens"), int) else None
+        if messages and calib_pt:
             from app.ai.context import _estimate_tokens, update_budget_scale
             estimated = sum(_estimate_tokens(m.get("content") or "") for m in messages)
+            if tools:
+                estimated += _estimate_tokens(json.dumps(tools, ensure_ascii=False))
             tu["estimated_tokens"] = estimated
+            tu["calibration_prompt_tokens"] = calib_pt
             # budget_scale 仍留在 world_state：它是上下文校准系数、被纯函数
             # build_kp_context 每轮读取，搬走会让上下文构建引入 DB 访问，得不偿失。
             game_session.world_state = update_budget_scale(
-                dict(game_session.world_state or {}), pt, estimated)
+                dict(game_session.world_state or {}), calib_pt, estimated)
         stats = session_stats.get_or_create(db, game_session.id)
         stats.turn_usage = tu
         db.commit()

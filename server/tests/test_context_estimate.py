@@ -1,5 +1,7 @@
 """上下文占用预估：分项 token 估算、窗口占比与健康度，以及模型窗口解析。"""
 
+import json
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -155,3 +157,46 @@ def test_record_turn_usage_persists_and_failopen(db_factory):
         last_usage = None   # 不支持 usage → 不覆盖、不报错
     chat_service._record_turn_usage(db, s, _LLM2(), events)
     assert db.get(SessionStats, sid).turn_usage["prompt_tokens"] == 900
+
+
+def test_tool_loop_calibrates_on_first_step_with_tool_schema(db_factory):
+    """工具循环：校准用第一步实测 + 估算补上 tools schema；显示仍用最后一步（峰值）。"""
+    from app.ai.context import _estimate_tokens
+    from app.models.session_stats import SessionStats
+    from app.services import chat_service
+    db = db_factory()
+    sid = _seed(db)
+    s = db.get(GameSession, sid)
+    events = session_service.get_session_events(db, sid, limit=0)
+    messages = [{"role": "system", "content": "调查员走进书房。" * 50}]
+    tools = [{"type": "function", "function": {"name": "dice_check", "description": "发起检定" * 40}}]
+
+    class _LLM:   # 最后一步：多了前面各步的工具往返
+        last_usage = {"prompt_tokens": 9000, "completion_tokens": 100, "total_tokens": 9100}
+    chat_service._record_turn_usage(
+        db, s, _LLM(), events, messages, tools=tools,
+        calibration_usage={"prompt_tokens": 1000},
+    )
+    tu = db.get(SessionStats, sid).turn_usage
+    assert tu["prompt_tokens"] == 9000                    # 占用显示：峰值
+    assert tu["calibration_prompt_tokens"] == 1000
+    est = _estimate_tokens(messages[0]["content"]) + _estimate_tokens(json.dumps(tools, ensure_ascii=False))
+    assert tu["estimated_tokens"] == est
+    assert s.world_state["budget_scale"] == round(min(est / 1000, 2.5), 4)
+
+
+def test_tool_loop_without_first_step_usage_skips_calibration(db_factory):
+    """工具路径拿不到第一步实测：这轮不校准，也不拿最后一步凑数。"""
+    from app.services import chat_service
+    db = db_factory()
+    sid = _seed(db)
+    s = db.get(GameSession, sid)
+    events = session_service.get_session_events(db, sid, limit=0)
+
+    class _LLM:
+        last_usage = {"prompt_tokens": 9000}
+    chat_service._record_turn_usage(
+        db, s, _LLM(), events, [{"role": "system", "content": "x" * 100}],
+        tools=[{"type": "function"}], calibration_usage=None,
+    )
+    assert "budget_scale" not in (s.world_state or {})
