@@ -83,3 +83,23 @@ def update_character(db: Session, character_id: str, updates: dict) -> Character
     db.commit()
     db.refresh(char)
     return char
+
+
+def change_conditions(
+    db: Session, char: Character, add: list[str] | None = None, remove: list[str] | None = None,
+) -> bool:
+    """改角色卡上的持续状态（``system_data.conditions``，如流血）。返回是否真的有变化。
+
+    只放规则钩子挂上/摘下的、跨越战斗的状态；擒抱、缴械、着火这类只在战斗态里有意义的不落卡。
+    """
+    sd = dict(char.system_data or {})
+    before = list(sd.get("conditions") or [])
+    after = [c for c in before if c not in (remove or [])]
+    after += [c for c in (add or []) if c not in after]
+    if after == before:
+        return False
+    sd["conditions"] = after
+    char.system_data = sd
+    db.add(char)
+    db.commit()
+    return True

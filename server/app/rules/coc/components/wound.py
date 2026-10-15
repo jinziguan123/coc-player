@@ -94,13 +94,32 @@ def resolve_wound(
     由调用方（战斗服务）并入参战方的 conditions。
     """
     result = _resolve_wound_core(hp, max_hp, damage, defender_data, already_wounded, options)
-    effects = merge_effects(hooks_of(options).wound_resolved(
-        result=dict(result), damage=damage, max_hp=max(1, max_hp),
-        defender_data=defender_data, options=options,
-    ))
+    effects = wound_effects(result, damage, max_hp, defender_data, options)
     result["lines"] = result["lines"] + effects["lines"]
     result["conditions_add"] = effects["conditions_add"]
     return result
+
+
+def wound_effects(
+    result: dict, damage: int, max_hp: int, defender_data: dict, options: WoundConfig | None = None,
+) -> dict:
+    """一次伤害结算之后的规则钩子 ``wound_resolved``（如流血）：返回 {conditions_add, lines}。
+
+    战斗走 :func:`resolve_wound`（它会调这里）；叙事扣血（turn_effects 的 HP_CHANGE）自己判
+    HP 与状态（要单独落体质检定的骰子事件），结算完同样经这里触发钩子，两边口径一致。
+    """
+    return merge_effects(hooks_of(options).wound_resolved(
+        result=dict(result), damage=damage, max_hp=max(1, max_hp),
+        defender_data=defender_data, options=options,
+    ))
+
+
+def condition_notes(conditions: list[str] | None, options: WoundConfig | None = None) -> list[str]:
+    """角色卡上的持续状态给 KP 的说明（规则钩子 ``condition_notes``）；没有状态或没人认领则空。"""
+    if not conditions:
+        return []
+    return [line for r in hooks_of(options).condition_notes(conditions=list(conditions), options=options)
+            for line in (r or [])]
 
 
 def turn_start_damage(participant: dict, options: WoundConfig | None = None) -> list[dict]:
@@ -167,7 +186,8 @@ COMPONENT = Component(
     config=WoundConfig, group="伤害与状态",
     provides={"wound": Provide(
         __name__,
-        bound=("is_major_wound", "resolve_wound", "tick_dying", "turn_start_damage", "after_first_aid"),
+        bound=("is_major_wound", "resolve_wound", "wound_effects", "tick_dying", "turn_start_damage",
+               "after_first_aid", "condition_notes"),
         plain=("CHARACTER_STATUSES", "STATUS_SEVERITY", "VALID_STATUS_VALUES", "LEGACY_STATUS_ALIAS"),
     )},
 )

@@ -40,6 +40,7 @@ EQUIPMENT = DataTable(
     name="equipment", title="装备表", row_model=EquipmentRow, key="name",
     source=Path(__file__).parent / "data" / "equipment.yaml", description="建卡时按时代与信用评级可选的随身装备",
     build=lambda rows: tuple(Equipment(**r) for r in rows),
+    brief=lambda r: r["category"],
 )
 
 #: 官方装备目录（未经任何补丁）。

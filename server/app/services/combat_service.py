@@ -19,7 +19,7 @@ from app.models.combat_state import CombatState
 from app.models.session import GameSession
 from app.rules import Ruleset, ruleset_for
 from app.ai.provider import model_meta
-from app.services import rule_options_service, session_service, world_memory
+from app.services import character_service, rule_options_service, session_service, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
@@ -138,8 +138,9 @@ def _char_participant(char: Character, side: str, is_human: bool = True, *, rs: 
         "pos": None, "mov": _coerce_mov(sd.get("MOV") or sd.get("move")),
         "move_left": _regular_budget(_coerce_mov(sd.get("MOV") or sd.get("move"))),
         "acted_this_round": False, "dodged_this_round": False,
-        # P2 主动动作集：正交条件 / 瞄准 / 该处伤是否已急救（RAW 每处伤一次）
-        "conditions": [], "aim": False, "first_aid_used": False,
+        # P2 主动动作集：正交条件 / 瞄准 / 该处伤是否已急救（RAW 每处伤一次）。
+        # 角色卡上的持续状态（叙事里挂上的流血等）带进来，开战第一轮就照常结算
+        "conditions": list(sd.get("conditions") or []), "aim": False, "first_aid_used": False,
     }
     # 武器表里删掉/改名的武器也要按卡上数据认出火器（先攻火器优先），故建好参战方再判
     p["has_firearm"] = _weapon_is_firearm(_attack_weapon(p, weapon, rs=rs), rs=rs)
@@ -421,10 +422,11 @@ def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: st
     )
     target["hp"] = r["new_hp"]
     target["status"] = r["status"]
-    # 规则钩子挂上的状态（如流血）并入 conditions
+    # 规则钩子挂上的状态（如流血）并入 conditions；玩家/队友同时落角色卡，战后仍在
     for cond in r.get("conditions_add") or []:
         if cond not in (target.get("conditions") or []):
             target["conditions"] = [*(target.get("conditions") or []), cond]
+    _sync_char_conditions(db, target, add=r.get("conditions_add"))
     # 新伤 = 新的急救机会：重置 first_aid_used，否则前期被急救过的人再受伤（乃至濒死）
     # 会被 first_aid 分支顶端的 used 检查锁死，连救命的濒死稳住都做不了。
     if amount > 0:
@@ -454,6 +456,17 @@ def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: st
             db.add(char)
             db.commit()
     return lines
+
+
+def _sync_char_conditions(
+    db: Session, target: dict, add: list[str] | None = None, remove: list[str] | None = None,
+) -> None:
+    """规则钩子挂上/摘下的持续状态（如流血）写回角色卡（仅玩家/队友）：战后仍在，下次进战斗再带进来。"""
+    if not target.get("char_id") or not (add or remove):
+        return
+    char = db.get(Character, target["char_id"])
+    if char is not None:
+        character_service.change_conditions(db, char, add=add, remove=remove)
 
 
 def _sync_char_status(db: Session, target: dict) -> None:
@@ -1033,6 +1046,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
             if effects["conditions_remove"]:
                 target["conditions"] = [c for c in (target.get("conditions") or [])
                                         if c not in effects["conditions_remove"]]
+                _sync_char_conditions(db, target, remove=effects["conditions_remove"])
             for line in effects["lines"]:
                 chunks.append(_combat_line(db, session_id, f"{target['name']} {line}"))
             target["first_aid_used"] = True

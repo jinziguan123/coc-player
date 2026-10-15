@@ -50,13 +50,15 @@
 |---|---|---|
 | `check_modifiers(character_data, skill_name, difficulty, options)` | 每次技能检定掷骰之前 | `[{"kind": "bonus"或"penalty", "n": 1, "reason": "…"}]`，理由会显示在骰子卡上 |
 | `max_hp(attrs, options)` | 计算最大 HP 时 | 一个整数，排在官方算法前面生效 |
-| `wound_resolved(result, damage, max_hp, defender_data, options)` | 一次伤害结算之后 | `{"conditions_add": [...], "lines": [...]}` |
+| `wound_resolved(result, damage, max_hp, defender_data, options)` | 一次伤害结算之后（战斗与叙事扣血都会触发） | `{"conditions_add": [...], "lines": [...]}`；玩家角色身上的状态会存到角色卡 |
 | `combat_turn_start(participant, options)` | 战斗中某人的回合开始时 | `[{"damage": 1, "reason": "…"}]`，即持续伤害 |
-| `first_aid_applied(target, options)` | 急救成功之后 | `{"conditions_remove": [...], "lines": [...]}` |
+| `first_aid_applied(target, options)` | 急救成功之后（战斗内与叙事中都会触发） | `{"conditions_remove": [...], "lines": [...]}` |
+| `condition_notes(conditions, options)` | 每回合给 KP 组上下文时，角色卡上挂着持续状态 | `["…"]`：告诉 KP 这个状态怎么演、战斗外怎么结算 |
 
 `options` 是本局生效的规则，你的组件参数可以直接从它上面读，例如 `options.wound_penalty_percent`。
 
 ## 已知限制
 
 - 插件新增的战斗状态（`conditions`）目前不会显示在战斗界面上，只有官方状态才有图标。
-- 叙事中的扣血（KP 写的 HP_CHANGE）不经过 `wound_resolved`，只有战斗轮里的伤害结算会经过它。
+- 战斗外没有「回合」，`combat_turn_start` 只在战斗里触发。持续状态在战斗外的结算交给 KP，靠 `condition_notes` 告诉它。
+- 角色卡上的持续状态目前只在战斗界面有徽标，角色卡面板上还看不到。

@@ -53,6 +53,10 @@ class DataTable:
     description: str = ""
     #: 行列表 → 组件算法使用的运行时形态（默认：不可变的行元组）。
     build: Callable[[tuple[dict, ...]], Any] = tuple
+    #: 行的显示名取哪个字段（默认即主键；疯狂症状的主键是英文标识，显示名是 label）。
+    display: str = ""
+    #: 一行 → 给 KP 看的要点（如武器「格斗(斗殴)，伤害 2D8+DB」）。房主改过的行据此告知 KP。
+    brief: Callable[[dict], str] | None = None
 
     @cached_property
     def official_rows(self) -> tuple[dict, ...]:
@@ -217,6 +221,29 @@ def summarize(table: DataTable, base: Iterable[dict], patches: Iterable[dict] | 
             added += 1
     parts = [f"{n} {c}" for n, c in (("新增", added), ("修改", modified), ("删除", deleted)) if c]
     return f"{table.title}：{'、'.join(parts)}" if parts else ""
+
+
+def changes(table: DataTable, base: Iterable[dict], rows: Iterable[dict]) -> list[tuple[str, str]]:
+    """合并后的表相对 ``base`` 改了哪些行，给 KP 看：每项 (带要点的全文, 只有名字的短文)。
+
+    顺序：新增 → 修改 → 删除；与补丁怎么分层无关——KP 只关心最终生效的是什么。
+    """
+    def name_of(row: dict) -> str:
+        return str(row.get(table.display) or row[table.key]) if table.display else str(row[table.key])
+
+    def item(verb: str, row: dict, detail: bool = True) -> tuple[str, str]:
+        short = f"{verb} {name_of(row)}"
+        text = table.brief(row) if (detail and table.brief) else ""
+        return (f"{short}（{text}）" if text else short), short
+
+    base_by_key = {r[table.key]: r for r in base}
+    rows = tuple(rows)
+    keys = {r[table.key] for r in rows}
+    added = [item("新增", r) for r in rows if r[table.key] not in base_by_key]
+    modified = [item("修改", r) for r in rows
+                if r[table.key] in base_by_key and base_by_key[r[table.key]] != r]
+    deleted = [item("删除", r, detail=False) for k, r in base_by_key.items() if k not in keys]
+    return added + modified + deleted
 
 
 def digest(layers: Iterable[Any]) -> str:

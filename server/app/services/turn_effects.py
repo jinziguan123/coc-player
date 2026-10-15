@@ -16,6 +16,7 @@ from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
 from app.rules import Ruleset, ruleset_for
 from app.services import (
+    character_service,
     dice_runtime,
     human_kp_service,
     illustration_service,
@@ -415,12 +416,19 @@ def _apply_heal_on_success(
         target.status = "active"        # 成功急救稳住濒死 / 唤醒昏迷
     db.add(target)
     db.commit()
+    # 规则钩子的急救后效果（如止血）：与战斗内的急救动作同一个出口
+    effects = rule_options_service.ruleset_by_id(db, session_id).wound.after_first_aid(
+        {"conditions": list(sd.get("conditions") or [])},
+    )
+    stanched = character_service.change_conditions(db, target, remove=effects["conditions_remove"])
 
     label = "急救" if kind == "first_aid" else "医学"
     gained = new_hp - max(old, 0)
     line = f"{target.name} 经{label}恢复 {gained} 点生命（HP {old} → {new_hp}）"
     if dying:
         line += "，伤势稳住、脱离濒死"
+    if stanched:
+        line += "".join(f"\n{target.name} {t}" for t in effects["lines"])
     ev = session_service.add_event(db, session_id, "system", line, actor_name="系统",
                                    metadata={"heal": gained, "old_hp": old, "new_hp": new_hp,
                                              "actor": target.name})
@@ -488,6 +496,17 @@ async def _exec_hp_change(
             major_wound = False   # 已按归零结算，不再走下方「未归零重伤体质检定」
         elif major_wound:
             hp_content += "\n重伤！"
+        # 规则钩子（如流血）：与战斗的 resolve_wound 同一个出口。体质检定在下面单独落骰子事件，
+        # 这里给钩子的 status 是「检定之前」的——流血只看人死没死，与昏迷与否无关。
+        status = char.status if char.status in ("dead", "dying", "unconscious") else (
+            "major_wound" if major_wound else "ok")
+        effects = rs.wound.wound_effects(
+            {"new_hp": new_hp, "status": status, "lines": []}, dmg, max_hp,
+            {"base_attributes": char.base_attributes, "skills": char.skills,
+             "system_data": char.system_data},
+        )
+        if character_service.change_conditions(db, char, add=effects["conditions_add"]):
+            hp_content += "".join(f"\n{line}" for line in effects["lines"])
     else:
         hp_content = f"{char.name} 恢复 {delta} 点生命（HP {old_hp} → {new_hp}）"
         if reason:
@@ -568,6 +587,10 @@ def _sync_combatant_hp(db: Session, session_id: str, char: Character) -> list[st
         hit["max_hp"] = int(hp.get("max") or hit["max_hp"])
     # 状态用参战方自己的枚举：角色卡的 active/ok 在战斗态里一律记作 ok
     hit["status"] = "ok" if char.status in ("active", "ok") else char.status
+    # 叙事扣血挂上的持续状态（如流血）并进参战方；战斗态自有的（擒抱等）原样保留
+    for cond in (char.system_data or {}).get("conditions") or []:
+        if cond not in (hit.get("conditions") or []):
+            hit["conditions"] = [*(hit.get("conditions") or []), cond]
     combat_service._save_combat(db, session_id, state)
     return [combat_service._combat_state_chunk(state)]
 
