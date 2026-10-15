@@ -1086,6 +1086,46 @@ def test_maybe_roll_story_summary_below_threshold_noop(db_factory):
     assert "story_summary" not in (session.world_state or {})
 
 
+def test_event_budget_scales_with_session_calibration(monkeypatch):
+    """摘要触发预算与 build_kp_context 同源：基准预算 × 会话校准系数 budget_scale。"""
+    from app.ai import context as ctx
+    from app.services import generation_housekeeping as gh
+
+    monkeypatch.setattr(ctx, "_active_context_budget", lambda: 100_000)
+    reserve = ctx.MAX_SYSTEM_TOKENS + ctx.RESERVE_FOR_OUTPUT
+    assert gh._event_budget({}) == 100_000 - reserve                       # 未校准 = 1.0
+    assert gh._event_budget({"budget_scale": 2.0}) == 200_000 - reserve    # 放大
+    assert gh._event_budget({"budget_scale": 0.6}) == 60_000 - reserve     # 收缩
+    assert gh._event_budget({"budget_scale": 0.6}) == (
+        ctx.effective_context_budget({"budget_scale": 0.6}) - reserve
+    )
+
+
+@pytest.mark.parametrize("scale, expect_rolled", [(0.6, True), (2.0, False)])
+def test_story_summary_trigger_follows_budget_scale(db_factory, monkeypatch, scale, expect_rolled):
+    """同一批事件：系数收缩时越过触发点要浓缩，系数放大时还撑得下、不浓缩。"""
+    from app.ai import context as ctx
+    from app.services import generation_housekeeping as gh
+
+    db = db_factory()
+    session = _seed_long_session(db, 50)
+    tokens = gh._events_tokens(_all_events(db, session.id))
+    # 基准预算取「系数 1.0 时恰在触发点」：系数偏离 1 才决定触不触发
+    base = int(tokens / gh.STORY_SUMMARY_TRIGGER_RATIO) + ctx.MAX_SYSTEM_TOKENS + ctx.RESERVE_FOR_OUTPUT
+    monkeypatch.setattr(ctx, "_active_context_budget", lambda: base)
+    session.world_state = {**(session.world_state or {}), "budget_scale": scale}
+    db.commit()
+
+    llm = _FakeLLM(json.dumps({"summary": "剧情梗概正文。", "npc_updates": {}, "clue_notes": {}}))
+    asyncio.run(chat_service._maybe_roll_story_summary(db, session.id, llm))
+    assert ("story_summary" in (session.world_state or {})) is expect_rolled
+
+
+def _all_events(db, session_id):
+    from app.services import session_service
+    return session_service.get_session_events(db, session_id, limit=0)
+
+
 # ── 模组结局：抵达终局的确定性记录 ──────────────────────────────────
 
 _ENDINGS = [{"id": "ending_a", "name": "结局A：冲出隧道", "when": "把油门推到底",

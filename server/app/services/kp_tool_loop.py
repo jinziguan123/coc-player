@@ -155,8 +155,10 @@ def _module_lookup_passages(
 
 # ── KP agent loop（tool use 新路径，use_tool_calls 开关控制）──────────────────
 
-# 单轮 loop 的步数上限：超限注入「请直接收束」再生成一次收尾，防无限工具链。
-MAX_TOOL_LOOP_STEPS = 6
+# 单轮 loop 的步数上限：超限注入「请直接收束」再生成一次收尾。只作防失控的保险丝
+# （模型反复调 say/set_flag/npc_act 等无配额工具时兜住），正常回合远碰不到——掷骰续写链、
+# 查阅后续写都在这条循环里自然收束，不另设专用深度上限。
+MAX_TOOL_LOOP_STEPS = 20
 
 
 def _tool_loop_active(llm) -> bool:
@@ -280,12 +282,16 @@ def _build_kp_tool_executor(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     player_char: Character, teammates: list[Character] | None, llm,
     result: list,
+    pre_gen_seq: int | None = None,
 ):
     """构建 loop 路径的工具执行器：把注册表工具名分发到上面的共用执行函数（不复制逻辑）。
 
     闭包内维护每轮查阅配额（rule_lookup 与 module_lookup 合计 MAX_RULE_LOOKUPS 次，
     超限返回拒绝文本——与旧路径 lookup_depth 语义一致）。未知工具名回「无此工具」结果、
     任何执行异常 fail-open 返回错误说明，绝不断流。
+
+    ``pre_gen_seq``（本轮生成前基线序号）给定时透传给理智检定：KP 没写 chars 就退回
+    「本轮真正行动过的人」而非在场全体，与旧路径 ``_process_commands`` 同一口径。
     """
     lookup_used = 0
 
@@ -323,6 +329,7 @@ def _build_kp_tool_executor(
     async def _h_san_check(name, kv):
         chunks, descs, pending = await _exec_san_check(
             db, session_id, game_session, kv, player_char, teammates,
+            pre_gen_seq=pre_gen_seq,
         )
         if pending:
             return kp_tools.ToolOutcome(
@@ -548,7 +555,7 @@ async def _run_kp_agent_loop(
     执行器执行 → 结果作为 role="tool" 消息回注 → 继续循环。DICE_CHECK/RULE_LOOKUP/
     MODULE_LOOKUP 由此天然取代旧路径的「续写 prompt」模式。
 
-    - 步数上限 max_steps（默认 6）：超限注入「请直接收束本轮叙述」再无工具生成一次收尾；
+    - 步数上限 max_steps（默认 MAX_TOOL_LOOP_STEPS）：超限注入「请直接收束本轮叙述」再无工具生成一次收尾；
     - 裁定轮（plan.requires_check）：采样降温 _CHECK_TURN_TEMPERATURE，且若模型始终没
       发起 dice_check/opposed_check，则按计划确定性补掷（等价 KPAgent 的补指令兜底）；
     - 模型把指令写成文本时（手写 prompt 旧习惯）：解析成合成 ToolCall 走同一执行器，

@@ -117,12 +117,12 @@ async def _drain(agen) -> list:
     return [c async for c in agen]
 
 
-async def _run_loop(llm, executor, plan=None, max_steps=6, messages=None) -> tuple[list, list[str]]:
+async def _run_loop(llm, executor, plan=None, max_steps=None, messages=None) -> tuple[list, list[str]]:
     result = ["", "", [], [], []]
     chunks = [
         c async for c in chat_service._run_kp_agent_loop(
             llm, messages or [{"role": "system", "content": "KP"}], result, executor,
-            plan=plan, max_steps=max_steps,
+            plan=plan, max_steps=max_steps or chat_service.MAX_TOOL_LOOP_STEPS,
         )
     ]
     return result, chunks
@@ -202,17 +202,19 @@ def test_loop_natural_end_single_step():
 
 
 def test_step_cap_forces_wrap_up():
-    """连续 6 步都发工具调用 → 注入「收束」指令、第 7 次不带工具生成收尾。"""
-    scripts = [[_call("set_flag", {"flag": f"f{i}"}, cid=f"c{i}")] for i in range(6)]
+    """连续 N 步（默认上限）都发工具调用 → 注入「收束」指令、第 N+1 次不带工具生成收尾。"""
+    cap = chat_service.MAX_TOOL_LOOP_STEPS
+    assert cap == 20                            # 防失控保险丝，不再兼作续写深度限制
+    scripts = [[_call("set_flag", {"flag": f"f{i}"}, cid=f"c{i}")] for i in range(cap)]
     scripts.append([_text("夜色沉了下来。")])
     llm = _FakeToolLLM(scripts)
     executor = _RecordingExecutor()
-    result, _ = asyncio.run(_run_loop(llm, executor))
+    result, _ = asyncio.run(_run_loop(llm, executor, max_steps=cap))
 
-    assert len(executor.received) == 6          # 只执行了上限内的 6 次
-    assert len(llm.calls) == 7                  # 6 步 + 1 次强制收尾
-    assert llm.calls[6]["tools"] is None        # 收尾不带工具
-    last_sys = [m for m in llm.calls[6]["messages"] if m["role"] == "system"][-1]
+    assert len(executor.received) == cap        # 只执行了上限内的 N 次
+    assert len(llm.calls) == cap + 1            # N 步 + 1 次强制收尾
+    assert llm.calls[cap]["tools"] is None      # 收尾不带工具
+    last_sys = [m for m in llm.calls[cap]["messages"] if m["role"] == "system"][-1]
     assert "收束" in last_sys["content"]
     assert result[0].endswith("夜色沉了下来。")
 
@@ -897,3 +899,187 @@ def test_正文SAY气泡与say工具同一口径遮名(db_factory):
     names = [c.actor_name for c in chunks if c.type in ("dialogue", "npc_dialogue")]
     assert names == ["香澄澪", "香澄澪", npc_identity.UNKNOWN_LABEL]
     assert [who for _o, who, _t in result[3]] == names
+
+
+# ── 旁路回合（_run_kp_turn：投骰续写 / 申请检定 / 战斗余波 / 前往）开关分流 ──────────
+
+
+def _kp_turn_runtime(monkeypatch, db_factory, llm, use_tool_calls: bool) -> list:
+    """旁路回合的运行期桩：记下广播、收尾不起后台任务。返回广播清单。"""
+    _patch_runtime(monkeypatch, db_factory, llm)
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: _Profile(use_tool_calls))
+    sent: list = []
+    from app.services.room_hub import room_hub
+    monkeypatch.setattr(room_hub, "broadcast", lambda room, chunk: sent.append(chunk))
+
+    async def _noop_finish(db, sid, llm):
+        return None
+    monkeypatch.setattr(chat_service, "_finish_generation", _noop_finish)
+    return sent
+
+
+def _check_requests(db_factory, session_id, skill):
+    return [
+        e for e in session_service.get_session_events(db_factory(), session_id)
+        if e.event_type == "system" and (e.metadata_ or {}).get("skill") == skill
+    ]
+
+
+def test_kp_turn_switch_on_uses_agent_loop(db_factory, monkeypatch):
+    """检定续写等旁路与主路径同口径：开关开启 → 走 agent loop（带工具清单 + 工具模式提示）。"""
+    llm = _FakeToolLLM([[_text("门后只有灰尘。")]])
+    _kp_turn_runtime(monkeypatch, db_factory, llm, True)
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    session_service.add_event(db, session_id, "action", "我推开门", actor_name="伊芙琳")
+
+    asyncio.run(chat_service._run_kp_turn(
+        db, session_id, session, module, hero, [], "侦查：成功。请续写", split_aware=True,
+    ))
+
+    assert llm.stream_calls == [] and len(llm.calls) == 1
+    tool_names = {t["function"]["name"] for t in llm.calls[0]["tools"]}
+    assert "dice_check" in tool_names
+    assert "rule_lookup" not in tool_names and "module_lookup" not in tool_names
+    assert any("工具调用模式" in m["content"] for m in llm.calls[0]["messages"] if m["role"] == "system")
+    assert llm.calls[0]["messages"][-2]["content"] == "侦查：成功。请续写"   # 续写提示仍是本轮输入
+    narrs = [e for e in session_service.get_session_events(db_factory(), session_id)
+             if e.event_type == "narration"]
+    assert [n.content for n in narrs] == ["门后只有灰尘。"]
+
+
+def test_kp_turn_switch_off_keeps_legacy_path(db_factory, monkeypatch):
+    llm = _FakeToolLLM([[_text("不该被用到。")]])
+    _kp_turn_runtime(monkeypatch, db_factory, llm, False)
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+
+    asyncio.run(chat_service._run_kp_turn(db, session_id, session, module, hero, [], "续写"))
+
+    assert llm.calls == [] and llm.stream_calls
+    narrs = [e for e in session_service.get_session_events(db_factory(), session_id)
+             if e.event_type == "narration"]
+    assert narrs and narrs[-1].content == "旧路径叙事。"
+
+
+def test_kp_turn_loop_executes_tools_instead_of_regex(db_factory, monkeypatch):
+    """loop 路径的指令在循环内执行：dice_check 挂出待投请求后收束，_process_commands 不再重复处理。"""
+    llm = _FakeToolLLM([
+        [_text("地板下传来刮擦声。"), _call("dice_check", {"skill": "聆听", "chars": "伊芙琳"})],
+        [_text("不该走到这一步。")],
+    ])
+    _kp_turn_runtime(monkeypatch, db_factory, llm, True)
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+
+    asyncio.run(chat_service._run_kp_turn(db, session_id, session, module, hero, [], "续写"))
+
+    assert len(llm.calls) == 1                       # 挂起：真人投骰前不再续写
+    assert len(_check_requests(db_factory, session_id, "聆听")) == 1
+
+
+def test_kp_turn_requested_check_via_tool_no_double_fallback(db_factory, monkeypatch):
+    """申请检定 + 模型调了 dice_check：只挂一张，确定性兜底识别为已挂、不再补。"""
+    llm = _FakeToolLLM([[_call("dice_check", {"skill": "侦查", "difficulty": "hard", "chars": "伊芙琳"})]])
+    sent = _kp_turn_runtime(monkeypatch, db_factory, llm, True)
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+
+    asyncio.run(chat_service._run_kp_turn(
+        db, session_id, session, module, hero, [], "申请侦查",
+        requested_check=(hero, "侦查"), focus_member=hero.name, split_aware=True,
+    ))
+
+    reqs = _check_requests(db_factory, session_id, "侦查")
+    assert len(reqs) == 1 and reqs[0].metadata_.get("difficulty") == "hard"
+    assert any(getattr(c, "id", None) == reqs[0].id for c in sent)   # 攒着的检定卡最终放出
+
+
+def test_kp_turn_requested_check_drops_long_narration_keeps_tool_card(db_factory, monkeypatch):
+    """申请检定轮写了长揣测旁白又调了工具：旁白不广播不落库，检定卡照常广播。"""
+    long = "伊芙琳的目光扫过书架。灰尘在光里浮着，一本书的书脊明显比旁边的新，像是最近有人取下又放回去过。" * 2
+    llm = _FakeToolLLM([[_text(long), _call("dice_check", {"skill": "侦查", "chars": "伊芙琳"})]])
+    sent = _kp_turn_runtime(monkeypatch, db_factory, llm, True)
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+
+    asyncio.run(chat_service._run_kp_turn(
+        db, session_id, session, module, hero, [], "申请侦查",
+        requested_check=(hero, "侦查"), focus_member=hero.name, split_aware=True,
+    ))
+
+    evs = session_service.get_session_events(db_factory(), session_id)
+    assert not [e for e in evs if e.event_type == "narration"]
+    assert not [c for c in sent if getattr(c, "type", None) == "narration"]
+    reqs = _check_requests(db_factory, session_id, "侦查")
+    assert len(reqs) == 1
+    assert any(getattr(c, "id", None) == reqs[0].id for c in sent)
+
+
+def test_kp_turn_requested_check_fallback_when_model_only_narrates(db_factory, monkeypatch):
+    """申请检定轮模型只写一句引子、没发检定：确定性兜底补挂（与旧路径同一守卫）。"""
+    llm = _FakeToolLLM([[_text("书架静静立着。")]])
+    _kp_turn_runtime(monkeypatch, db_factory, llm, True)
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+
+    asyncio.run(chat_service._run_kp_turn(
+        db, session_id, session, module, hero, [], "申请侦查",
+        requested_check=(hero, "侦查"), focus_member=hero.name, split_aware=True,
+    ))
+
+    assert len(_check_requests(db_factory, session_id, "侦查")) == 1
+    narrs = [e for e in session_service.get_session_events(db_factory(), session_id)
+             if e.event_type == "narration"]
+    assert [n.content for n in narrs] == ["书架静静立着。"]
+
+
+def test_kp_turn_loop_keeps_sanity_guard(db_factory, monkeypatch):
+    """检定成功续写（sanity_guard）走 loop 时，叙事后补跑 planner → 确定性补发 SAN 仍生效。"""
+    from app.ai.turn_planner import SanityPolicy
+
+    llm = _FakeToolLLM([[_text("手电照亮了那具扭曲的尸体。")]])
+    _kp_turn_runtime(monkeypatch, db_factory, llm, True)
+
+    async def _fake_planner(_llm, _messages):
+        return TurnPlan(sanity=SanityPolicy(
+            trigger=True, source="扭曲的尸体", success_loss="0", failure_loss="1d6"))
+    monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", _fake_planner)
+
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    hero.system_data = {"sanity": {"current": 60, "max": 99}}
+    db.commit()
+
+    asyncio.run(chat_service._run_kp_turn(
+        db, session_id, session, module, hero, [], "侦查：成功。请续写", sanity_guard=True,
+    ))
+
+    evs = session_service.get_session_events(db_factory(), session_id)
+    assert any(e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check" for e in evs)
+
+
+def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
+    """分头模式与主路径一致仍走旧的逐组生成，开关开启也不进 loop。"""
+    llm = _FakeToolLLM([[_text("不该被用到。")]])
+    _kp_turn_runtime(monkeypatch, db_factory, llm, True)
+    groups = [
+        {"label": "书房", "scene_id": "scene_a", "members": ["伊芙琳"]},
+        {"label": "地下室", "scene_id": "scene_b", "members": ["队友"]},
+    ]
+    monkeypatch.setattr(chat_service, "_location_groups", lambda *a, **k: groups)
+    called = {}
+
+    async def _fake_split(*a, **k):
+        called["split"] = True
+        return ""
+    monkeypatch.setattr(chat_service, "_run_split_narrations", _fake_split)
+
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    asyncio.run(chat_service._run_kp_turn(
+        db, session_id, session, module, hero, [], "续写", split_aware=True,
+    ))
+
+    assert called.get("split") is True
+    assert llm.calls == []

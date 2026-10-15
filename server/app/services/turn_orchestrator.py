@@ -1330,6 +1330,81 @@ def _check_request_narration_keep(res: list) -> bool:
     return False
 
 
+#: 申请检定轮旁白被丢弃时一并丢掉的广播类型：旁白正文与（say/[SAY]）台词气泡。
+#: 其余 chunk（检定卡等 loop 内已即时落库的工具事件）照常放出，否则落库与屏幕不一致。
+_NARRATION_CHUNK_TYPES = frozenset({"narration", "dialogue"})
+
+
+async def _run_kp_turn_tool_loop(
+    db, session_id, game_session, module, player_char, party_others,
+    llm, messages: list, events: list, party_ids: set,
+    *, rules_enabled: bool, module_rag_enabled: bool, location_guard: str,
+    hold: bool, pre_gen_seq: int,
+) -> None:
+    """_run_kp_turn 单场景段的工具循环版：生成 + 指令执行 + 终检润色 + 落库。
+
+    与主路径 ``_run_generation`` 的 loop 分支同构（无 plan：旁路回合起点没有裁定计划）；
+    ``hold``（申请检定轮）时先攒着 chunk，看完整产物再定旁白去留（见 _check_request_narration_keep）。
+    """
+    messages = list(messages)
+    messages.append(kp_tools.tool_mode_message())
+    exclude = set()
+    if not rules_enabled:
+        exclude.add("rule_lookup")
+    if not module_rag_enabled:
+        exclude.add("module_lookup")
+    res = ["", "", [], [], []]
+    execute = _build_kp_tool_executor(
+        db, session_id, game_session, module, player_char, party_others, llm, res,
+        pre_gen_seq=pre_gen_seq,
+    )
+    base_seq = session_service.get_next_sequence_num(db, session_id) - 1
+    event_order: list = []
+    party_names = {player_char.name} | {t.name for t in (party_others or [])}
+    held: list = []
+    try:
+        async for chunk in _run_kp_agent_loop(
+            llm, messages, res, execute,
+            tools=kp_tools.openai_tool_schemas(exclude=exclude),
+            npcs=_matcher_npcs(module, party_others, game_session),
+            party_names=party_names,
+            event_order=event_order,
+            masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+        ):
+            if hold:
+                held.append(chunk)
+            else:
+                room_hub.broadcast(session_id, chunk)
+    except BaseException:
+        _persist_narration(db, session_id, res, event_order, llm=llm)
+        _reorder_turn_events(db, session_id, event_order, base_seq)
+        raise
+    if hold:
+        keep = _check_request_narration_keep(res)
+        for chunk in held:
+            if keep or getattr(chunk, "type", None) not in _NARRATION_CHUNK_TYPES:
+                room_hub.broadcast(session_id, chunk)
+        if not keep:
+            # 没有旁白可交错了：工具事件保持即时落库的原序即可
+            res[0], res[2], res[3], res[4] = "", [], [], []
+            event_order.clear()
+    # 旁路没有完整 plan：有位置硬约束时用空计划做定点终检（偏移按比例重映射），再过润色。
+    await _validate_and_patch_narration(
+        llm, turn_planner.TurnPlan() if location_guard else None, res, event_order,
+        turn_inputs=_shown_turn_context(events, party_ids),
+        on_start=_validator_note(session_id),
+        settled_checks=_settled_checks_context(events),
+        party_names=party_names, location_context=location_guard,
+    )
+    _persist_narration(db, session_id, res, event_order, llm=llm)
+    _reorder_turn_events(db, session_id, event_order, base_seq)
+    # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
+    _record_npc_say_memory(
+        db, session_id, game_session, module, res[2],
+        [player_char.name] + [t.name for t in (party_others or [])],
+    )
+
+
 async def _run_kp_turn(
     db, session_id, game_session, module, player_char, party_others, user_prompt: str,
     then_team_turn: list[Character] | None = None,
@@ -1397,51 +1472,64 @@ async def _run_kp_turn(
             messages.append({"role": "system", "content": location_guard})
         messages.append({"role": "user", "content": user_prompt})
 
-        res = ["", "", [], [], []]
-        # 申请检定轮先攒着不广播：KP 该只回一行指令，小模型却常在前面先写一段揣测性旁白
-        # （「心里有个影子若隐若现地晃着」），既提前泄了骰子还没定的结果、又和骰后续写重复，
-        # 还把气泡渲染搅乱。看完整产物再定去留（见 _check_request_narration_keep）。
-        hold = requested_check is not None
-        held: list = []
-        try:
-            async for chunk in _stream_narration_filtered(
-                kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
-                masker=npc_identity.build_masker(db, session_id, module),
-            ):
-                if hold:
-                    held.append(chunk)
-                else:
-                    room_hub.broadcast(session_id, chunk)
-        except asyncio.CancelledError:
-            _persist_narration(db, session_id, res, llm=llm)
-            raise
-        if hold:
-            if _check_request_narration_keep(res):
-                for chunk in held:
-                    room_hub.broadcast(session_id, chunk)
-            else:
-                res[0], res[2], res[3], res[4] = "", [], [], []
-        if location_guard:
-            # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
-            validation = await turn_context.turn_validator.validate_turn_narration(
-                llm, turn_planner.TurnPlan(), res[0],
-                turn_inputs=_shown_turn_context(events, party_ids),
-                party_names={player_char.name} | {t.name for t in (party_others or [])},
-                location_context=location_guard,
-                # 旁路本身就是「投骰之后的续写」，不给它骰子，写出检定所得必被判成代演
-                settled_checks=_settled_checks_context(events),
+        if _tool_loop_active(llm):
+            # 与主路径同一条 agent loop：检定续写 / 申请检定 / 战斗余波 / 前往等旁路也能用
+            # rule_lookup / module_lookup / recall_history 等工具。指令在 loop 内执行完毕，
+            # 不再经 _process_commands（commands_text 置空）；分头模式仍走上面的旧路径（同主路径）。
+            await _run_kp_turn_tool_loop(
+                db, session_id, game_session, module, player_char, party_others,
+                llm, messages, events, party_ids,
+                rules_enabled=rules_enabled, module_rag_enabled=module_rag_enabled,
+                location_guard=location_guard, hold=requested_check is not None,
+                pre_gen_seq=pre_gen_seq,
             )
-            if validation is not None and validation.violated:
-                logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
-                res[0] = validation.corrected_narration
-        await style_editor.polish_result(llm, res, on_start=_validator_note(session_id))
-        _persist_narration(db, session_id, res, llm=llm)
-        # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
-        _record_npc_say_memory(
-            db, session_id, game_session, module, res[2],
-            [player_char.name] + [t.name for t in (party_others or [])],
-        )
-        commands_text = res[1]
+            commands_text = ""
+        else:
+            res = ["", "", [], [], []]
+            # 申请检定轮先攒着不广播：KP 该只回一行指令，小模型却常在前面先写一段揣测性旁白
+            # （「心里有个影子若隐若现地晃着」），既提前泄了骰子还没定的结果、又和骰后续写重复，
+            # 还把气泡渲染搅乱。看完整产物再定去留（见 _check_request_narration_keep）。
+            hold = requested_check is not None
+            held: list = []
+            try:
+                async for chunk in _stream_narration_filtered(
+                    kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
+                    masker=npc_identity.build_masker(db, session_id, module),
+                ):
+                    if hold:
+                        held.append(chunk)
+                    else:
+                        room_hub.broadcast(session_id, chunk)
+            except asyncio.CancelledError:
+                _persist_narration(db, session_id, res, llm=llm)
+                raise
+            if hold:
+                if _check_request_narration_keep(res):
+                    for chunk in held:
+                        room_hub.broadcast(session_id, chunk)
+                else:
+                    res[0], res[2], res[3], res[4] = "", [], [], []
+            if location_guard:
+                # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
+                validation = await turn_context.turn_validator.validate_turn_narration(
+                    llm, turn_planner.TurnPlan(), res[0],
+                    turn_inputs=_shown_turn_context(events, party_ids),
+                    party_names={player_char.name} | {t.name for t in (party_others or [])},
+                    location_context=location_guard,
+                    # 旁路本身就是「投骰之后的续写」，不给它骰子，写出检定所得必被判成代演
+                    settled_checks=_settled_checks_context(events),
+                )
+                if validation is not None and validation.violated:
+                    logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
+                    res[0] = validation.corrected_narration
+            await style_editor.polish_result(llm, res, on_start=_validator_note(session_id))
+            _persist_narration(db, session_id, res, llm=llm)
+            # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
+            _record_npc_say_memory(
+                db, session_id, game_session, module, res[2],
+                [player_char.name] + [t.name for t in (party_others or [])],
+            )
+            commands_text = res[1]
 
     async for chunk in _process_commands(
         db, session_id, commands_text, module, player_char, game_session, llm,

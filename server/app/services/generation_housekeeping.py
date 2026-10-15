@@ -33,18 +33,19 @@ STORY_SUMMARY_KEEP_RATIO = 0.3
 STORY_SUMMARY_MIN_KEEP = 6
 
 
-def _event_budget() -> int:
+def _event_budget(ws: dict | None) -> int:
     """事件区可用预算（估算 token 口径）。
 
-    按「系统提示满载」保守估计，与 build_kp_context 里 event_budget 的算法同源，
-    这样摘要触发点与事件区真正撑不下的点对齐——不会出现「还没触发摘要就已经溢出」。
+    按「系统提示满载」保守估计，与 build_kp_context 里 event_budget 的算法同源（同样乘本会话
+    的在线校准系数 budget_scale），这样摘要触发点与事件区真正撑不下的点对齐——不会出现
+    「还没触发摘要就已经溢出」，也不会在校准放大了预算后仍按旧预算过早浓缩。
     """
     from app.ai.context import (
         MAX_SYSTEM_TOKENS,
         RESERVE_FOR_OUTPUT,
-        _active_context_budget,
+        effective_context_budget,
     )
-    return max(_active_context_budget() - MAX_SYSTEM_TOKENS - RESERVE_FOR_OUTPUT, 4000)
+    return max(effective_context_budget(ws) - MAX_SYSTEM_TOKENS - RESERVE_FOR_OUTPUT, 4000)
 
 
 def _events_tokens(events: list) -> int:
@@ -110,7 +111,7 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
             if (e.sequence_num or 0) > cursor
             and not session_service.is_kp_only_event(e)
         ]
-        budget = _event_budget()
+        budget = _event_budget(ws)
         if _events_tokens(uncovered) <= budget * STORY_SUMMARY_TRIGGER_RATIO:
             return
         to_summ = uncovered[:_split_for_summary(
