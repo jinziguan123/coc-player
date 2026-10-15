@@ -537,6 +537,42 @@ def _build_kp_tool_executor(
     return execute
 
 
+#: 折进 user 消息时，本轮已结算事实前的标签。
+TURN_FACTS_LABEL = "[本轮已发生（系统已结算，请据此续写，不要复述）]"
+
+
+def fold_turn_history_for_tools(messages: list[dict]) -> None:
+    """把「最后一条 user 之后、由历史事件转成的 assistant 消息」改写成一条 user 消息（就地）。
+
+    DeepSeek 思考模式在带 tools 的请求里，要求本轮（最后一条 user 之后）的每条 assistant
+    消息都回传 reasoning_content，否则 400。可这些消息不是模型本轮写的，而是已经落库的
+    事件——典型是骰子结果：重新生成会保留本轮已掷的骰子，玩家投骰后的续写更是必然带着它，
+    事件转消息时骰子归 assistant，于是恰好落在最后一条 user 之后、又没有思考内容可带。
+
+    它们本来就是「本轮已发生的事实」，以 user 身份交给 KP 在语义上也更准：KP 是要接着
+    这些事实往下写，而不是把它们当成自己刚说过的话。工具循环自己产生的 assistant 消息
+    带着 tool_calls / reasoning_content，不受影响。
+    """
+    last_user = max(
+        (i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1,
+    )
+    trailing = [
+        i for i in range(last_user + 1, len(messages))
+        if messages[i].get("role") == "assistant"
+        and not messages[i].get("tool_calls")
+        and "reasoning_content" not in messages[i]
+    ]
+    if not trailing:
+        return
+    facts = "\n".join(
+        str(messages[i].get("content") or "").strip() for i in trailing
+    ).strip()
+    first = trailing[0]
+    for i in reversed(trailing[1:]):
+        del messages[i]
+    messages[first] = {"role": "user", "content": f"{TURN_FACTS_LABEL}\n{facts}"}
+
+
 async def _run_kp_agent_loop(
     llm, messages: list[dict], result: list, execute_tool, *,
     tools: list[dict] | None = None,
@@ -585,6 +621,8 @@ async def _run_kp_agent_loop(
             return None
         said = "\n".join(t for _who, t in (result[2] if len(result) > 2 else []))
         return masker_factory().with_prose(said)
+
+    fold_turn_history_for_tools(messages)
 
     def _log_rounds() -> None:
         if used_tools:

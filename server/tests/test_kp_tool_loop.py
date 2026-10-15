@@ -1083,3 +1083,38 @@ def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
 
     assert called.get("split") is True
     assert llm.calls == []
+
+# ── DeepSeek 思考模式：本轮历史里的 assistant 消息折成 user ─────────────────────
+
+from app.services.kp_tool_loop import TURN_FACTS_LABEL, fold_turn_history_for_tools  # noqa: E402
+
+
+def test_fold_turn_history_moves_trailing_dice_into_user():
+    """重新生成 / 投骰后续写：最后一条玩家消息之后的骰子结果不能以 assistant 身份留着。"""
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "旧叙述"},
+        {"role": "user", "content": "[哈桑 行动] 辨认刻痕"},
+        {"role": "assistant", "content": "哈桑｜考古学 检定：失败"},
+        {"role": "assistant", "content": "阿尔文｜侦查 检定：成功"},
+        {"role": "system", "content": "[当前局面·供 KP 参考]"},
+    ]
+    fold_turn_history_for_tools(msgs)
+    assert [m["role"] for m in msgs] == ["system", "assistant", "user", "user", "system"]
+    assert msgs[3]["content"] == f"{TURN_FACTS_LABEL}\n哈桑｜考古学 检定：失败\n阿尔文｜侦查 检定：成功"
+    assert msgs[1]["content"] == "旧叙述"   # 上一轮以前的历史不动
+
+
+def test_fold_turn_history_without_user_message():
+    msgs = [{"role": "system", "content": "sys"}, {"role": "assistant", "content": "开场旁白"}]
+    fold_turn_history_for_tools(msgs)
+    assert msgs[1] == {"role": "user", "content": f"{TURN_FACTS_LABEL}\n开场旁白"}
+
+
+def test_fold_turn_history_keeps_loop_generated_assistant():
+    """工具循环自己产生的 assistant（带 tool_calls / reasoning_content）原样保留。"""
+    tool_msg = {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}], "reasoning_content": "想"}
+    msgs = [{"role": "user", "content": "我推门"}, tool_msg, {"role": "tool", "tool_call_id": "1", "content": "ok"}]
+    before = [dict(m) for m in msgs]
+    fold_turn_history_for_tools(msgs)
+    assert msgs == before
