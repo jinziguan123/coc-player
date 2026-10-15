@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
+from app.ai import tools
 from app.ai.provider import model_meta, model_name  # noqa: F401  # kp_tool_loop 经本模块取用
 from app.models.character import Character
 from app.models.module import Module
@@ -35,6 +36,16 @@ def persist_error_notice(db: Session, session_id: str, text: str) -> None:
 # 只由引号字符（±空白）组成的整行——KP 把闭引号写在台词/[SAY] 之外时留下的「孤立引号行」，
 # 渲染成旁白里孤零零的一个 ” / “（用户报的「双引号被分到旁白中」）。落库前整行剥除。
 _ORPHAN_QUOTE_LINE_RE = re.compile(r"(?m)^[ \t　]*[“”「」『』\"]+[ \t　]*(?:\n|$)")
+
+# 工具名残留：模型没走 tool call、把工具名（可能带参数）当文字写进了旁白（线上实录：结尾多出
+# 一个「dice_check」）。只认带下划线的工具名——say / handout 这种普通英文词不碰。确定性剥掉，
+# 不必让终检为一个词把整段旁白交给 LLM 改写。独占一行的连行一起删，夹在句中的只删词本身。
+_TOOL_NAMES = sorted((s.name for s in tools.REGISTRY if "_" in s.name), key=len, reverse=True)
+_TOOL_TOKEN = (
+    r"[`\[【(（]?(?<![A-Za-z0-9_])(?:" + "|".join(_TOOL_NAMES) + r")(?![A-Za-z0-9_])"
+    r"(?:\s*[(（{:：][^\n)）}\]】]*[)）}\]】]?)?[`\]】)）]?"
+)
+LEAKED_TOOL_NAME_RE = re.compile(rf"(?m)^[ \t　]*{_TOOL_TOKEN}[ \t　]*(?:\n|$)|{_TOOL_TOKEN}")
 
 # 台词残留兜底：模型（尤其 deepseek）漏调 say()、把「名字[（身份）]：「台词」」写进叙述文本
 # （有时把名字写重一遍，如「京山人吉：\n京山人吉（乘务员）：“…”」）。
@@ -159,6 +170,15 @@ def _session_npc_names(db: Session, session_id: str) -> set[str]:
     return names
 
 
+def strip_leaked_tool_names(result: list) -> None:
+    """就地剥掉 result[0] 里的工具名残留，同步修正 result[3] 的对话偏移。"""
+    marks = result[3] if len(result) > 3 else None
+    narration, marks = _strip_marked_lines(result[0], marks, LEAKED_TOOL_NAME_RE)
+    result[0] = narration
+    if len(result) > 3:
+        result[3] = marks
+
+
 def _strip_marked_lines(narration: str, marks: list | None, regex) -> tuple[str, list | None]:
     """按 regex 整段剥除旁白里的问题行，并同步修正 dialogue_marks 偏移：删除点之前的 mark
     不动，之后的按累计删除量前移（落在被删区间内的 mark 挪到区间起点）。"""
@@ -203,6 +223,7 @@ def persist_narration(
     """
     narration = result[0]
     marks = result[3] if len(result) > 3 else None
+    narration, marks = _strip_marked_lines(narration, marks, LEAKED_TOOL_NAME_RE)
     narration, marks = _strip_marked_lines(narration, marks, _FAKE_CHECK_RESULT_RE)
     narration, marks = _strip_marked_lines(narration, marks, _ORPHAN_QUOTE_LINE_RE)
     # 台词残留兜底：模型漏调 say()、把显式署名台词写进旁白 → 抽成对话气泡、清掉重复前缀。

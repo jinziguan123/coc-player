@@ -13,6 +13,7 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    chat_event_writer,
     module_rag_service,
     npc_identity,
     rag_stats,
@@ -499,6 +500,8 @@ async def _validate_and_patch_narration(
     走「整段旁白 + 对话全部追加」的回退，旁白与气泡各自成堆、丢交错顺序，是用户可见的渲染 bug），
     改为按长度比例重映射偏移，保住交错顺序。
     """
+    # 工具名残留先确定性剥掉：否则终检会为这一个词判违规、把整段交给 LLM 改写。
+    chat_event_writer.strip_leaked_tool_names(result)
     if plan is not None:
         await _validate_only(
             llm, plan, result, event_order, seen_context=seen_context, turn_inputs=turn_inputs,
@@ -534,6 +537,12 @@ async def _validate_only(
         return
     logger.warning("KP 回合校验发现违规，已改写落库版本：%s", validation.reason)
     old_narr = result[0]
+    # 原文与改写稿整段留底（单行 JSON，便于 grep 后批量回看），否则误判率无从统计。
+    logger.info("终检改写对照|%s", json.dumps({
+        "reason": validation.reason,
+        "original": old_narr,
+        "corrected": validation.corrected_narration,
+    }, ensure_ascii=False))
     result[0] = validation.corrected_narration
     _remap_marks_after_rewrite(result, old_narr, event_order)
 
