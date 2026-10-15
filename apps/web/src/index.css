@@ -5076,6 +5076,9 @@ select.input option {
   box-shadow: 0 2px 6px var(--shadow-color);
 }
 
+/* 选人舞台里临时展开：盖在角色卡之上，不让主栏让位 */
+.chat-dock--overlay { z-index: 45; }
+
 /* 展开态：一张悬浮卡。高度写死，日志内部滚动 */
 .chat-dock {
   display: flex;
@@ -6957,7 +6960,7 @@ select.input option {
    用 :has 而不是把开合状态回传给页面：浮层展开渲染 .chat-dock、收起渲染 .chat-token，
    DOM 里本来就写着答案，再同步一份 React 状态是白搭一条线。 */
 @media (min-width: 60rem) {
-  .lobby-shell:has(.chat-dock) { padding-right: 21rem; }
+  .lobby-shell:has(.chat-dock:not(.chat-dock--overlay)) { padding-right: 21rem; }
 }
 
 /* ===================== 规则页（pages/RulesPage） =====================

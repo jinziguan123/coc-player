@@ -15,7 +15,7 @@ interface Props {
   onTyping: () => void
   /** 右栏（角色卡预览）开着时往左让一个栏宽，别把人家盖住。 */
   shifted?: boolean
-  /** 选人舞台等专注模式：强制收成圆形浮标，不遮挡角色卡阵列。 */
+  /** 选人舞台等专注模式：默认收成圆形浮标，点开后以浮层盖在上面（不挤占版面），离开该模式即收起。 */
   compact?: boolean
 }
 
@@ -39,6 +39,10 @@ export function LobbyChatDock({
   lines, typingName, canSpeak, onSend, onTyping, shifted, compact,
 }: Props) {
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== '0')
+  /** 专注模式下临时展开（不写进 OPEN_KEY，退出专注模式即收起）。 */
+  const [peek, setPeek] = useState(false)
+  /** 聊天卡此刻是否真的看得见：未读与贴底都以它为准。 */
+  const visible = compact ? peek : open
   const [draft, setDraft] = useState('')
   /** 收起期间新增的条数；展开即清零。 */
   const [unread, setUnread] = useState(0)
@@ -48,19 +52,20 @@ export function LobbyChatDock({
   const seen = useRef(lines.length)
 
   useEffect(() => { localStorage.setItem(OPEN_KEY, open ? '1' : '0') }, [open])
+  useEffect(() => { if (!compact) setPeek(false) }, [compact])
 
-  // 展开时 seen 一路跟着长度走，未读恒为 0；收起后 seen 冻在那一刻，差值就是未读。
+  // 看得见时 seen 一路跟着长度走，未读恒为 0；收起后 seen 冻在那一刻，差值就是未读。
   useEffect(() => {
-    if (open) { seen.current = lines.length; setUnread(0) }
+    if (visible) { seen.current = lines.length; setUnread(0) }
     else setUnread(Math.max(0, lines.length - seen.current))
-  }, [open, lines.length])
+  }, [visible, lines.length])
 
   // useLayoutEffect：要在浏览器绘制之前贴底，否则新消息会先闪一下再跳。
   useLayoutEffect(() => {
-    if (!open || !pinned) return
+    if (!visible || !pinned) return
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [lines.length, typingName, open, pinned])
+  }, [lines.length, typingName, visible, pinned])
 
   const onScroll = () => {
     const el = logRef.current
@@ -76,12 +81,14 @@ export function LobbyChatDock({
     onSend(text)
   }
 
-  if (!open || compact) {
+  const show = (v: boolean) => (compact ? setPeek(v) : setOpen(v))
+
+  if (!visible) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => show(true)}
         className={`chat-float chat-token${shifted ? ' chat-float--shifted' : ''}`}
-        title={compact ? '选人期间聊天收起为浮标，避免遮挡角色卡' : '展开大厅聊天'}
+        title="展开大厅聊天"
         aria-label="展开大厅聊天"
       >
         <GiTalk size={20} aria-hidden="true" />
@@ -91,12 +98,13 @@ export function LobbyChatDock({
   }
 
   return (
-    <aside className={`chat-float chat-dock${shifted ? ' chat-float--shifted' : ''}`}>
+    // 专注模式下是盖在上面的浮层（chat-dock--overlay），不触发主栏让位
+    <aside className={`chat-float chat-dock${shifted ? ' chat-float--shifted' : ''}${compact ? ' chat-dock--overlay' : ''}`}>
       <div className="chat-dock-head">
         <GiTalk size={14} aria-hidden="true" />
         <span className="flex-1">大厅聊天</span>
         <button
-          onClick={() => setOpen(false)}
+          onClick={() => show(false)}
           className="btn-secondary !px-1.5 !py-0.5"
           title="收起"
           aria-label="收起大厅聊天"
