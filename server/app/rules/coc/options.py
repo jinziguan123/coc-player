@@ -89,6 +89,17 @@ class CocRuleOptions:
 DEFAULT_OPTIONS = CocRuleOptions()
 
 
+def insanity_trigger_text(options: CocRuleOptions) -> str:
+    """临时疯狂触发口径的一句人话，与 ``checks.py`` 里 SAN 结算的判定同源。
+
+    KP 手册（静态提示词）按 :data:`DEFAULT_OPTIONS` 生成这一句，本桌改过口径时
+    :func:`describe` 再用同一函数给出改后的说法——两处不会各写一套而漂移。
+    """
+    if options.insanity_rule == "flat":
+        return f"单次理智损失达到 {options.insanity_flat_threshold} 点即临时性疯狂"
+    return "单次理智损失达到当前 SAN 的五分之一即临时性疯狂"
+
+
 def describe(options: CocRuleOptions) -> list[str]:
     """把**改动过的**那几项译成人话，供注入 KP 与规划器。
 
@@ -133,8 +144,8 @@ def describe(options: CocRuleOptions) -> list[str]:
         )
     if options.insanity_rule == "flat":
         lines.append(
-            f"临时疯狂：单次理智损失达到 {options.insanity_flat_threshold} 点即触发"
-            "（原文是当前 SAN 的五分之一）"
+            f"临时疯狂：{insanity_trigger_text(options)}"
+            "（本项目默认口径是当前 SAN 的五分之一）"
         )
     if not options.improvement:
         lines.append("本局不做技能成长检定，收场时不要提『这次经历让你的技能有所长进』")

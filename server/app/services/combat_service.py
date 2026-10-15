@@ -210,6 +210,13 @@ def _char_data(p: dict) -> dict:
             "system_data": p.get("system_data") or {}, "_weapon": p.get("weapon")}
 
 
+def _rule_options(db: Session, session_id: str) -> coc_options.CocRuleOptions:
+    """本局生效的村规（模组默认 → 村规 → 本局覆盖）；战斗内每一次检定都要带上它。"""
+    return coc_options.from_dict(
+        rule_options_service.effective_by_id(db, session_id) if session_id else None,
+    )
+
+
 def get_combat(session: GameSession) -> dict | None:
     # 战斗态已拆到独立表（combat_states），不再塞在 world_state.combat。
     # 经 GameSession.combat_state 关系取（1:1，懒加载；调用方传入的都是挂在 db 会话上的 session）。
@@ -357,9 +364,7 @@ def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: st
     r = engine.resolve_wound(
         target.get("hp", 0), target.get("max_hp") or 1, amount, _char_data(target),
         already_wounded=(target.get("status") == "major_wound"),
-        options=coc_options.from_dict(
-            rule_options_service.effective_by_id(db, session_id) if session_id else None,
-        ),
+        options=_rule_options(db, session_id),
     )
     target["hp"] = r["new_hp"]
     target["status"] = r["status"]
@@ -551,6 +556,7 @@ async def _begin_player_attack(
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus + g_bonus, penalty=g_penalty,
         defense_penalty=_flank_penalty(state, target),   # 目标被我方夹击 → 其闪避吃惩罚
+        options=_rule_options(db, session_id),
     )
     if actor.get("aim"):
         actor["aim"] = False   # 瞄准一次性消费
@@ -616,6 +622,7 @@ async def _begin_player_burst(
     不走两段式手掷伤害（连射是泼弹、不逐发仪式）。命中即扣血（走护甲）。"""
     weapon = action.get("weapon") or actor.get("weapon") or "徒手格斗"
     cap = engine.burst_capacity(weapon)
+    opts = _rule_options(db, session_id)
     shots = [t for t in (action.get("shots") or []) if t][:cap]
     # 前置校验：需可连射的火器（cap≥2）且至少 2 发；否则降级为单发两段式攻击。
     if cap < 2 or not _weapon_is_firearm(weapon) or len(shots) < 2:
@@ -639,7 +646,8 @@ async def _begin_player_burst(
                                  "hit": False, "penalty": pen, "damage": None, "gone": True})
             continue
         res = engine.resolve_attack(_char_data(actor), actor.get("db", "0"), weapon,
-                                    defender_data=None, ranged=True, bonus=aim_bonus, penalty=pen)
+                                    defender_data=None, ranged=True, bonus=aim_bonus, penalty=pen,
+                                    options=opts)
         chk = res["attacker_check"]
         rec = {"target": target["name"], "roll": chk.roll, "target_val": chk.skill_value,
                "outcome": chk.outcome, "hit": res["hit"], "penalty": pen,
@@ -845,6 +853,7 @@ async def resolve_reaction(db: Session, session_id: str, defender_id: str, choic
             defender_data=_char_data(defender), defense=choice, ranged=pr["ranged"],
             attacker_disarmed=atk_disarmed, bonus=atk_pb,
             defense_penalty=_flank_penalty(state, defender),
+            options=_rule_options(db, session_id),
         )
         # 玩家亲手做的这次反应检定 → 走 3D 骰动画 + 对抗卡（守方是玩家，动画呈现守方这一掷）
         react_content = _combat_dice_content(attacker, defender, pr["weapon"], res)
@@ -934,7 +943,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
             s = f"{actor['name']} 想为 {target['name']} 急救，但这处伤已被处理过"
             chunks.append(_combat_line(db, session_id, s + "。"))
             return chunks, s
-        r = engine.resolve_first_aid(_char_data(actor))
+        r = engine.resolve_first_aid(_char_data(actor), options=_rule_options(db, session_id))
         for line in r["lines"]:
             chunks.append(_combat_line(db, session_id, f"{actor['name']}｜{line}"))
         heal_lines: list[str] = []
@@ -958,7 +967,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
         return chunks, summary
 
     if atype == "observe":
-        r = engine.resolve_observe(_char_data(actor))
+        r = engine.resolve_observe(_char_data(actor), options=_rule_options(db, session_id))
         for line in r["lines"]:
             chunks.append(_combat_line(db, session_id, f"{actor['name']}｜{line}"))
         state["log"].append({"round": state["round"], "actor": actor["name"], "action": "observe",
@@ -973,7 +982,10 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
             chunks.append(_combat_line(db, session_id, s + "。"))
             return chunks, s
         kind = action.get("kind") or "grapple"
-        r = engine.resolve_maneuver(_char_data(actor), _char_data(target), kind=kind)
+        r = engine.resolve_maneuver(
+            _char_data(actor), _char_data(target), kind=kind,
+            options=_rule_options(db, session_id),
+        )
         for line in r["lines"]:
             chunks.append(_combat_line(db, session_id, f"{actor['name']} → {target['name']}｜{line}"))
         if r["success"] and r["condition"]:
@@ -1022,6 +1034,7 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
         _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon),
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus,
+        options=_rule_options(db, session_id),
     )
     if actor.get("aim"):
         actor["aim"] = False   # 瞄准一次性消费（aim 只在此攻击分支清；observe/maneuver 不碰它，
@@ -1067,7 +1080,7 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             _save_combat(db, session_id, state)
         # 濒死者回合开始先跑体质 tick（须在 is_active 跳过之前，否则永远不掷）
         if actor.get("status") == "dying":
-            for line in engine.tick_dying(actor):
+            for line in engine.tick_dying(actor, options=_rule_options(db, session_id)):
                 chunks.append(_combat_line(db, session_id, line))
             _save_combat(db, session_id, state)
         if not engine.is_active(actor):   # 当前指针落在失能者 → 跳过

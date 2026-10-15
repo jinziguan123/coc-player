@@ -227,12 +227,14 @@ def allowed_reactions(is_firearm: bool, defender_grappled: bool = False) -> list
     return ["dodge", "cover"] if is_firearm else ["fight_back", "dodge"]
 
 
-def resolve_first_aid(medic_data: dict, skill: str = "急救") -> dict:
+def resolve_first_aid(
+    medic_data: dict, skill: str = "急救", options: CocRuleOptions | None = None,
+) -> dict:
     """一次急救/医学检定。返回 {success, heal, lines}：成功 heal=1（回 1 HP），失败 heal=0。
 
     纯规则：只算成败与回血量。是否稳住濒死、写回角色卡、标记该处伤已急救，由 service 层决定。
     """
-    chk = resolve_skill_check(medic_data, skill)
+    chk = resolve_skill_check(medic_data, skill, options=options)
     success = chk.outcome in ("critical_success", "hard_success", "success")
     heal = 1 if success else 0
     verb = "成功" if success else "失败"
@@ -240,12 +242,14 @@ def resolve_first_aid(medic_data: dict, skill: str = "急救") -> dict:
     return {"success": success, "heal": heal, "lines": lines}
 
 
-def resolve_observe(observer_data: dict, skill: str = "侦查") -> dict:
+def resolve_observe(
+    observer_data: dict, skill: str = "侦查", options: CocRuleOptions | None = None,
+) -> dict:
     """一次观察战场检定（侦查/心理学）。返回 {success, lines}。
 
     成功不改数值，仅产一条「察觉到破绽/敌情」beat，交子代理据此叙述具体线索。
     """
-    chk = resolve_skill_check(observer_data, skill)
+    chk = resolve_skill_check(observer_data, skill, options=options)
     success = chk.outcome in ("critical_success", "hard_success", "success")
     if success:
         lines = [f"{skill}检定成功（{chk.description}），观察到敌方的破绽/动向。"]
@@ -254,7 +258,10 @@ def resolve_observe(observer_data: dict, skill: str = "侦查") -> dict:
     return {"success": success, "lines": lines}
 
 
-def resolve_maneuver(attacker_data: dict, defender_data: dict, kind: str = "grapple") -> dict:
+def resolve_maneuver(
+    attacker_data: dict, defender_data: dict, kind: str = "grapple",
+    options: CocRuleOptions | None = None,
+) -> dict:
     """对抗格斗机动（擒抱/缴械）。attacker 的格斗 对抗 defender 的格斗/闪避（取其一），
     用 compare_checks 比成功等级。返回 {success, condition, lines}：
 
@@ -267,8 +274,8 @@ def resolve_maneuver(attacker_data: dict, defender_data: dict, kind: str = "grap
     dfn_skills = defender_data.get("skills") or {}
     if (dfn_skills.get("闪避") or 0) > (dfn_skills.get(dfn_skill) or 0):
         dfn_skill = "闪避"
-    atk = resolve_skill_check(attacker_data, atk_skill)
-    dfn = resolve_skill_check(defender_data, dfn_skill)
+    atk = resolve_skill_check(attacker_data, atk_skill, options=options)
+    dfn = resolve_skill_check(defender_data, dfn_skill, options=options)
     won = compare_checks(atk, dfn) == "a" and atk.meets_difficulty
     condition = None
     kind_cn = "擒抱" if kind == "grapple" else "缴械"
@@ -293,6 +300,7 @@ def resolve_attack(
     bonus: int = 0,
     penalty: int = 0,
     defense_penalty: int = 0,
+    options: CocRuleOptions | None = None,
 ) -> dict:
     """解析一次攻击。返回结构化结果（谁命中谁、伤害多少、各自检定）。**不改状态、不落库。**
 
@@ -305,6 +313,7 @@ def resolve_attack(
     attacker_disarmed=True：攻方已被缴械 → 武器强制回落徒手格斗。
     bonus>0：给攻方命中检定加奖励骰（瞄准用，透传给 resolve_skill_check）。
     penalty>0：给攻方命中检定加惩罚骰（连发换目标用，透传给 resolve_skill_check）。
+    options：本局村规，透传给每一次 resolve_skill_check（大成功/大失败阈值、奖惩骰上限）。
     """
     if attacker_disarmed:
         weapon = _UNARMED
@@ -312,7 +321,9 @@ def resolve_attack(
     # 注意用原始入参 weapon（可能是「撕咬」这类怪物攻击方式）取技能，不能用回落后的 w——
     # w 已经是徒手格斗了，取出来只会是 格斗(斗殴)。
     atk_skill = attack_skill_of(attacker_data, weapon)
-    atk = resolve_skill_check(attacker_data, atk_skill, difficulty, bonus=bonus, penalty=penalty)
+    atk = resolve_skill_check(
+        attacker_data, atk_skill, difficulty, bonus=bonus, penalty=penalty, options=options,
+    )
 
     result: dict = {
         "weapon": w.get("name"), "attacker_check": atk, "defender_check": None,
@@ -326,7 +337,9 @@ def resolve_attack(
     # 远程：无反应 → 达标即命中；扑掩体/闪避 → 射手转困难难度（扑向掩体），无反击
     if ranged:
         if defense in ("dodge", "cover"):
-            atk = resolve_skill_check(attacker_data, atk_skill, "hard", bonus=bonus, penalty=penalty)
+            atk = resolve_skill_check(
+                attacker_data, atk_skill, "hard", bonus=bonus, penalty=penalty, options=options,
+            )
             result["attacker_check"] = atk
         if atk.meets_difficulty:
             result["hit"] = True
@@ -350,7 +363,9 @@ def resolve_attack(
         return result
 
     if defense in ("dodge", "cover"):
-        dfn = resolve_skill_check(defender_data, "闪避", "normal", penalty=defense_penalty)
+        dfn = resolve_skill_check(
+            defender_data, "闪避", "normal", penalty=defense_penalty, options=options,
+        )
         result["defender_check"] = dfn
         # 攻方成功等级严格高于守方才命中（平手/守方更高 = 被闪开）
         if compare_checks(atk, dfn) == "a" and atk.meets_difficulty:
@@ -361,7 +376,9 @@ def resolve_attack(
 
     # fight_back：双方格斗，胜方伤害负方
     dfn_skill = _fight_skill_of(defender_data)
-    dfn = resolve_skill_check(defender_data, dfn_skill, "normal", penalty=defense_penalty)
+    dfn = resolve_skill_check(
+        defender_data, dfn_skill, "normal", penalty=defense_penalty, options=options,
+    )
     result["defender_check"] = dfn
     winner = compare_checks(atk, dfn)
     if winner == "a" and atk.meets_difficulty:
@@ -375,6 +392,15 @@ def resolve_attack(
                                                impale=dfn.tier in ("extreme", "critical") and False)
         result["damage_to"] = "attacker"
     return result
+
+
+def is_major_wound(damage: int, max_hp: int, options: CocRuleOptions | None = None) -> bool:
+    """单击伤害是否构成重伤：≥ 最大 HP ÷ major_wound_divisor（RAW 半血）。
+
+    战斗结算（resolve_wound）与叙事扣血（turn_effects 的 HP_CHANGE）共用这一条口径。
+    """
+    opts = options or DEFAULT_OPTIONS
+    return damage >= max(1, max_hp) // opts.major_wound_divisor
 
 
 def resolve_wound(
@@ -393,7 +419,7 @@ def resolve_wound(
     max_hp = max(1, max_hp)   # 归一非正 max_hp，避免半血阈值判定被负值扭曲
     new_hp = max(0, hp - damage)
     lines = [f"受到 {damage} 点伤害（HP {hp}→{new_hp}）"]
-    major = damage >= max_hp // opts.major_wound_divisor
+    major = is_major_wound(damage, max_hp, opts)
     if damage > max_hp:                                   # ① 单击超过满血 → 必死
         return {"new_hp": 0, "status": "dead", "lines": lines + ["单次伤害超过最大生命值，当场毙命！"]}
     if new_hp <= 0:                                       # ② 归零：分轻/重伤
@@ -402,7 +428,7 @@ def resolve_wound(
         return {"new_hp": 0, "status": "unconscious",
                 "lines": lines + ["昏迷倒地（生命值归零，但只受轻伤、伤势稳定、不致死）。"]}
     if major:                                             # ③ 未归零的重伤 → 体质检定判昏迷
-        con = resolve_skill_check(defender_data, "体质", "normal")
+        con = resolve_skill_check(defender_data, "体质", "normal", options=opts)
         lines.append(f"重伤体质检定：{con.description}")
         if con.outcome in ("failure", "fumble"):
             return {"new_hp": new_hp, "status": "unconscious", "lines": lines + ["眼前一黑，昏迷倒地！"]}
@@ -410,14 +436,14 @@ def resolve_wound(
     return {"new_hp": new_hp, "status": "ok", "lines": lines}
 
 
-def tick_dying(participant: dict) -> list[str]:
+def tick_dying(participant: dict, options: CocRuleOptions | None = None) -> list[str]:
     """濒死者每轮开始的 CON 检定：失败则死亡。非濒死者 no-op。原地改 participant。"""
     if participant.get("status") != "dying":
         return []
     data = {"skills": participant.get("skills") or {},
             "base_attributes": participant.get("base_attributes") or {},
             "system_data": participant.get("system_data") or {}}
-    con = resolve_skill_check(data, "体质", "normal")
+    con = resolve_skill_check(data, "体质", "normal", options=options)
     if con.outcome in ("failure", "fumble"):
         participant["status"] = "dead"
         return [f"{participant.get('name', '')}｜濒死体质检定失败（{con.description}），气绝身亡。"]
