@@ -1,4 +1,4 @@
-// 村规面板的 schema 解读：后端 manifest 里每个组件带一份参数 JSON Schema，
+// 规则页的 schema 解读：后端 manifest 里每个组件带一份参数 JSON Schema，
 // 面板照它渲染，不再在前端写死字段、标题、区间与说明。
 //
 // 放在 lib 而不是组件文件里：纯函数、可单测，也不让组件文件失去 Fast Refresh。
@@ -24,6 +24,8 @@ export interface RuleField {
   max?: number
   choices?: RuleChoice[]
   showIf?: RuleValues
+  /** 规则书原文的取值（schema 默认值） */
+  default?: unknown
 }
 
 interface PropertySchema {
@@ -32,6 +34,7 @@ interface PropertySchema {
   description?: string
   minimum?: number
   maximum?: number
+  default?: unknown
   'x-choices'?: RuleChoice[]
   'x-show-if'?: RuleValues
 }
@@ -48,6 +51,7 @@ export function componentFields(component: RuleComponent): RuleField[] {
     max: p.maximum,
     choices: p['x-choices'],
     showIf: p['x-show-if'],
+    default: p.default,
   }))
 }
 

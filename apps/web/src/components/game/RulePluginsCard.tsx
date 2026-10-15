@@ -1,7 +1,7 @@
-// 第三方规则插件：本机装了哪些、有没有加载上、没加载的原因。
+// 规则页「插件」分区：本机装了哪些第三方规则插件、有没有加载上、没加载的原因。
 //
 // 插件是代码、以本应用的权限运行——这一点必须写在界面上，而不是只写在文档里。
-// 插件提供的规则装上后默认关着，到「本桌规矩 → 调整」里打开（那里会标「插件」）。
+// 插件提供的规则装上后默认关着，在规则页对应分区里打开（卡片上标「插件」）。
 import { useEffect, useState } from 'react'
 import { GiPuzzle } from 'react-icons/gi'
 import { api } from '@/api/client'
@@ -24,8 +24,9 @@ export function RulePluginsCard({ ruleSystem }: { ruleSystem: string }) {
   const muted = { color: 'var(--color-text-secondary)' }
 
   return (
-    <div className="card" aria-label="规则插件">
-      <h3 className="card-title flex items-center gap-2"><GiPuzzle /> 规则插件</h3>
+    <section id="sec-plugins" className="rules-sec" aria-label="规则插件">
+      <div className="rules-sec-head"><h3 className="flex items-center gap-2"><GiPuzzle /> 插件</h3><span>第三方提供的规则，装上默认关闭</span></div>
+      <div className="rules-sec-rule" />
       {data.plugins.length === 0 ? (
         <p className="text-sm" style={muted}>
           没有安装插件。要用第三方规则，把插件文件放进 <code>{data.directory}</code> 后重启应用；
@@ -50,7 +51,7 @@ export function RulePluginsCard({ ruleSystem }: { ruleSystem: string }) {
               {p.description && <div className="text-xs mt-0.5" style={muted}>{p.description}</div>}
               {p.status === 'loaded' ? (
                 <div className="text-xs mt-0.5" style={muted}>
-                  提供 {p.components.length} 条规则，默认关闭，到「本桌规矩 → 调整」里打开。
+                  提供 {p.components.length} 条规则，默认关闭，在上面对应分区里打开（卡片标「插件」）。
                 </div>
               ) : (
                 <div className="text-xs mt-0.5" style={{ color: 'var(--color-danger)' }}>{p.error}</div>
@@ -65,6 +66,6 @@ export function RulePluginsCard({ ruleSystem }: { ruleSystem: string }) {
         只是想改参数或武器、职业这些数据的话，用「导出 / 导入房规」就够了，房规文件不含代码。
         插件目录：{data.directory}（应用启动时加载）。
       </p>
-    </div>
+    </section>
   )
 }

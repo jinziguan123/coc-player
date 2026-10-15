@@ -1,5 +1,5 @@
 import { lazy } from 'react'
-import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom'
+import { BrowserRouter, Navigate, Routes, Route, useParams } from 'react-router-dom'
 import { AppShell } from './components/layout/AppShell'
 import { Toaster } from './components/ui/toaster'
 import './index.css'
@@ -9,7 +9,7 @@ import './index.css'
 const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })))
 const ModulePage = lazy(() => import('./pages/ModulePage').then((m) => ({ default: m.ModulePage })))
 const ModuleDetailPage = lazy(() => import('./pages/ModuleDetailPage').then((m) => ({ default: m.ModuleDetailPage })))
-const RulebookPage = lazy(() => import('./pages/RulebookPage').then((m) => ({ default: m.RulebookPage })))
+const RulesPage = lazy(() => import('./pages/RulesPage').then((m) => ({ default: m.RulesPage })))
 const CharacterPage = lazy(() => import('./pages/CharacterPage').then((m) => ({ default: m.CharacterPage })))
 const GamePage = lazy(() => import('./pages/GamePage').then((m) => ({ default: m.GamePage })))
 const GameSessionPage = lazy(() => import('./pages/GameSessionPage').then((m) => ({ default: m.GameSessionPage })))
@@ -41,7 +41,9 @@ export default function App() {
           <Route path="modules" element={<ModulePage />} />
           <Route path="modules/new" element={<ModuleDetailPage />} />
           <Route path="modules/:id" element={<ModuleDetailPage />} />
-          <Route path="rulebooks" element={<RulebookPage />} />
+          <Route path="rules" element={<RulesPage />} />
+          {/* 规则书并进了「规则」页的标签；旧地址（书签、旧链接）转过去 */}
+          <Route path="rulebooks" element={<Navigate to="/rules?tab=books" replace />} />
           <Route path="characters" element={<CharacterPage />} />
           <Route path="game" element={<GamePage />} />
           <Route path="onboarding" element={<OnboardingPage />} />

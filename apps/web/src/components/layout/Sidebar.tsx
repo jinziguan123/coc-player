@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { m } from 'motion/react'
-import { GiScrollUnfurled, GiCharacter, GiDiceTwentyFacesTwenty, GiArchiveResearch, GiGears, GiBookCover } from 'react-icons/gi'
+import { GiScrollUnfurled, GiCharacter, GiDiceTwentyFacesTwenty, GiArchiveResearch, GiGears, GiRuleBook } from 'react-icons/gi'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { spring } from '@/lib/motion'
 import { DecoSunburst } from '@/components/ui/deco'
+import { canLeave } from '@/lib/navGuard'
 
 const NAV_ITEMS = [
   { to: '/', label: '卷宗', icon: GiArchiveResearch },
   { to: '/modules', label: '模组', icon: GiScrollUnfurled },
-  { to: '/rulebooks', label: '规则书', icon: GiBookCover },
+  // 「规则」页含两个标签：本桌规则（决定骰子怎么判）与规则书（给 AI 查阅的参考）
+  { to: '/rules', label: '规则', icon: GiRuleBook },
   { to: '/characters', label: '角色', icon: GiCharacter },
   { to: '/game', label: '游戏', icon: GiDiceTwentyFacesTwenty },
   { to: '/settings', label: '设置', icon: GiGears },
@@ -77,6 +79,8 @@ export function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
             to={to}
             end={to === '/'}
             title={label}
+            // 当前页有没保存的改动时先问它（如规则页）；它会自己弹框，确认后再跳
+            onClick={(e) => { if (!canLeave(to)) e.preventDefault() }}
             className={({ isActive }) =>
               `sidebar-link ${isActive ? 'active' : ''}`
             }

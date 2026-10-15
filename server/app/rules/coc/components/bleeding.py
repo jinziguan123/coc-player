@@ -65,7 +65,7 @@ def first_aid_applied(target: dict) -> dict | None:
 COMPONENT = Component(
     id="coc7.bleeding", title="流血",
     requires=("coc7.wound",),
-    config=BleedingConfig, toggle="bleeding", group="伤害与状态",
+    config=BleedingConfig, toggle="bleeding", group="伤害与状态", tag="本桌自定",
     description="本桌自定，规则书里没有这条：战斗中受重伤会流血，每轮回合开始失血，急救成功即止血。",
     hooks=__name__,
 )

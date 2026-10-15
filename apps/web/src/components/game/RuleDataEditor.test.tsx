@@ -44,19 +44,19 @@ beforeEach(() => {
 
 async function openWeapons() {
   const user = userEvent.setup()
-  render(<RuleDataEditor scope={{ kind: 'village', ruleSystem: 'coc' }} />)
+  render(<RuleDataEditor scope={{ ruleSystem: 'coc', moduleId: 'm1' }} />)
   await user.click(await screen.findByRole('tab', { name: '武器表' }))
   await screen.findByText('弓箭')
   return user
 }
 
 describe('数据表编辑器', () => {
-  it('表的页签来自 manifest，村规层读村规接口', async () => {
+  it('表的页签来自 manifest，读写模组自己的接口', async () => {
     await openWeapons()
     for (const t of ['技能表', '职业表', '专精表', '装备表', '武器表', '疯狂症状表']) {
       expect(screen.getByRole('tab', { name: t })).toBeInTheDocument()
     }
-    expect(get).toHaveBeenCalledWith('/rulebooks/village-rules/coc/data/weapons')
+    expect(get).toHaveBeenCalledWith('/modules/m1/rule-data/weapons')
   })
 
   it('改一行后标「已修改」，保存提交整张表', async () => {
@@ -70,7 +70,7 @@ describe('数据表编辑器', () => {
     await user.click(screen.getByRole('button', { name: /保存武器表/ }))
     await waitFor(() => expect(put).toHaveBeenCalled())
     const [path, body] = put.mock.calls[0] as [string, { rows: Array<Record<string, unknown>> }]
-    expect(path).toBe('/rulebooks/village-rules/coc/data/weapons')
+    expect(path).toBe('/modules/m1/rule-data/weapons')
     expect(body.rows.find((r) => r.name === '弓箭')!.dam).toBe('1D8')
     expect(body.rows).toHaveLength(2)
   })
@@ -94,7 +94,7 @@ describe('数据表编辑器', () => {
     const user = await openWeapons()
     await user.click(screen.getByRole('button', { name: /新增/ }))
     await user.click(screen.getByRole('button', { name: /保存武器表/ }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('第 3 行还没填名称')
+    expect(await screen.findByRole('alert')).toHaveTextContent('第 3 行还没填主键')
     expect(put).not.toHaveBeenCalled()
   })
 
@@ -131,7 +131,7 @@ describe('数据表编辑器', () => {
   it('模组层读写模组自己的接口', async () => {
     get.mockImplementation((path: string) =>
       Promise.resolve(path.endsWith('/manifest') ? MANIFEST : view()))
-    render(<RuleDataEditor scope={{ kind: 'module', ruleSystem: 'coc', moduleId: 'm1' }} />)
+    render(<RuleDataEditor scope={{ ruleSystem: 'coc', moduleId: 'm1' }} />)
     await screen.findByText('会计')
     expect(get).toHaveBeenCalledWith('/modules/m1/rule-data/skills')
     expect(screen.getByText(/随模组走/)).toBeInTheDocument()

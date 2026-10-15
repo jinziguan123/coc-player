@@ -343,7 +343,7 @@ def resolve_skill_check(
 COMPONENT = Component(
     id="coc7.check", title="技能检定",
     requires=("coc7.dice", "coc7.character"),
-    config=CheckConfig, group="判定",
+    config=CheckConfig, group="检定",
     provides={"check": Provide(
         __name__,
         bound=("resolve_skill_check", "is_fumble", "achieved_tier", "judge", "resolve_skill_value"),

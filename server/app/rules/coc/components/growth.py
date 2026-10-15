@@ -50,7 +50,7 @@ def improvement_check(current_value: int, options: GrowthConfig | None = None) -
 COMPONENT = Component(
     id="coc7.growth", title="技能成长",
     requires=("coc7.check",),
-    config=GrowthConfig, toggle="improvement", group="伤害与状态",
+    config=GrowthConfig, toggle="improvement", group="成长", tag="官方",
     description="关掉则模组结束时不做成长检定（短模组常这么跑）",
     provides={"growth": Provide(__name__, bound=("improvement_check",))},
 )

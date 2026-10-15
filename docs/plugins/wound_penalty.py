@@ -1,7 +1,7 @@
 """示例规则插件：受伤减值（常见村规）——生命值低于一定比例时，所有检定多一颗惩罚骰。
 
 安装：把本文件复制到插件目录（源码运行是 server/plugins/，打包版是数据目录下的 plugins/），
-重启应用，在规则书页「本桌规矩 → 调整」里打开「受伤减值」。插件写法见同目录 README.md。
+重启应用，在侧栏「规则」页的「检定」分区里打开「受伤减值」。插件写法见同目录 README.md。
 """
 
 from app.rules.config import RuleConfig, rule_field
@@ -49,7 +49,7 @@ def check_modifiers(character_data: dict, options) -> list[dict] | None:
 COMPONENTS = [
     Component(
         id="example.wound-penalty", title="受伤减值",
-        config=WoundPenaltyConfig, toggle="wound_penalty", group="判定",
+        config=WoundPenaltyConfig, toggle="wound_penalty", group="检定",
         description="插件提供的常见村规：生命值低于一定比例时，所有检定多一颗惩罚骰。",
         hooks=__name__,
     ),

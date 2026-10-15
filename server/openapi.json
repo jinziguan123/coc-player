@@ -1330,6 +1330,18 @@
             "title": "Table Notes",
             "type": "string"
           },
+          "tables": {
+            "additionalProperties": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Tables",
+            "type": "object"
+          },
           "warnings": {
             "default": [],
             "items": {
@@ -2738,6 +2750,11 @@
             "title": "Source",
             "type": "string"
           },
+          "tag": {
+            "default": "",
+            "title": "Tag",
+            "type": "string"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2884,7 +2901,7 @@
         "type": "object"
       },
       "RuleSystemManifest": {
-        "description": "规则系统的组件目录：前端村规面板与数据表编辑器据此渲染，房规文件据此校验。",
+        "description": "规则系统的组件目录：前端规则页与数据表编辑器据此渲染，房规文件据此校验。",
         "properties": {
           "components": {
             "items": {
@@ -3497,6 +3514,12 @@
       "VillageRulesRead": {
         "description": "村规的两种视图：``options`` 是显式改过的差异项，``effective`` 是叠在规则原文上的\n完整结果（面板拿它回显，才不必在前端复刻一份默认值表）。",
         "properties": {
+          "data": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Data",
+            "type": "object"
+          },
           "effective": {
             "additionalProperties": true,
             "title": "Effective",
@@ -3580,6 +3603,24 @@
               }
             ],
             "title": "Table Notes"
+          },
+          "tables": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tables"
           }
         },
         "title": "VillageRulesUpdate",
@@ -5867,7 +5908,7 @@
     },
     "/api/rulebooks/village-rules/{rule_system}/manifest": {
       "get": {
-        "description": "规则系统的组件目录与各组件参数的 schema——村规面板据此渲染，不再在前端写死字段。",
+        "description": "规则系统的组件目录与各组件参数的 schema——规则页据此渲染，不再在前端写死字段。",
         "operationId": "read_rule_manifest_api_rulebooks_village_rules__rule_system__manifest_get",
         "parameters": [
           {

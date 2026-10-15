@@ -89,8 +89,11 @@ class Component:
     config: type[RuleConfig] | None = None
     #: 可选组件的开关参数名（``config`` 里的一个 bool 字段）；None = 常驻组件。
     toggle: str | None = None
-    #: 村规面板上的分栏（如「判定」「伤害与状态」）；空串 = 不在面板上出现。
+    #: 规则页上的分区（检定 / 幸运 / 伤害与状态 / 理智与疯狂 / 成长……）；空串 = 不在规则页出现。
+    #: 分区按组件在预设里首次出现的顺序排列；插件可以并入已有分区，也可以开新分区。
     group: str = ""
+    #: 可选规则卡上的来源标签：「官方可选」「本桌自定」「官方变体」等（插件一律显示「插件」）。
+    tag: str = ""
     #: 给房主看的一句说明（可选组件的开关行下方显示它）。
     description: str = ""
     #: 本组件的数据表（房主/模组作者可以补丁改动的那些表）。表名在规则系统内唯一。
@@ -126,7 +129,7 @@ class RuleSystem:
     #: 官方预设的版本：房规文件记下它（``base_preset``），预设调整默认值时据此提示。
     version: int
     components: tuple[Component, ...]
-    #: 官方预设包含的组件 id，顺序即 KP 描述、摘要标签、村规面板的顺序。
+    #: 官方预设包含的组件 id，顺序即 KP 描述、摘要标签、规则页的顺序。
     preset: tuple[str, ...]
     #: 各组件参数的合成（多继承各组件的 config）；字段全集须与组件参数一一对应。
     options_model: type[RuleConfig]
@@ -247,7 +250,7 @@ class RuleSystem:
     # ── 组件 ──
 
     def manifest(self) -> dict:
-        """前端村规面板、数据表编辑器与房规文件的契约：组件目录、各组件参数与数据表的 schema。"""
+        """前端规则页、数据表编辑器与房规文件的契约：组件目录、各组件参数与数据表的 schema。"""
         return {
             "id": self.id,
             "title": self.title,
@@ -267,6 +270,7 @@ class RuleSystem:
                     "description": c.description,
                     "group": c.group,
                     "toggle": c.toggle,
+                    "tag": c.tag,
                     "source": c.source,
                     "requires": list(c.requires),
                     "conflicts": list(c.conflicts),

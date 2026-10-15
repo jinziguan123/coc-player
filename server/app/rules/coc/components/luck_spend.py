@@ -64,6 +64,6 @@ class LuckSpendConfig(RuleConfig):
 COMPONENT = Component(
     id="coc7.luck-spend", title="幸运消费",
     requires=("coc7.luck",),
-    config=LuckSpendConfig, toggle="luck_spend", group="判定",
+    config=LuckSpendConfig, toggle="luck_spend", group="幸运", tag="官方可选",
     description="规则书的可选规则：检定失败后可花幸运点抵掉差值买成功。开启后失败时会问玩家买不买。",
 )

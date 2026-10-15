@@ -117,7 +117,7 @@ def _went_insane(loss: int, current_san: int, options: SanityConfig) -> bool:
 COMPONENT = Component(
     id="coc7.sanity", title="理智",
     requires=("coc7.check",),
-    config=SanityConfig, group="伤害与状态",
+    config=SanityConfig, group="理智与疯狂",
     provides={"sanity": Provide(
         __name__, bound=("san_check", "insanity_trigger_text"),
     )},

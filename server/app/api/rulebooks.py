@@ -112,6 +112,7 @@ def read_village_rules(rule_system: str, db: Session = Depends(get_db)):
         table_notes=(row.table_notes if row else "") or "",
         enabled=bool(row.enabled) if row else True,
         labels=rule_options_service.village_labels(db, rule_system),
+        data=dict((row.data_patches if row else None) or {}),
     )
 
 
@@ -132,7 +133,7 @@ def update_village_rules(
     """
     try:
         saved, notes = rule_options_service.save_village_options(
-            db, rule_system, data.options, data.table_notes, data.enabled, data.data,
+            db, rule_system, data.options, data.table_notes, data.enabled, data.data, data.tables,
         )
     except rule_options_service.RuleDataError as e:
         raise HTTPException(400, "\n".join(e.errors)) from e
@@ -143,12 +144,13 @@ def update_village_rules(
         table_notes=notes,
         enabled=rule_options_service.village_enabled(db, rule_system),
         labels=rule_options_service.village_labels(db, rule_system),
+        data=dict((rule_options_service.village_row(db, rule_system).data_patches) or {}),
     )
 
 
 @router.get("/village-rules/{rule_system}/manifest", response_model=RuleSystemManifest)
 def read_rule_manifest(rule_system: str):
-    """规则系统的组件目录与各组件参数的 schema——村规面板据此渲染，不再在前端写死字段。"""
+    """规则系统的组件目录与各组件参数的 schema——规则页据此渲染，不再在前端写死字段。"""
     return RuleSystemManifest(**_system_or_404(rule_system).manifest())
 
 
@@ -179,7 +181,8 @@ def preview_house_rules(rule_system: str, data: HouseRulesImportRequest):
     preview, labels = rule_options_service.preview_house_rules(rule_system, data.text)
     return HouseRulesPreviewRead(
         ok=preview.ok, name=preview.name, description=preview.description,
-        options=preview.options, table_notes=preview.table_notes, data=preview.data, labels=labels,
+        options=preview.options, table_notes=preview.table_notes, data=preview.data,
+        tables=preview.tables, labels=labels,
         errors=preview.errors, warnings=preview.warnings,
     )
 

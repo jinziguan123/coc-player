@@ -38,7 +38,7 @@ def max_hp(attrs: dict) -> int:
 COMPONENT = Component(
     id="coc7.pulp-hp", title="Pulp 英雄生命值",
     requires=("coc7.character",),
-    config=PulpHpConfig, toggle="pulp_hp", group="伤害与状态",
+    config=PulpHpConfig, toggle="pulp_hp", group="伤害与状态", tag="官方变体",
     description="《Pulp 克苏鲁》的英雄规则：最大 HP 按 (CON+SIZ)/5 计算，约为常规的两倍。"
                 "只影响之后新建的角色与 NPC，已有角色卡上的 HP 不变。",
     hooks=__name__,

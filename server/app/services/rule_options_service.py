@@ -165,6 +165,7 @@ def _village_row_for_write(db: Session, rule_system: str) -> RuleSystemOptions:
 def save_village_options(
     db: Session, rule_system: str, raw: dict | None, notes: str | None = None,
     enabled: bool | None = None, data: dict | None = None,
+    tables: dict[str, list] | None = None,
 ) -> tuple[dict, str]:
     """整份替换某套规则系统的村规与桌面约定，返回落库后的 (差异项, 约定原文)。
 
@@ -172,17 +173,37 @@ def save_village_options(
     ``enabled=None`` 同理不动总开关；``data=None`` 不动数据表补丁（给了就整份替换，
     先严格校验，有错抛 :class:`RuleDataError` 且什么都不改）。落库的始终是**配置本身**——
     关掉开关不清空它们，只是读的时候当作没配过。
+
+    ``tables``（表名 → 整张表的行）只替换列出的那几张表的补丁，其余表不动——规则页的统一保存
+    用它。所有校验（参数开关组合、每张表的每一行）都在写库前做完：任何一处有错就一处都不改。
     """
     rule_system = (rule_system or DEFAULT_RULE_SYSTEM).strip()
     checked = validated_data(rule_system, data) if data is not None else None
     options = normalized(raw, rule_system)
     problems = get_system(rule_system).check_options(options)   # 依赖没开、互斥都开
+    table_patches: dict[str, list] = {}
+    for name, rows in (tables or {}).items():
+        try:
+            table_patches[name] = table_patch_from_rows(rule_system, name, rows)
+        except RuleDataError as e:
+            title = get_system(rule_system).data_table(name).title
+            problems += [f"{title}·{msg}" for msg in e.errors]
+        except ValueError as e:   # 没有这张表
+            problems.append(str(e))
     if problems:
         raise RuleDataError(problems)
     row = _village_row_for_write(db, rule_system)
     row.options = options
     if checked is not None:
         row.data_patches = checked
+    if table_patches:
+        merged = dict(row.data_patches or {})
+        for name, patch in table_patches.items():
+            if patch:
+                merged[name] = patch
+            else:
+                merged.pop(name, None)
+        row.data_patches = merged
     if notes is not None:
         row.table_notes = (notes or "").strip()[:TABLE_NOTES_MAX]
     if enabled is not None:
@@ -295,6 +316,11 @@ def preview_house_rules(rule_system: str, text: str) -> tuple[house_rules.HouseR
     preview = house_rules.parse_text(system, text, notes_max=TABLE_NOTES_MAX)
     if preview.ok:
         preview.errors += system.check_options(preview.options)
+        # 导入会整份替换数据表改动：给出每张表打完补丁后的样子，规则页直接载入草稿
+        preview.tables = {
+            t.name: list(rule_data.apply_patches(t, t.official_rows, preview.data.get(t.name)))
+            for t in system.data_tables
+        }
     labels = (
         system.option_labels(system.parse_options(preview.options))
         + data_labels(rule_system, preview.data)
@@ -303,7 +329,7 @@ def preview_house_rules(rule_system: str, text: str) -> tuple[house_rules.HouseR
 
 
 def village_view(db: Session, rule_system: str) -> dict:
-    """村规面板的回显值：村规叠在规则原文上的完整结果。"""
+    """规则页的回显值：村规叠在规则原文上的完整结果。"""
     return get_system(rule_system).parse_options(village_options(db, rule_system)).to_dict()
 
 

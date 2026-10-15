@@ -623,7 +623,7 @@ export function ModuleDetailPage() {
         // 模组自带的数据表改动（如 1890 年代模组的老式武器、职业）：叠在官方数据之上、
         // 村规之下。它有自己的保存按钮、直接写库，与上面模组正文的编辑草稿互不相干。
         <div className="card">
-          <RuleDataEditor scope={{ kind: 'module', ruleSystem: data.rule_system || 'coc', moduleId: data.id }} />
+          <RuleDataEditor scope={{ ruleSystem: data.rule_system || 'coc', moduleId: data.id }} />
         </div>
       ) : view === 'graph' && !edit ? (
         <ModuleGraph moduleId={data.id} scenes={data.scenes} npcs={data.npcs} clues={data.clues} onImageRegenerated={onGraphImageRegenerated} />

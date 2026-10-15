@@ -870,7 +870,7 @@ export interface paths {
         };
         /**
          * Read Rule Manifest
-         * @description 规则系统的组件目录与各组件参数的 schema——村规面板据此渲染，不再在前端写死字段。
+         * @description 规则系统的组件目录与各组件参数的 schema——规则页据此渲染，不再在前端写死字段。
          */
         get: operations["read_rule_manifest_api_rulebooks_village_rules__rule_system__manifest_get"];
         put?: never;
@@ -3390,6 +3390,15 @@ export interface components {
              */
             table_notes: string;
             /**
+             * Tables
+             * @default {}
+             */
+            tables: {
+                [key: string]: {
+                    [key: string]: unknown;
+                }[];
+            };
+            /**
              * Warnings
              * @default []
              */
@@ -4098,6 +4107,11 @@ export interface components {
              * @default official
              */
             source: string;
+            /**
+             * Tag
+             * @default
+             */
+            tag: string;
             /** Title */
             title: string;
             /** Toggle */
@@ -4167,7 +4181,7 @@ export interface components {
         };
         /**
          * RuleSystemManifest
-         * @description 规则系统的组件目录：前端村规面板与数据表编辑器据此渲染，房规文件据此校验。
+         * @description 规则系统的组件目录：前端规则页与数据表编辑器据此渲染，房规文件据此校验。
          */
         RuleSystemManifest: {
             /** Components */
@@ -4455,6 +4469,13 @@ export interface components {
          *     完整结果（面板拿它回显，才不必在前端复刻一份默认值表）。
          */
         VillageRulesRead: {
+            /**
+             * Data
+             * @default {}
+             */
+            data: {
+                [key: string]: unknown;
+            };
             /** Effective */
             effective: {
                 [key: string]: unknown;
@@ -4503,6 +4524,12 @@ export interface components {
             };
             /** Table Notes */
             table_notes?: string | null;
+            /** Tables */
+            tables?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                }[];
+            } | null;
         };
     };
     responses: never;

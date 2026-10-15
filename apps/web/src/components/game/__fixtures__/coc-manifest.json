@@ -371,6 +371,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [],
       "conflicts": [],
@@ -382,6 +383,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.dice"
@@ -395,6 +397,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.character"
@@ -408,6 +411,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.character"
@@ -419,8 +423,9 @@
       "id": "coc7.check",
       "title": "技能检定",
       "description": "",
-      "group": "判定",
+      "group": "检定",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.dice",
@@ -484,6 +489,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.check"
@@ -495,8 +501,9 @@
       "id": "coc7.luck-spend",
       "title": "幸运消费",
       "description": "规则书的可选规则：检定失败后可花幸运点抵掉差值买成功。开启后失败时会问玩家买不买。",
-      "group": "判定",
+      "group": "幸运",
       "toggle": "luck_spend",
+      "tag": "官方可选",
       "source": "official",
       "requires": [
         "coc7.luck"
@@ -539,8 +546,9 @@
       "id": "coc7.luck-reroll",
       "title": "燃运重骰",
       "description": "本桌自定，规则书里没有这条：失败后可烧固定点数幸运，整骰重掷一次。规则书的重掷叫「孤注一掷」，它不花幸运、且与花幸运二选一。",
-      "group": "判定",
+      "group": "幸运",
       "toggle": "luck_reroll",
+      "tag": "本桌自定",
       "source": "official",
       "requires": [
         "coc7.luck"
@@ -573,6 +581,7 @@
       "description": "",
       "group": "伤害与状态",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.check"
@@ -600,6 +609,7 @@
       "description": "《Pulp 克苏鲁》的英雄规则：最大 HP 按 (CON+SIZ)/5 计算，约为常规的两倍。只影响之后新建的角色与 NPC，已有角色卡上的 HP 不变。",
       "group": "伤害与状态",
       "toggle": "pulp_hp",
+      "tag": "官方变体",
       "source": "official",
       "requires": [
         "coc7.character"
@@ -623,6 +633,7 @@
       "description": "本桌自定，规则书里没有这条：战斗中受重伤会流血，每轮回合开始失血，急救成功即止血。",
       "group": "伤害与状态",
       "toggle": "bleeding",
+      "tag": "本桌自定",
       "source": "official",
       "requires": [
         "coc7.wound"
@@ -654,6 +665,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.check",
@@ -668,6 +680,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.combat"
@@ -681,6 +694,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.check"
@@ -692,8 +706,9 @@
       "id": "coc7.sanity",
       "title": "理智",
       "description": "",
-      "group": "伤害与状态",
+      "group": "理智与疯狂",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.check"
@@ -745,6 +760,7 @@
       "description": "",
       "group": "",
       "toggle": null,
+      "tag": "",
       "source": "official",
       "requires": [
         "coc7.sanity"
@@ -756,8 +772,9 @@
       "id": "coc7.growth",
       "title": "技能成长",
       "description": "关掉则模组结束时不做成长检定（短模组常这么跑）",
-      "group": "伤害与状态",
+      "group": "成长",
       "toggle": "improvement",
+      "tag": "官方",
       "source": "official",
       "requires": [
         "coc7.check"

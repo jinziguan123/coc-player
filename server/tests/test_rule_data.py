@@ -300,3 +300,47 @@ def test_table_view_carries_originals_of_modified_rows():
     view = rule_options_service.table_view("coc", "weapons", [{"name": "弓箭", "dam": "1D8"}, HAMMER])
     assert view["status"]["弓箭"] == "modified" and view["originals"]["弓箭"]["dam"] == "1D6+半DB"
     assert "雷霆之锤" not in view["originals"]
+
+
+# ── 规则页的统一保存：参数、约定、开关与整张表一次提交 ─────────────────────
+
+
+def test_unified_save_writes_options_and_tables_together(client):
+    c, _ = client
+    rows = list(c.get("/api/rulebooks/village-rules/coc/data/weapons").json()["rows"]) + [HAMMER]
+    r = c.put("/api/rulebooks/village-rules/coc", json={
+        "options": {"critical_max": 4}, "table_notes": "重调查", "enabled": True,
+        "tables": {"weapons": rows},
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["options"] == {"critical_max": 4}
+    assert body["data"]["weapons"][0]["name"] == "雷霆之锤"
+    assert "武器表：新增 1" in body["labels"]
+
+
+def test_unified_save_is_all_or_nothing(client):
+    c, _ = client
+    r = c.put("/api/rulebooks/village-rules/coc", json={
+        "options": {"critical_max": 4}, "tables": {"weapons": [{"name": "坏枪"}]},
+    })
+    assert r.status_code == 400 and "武器表" in r.json()["detail"]
+    saved = c.get("/api/rulebooks/village-rules/coc").json()
+    assert saved["options"] == {} and saved["data"] == {}
+
+
+def test_unified_save_leaves_unlisted_tables_alone(client):
+    c, _ = client
+    skills = c.get("/api/rulebooks/village-rules/coc/data/skills").json()["rows"] + [{"name": "无线电", "base": 10}]
+    c.put("/api/rulebooks/village-rules/coc", json={"options": {}, "tables": {"skills": skills}})
+    weapons = c.get("/api/rulebooks/village-rules/coc/data/weapons").json()["rows"] + [HAMMER]
+    c.put("/api/rulebooks/village-rules/coc", json={"options": {}, "tables": {"weapons": weapons}})
+    data = c.get("/api/rulebooks/village-rules/coc").json()["data"]
+    assert set(data) == {"skills", "weapons"}
+
+
+def test_import_preview_returns_full_tables(client):
+    c, _ = client
+    text = house_rules.export_text(COC, {}, "", data={"weapons": [HAMMER]})
+    p = c.post("/api/rulebooks/village-rules/coc/import-preview", json={"text": text}).json()
+    assert p["ok"] and len(p["tables"]["weapons"]) == 107 and len(p["tables"]["skills"]) == 51

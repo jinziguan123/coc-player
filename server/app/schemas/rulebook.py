@@ -42,6 +42,8 @@ class VillageRulesRead(BaseModel):
     enabled: bool = True
     #: ``options`` 与规则原文不同之处的短标签（规矩摘要用；由各规则组件生成，前端不再自己翻译）
     labels: list[str] = []
+    #: 存着的数据表补丁（表名 → 补丁行），规则页据此显示每张表改了几处
+    data: dict = {}
 
 
 class RuleTableView(BaseModel):
@@ -72,8 +74,11 @@ class VillageRulesUpdate(BaseModel):
     table_notes: str | None = None
     #: ``None`` = 本次不动总开关（只改参数时不必把它一并回传）
     enabled: bool | None = None
-    #: 数据表补丁（表名 → 补丁行），整份替换；``None`` = 本次不动（导入房规时才带）
+    #: 数据表补丁（表名 → 补丁行），整份替换；``None`` = 本次不动
     data: dict | None = None
+    #: 数据表的「整张表」（表名 → 想要的全部行），只替换列出的表、其余不动；服务端算出与官方的差异。
+    #: 规则页的统一保存用它：参数、约定、开关与数据表一次提交，全部校验通过才一起落库。
+    tables: dict[str, list[dict]] | None = None
 
 
 class HouseRulesExport(BaseModel):
@@ -99,6 +104,8 @@ class HouseRulesPreviewRead(BaseModel):
     table_notes: str = ""
     #: 数据表补丁（表名 → 补丁行），已严格校验
     data: dict = {}
+    #: 补丁打在官方数据上之后的整张表（表名 → 行），规则页导入时直接载入草稿
+    tables: dict[str, list[dict]] = {}
     labels: list[str] = []
     errors: list[str] = []
     warnings: list[str] = []
@@ -108,12 +115,14 @@ class RuleComponentManifest(BaseModel):
     id: str
     title: str
     description: str = ""
-    #: 村规面板上的分栏；空串 = 不在面板上出现（没有可调参数的常驻组件）
+    #: 规则页上的分区；空串 = 不在规则页出现（没有可调参数的常驻组件）
     group: str = ""
     #: 可选组件的开关参数名；None = 常驻组件
     toggle: str | None = None
     #: 组件来源：official 或 plugin:<插件文件名>
     source: str = "official"
+    #: 可选规则卡的来源标签（官方可选 / 本桌自定 / 官方变体）
+    tag: str = ""
     requires: list[str] = []
     conflicts: list[str] = []
     #: 本组件参数的 JSON Schema（含 x-choices / x-show-if 界面提示）；无参数时为 None
@@ -133,7 +142,7 @@ class RuleTableManifest(BaseModel):
 
 
 class RuleSystemManifest(BaseModel):
-    """规则系统的组件目录：前端村规面板与数据表编辑器据此渲染，房规文件据此校验。"""
+    """规则系统的组件目录：前端规则页与数据表编辑器据此渲染，房规文件据此校验。"""
 
     id: str
     title: str

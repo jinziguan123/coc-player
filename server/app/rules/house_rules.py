@@ -50,6 +50,8 @@ class HouseRulesPreview:
     table_notes: str = ""
     #: 数据表补丁（表名 → 补丁行），已严格校验
     data: dict = field(default_factory=dict)
+    #: 补丁打在官方数据上之后的整张表（由服务层填，供规则页载入草稿）
+    tables: dict = field(default_factory=dict)
     name: str = ""
     description: str = ""
     errors: list[str] = field(default_factory=list)
@@ -74,7 +76,7 @@ def export_text(
             "description": description,
             "exported_at": (today or date.today()).isoformat(),
         },
-        # 按村规面板的顺序写（判定在前、伤害与状态在后），人读起来与界面一一对应
+        # 按规则页的顺序写（检定、幸运、伤害与状态……），人读起来与界面一一对应
         "options": {
             key: options_diff[key]
             for comp in system.active_components for key in comp.option_keys

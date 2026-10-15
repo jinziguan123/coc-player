@@ -38,7 +38,7 @@ class LuckRerollConfig(RuleConfig):
 COMPONENT = Component(
     id="coc7.luck-reroll", title="燃运重骰",
     requires=("coc7.luck",),
-    config=LuckRerollConfig, toggle="luck_reroll", group="判定",
+    config=LuckRerollConfig, toggle="luck_reroll", group="幸运", tag="本桌自定",
     description="本桌自定，规则书里没有这条：失败后可烧固定点数幸运，整骰重掷一次。"
                 "规则书的重掷叫「孤注一掷」，它不花幸运、且与花幸运二选一。",
 )
