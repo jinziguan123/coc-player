@@ -13,6 +13,8 @@ from app.schemas.rulebook import (
     HouseRulesPreviewRead,
     RuleSearchResponse,
     RulebookRead,
+    RulePluginList,
+    RulePluginRead,
     RuleSystemManifest,
     RuleTableUpdate,
     RuleTableView,
@@ -212,6 +214,20 @@ def update_village_table(
     except rule_options_service.RuleDataError as e:
         raise HTTPException(400, "\n".join(e.errors)) from e
     return RuleTableView(table=table, **rule_options_service.table_view(rule_system, table, patches))
+
+
+@router.get("/plugins/{rule_system}", response_model=RulePluginList)
+def list_rule_plugins(rule_system: str):
+    """本机安装的第三方规则插件及加载结果（含没加载的原因）。插件在应用启动时加载。"""
+    from app.config import settings
+    from app.rules import plugins
+
+    _system_or_404(rule_system)
+    return RulePluginList(
+        directory=str(settings.plugins_dir),
+        api_version=plugins.PLUGIN_API_VERSION,
+        plugins=[RulePluginRead(**vars(i)) for i in plugins.installed(rule_system)],
+    )
 
 
 def _table_or_404(rule_system: str, table: str):

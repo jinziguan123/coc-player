@@ -70,7 +70,7 @@ def village_data(db: Session, rule_system: str) -> dict:
 
 
 class RuleDataError(ValueError):
-    """数据表补丁校验失败；``errors`` 是逐行的可读原因。"""
+    """村规校验失败（数据表补丁逐行出错、组件开关组合不成立）；``errors`` 是可读原因。"""
 
     def __init__(self, errors: list[str]) -> None:
         super().__init__("；".join(errors[:5]) + (f"……等 {len(errors)} 处" if len(errors) > 5 else ""))
@@ -175,8 +175,12 @@ def save_village_options(
     """
     rule_system = (rule_system or DEFAULT_RULE_SYSTEM).strip()
     checked = validated_data(rule_system, data) if data is not None else None
+    options = normalized(raw, rule_system)
+    problems = get_system(rule_system).check_options(options)   # 依赖没开、互斥都开
+    if problems:
+        raise RuleDataError(problems)
     row = _village_row_for_write(db, rule_system)
-    row.options = normalized(raw, rule_system)
+    row.options = options
     if checked is not None:
         row.data_patches = checked
     if notes is not None:
@@ -289,6 +293,8 @@ def preview_house_rules(rule_system: str, text: str) -> tuple[house_rules.HouseR
     """
     system = get_system(rule_system)
     preview = house_rules.parse_text(system, text, notes_max=TABLE_NOTES_MAX)
+    if preview.ok:
+        preview.errors += system.check_options(preview.options)
     labels = (
         system.option_labels(system.parse_options(preview.options))
         + data_labels(rule_system, preview.data)

@@ -13,6 +13,7 @@ from app.rules.base import CheckResult
 from app.rules.coc.components.character import default_skills
 from app.rules.config import RuleConfig, rule_field
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile
+from app.rules.hooks import hooks_of
 from app.rules.kernel import Component, Provide
 
 #: 大失败判定规则。
@@ -290,6 +291,14 @@ def resolve_skill_check(
     """
     opts = options or _RAW
     skill_value = resolve_skill_value(character_data, skill_name, options)
+    # 规则钩子追加的奖惩骰（如临时疯狂的症状波及这项技能）：所有检定一视同仁
+    modifiers = [
+        m for result in hooks_of(options).check_modifiers(
+            character_data=character_data, skill_name=skill_name, difficulty=difficulty, options=options,
+        ) for m in (result or []) if m.get("n")
+    ]
+    bonus += sum(int(m["n"]) for m in modifiers if m.get("kind") == "bonus")
+    penalty += sum(int(m["n"]) for m in modifiers if m.get("kind") == "penalty")
     # 奖惩骰上限也是村规：净奖惩先各自钳到上限内，再抵消。
     bonus = max(0, min(bonus, opts.dice_pool_cap))
     penalty = max(0, min(penalty, opts.dice_pool_cap))
@@ -327,6 +336,7 @@ def resolve_skill_check(
         units=units,
         bonus=bonus,
         penalty=penalty,
+        modifiers=modifiers,
     )
 
 

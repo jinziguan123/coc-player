@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from app.rules.config import RuleConfig, table_of
 from app.rules.data import DataTable, frozen_mapping
 from app.rules.dice import roll
+from app.rules.hooks import hookimpl, hooks_of
 from app.rules.kernel import Component, Provide
 
 # CoC 7th 基础属性掷骰规则
@@ -210,15 +211,26 @@ def damage_bonus(combined: int) -> tuple[str, int]:
     return f"{4 + extra}d6", 5 + extra
 
 
-def compute_derived(attrs: dict[str, int], age: int = 25) -> dict:
-    """计算派生属性"""
+@hookimpl(trylast=True)
+def max_hp(attrs: dict) -> int:
+    """官方最大 HP：(CON+SIZ)/10。以 trylast 挂上，变体组件（如 Pulp）的实现排在它前面、先生效。"""
+    return (attrs.get("CON", 50) + attrs.get("SIZ", 50)) // 10
+
+
+def max_hp_of(attrs: dict[str, int], options: RuleConfig | None = None) -> int:
+    """本局规则下的最大 HP（经钩子 ``max_hp``：变体可以换掉算法）。"""
+    hp = hooks_of(options).max_hp(attrs=attrs, options=options)
+    return hp if hp is not None else max_hp(attrs)
+
+
+def compute_derived(attrs: dict[str, int], age: int = 25, options: RuleConfig | None = None) -> dict:
+    """计算派生属性（最大 HP 经钩子，其余按规则书）"""
     str_val = attrs.get("STR", 50)
-    con_val = attrs.get("CON", 50)
     siz_val = attrs.get("SIZ", 50)
     dex_val = attrs.get("DEX", 50)
     pow_val = attrs.get("POW", 50)
 
-    hp = (con_val + siz_val) // 10
+    hp = max_hp_of(attrs, options)
     mp = pow_val // 5
     san = pow_val
     # 走 roll_luck 而非裸 3d6：未成年「两次取高」是年龄规则的一部分，
@@ -364,7 +376,7 @@ def create_character(data: dict, options: RuleConfig | None = None) -> dict:
         attrs = roll_attributes()
 
     age = data.get("age", 25)
-    system_data = compute_derived(attrs, age)
+    system_data = compute_derived(attrs, age, options)
 
     extra_sd = data.get("system_data", {})
     if isinstance(extra_sd, dict):
@@ -411,15 +423,16 @@ COMPONENT = Component(
     id="coc7.character", title="属性与建卡",
     requires=("coc7.dice",),
     data=(SKILLS,),
+    hooks=__name__,
     provides={"character": Provide(
         __name__,
         bound=(
             "default_skills", "build_default_skills", "get_character_schema", "base_skills",
-            "create_character",
+            "create_character", "compute_derived", "max_hp_of",
         ),
         plain=(
             "ATTRIBUTE_ROLLS", "roll_attributes", "apply_age_modifiers",
-            "roll_luck", "damage_bonus", "compute_derived", "derive_assets",
+            "roll_luck", "damage_bonus", "derive_assets",
             "apply_attr_derived_skills", "validate_character", "roll_attribute_sets",
         ),
     )},

@@ -181,7 +181,8 @@ def test_major_wound_divisor_changes_threshold():
 
 def test_improvement_can_be_switched_off():
     assert ruleset_for("coc").growth.improvement_check(50) is not None
-    assert ruleset_for("coc", {"improvement": False}).growth.improvement_check(50) is None
+    # 关掉成长 = 成长组件不启用：本局根本没有成长这块规则（成长结算据 rs.has 返回空结果）
+    assert not ruleset_for("coc", {"improvement": False}).has("growth")
 
 
 # ── 规划器看得见玩家状态 ──────────────────────────────────────────────────

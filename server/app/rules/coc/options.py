@@ -13,17 +13,20 @@ Effects：它把改动应用在角色数据的副本上而非原件上，所以�
 
 from __future__ import annotations
 
+from app.rules.coc.components.bleeding import BleedingConfig
 from app.rules.coc.components.check import CheckConfig
 from app.rules.coc.components.growth import GrowthConfig
 from app.rules.coc.components.luck_reroll import LuckRerollConfig
 from app.rules.coc.components.luck_spend import LuckSpendConfig
+from app.rules.coc.components.pulp_hp import PulpHpConfig
 from app.rules.coc.components.sanity import SanityConfig
 from app.rules.coc.components.wound import WoundConfig
 from app.rules.config import parse_lenient
 
 
 class CocRuleOptions(
-    CheckConfig, LuckSpendConfig, LuckRerollConfig, WoundConfig, SanityConfig, GrowthConfig,
+    CheckConfig, LuckSpendConfig, LuckRerollConfig, WoundConfig, PulpHpConfig, BleedingConfig,
+    SanityConfig, GrowthConfig,
 ):
     """一局（或一个模组）生效的完整村规：各组件参数的合成。
 

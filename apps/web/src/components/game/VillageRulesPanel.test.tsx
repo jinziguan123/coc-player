@@ -205,3 +205,20 @@ describe('房规导入', () => {
     expect(screen.queryByRole('button', { name: '确认导入' })).not.toBeInTheDocument()
   })
 })
+
+
+describe('插件提供的规则', () => {
+  it('来自插件的组件标「插件」', async () => {
+    const plugin = {
+      id: 'example.wound-penalty', title: '受伤减值', description: '插件提供的常见村规',
+      group: '判定', toggle: 'wound_penalty', source: 'plugin:wound_penalty.py', requires: [], conflicts: [],
+      config_schema: { properties: { wound_penalty: { type: 'boolean', title: '受伤减值', default: false } } },
+    }
+    get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/manifest')
+      ? { ...MANIFEST, components: [...MANIFEST.components, plugin] }
+      : { options: {}, effective: { ...RAW, wound_penalty: false }, table_notes: '' }))
+    render(<VillageRulesPanel ruleSystem="coc" />)
+    await screen.findByRole('switch', { name: '受伤减值' })
+    expect(screen.getByText('插件')).toBeInTheDocument()
+  })
+})

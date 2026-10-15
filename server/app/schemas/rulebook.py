@@ -112,6 +112,8 @@ class RuleComponentManifest(BaseModel):
     group: str = ""
     #: 可选组件的开关参数名；None = 常驻组件
     toggle: str | None = None
+    #: 组件来源：official 或 plugin:<插件文件名>
+    source: str = "official"
     requires: list[str] = []
     conflicts: list[str] = []
     #: 本组件参数的 JSON Schema（含 x-choices / x-show-if 界面提示）；无参数时为 None
@@ -139,3 +141,26 @@ class RuleSystemManifest(BaseModel):
     house_rules_format_version: int
     tables: list[RuleTableManifest] = []
     components: list[RuleComponentManifest]
+
+
+class RulePluginRead(BaseModel):
+    """一个第三方规则插件的加载结果。"""
+
+    file: str
+    name: str = ""
+    version: str = ""
+    description: str = ""
+    #: loaded | failed
+    status: str
+    #: 没加载的原因（导入报错、接口版本不符、与官方或其他插件冲突……）
+    error: str = ""
+    #: 插件提供的组件 id
+    components: list[str] = []
+
+
+class RulePluginList(BaseModel):
+    #: 插件目录（放插件文件的位置）
+    directory: str
+    #: 本应用的插件接口版本
+    api_version: int
+    plugins: list[RulePluginRead]

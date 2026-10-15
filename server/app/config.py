@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # 与数据库、素材同处。app.log 收全部应用日志；timing.log 只收「耗时|…」与思考占比告警，
     # 方便直接对账「一个回合慢在哪一段」——此前日志只进 stdout，打包版那个文件恒为空。
     log_dir: Path = _BASE / "logs"
+    # 第三方规则插件目录（PLUGINS_DIR 可覆盖）。开发态 server/plugins/，打包态 app-data/plugins/。
+    # 插件以本应用的权限运行、不做沙箱，只放你信任的插件。见 app/rules/plugins.py。
+    plugins_dir: Path = _BASE / "plugins"
     # 终检/去口癖这类「检查与改写」任务是否先用快模型、不可用再回退叙事模型。
     # 默认开启：快模型槽位通常关思考，这两步能省下每次 20~40s；设为 false 全部走叙事模型。
     checks_use_fast_model: bool = True

@@ -153,8 +153,8 @@ def _npc_participant(npc: dict, side: str = "enemy", masker=None, *, rs: Ruleset
     """
     rs = rs or _raw_rules()
     attrs = npc.get("attributes") or {}
-    con, siz = attrs.get("CON", 50), attrs.get("SIZ", 50)
-    max_hp = npc.get("hp") or (con + siz) // 10
+    # 模组/KP 给了 hp 就用；没给按本局规则算（Pulp 等变体可换掉算法）
+    max_hp = npc.get("hp") or rs.character.max_hp_of(attrs)
     weapon = npc.get("weapon") or "徒手格斗"
     db = "0"
     try:
@@ -376,6 +376,10 @@ def apply_damage(db: Session, state: dict, target: dict, amount: int, reason: st
     )
     target["hp"] = r["new_hp"]
     target["status"] = r["status"]
+    # 规则钩子挂上的状态（如流血）并入 conditions
+    for cond in r.get("conditions_add") or []:
+        if cond not in (target.get("conditions") or []):
+            target["conditions"] = [*(target.get("conditions") or []), cond]
     # 新伤 = 新的急救机会：重置 first_aid_used，否则前期被急救过的人再受伤（乃至濒死）
     # 会被 first_aid 分支顶端的 used 检查锁死，连救命的濒死稳住都做不了。
     if amount > 0:
@@ -972,6 +976,13 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
                 heal_lines = apply_heal(db, state, target, r["heal"])
                 for line in heal_lines:
                     chunks.append(_combat_line(db, session_id, line))
+            # 规则钩子的急救后效果（如止血）
+            effects = rs.wound.after_first_aid(target)
+            if effects["conditions_remove"]:
+                target["conditions"] = [c for c in (target.get("conditions") or [])
+                                        if c not in effects["conditions_remove"]]
+            for line in effects["lines"]:
+                chunks.append(_combat_line(db, session_id, f"{target['name']} {line}"))
             target["first_aid_used"] = True
         state["log"].append({"round": state["round"], "actor": actor["name"], "action": "first_aid",
                              "target": target["name"], "success": r["success"]})
@@ -1090,6 +1101,13 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
                                      ignore_armor=True, session_id=session_id):
                 chunks.append(_combat_line(db, session_id, line))
             _save_combat(db, session_id, state)
+        # 规则钩子的持续伤害（如流血）：同燃烧，回合开始结算、须在 is_active 判断前
+        if rs.combat.is_active(actor):
+            for eff in rs.wound.turn_start_damage(actor):
+                for line in apply_damage(db, state, actor, int(eff["damage"]), reason=str(eff.get("reason") or ""),
+                                         ignore_armor=True, session_id=session_id):
+                    chunks.append(_combat_line(db, session_id, line))
+                _save_combat(db, session_id, state)
         # 濒死者回合开始先跑体质 tick（须在 is_active 跳过之前，否则永远不掷）
         if actor.get("status") == "dying":
             for line in rs.wound.tick_dying(actor):

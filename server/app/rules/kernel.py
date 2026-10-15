@@ -21,14 +21,18 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.rules import data as rule_data
+from app.rules import hooks as rule_hooks
 from app.rules.config import RuleConfig, parse_lenient, parse_strict
 from app.rules.data import DataTable
+
+logger = logging.getLogger(__name__)
 
 #: 房规文件格式版本（见设计文档 6.3）。升级时在 house_rules 里补一个迁移函数。
 #: v2（P3）：新增 ``data`` 段——数据表补丁。
@@ -91,6 +95,19 @@ class Component:
     description: str = ""
     #: 本组件的数据表（房主/模组作者可以补丁改动的那些表）。表名在规则系统内唯一。
     data: tuple[DataTable, ...] = ()
+    #: 本组件的钩子实现所在的模块（模块对象或路径，通常写 ``__name__``）。见 app.rules.hooks。
+    hooks: Any = None
+    #: 组件来源：``official`` 或 ``plugin:<插件名>``（第三方插件加载时填）。
+    source: str = "official"
+
+    @property
+    def optional(self) -> bool:
+        return self.toggle is not None
+
+    def hooks_module(self) -> Any:
+        if isinstance(self.hooks, str):
+            return importlib.import_module(self.hooks)
+        return self.hooks
 
     @property
     def option_keys(self) -> tuple[str, ...]:
@@ -186,6 +203,43 @@ class RuleSystem:
         """与 RAW 不同之处的人话（给 KP），按预设顺序逐组件拼接。"""
         return [line for c in self._active if c.config for line in c.config.describe(options)]
 
+    def enabled_components(self, options: Any) -> tuple[tuple[Component, ...], list[str]]:
+        """按村规开关算出本局实际启用的组件，并报出开关组合的问题（依赖没开、互斥都开）。
+
+        有问题的组件按「后者让位」剔除：依赖缺失的不启用；互斥的两个只保留预设里靠前的那个。
+        """
+        errors: list[str] = []
+        on = [c for c in self._active if c.is_enabled(options)]
+        changed = True
+        while changed:   # 依赖可能是另一个可选组件：剔除一个可能连带剔除下一个
+            changed = False
+            ids = {c.id for c in on}
+            for comp in list(on):
+                missing = [d for d in comp.requires if d not in ids]
+                if missing:
+                    titles = "、".join(self._title(d) for d in missing)
+                    errors.append(f"「{comp.title}」需要先开启「{titles}」")
+                    on.remove(comp)
+                    changed = True
+        kept: list[Component] = []
+        for comp in on:
+            clash = [k for k in kept if k.id in comp.conflicts or comp.id in k.conflicts]
+            if clash:
+                errors.append(f"「{comp.title}」与「{clash[0].title}」不能同时开启")
+                continue
+            kept.append(comp)
+        return tuple(kept), errors
+
+    def check_options(self, options: dict | None) -> list[str]:
+        """保存村规前的校验：开关组合是否成立（依赖、互斥）。返回可读的问题列表。"""
+        return self.enabled_components(self.parse_options(options))[1]
+
+    def _title(self, component_id: str) -> str:
+        for c in self.components:
+            if c.id == component_id:
+                return c.title
+        return component_id
+
     def option_labels(self, options: Any) -> list[str]:
         """与 RAW 不同之处的短标签（给玩家看的规矩摘要）。"""
         return [text for c in self._active if c.config for text in c.config.labels(options)]
@@ -213,6 +267,7 @@ class RuleSystem:
                     "description": c.description,
                     "group": c.group,
                     "toggle": c.toggle,
+                    "source": c.source,
                     "requires": list(c.requires),
                     "conflicts": list(c.conflicts),
                     "config_schema": c.config.model_json_schema() if c.config else None,
@@ -276,15 +331,25 @@ class Ruleset:
         self._tables = {
             name: table.runtime(rows[name]) for name, (_cid, table) in system._tables.items()
         }
-        # 「本局规则」= 参数 + 数据表：把合并好的表附在注入给组件函数的那个对象上
+        enabled, problems = system.enabled_components(options)
+        for p in problems:   # 保存时已校验过；走到这里多半是旧存档或手改数据库，降级而不是崩
+            logger.warning("规则系统 %s 的组件开关组合有问题，已按后者让位处理：%s", system.id, p)
+        #: 本份村规下实际启用的组件（可选组件随其开关参数进出）。
+        self.components = tuple(c.id for c in enabled)
+        # 本局的钩子：只登记启用的组件
+        pm = rule_hooks.new_manager()
+        for comp in enabled:
+            if comp.hooks is not None:
+                pm.register(comp.hooks_module(), name=comp.id)
+        # 「本局规则」= 参数 + 数据表 + 钩子：附在注入给组件函数的那个对象上
         ctx = options.model_copy()
         ctx._tables = self._tables
+        ctx._hooks = pm.hook
         self.options = ctx
-        #: 本份村规下实际启用的组件（可选组件随其开关参数进出）。
-        self.components = tuple(c.id for c in system._active if c.is_enabled(options))
         self._services = {
             slot: Service(slot, provide, ctx)
-            for slot, (_cid, provide) in system._slots.items()
+            for slot, (cid, provide) in system._slots.items()
+            if cid in self.components
         }
 
     def rows(self, table: str) -> tuple[dict, ...]:
@@ -321,8 +386,9 @@ class Ruleset:
 _SYSTEMS: dict[str, RuleSystem] = {}
 
 
-def register_system(system: RuleSystem) -> None:
-    if system.id in _SYSTEMS and _SYSTEMS[system.id] is not system:
+def register_system(system: RuleSystem, *, replace: bool = False) -> None:
+    """注册规则系统。``replace=True`` 用于叠上第三方插件后替换官方版本（见 app.rules.plugins）。"""
+    if system.id in _SYSTEMS and _SYSTEMS[system.id] is not system and not replace:
         raise RulesetError(f"规则系统 {system.id!r} 重复注册")
     _SYSTEMS[system.id] = system
 
@@ -386,7 +452,9 @@ def _resolve(system: RuleSystem) -> tuple[
             if dep not in active_ids:
                 errors.append(f"组件 {comp.id} 依赖 {dep}，但它没有启用")
         for other in comp.conflicts:
-            if other in active_ids:
+            # 两个都是常驻组件才是组装错误；有可选组件参与的互斥按村规开关在运行时判
+            other_comp = catalog.get(other)
+            if other in active_ids and not comp.optional and other_comp and not other_comp.optional:
                 errors.append(f"组件 {comp.id} 与 {other} 互斥，不能同时启用")
 
     slots: dict[str, tuple[str, Provide]] = {}
@@ -416,6 +484,7 @@ def _resolve(system: RuleSystem) -> tuple[
 
     errors += _check_option_owners(active, tuple(system.options_model.model_fields))
     errors += _check_toggles(active)
+    errors += _check_hooks(active)
     if errors:
         raise RulesetError(f"规则系统 {system.id} 组装失败：\n- " + "\n- ".join(errors))
     return tuple(active), slots, tables
@@ -434,6 +503,21 @@ def _check_option_owners(active: Iterable[Component], option_fields: tuple[str, 
             else:
                 owner[key] = comp.id
     errors += [f"村规键 {key} 没有任何组件认领" for key in option_fields if key not in owner]
+    return errors
+
+
+def _check_hooks(active: Iterable[Component]) -> list[str]:
+    """每个组件的钩子实现都要对得上某个钩子声明——名字拼错在启动时就报。"""
+    errors: list[str] = []
+    for comp in active:
+        if comp.hooks is None:
+            continue
+        pm = rule_hooks.new_manager()
+        try:
+            pm.register(comp.hooks_module(), name=comp.id)
+            pm.check_pending()
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"组件 {comp.id} 的钩子无效：{e}")
     return errors
 
 

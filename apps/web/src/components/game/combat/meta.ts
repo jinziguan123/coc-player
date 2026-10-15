@@ -1,10 +1,7 @@
 // 战斗面板共享元数据/纯函数：图标映射、成败取色、出局/血量小工具。
 // 图标全走 react-icons/gi（game-icons 风格），禁 emoji（项目硬性守则）。
 import {
-  GiCrossedSwords, GiShield, GiRun, GiBrickWall,
-  GiFirstAidKit, GiBinoculars, GiGrab, GiBrokenAxe, GiAmmoBox, GiCrosshair,
-  GiHandcuffs, GiFlame, GiFireBottle, GiDeathSkull, GiBrokenHeart,
-  GiKnockedOutStars, GiBrokenBone,
+  GiCrossedSwords, GiShield, GiRun, GiBrickWall, GiFirstAidKit, GiBinoculars, GiGrab, GiBrokenAxe, GiAmmoBox, GiCrosshair, GiHandcuffs, GiFlame, GiFireBottle, GiDeathSkull, GiBrokenHeart, GiKnockedOutStars, GiBrokenBone, GiBleedingWound,
 } from 'react-icons/gi'
 import type { Combatant, CombatStatus } from './types'
 
@@ -57,6 +54,8 @@ export const CONDITION_META: Record<string, { label: string; Icon: typeof GiCros
   grappled: { label: '被擒', Icon: GiHandcuffs },
   disarmed: { label: '缴械', Icon: GiBrokenAxe },
   burning: { label: '着火', Icon: GiFlame },
+  // 来自可选规则组件「流血」（coc7.bleeding）：重伤后每轮失血，急救止血
+  bleeding: { label: '流血', Icon: GiBleedingWound },
 }
 
 // 武器：拳头（徒手格斗）永远可选并置顶；其余从角色卡武器栏（system_data.weapons）来；

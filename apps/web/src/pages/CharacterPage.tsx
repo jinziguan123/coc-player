@@ -8,7 +8,7 @@ import { CharacterEditModal } from '../components/character/CharacterEditModal'
 import { SpecializationDialog } from '../components/character/SpecializationDialog'
 import { WeaponsEditor } from '../components/character/WeaponsEditor'
 import {
-  useSpecializations, useOccupations, normalizeWeapon, deriveAssets, ruleQuery, RuleModuleContext,
+  useSpecializations, useOccupations, useDerivedStats, normalizeWeapon, deriveAssets, ruleQuery, RuleModuleContext,
   type CharWeapon, type OccupationDef,
 } from '../components/character/useCocData'
 import {
@@ -37,7 +37,6 @@ import {
   grantableDelta,
   remainingOccPoints,
 } from '@/features/characters/skillBudget'
-import { deriveStats } from '@/features/characters/cocDerived'
 
 interface AttrSet {
   sets: Array<Record<string, number>>
@@ -300,7 +299,7 @@ export function CharacterPage() {
   }
 
   // ---- 派生属性计算（规则在 features/characters/cocDerived，与后端逐条对齐）----
-  const derivedStats = effectiveAttrs ? deriveStats(effectiveAttrs, age) : null
+  const derivedStats = useDerivedStats(effectiveAttrs, age, moduleId || null)
 
   // ---- 掷骰 ----
   const rollLuck = () => {

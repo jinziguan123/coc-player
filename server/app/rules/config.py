@@ -34,6 +34,8 @@ class RuleConfig(BaseModel):
     #: 本局合并后的数据表（表名 → 运行时形态）。由 Ruleset 在注入前附上；
     #: 不参与相等与哈希——缓存键另算（见 kernel._build）。
     _tables: Any = PrivateAttr(default=None)
+    #: 本局的钩子（``pm.hook``），只含实际启用的组件；同样由 Ruleset 附上。见 app.rules.hooks。
+    _hooks: Any = PrivateAttr(default=None)
 
     def table(self, name: str, official: Any) -> Any:
         """取本局的某张数据表；没附表（未经 Ruleset 注入，如单测直接调）时用官方数据。"""

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.rules.config import RuleConfig, rule_field, table_of
 from app.rules.data import DataTable
+from app.rules.hooks import hookimpl
 from app.rules.kernel import Component, Provide
 
 
@@ -84,10 +85,23 @@ def check_penalty(madness: dict | None, skill: str) -> int:
     return 0
 
 
+@hookimpl
+def check_modifiers(character_data: dict, skill_name: str) -> list[dict] | None:
+    """临时疯狂发作中：症状波及这项技能 → 加一颗惩罚骰。对所有检定生效（玩家、AI 队友、NPC、
+    对抗、战斗、追逐），不再只在 KP 发起的玩家检定上手工叠加。"""
+    madness = (character_data.get("system_data") or {}).get("madness")
+    n = check_penalty(madness, skill_name)
+    if not n:
+        return None
+    label = str((madness or {}).get("label") or "").strip()
+    return [{"kind": "penalty", "n": n, "reason": f"临时疯狂{f'·{label}' if label else ''}影响了这项技能"}]
+
+
 COMPONENT = Component(
     id="coc7.madness", title="疯狂发作",
     requires=("coc7.sanity",),
     data=(SYMPTOMS,),
+    hooks=__name__,
     provides={"madness": Provide(
         __name__, bound=("symptoms", "make_bout", "roll_symptom"),
         plain=("roll_duration", "check_penalty"),

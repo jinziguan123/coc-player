@@ -26,6 +26,8 @@ server/seed/
 server/evals/results/
 # 应用日志落盘目录（app.log / timing.log，运行时产物，不入库）
 server/logs/
+# 本机安装的第三方规则插件（源码运行时的插件目录，不入库；示例插件在 docs/plugins/）
+server/plugins/
 
 .env
 # 含 AI 密钥，不入库（密钥应从 .env / 设置页注入）

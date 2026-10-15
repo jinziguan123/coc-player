@@ -698,6 +698,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rulebooks/plugins/{rule_system}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rule Plugins
+         * @description 本机安装的第三方规则插件及加载结果（含没加载的原因）。插件在应用启动时加载。
+         */
+        get: operations["list_rule_plugins_api_rulebooks_plugins__rule_system__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rulebooks/search": {
         parameters: {
             query?: never;
@@ -953,6 +973,28 @@ export interface paths {
         get: operations["get_character_schema_api_rules__rule_system__character_schema_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rules/{rule_system}/derived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Derived Stats
+         * @description 建卡预览的派生值，按这一桌的规则算（含 Pulp 英雄生命值等变体）。
+         *
+         *     前端有一份本地镜像（cocDerived.ts）用于即时预览；本接口是权威值，变体打开时以它为准。
+         */
+        post: operations["derived_stats_api_rules__rule_system__derived_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3211,6 +3253,38 @@ export interface components {
             /** Weapon */
             weapon?: string | null;
         };
+        /** DerivedStatsRequest */
+        DerivedStatsRequest: {
+            /**
+             * Age
+             * @default 25
+             */
+            age: number;
+            /** Base Attributes */
+            base_attributes: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * DerivedStatsResponse
+         * @description 建卡预览用的派生值（按本桌规则：Pulp 等变体会改 HP）。与前端 cocDerived.ts 同字段。
+         */
+        DerivedStatsResponse: {
+            /** Build */
+            build: number;
+            /** Db */
+            db: string;
+            /** Dodge */
+            dodge: number;
+            /** Hp */
+            hp: number;
+            /** Mov */
+            mov: number;
+            /** Mp */
+            mp: number;
+            /** San */
+            san: number;
+        };
         /**
          * EndVoteRequest
          * @description 结束模组投票：以哪个真人席角色发起 / 同意；缺省取主角席。
@@ -4019,6 +4093,11 @@ export interface components {
              * @default []
              */
             requires: string[];
+            /**
+             * Source
+             * @default official
+             */
+            source: string;
             /** Title */
             title: string;
             /** Toggle */
@@ -4034,6 +4113,50 @@ export interface components {
             score: number;
             /** Text */
             text: string;
+        };
+        /** RulePluginList */
+        RulePluginList: {
+            /** Api Version */
+            api_version: number;
+            /** Directory */
+            directory: string;
+            /** Plugins */
+            plugins: components["schemas"]["RulePluginRead"][];
+        };
+        /**
+         * RulePluginRead
+         * @description 一个第三方规则插件的加载结果。
+         */
+        RulePluginRead: {
+            /**
+             * Components
+             * @default []
+             */
+            components: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /** File */
+            file: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /** Status */
+            status: string;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
         };
         /** RuleSearchResponse */
         RuleSearchResponse: {
@@ -5672,6 +5795,37 @@ export interface operations {
             };
         };
     };
+    list_rule_plugins_api_rulebooks_plugins__rule_system__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RulePluginList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     search_rules_api_rulebooks_search_get: {
         parameters: {
             query: {
@@ -6134,6 +6288,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    derived_stats_api_rules__rule_system__derived_post: {
+        parameters: {
+            query?: {
+                module_id?: string | null;
+            };
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DerivedStatsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DerivedStatsResponse"];
                 };
             };
             /** @description Validation Error */

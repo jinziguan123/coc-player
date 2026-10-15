@@ -787,7 +787,8 @@ async def _auto_roll_check(
             "tier": result.tier,
             "actor": shown,
             "dice": _check_dice_detail(
-                result, dice_runtime.modifier_notes(bonus, penalty, modifier_reason),
+                result,
+                dice_runtime.modifier_notes(bonus, penalty, modifier_reason) + result.modifiers,
             ),
         }
         descs.append(

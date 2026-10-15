@@ -28,7 +28,7 @@ type HouseRulesExport = components['schemas']['HouseRulesExport']
  *  说明不能跟标题挤在左半边——那样它只剩一半宽度，一句话要折三行，整列看着像被压扁的表格。
  *  ``indent`` 用于从属项（幸运消费展开的那几条），靠缩进表明它们依附于上一条。 */
 function Row({ label, hint, indent, children }: {
-  label: string
+  label: React.ReactNode
   hint?: string
   indent?: boolean
   children: React.ReactNode
@@ -116,8 +116,14 @@ function ComponentRows({ component, values, patch }: {
   const rest = fields.filter((f) => f !== toggle)
   const open = !toggle || Boolean(values[toggle.key])
 
+  // 第三方插件提供的规则标出来：房主有权一眼看出哪条不是官方规则
+  const fromPlugin = (component.source ?? 'official').startsWith('plugin:')
+  const title = (f: RuleField, head: boolean) => (head && fromPlugin
+    ? <>{f.title} <span className="chip" style={{ fontSize: 'var(--text-2xs)' }}>插件</span></>
+    : f.title)
+
   const row = (f: RuleField, indent: boolean, hint?: string) => (
-    <Row key={f.key} indent={indent} label={f.title} hint={hint ?? fieldHint(f, values[f.key])}>
+    <Row key={f.key} indent={indent} label={title(f, !indent)} hint={hint ?? fieldHint(f, values[f.key])}>
       <FieldControl
         field={f}
         value={values[f.key]}

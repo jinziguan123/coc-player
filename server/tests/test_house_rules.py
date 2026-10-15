@@ -54,16 +54,18 @@ def test_manifest_lists_configurable_components_with_schema():
     panel = [c for c in m["components"] if c["group"]]
     assert [c["id"] for c in panel] == [
         "coc7.check", "coc7.luck-spend", "coc7.luck-reroll",
-        "coc7.wound", "coc7.sanity", "coc7.growth",
+        "coc7.wound", "coc7.pulp-hp", "coc7.bleeding", "coc7.sanity", "coc7.growth",
     ]
     check = panel[0]["config_schema"]["properties"]
     assert check["critical_max"]["minimum"] == 1 and check["critical_max"]["maximum"] == 20
     assert [c["value"] for c in check["fumble_rule"]["x-choices"]] == [
         "raw", "hundred_only", "ninety_six_plus",
     ]
-    sanity = panel[4]["config_schema"]["properties"]
+    sanity = next(c for c in panel if c["id"] == "coc7.sanity")["config_schema"]["properties"]
     assert sanity["insanity_flat_threshold"]["x-show-if"] == {"insanity_rule": "flat"}
-    assert {c["toggle"] for c in panel} == {None, "luck_spend", "luck_reroll", "improvement"}
+    assert {c["toggle"] for c in panel} == {
+        None, "luck_spend", "luck_reroll", "pulp_hp", "bleeding", "improvement",
+    }
 
 
 def test_every_option_appears_in_exactly_one_component_schema():

@@ -21,6 +21,8 @@ dependencies = [
     "slowapi>=0.1.9",
     # 房规文件（导出/导入村规）；只用 safe_load/safe_dump
     "pyyaml>=6.0",
+    # 规则钩子（组件在检定、伤害等节点挂逻辑）；见 app/rules/hooks.py
+    "pluggy>=1.5",
 ]
 
 [project.optional-dependencies]

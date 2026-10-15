@@ -1098,6 +1098,71 @@
         "title": "CombatActionRequest",
         "type": "object"
       },
+      "DerivedStatsRequest": {
+        "properties": {
+          "age": {
+            "default": 25,
+            "title": "Age",
+            "type": "integer"
+          },
+          "base_attributes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Base Attributes",
+            "type": "object"
+          }
+        },
+        "required": [
+          "base_attributes"
+        ],
+        "title": "DerivedStatsRequest",
+        "type": "object"
+      },
+      "DerivedStatsResponse": {
+        "description": "建卡预览用的派生值（按本桌规则：Pulp 等变体会改 HP）。与前端 cocDerived.ts 同字段。",
+        "properties": {
+          "build": {
+            "title": "Build",
+            "type": "integer"
+          },
+          "db": {
+            "title": "Db",
+            "type": "string"
+          },
+          "dodge": {
+            "title": "Dodge",
+            "type": "integer"
+          },
+          "hp": {
+            "title": "Hp",
+            "type": "integer"
+          },
+          "mov": {
+            "title": "Mov",
+            "type": "integer"
+          },
+          "mp": {
+            "title": "Mp",
+            "type": "integer"
+          },
+          "san": {
+            "title": "San",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hp",
+          "mp",
+          "san",
+          "mov",
+          "db",
+          "build",
+          "dodge"
+        ],
+        "title": "DerivedStatsResponse",
+        "type": "object"
+      },
       "EndVoteRequest": {
         "description": "结束模组投票：以哪个真人席角色发起 / 同意；缺省取主角席。",
         "properties": {
@@ -2668,6 +2733,11 @@
             "title": "Requires",
             "type": "array"
           },
+          "source": {
+            "default": "official",
+            "title": "Source",
+            "type": "string"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2717,6 +2787,79 @@
           "rulebook_id"
         ],
         "title": "RuleHit",
+        "type": "object"
+      },
+      "RulePluginList": {
+        "properties": {
+          "api_version": {
+            "title": "Api Version",
+            "type": "integer"
+          },
+          "directory": {
+            "title": "Directory",
+            "type": "string"
+          },
+          "plugins": {
+            "items": {
+              "$ref": "#/components/schemas/RulePluginRead"
+            },
+            "title": "Plugins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "directory",
+          "api_version",
+          "plugins"
+        ],
+        "title": "RulePluginList",
+        "type": "object"
+      },
+      "RulePluginRead": {
+        "description": "一个第三方规则插件的加载结果。",
+        "properties": {
+          "components": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "status"
+        ],
+        "title": "RulePluginRead",
         "type": "object"
       },
       "RuleSearchResponse": {
@@ -5244,6 +5387,49 @@
         ]
       }
     },
+    "/api/rulebooks/plugins/{rule_system}": {
+      "get": {
+        "description": "本机安装的第三方规则插件及加载结果（含没加载的原因）。插件在应用启动时加载。",
+        "operationId": "list_rule_plugins_api_rulebooks_plugins__rule_system__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulePluginList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Rule Plugins",
+        "tags": [
+          "rulebooks"
+        ]
+      }
+    },
     "/api/rulebooks/search": {
       "get": {
         "description": "调试用：直接对规则书做一次检索，观察命中片段与分数。",
@@ -6017,6 +6203,75 @@
           }
         },
         "summary": "Get Character Schema",
+        "tags": [
+          "characters"
+        ]
+      }
+    },
+    "/api/rules/{rule_system}/derived": {
+      "post": {
+        "description": "建卡预览的派生值，按这一桌的规则算（含 Pulp 英雄生命值等变体）。\n\n前端有一份本地镜像（cocDerived.ts）用于即时预览；本接口是权威值，变体打开时以它为准。",
+        "operationId": "derived_stats_api_rules__rule_system__derived_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "module_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DerivedStatsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivedStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Derived Stats",
         "tags": [
           "characters"
         ]

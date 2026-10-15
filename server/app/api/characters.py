@@ -13,6 +13,8 @@ from app.schemas.character import (
     ApplyAgeResponse,
     BaseSkillsRequest,
     BaseSkillsResponse,
+    DerivedStatsRequest,
+    DerivedStatsResponse,
     CharacterCreate,
     CharacterRead,
     CharacterUpdate,
@@ -219,6 +221,20 @@ def apply_age(data: ApplyAgeRequest, rs: Ruleset = Depends(_rules)):
     luck, luck_rolls = character.roll_luck(data.age)
     return ApplyAgeResponse(
         base_attributes=attrs, notes=notes, luck=luck, luck_rolls=luck_rolls,
+    )
+
+
+@router.post("/rules/{rule_system}/derived", response_model=DerivedStatsResponse)
+def derived_stats(data: DerivedStatsRequest, rs: Ruleset = Depends(_rules)):
+    """建卡预览的派生值，按这一桌的规则算（含 Pulp 英雄生命值等变体）。
+
+    前端有一份本地镜像（cocDerived.ts）用于即时预览；本接口是权威值，变体打开时以它为准。
+    """
+    attrs = data.base_attributes
+    d = _slot(rs, "character").compute_derived(attrs, data.age)
+    return DerivedStatsResponse(
+        hp=d["hitPoints"]["max"], mp=d["magicPoints"]["max"], san=d["sanity"]["current"],
+        mov=d["move"], db=d["damageBonus"], build=d["build"], dodge=attrs.get("DEX", 50) // 2,
     )
 
 

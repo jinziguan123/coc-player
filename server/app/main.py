@@ -132,6 +132,13 @@ async def lifespan(_app: FastAPI):
         logger.exception("启动自动迁移失败，请手动执行 alembic upgrade head")
         # 不以半新半旧 schema 运行，进入维护模式，请求返回可读错误页。
         _MIGRATION_ERROR = str(e)
+    # 第三方规则插件：逐个校验、失败隔离（坏插件只会让它自己不加载，不影响启动）
+    try:
+        from app.rules import plugins
+
+        plugins.install_all(settings.plugins_dir)
+    except Exception:
+        logger.exception("加载规则插件时出错，已按无插件运行")
     yield
 
 

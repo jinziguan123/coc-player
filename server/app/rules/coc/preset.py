@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from app.rules.coc.components import (
+    bleeding,
     character,
     chase,
     check,
@@ -20,6 +21,7 @@ from app.rules.coc.components import (
     madness,
     occupation,
     positioning,
+    pulp_hp,
     sanity,
     wound,
 )
@@ -29,7 +31,7 @@ from app.rules.kernel import RuleSystem
 OFFICIAL_COMPONENTS = (
     dice, character, occupation, equipment,
     check, luck, luck_spend, luck_reroll,
-    wound, combat, positioning, chase,
+    wound, pulp_hp, bleeding, combat, positioning, chase,
     sanity, madness, growth,
 )
 

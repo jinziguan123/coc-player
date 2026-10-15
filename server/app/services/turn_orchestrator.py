@@ -1734,19 +1734,12 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
         modifiers = dice_runtime.modifier_notes(
             bonus, penalty, str(check.get("modifier_reason") or ""),
         )
-        # 临时疯狂：症状波及该技能域 → 自动加惩罚骰（确定性，不问 KP 当初有没有标 penalty）。
-        madness_state = (char_data.get("system_data") or {}).get("madness")
-        madness_penalty = rs.madness.check_penalty(madness_state, skill)
-        if madness_penalty:
-            penalty += madness_penalty
-            label = str((madness_state or {}).get("label") or "").strip()
-            modifiers.append({
-                "kind": "penalty", "n": madness_penalty,
-                "reason": f"临时疯狂{f'·{label}' if label else ''}影响了这项技能",
-            })
+        # 临时疯狂等系统追加的奖惩骰由规则钩子在检定内部加上（所有检定一视同仁），
+        # 理由随结果带回来，与 KP 判的理由一并显示。
         result = rs.check.resolve_skill_check(
             char_data, skill, difficulty, bonus=bonus, penalty=penalty,
         )
+        modifiers += result.modifiers
         tier_cn = TIER_LABEL.get(result.tier, result.tier)
 
         dice_content = (
@@ -1988,6 +1981,7 @@ def _check_result_payload(result) -> dict:
         "meets_difficulty": result.meets_difficulty,
         "tens": list(result.tens), "tens_kept": result.tens_kept,
         "units": result.units, "bonus": result.bonus, "penalty": result.penalty,
+        "modifiers": list(result.modifiers),
     }
 
 
@@ -2000,6 +1994,7 @@ def _check_result_from_payload(payload: dict):
         for key in (
             "skill_name", "skill_value", "roll", "target", "outcome", "description",
             "tier", "meets_difficulty", "tens", "tens_kept", "units", "bonus", "penalty",
+            "modifiers",
         )
         if payload.get(key) is not None
     })

@@ -4,6 +4,7 @@ import { api, getApiBase, getPlayerToken, localApi } from '../api/client'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiArchiveRegister, GiBookCover, GiMagnifyingGlass, GiScrollUnfurled } from 'react-icons/gi'
 import { RuleDataEditor } from '@/components/game/RuleDataEditor'
+import { RulePluginsCard } from '@/components/game/RulePluginsCard'
 import { VillageRulesPanel } from '@/components/game/VillageRulesPanel'
 import { VillageRulesSummary } from '@/components/game/VillageRulesSummary'
 import { ArchiveHead } from '@/components/layout/ArchiveHead'
@@ -197,6 +198,8 @@ export function RulebookPage() {
             </div>
           </Collapse>
         </div>
+
+        <RulePluginsCard ruleSystem={ruleSystem} />
 
         <div className="min-w-0" aria-label="规则书库">
           {/* 书库与上传合成一张卡：上传是**低频入口动作**，此前那块大拖拽区占掉首屏三分之一，

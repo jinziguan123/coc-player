@@ -70,6 +70,23 @@ class BaseSkillsRequest(BaseModel):
     base_attributes: dict[str, int]
 
 
+class DerivedStatsRequest(BaseModel):
+    base_attributes: dict[str, int]
+    age: int = 25
+
+
+class DerivedStatsResponse(BaseModel):
+    """建卡预览用的派生值（按本桌规则：Pulp 等变体会改 HP）。与前端 cocDerived.ts 同字段。"""
+
+    hp: int
+    mp: int
+    san: int
+    mov: int
+    db: str
+    build: int
+    dodge: int
+
+
 class BaseSkillsResponse(BaseModel):
     """这组属性下、未加任何点时的技能起始值（含属性派生项）。"""
 

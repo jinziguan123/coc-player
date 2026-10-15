@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.rules.coc.components.check import resolve_skill_check
 from app.rules.config import RuleConfig, rule_field
+from app.rules.hooks import hooks_of, merge_effects
 from app.rules.kernel import Component, Provide
 
 # ── 角色状态（键 + 中文标签）──────────────────────────────────────────────
@@ -87,6 +88,36 @@ def resolve_wound(
     hp: int, max_hp: int, damage: int, defender_data: dict, already_wounded: bool = False,
     options: WoundConfig | None = None,
 ) -> dict:
+    """结算一次伤害，再让规则钩子 ``wound_resolved`` 追加效果（如流血）。
+
+    返回 {new_hp, status, lines, conditions_add}：``conditions_add`` 是钩子要挂上的状态，
+    由调用方（战斗服务）并入参战方的 conditions。
+    """
+    result = _resolve_wound_core(hp, max_hp, damage, defender_data, already_wounded, options)
+    effects = merge_effects(hooks_of(options).wound_resolved(
+        result=dict(result), damage=damage, max_hp=max(1, max_hp),
+        defender_data=defender_data, options=options,
+    ))
+    result["lines"] = result["lines"] + effects["lines"]
+    result["conditions_add"] = effects["conditions_add"]
+    return result
+
+
+def turn_start_damage(participant: dict, options: WoundConfig | None = None) -> list[dict]:
+    """战斗中某参战方回合开始时的持续伤害（规则钩子 ``combat_turn_start``，如流血）。"""
+    return [d for r in hooks_of(options).combat_turn_start(participant=participant, options=options)
+            for d in (r or []) if d.get("damage")]
+
+
+def after_first_aid(target: dict, options: WoundConfig | None = None) -> dict:
+    """急救成功之后的效果（规则钩子 ``first_aid_applied``，如止血）。"""
+    return merge_effects(hooks_of(options).first_aid_applied(target=target, options=options))
+
+
+def _resolve_wound_core(
+    hp: int, max_hp: int, damage: int, defender_data: dict, already_wounded: bool = False,
+    options: WoundConfig | None = None,
+) -> dict:
     """结算一次伤害的 HP 与状态迁移（纯规则，不碰 DB）。返回 {new_hp, status, lines}。
 
     CoC 7e：
@@ -136,7 +167,7 @@ COMPONENT = Component(
     config=WoundConfig, group="伤害与状态",
     provides={"wound": Provide(
         __name__,
-        bound=("is_major_wound", "resolve_wound", "tick_dying"),
+        bound=("is_major_wound", "resolve_wound", "tick_dying", "turn_start_damage", "after_first_aid"),
         plain=("CHARACTER_STATUSES", "STATUS_SEVERITY", "VALID_STATUS_VALUES", "LEGACY_STATUS_ALIAS"),
     )},
 )

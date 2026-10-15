@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { deriveStats, type DerivedStats } from '@/features/characters/cocDerived'
 import { api } from '../../api/client'
 
 export interface SpecItem { name: string; init: number }
@@ -130,6 +131,29 @@ export function useOccupations(moduleId: string | null) {
     api.get<string[]>(`/rules/coc/occupation-categories${q}`).then(setCategories).catch(() => {})
   }, [moduleId])
   return { occupations, categories }
+}
+
+/** 建卡预览的派生值：先用本地镜像即时出数，再取后端按本桌规则算的权威值覆盖。
+ *  本地镜像只认规则书原文；开了 Pulp 英雄生命值等变体时，后端的数才是对的。 */
+export function useDerivedStats(
+  attrs: Record<string, number> | null, age: number, moduleId: string | null,
+): DerivedStats | null {
+  const key = attrs ? JSON.stringify([attrs, age, moduleId]) : ''
+  const [server, setServer] = useState<{ key: string; stats: DerivedStats } | null>(null)
+  useEffect(() => {
+    if (!attrs) return
+    let alive = true
+    const t = setTimeout(() => {   // 属性连点时只取最后一次
+      api.post<DerivedStats>(`/rules/coc/derived${ruleQuery(moduleId)}`, { base_attributes: attrs, age })
+        .then((stats) => { if (alive) setServer({ key, stats }) })
+        .catch(() => { /* 取不到就留着本地镜像的数 */ })
+    }, 250)
+    return () => { alive = false; clearTimeout(t) }
+  // key 已编码 attrs/age/moduleId 的内容，避免每次渲染的新对象引发重取
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  if (!attrs) return null
+  return server?.key === key ? server.stats : deriveStats(attrs, age)
 }
 
 // ---- 资产：按信用评级换算现金/消费水平/资产（CoC 7 版标准表，1920s 美元） ----

@@ -21,3 +21,6 @@ class CheckResult:
     units: int = 0         # 个位骰（0-9）
     bonus: int = 0         # 奖励骰数量
     penalty: int = 0       # 惩罚骰数量
+    #: 规则钩子追加的奖惩骰及理由（如临时疯狂），供骰子卡说明「凭什么多了一颗惩罚骰」。
+    #: 每项 {"kind": "bonus"|"penalty", "n": int, "reason": str}；bonus/penalty 已含这些。
+    modifiers: list[dict] = field(default_factory=list)
