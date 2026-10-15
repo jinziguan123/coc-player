@@ -98,6 +98,9 @@ class Component:
     description: str = ""
     #: 本组件的数据表（房主/模组作者可以补丁改动的那些表）。表名在规则系统内唯一。
     data: tuple[DataTable, ...] = ()
+    #: 本组件会给参战方挂的战斗状态：状态键 → 中文名（如 ``{"bleeding": "流血"}``）。
+    #: 前端战斗界面据此显示状态名；状态键在规则系统内唯一。
+    conditions: dict[str, str] = field(default_factory=dict)
     #: 本组件的钩子实现所在的模块（模块对象或路径，通常写 ``__name__``）。见 app.rules.hooks。
     hooks: Any = None
     #: 组件来源：``official`` 或 ``plugin:<插件名>``（第三方插件加载时填）。
@@ -149,6 +152,13 @@ class RuleSystem:
     def active_components(self) -> tuple[Component, ...]:
         """预设内的组件，按预设顺序。"""
         return self._active
+
+    # ── 战斗状态 ──
+
+    @property
+    def condition_labels(self) -> dict[str, str]:
+        """预设内各组件声明的战斗状态：状态键 → 中文名（可选组件关着也算，状态名与开关无关）。"""
+        return {key: label for c in self._active for key, label in c.conditions.items()}
 
     # ── 数据表 ──
 
@@ -263,6 +273,10 @@ class RuleSystem:
                 }
                 for cid, t in self._tables.values()
             ],
+            "conditions": [
+                {"key": key, "label": label, "component": c.id}
+                for c in self._active for key, label in c.conditions.items()
+            ],
             "components": [
                 {
                     "id": c.id,
@@ -327,10 +341,12 @@ class Service:
 class Ruleset:
     """一份生效规则：``rs.<槽位>.<导出>``，例如 ``rs.check.resolve_skill_check(...)``。"""
 
-    __slots__ = ("system", "options", "components", "_services", "_rows", "_tables")
+    __slots__ = ("system", "options", "components", "condition_labels", "_services", "_rows", "_tables")
 
     def __init__(self, system: RuleSystem, options: Any, rows: dict[str, tuple[dict, ...]]) -> None:
         self.system = system.id
+        #: 本规则系统各组件声明的战斗状态名（状态键 → 中文名），见 RuleSystem.condition_labels。
+        self.condition_labels = system.condition_labels
         self._rows = rows
         self._tables = {
             name: table.runtime(rows[name]) for name, (_cid, table) in system._tables.items()
@@ -485,6 +501,14 @@ def _resolve(system: RuleSystem) -> tuple[
                 errors.append(f"组件 {comp.id} 的官方数据 {table.name} 无效：{e}")
                 continue
             tables[table.name] = (comp.id, table)
+
+    conditions: dict[str, str] = {}
+    for comp in active:
+        for key in comp.conditions:
+            if key in conditions:
+                errors.append(f"战斗状态 {key} 同时由 {conditions[key]} 与 {comp.id} 声明")
+            else:
+                conditions[key] = comp.id
 
     errors += _check_option_owners(active, tuple(system.options_model.model_fields))
     errors += _check_toggles(active)

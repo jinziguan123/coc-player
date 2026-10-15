@@ -14,7 +14,9 @@ export interface Combatant {
   status: CombatStatus
   weapon?: string         // 当前武器名（后端 order 投影透传）
   armor?: number          // 护甲值（每次物理伤害先扣它）
-  conditions?: string[]   // 正交条件：grappled（被擒）/ disarmed（缴械）
+  conditions?: string[]   // 正交条件：grappled（被擒）/ disarmed（缴械）/ 规则组件挂的状态
+  /** 本人身上各状态的中文名（规则组件声明，含第三方插件）；没声明的状态不在里面。 */
+  condition_labels?: Record<string, string>
   aim?: boolean           // 瞄准态（下一击加奖励骰）
   pos?: { x: number; y: number } | null   // 方格坐标
   mov?: number            // 移动力（格/轮）

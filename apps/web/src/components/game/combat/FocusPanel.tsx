@@ -11,7 +11,7 @@
 import { GiCrossedSwords } from 'react-icons/gi'
 
 import type { Combatant, HpDiff } from './types'
-import { CONDITION_META, STATUS_META, isOut, pctOf, sideColor } from './meta'
+import { STATUS_META, conditionBadges, isOut, pctOf, sideColor } from './meta'
 import { figureOf } from './figures'
 
 export function FocusPanel({ c, isTurn, mine, diff, onChangeFigure, children }: {
@@ -36,7 +36,7 @@ export function FocusPanel({ c, isTurn, mine, diff, onChangeFigure, children }: 
   const out = isOut(c)
   const col = sideColor(c)
   const sm = c.status !== 'ok' ? STATUS_META[c.status] : null
-  const conds = (c.conditions || []).filter((k) => CONDITION_META[k])
+  const conds = conditionBadges(c)
   const Figure = figureOf(c)
   const dmg = diff && diff.delta < 0
 
@@ -68,7 +68,7 @@ export function FocusPanel({ c, isTurn, mine, diff, onChangeFigure, children }: 
           {c.weapon && <span><GiCrossedSwords size={11} /> {c.weapon}</span>}
           {!!c.armor && <span>护甲 {c.armor}</span>}
           {c.aim && <span>瞄准中</span>}
-          {conds.map((k) => <span key={k}>{CONDITION_META[k].label}</span>)}
+          {conds.map(({ key, label, Icon }) => <span key={key}><Icon size={11} /> {label}</span>)}
         </div>
 
         {onChangeFigure && (

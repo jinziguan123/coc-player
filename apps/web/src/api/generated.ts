@@ -4117,6 +4117,18 @@ export interface components {
             /** Toggle */
             toggle?: string | null;
         };
+        /**
+         * RuleConditionManifest
+         * @description 组件声明的一种战斗状态（如流血）：前端战斗界面据此显示状态名。
+         */
+        RuleConditionManifest: {
+            /** Component */
+            component: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+        };
         /** RuleHit */
         RuleHit: {
             /** Page */
@@ -4186,6 +4198,11 @@ export interface components {
         RuleSystemManifest: {
             /** Components */
             components: components["schemas"]["RuleComponentManifest"][];
+            /**
+             * Conditions
+             * @default []
+             */
+            conditions: components["schemas"]["RuleConditionManifest"][];
             /** House Rules Format Version */
             house_rules_format_version: number;
             /** Id */

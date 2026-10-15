@@ -541,6 +541,7 @@ COMPONENT = Component(
     id="coc7.combat", title="战斗轮",
     requires=("coc7.check", "coc7.wound"),
     data=(WEAPONS,),
+    conditions={"grappled": "被擒", "disarmed": "缴械", "burning": "着火"},
     provides={"combat": Provide(
         __name__,
         bound=(

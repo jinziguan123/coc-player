@@ -1,7 +1,7 @@
 // 战斗面板共享元数据/纯函数：图标映射、成败取色、出局/血量小工具。
 // 图标全走 react-icons/gi（game-icons 风格），禁 emoji（项目硬性守则）。
 import {
-  GiCrossedSwords, GiShield, GiRun, GiBrickWall, GiFirstAidKit, GiBinoculars, GiGrab, GiBrokenAxe, GiAmmoBox, GiCrosshair, GiHandcuffs, GiFlame, GiFireBottle, GiDeathSkull, GiBrokenHeart, GiKnockedOutStars, GiBrokenBone, GiBleedingWound,
+  GiCrossedSwords, GiShield, GiRun, GiBrickWall, GiFirstAidKit, GiBinoculars, GiGrab, GiBrokenAxe, GiAmmoBox, GiCrosshair, GiHandcuffs, GiFlame, GiFireBottle, GiDeathSkull, GiBrokenHeart, GiKnockedOutStars, GiBrokenBone, GiBleedingWound, GiAura,
 } from 'react-icons/gi'
 import type { Combatant, CombatStatus } from './types'
 
@@ -49,13 +49,31 @@ export const TOKEN_STATUS_META: Record<Exclude<CombatStatus, 'ok'>, { Icon: type
   fled: { Icon: GiRun, color: 'var(--color-text-secondary)', label: '逃离' },
 }
 
-// 条件徽标：被擒 / 缴械 / 着火（gi 图标 + 中文），叠加渲染于卡片。
+// 条件徽标：内置状态的专属图标（gi 图标 + 中文），叠加渲染于卡片。
 export const CONDITION_META: Record<string, { label: string; Icon: typeof GiCrossedSwords }> = {
   grappled: { label: '被擒', Icon: GiHandcuffs },
   disarmed: { label: '缴械', Icon: GiBrokenAxe },
   burning: { label: '着火', Icon: GiFlame },
   // 来自可选规则组件「流血」（coc7.bleeding）：重伤后每轮失血，急救止血
   bleeding: { label: '流血', Icon: GiBleedingWound },
+}
+
+// 不认识的状态（如第三方规则插件新增的）用的通用徽标。
+export const GENERIC_CONDITION_ICON = GiAura
+
+/**
+ * 参战方身上的状态 → 徽标（名称 + 图标）。内置状态用专属图标；其余用通用徽标，名称取
+ * 组件声明的中文名（后端随 order 下发的 condition_labels），实在没有才显示键名。
+ */
+export function conditionBadges(c: Combatant): { key: string; label: string; Icon: typeof GiCrossedSwords }[] {
+  return (c.conditions || []).map((key) => {
+    const known = CONDITION_META[key]
+    return {
+      key,
+      label: c.condition_labels?.[key] || known?.label || key,
+      Icon: known?.Icon ?? GENERIC_CONDITION_ICON,
+    }
+  })
 }
 
 // 武器：拳头（徒手格斗）永远可选并置顶；其余从角色卡武器栏（system_data.weapons）来；

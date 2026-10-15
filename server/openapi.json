@@ -2778,6 +2778,30 @@
         "title": "RuleComponentManifest",
         "type": "object"
       },
+      "RuleConditionManifest": {
+        "description": "组件声明的一种战斗状态（如流血）：前端战斗界面据此显示状态名。",
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "component"
+        ],
+        "title": "RuleConditionManifest",
+        "type": "object"
+      },
       "RuleHit": {
         "properties": {
           "page": {
@@ -2908,6 +2932,14 @@
               "$ref": "#/components/schemas/RuleComponentManifest"
             },
             "title": "Components",
+            "type": "array"
+          },
+          "conditions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RuleConditionManifest"
+            },
+            "title": "Conditions",
             "type": "array"
           },
           "house_rules_format_version": {
