@@ -272,6 +272,22 @@ def test_api_village_table_edit_roundtrip(client):
     assert "雷霆之锤" in names and "长鞭" not in names
 
 
+def test_api_weapon_holders_counts_each_character_once(client):
+    """删武器时的提示数据：武器名 → 持有它的角色数（武器栏与战斗默认武器去重，徒手不计）。"""
+    c, maker = client
+    db = maker()
+    db.add_all([
+        Character(name="甲", rule_system="coc", system_data={
+            "weapons": [{"name": "长鞭"}, {"name": "徒手格斗"}], "combat": {"weapon": "长鞭"}}),
+        Character(name="乙", rule_system="coc", system_data={"weapons": [{"name": "长鞭"}, {"name": "弓箭"}]}),
+        Character(name="丙", rule_system="dnd", system_data={"weapons": [{"name": "长鞭"}]}),
+        Character(name="丁", rule_system="coc", system_data=None),
+    ])
+    db.commit()
+    db.close()
+    assert c.get("/api/rulebooks/weapon-holders/coc").json() == {"holders": {"长鞭": 2, "弓箭": 1}}
+
+
 def test_api_village_table_rejects_bad_rows_with_reasons(client):
     c, _ = client
     r = c.put("/api/rulebooks/village-rules/coc/data/weapons", json={"rows": [{"name": "坏枪"}]})

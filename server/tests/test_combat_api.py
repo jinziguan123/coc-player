@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401 — 注册全部表
     SessionParticipant,
 )
 from app.services import combat_service
+from app.rules import ruleset_for
 
 
 def _seq(values):
@@ -77,8 +78,8 @@ def env(tmp_path):
              "skills": {"格斗(斗殴)": 45, "闪避": 20}, "weapon": "徒手格斗"}
     state = combat_service.start_combat(
         db, sid,
-        [combat_service._char_participant(hero, "player", is_human=True)],
-        [combat_service._npc_participant(enemy, "enemy")])
+        [combat_service._char_participant(hero, "player", is_human=True, rs=ruleset_for("coc"))],
+        [combat_service._npc_participant(enemy, "enemy", rs=ruleset_for("coc"))])
     # 摆到相邻：拉开布阵下 NPC 会先走位接近，这里让打手开局就够得着 hero → 直接攻击暂停
     combat_service._find(state, hero.id)["pos"] = {"x": 5, "y": 5}
     combat_service._find(state, "npc_thug")["pos"] = {"x": 6, "y": 5}

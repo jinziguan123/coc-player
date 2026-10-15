@@ -2,6 +2,7 @@
 import { useEffect } from 'react'
 import { AnimatePresence, m } from 'motion/react'
 import { DataTableView } from '@/components/game/DataTableView'
+import { useDeleteWarning } from '@/components/game/useDeleteWarning'
 import { spring } from '@/lib/motion'
 import { diffFromRaw, officialRows, tableDiffCount, type Change, type RuleSection } from '@/lib/ruleDraft'
 import { diffCounts, type RulesWorkbench } from './useRulesWorkbench'
@@ -96,6 +97,7 @@ export function DataSection({ wb, active, onPick, query, onlyChanged }: {
   const view = table ? wb.views[table.name] : undefined
   const rows = table ? wb.tableRows[table.name] : undefined
   const { loadTable } = wb
+  const deleteWarning = useDeleteWarning(wb.ruleSystem, table?.name)
   useEffect(() => { if (table && !view) void loadTable(table.name) }, [table, view, loadTable])
   const counts = (name: string, key: string) => {
     const v = wb.views[name]
@@ -125,7 +127,8 @@ export function DataSection({ wb, active, onPick, query, onlyChanged }: {
         <>
           <div className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>{table.description}</div>
           <DataTableView key={table.name} table={table} official={officialRows(view, table.key)} rows={rows}
-            onChange={(next) => wb.setTable(table.name, next)} query={query} onlyChanged={onlyChanged} />
+            onChange={(next) => wb.setTable(table.name, next)} query={query} onlyChanged={onlyChanged}
+            deleteWarning={deleteWarning} />
         </>
       ) : (
         <div className="text-sm py-6 text-center" style={{ color: 'var(--color-text-secondary)' }}>读取中…</div>

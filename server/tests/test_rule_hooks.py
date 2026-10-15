@@ -101,7 +101,7 @@ def test_bleeding_in_combat_flow(db):
     db.add(gs)
     db.commit()
     rule_options_service.save_village_options(db, "coc", {"bleeding": True})
-    thug = combat_service._npc_participant({"name": "暴徒", "hp": 12, "attributes": {"CON": 99}})
+    thug = combat_service._npc_participant({"name": "暴徒", "hp": 12, "attributes": {"CON": 99}}, rs=ruleset_for("coc"))
     state = {"initiative": [thug], "round": 1, "log": []}
     combat_service.apply_damage(db, state, thug, 7, "刀伤", session_id=gs.id)
     assert "bleeding" in thug["conditions"] and thug["hp"] == 5

@@ -43,9 +43,9 @@ def _chunk(chunk_type: str, content: str = "", **extra) -> RoomEvent:
     )
 
 
-def _weapon_is_firearm(weapon_name: str, *, rs: Ruleset | None = None) -> bool:
-    rs = rs or _raw_rules()
-    w = rs.combat.resolve_weapon(weapon_name)
+def _weapon_is_firearm(weapon: str | dict, *, rs: Ruleset) -> bool:
+    """weapon 可为武器名或 :func:`_attack_weapon` 解析出的武器 dict。"""
+    w = rs.combat.resolve_weapon(weapon) if isinstance(weapon, str) else weapon
     return w.get("category") in _FIREARM_CATEGORIES or (w.get("skill", "").startswith("射击"))
 
 
@@ -77,14 +77,15 @@ def _regular_budget(mov: int) -> int:
 
 
 def _attack_geometry(state: dict, actor: dict, target: dict, weapon: str,
-                     ranged: bool, *, rs: Ruleset | None = None) -> tuple[int, int, bool, str, list[dict]]:
+                     ranged: bool, *, rs: Ruleset) -> tuple[int, int, bool, str, list[dict]]:
     """方格几何折算 →（命中奖励骰, 命中惩罚骰, 是否可达, 不可达原因, 奖惩骰来由）。
     无 grid 或缺坐标 → 视为可达、无奖惩（向后兼容旧战斗态/无方格场景）。
     近战须相邻、火器超基础射程 -1 惩罚 / 超 2× 不可及；火器抵近（≤2 格）+1 奖励骰（P-Grid-2）。
 
     第五个返回值是给玩家看的**来由**：这些奖惩骰全由几何算出，玩家在战场上看不到算式，
-    只显示「惩罚骰 ×1」会让人以为被针对了。"""
-    rs = rs or _raw_rules()
+    只显示「惩罚骰 ×1」会让人以为被针对了。
+
+    weapon 可为武器名或 :func:`_attack_weapon` 解析出的武器 dict（射程按它算）。"""
     grid = state.get("grid")
     notes: list[dict] = []
     if not grid or not actor.get("pos") or not target.get("pos"):
@@ -112,26 +113,24 @@ def _attack_geometry(state: dict, actor: dict, target: dict, weapon: str,
     return bonus, penalty, True, "", notes
 
 
-def _flank_penalty(state: dict, defender: dict, *, rs: Ruleset | None = None) -> int:
+def _flank_penalty(state: dict, defender: dict, *, rs: Ruleset) -> int:
     """防御者被夹击的惩罚骰（无 grid → 0）。供守方闪避/招架检定用。"""
-    rs = rs or _raw_rules()
     if not state.get("grid"):
         return 0
     return rs.positioning.flank_penalty(defender, state.get("initiative") or [])
 
 
-def _char_participant(char: Character, side: str, is_human: bool = True, *, rs: Ruleset | None = None) -> dict:
+def _char_participant(char: Character, side: str, is_human: bool = True, *, rs: Ruleset) -> dict:
     """把玩家/队友角色卡转成参战方。HP 与状态与角色卡同步。is_human=True 的回合会停下等操作。"""
-    rs = rs or _raw_rules()
     sd = char.system_data or {}
     hp = (sd.get("hitPoints") or {})
     weapon = (sd.get("combat", {}) or {}).get("weapon") or "徒手格斗"
-    return {
+    p = {
         "id": char.id, "char_id": char.id, "name": char.name, "side": side,
         "is_human": is_human,
         "dex": (char.base_attributes or {}).get("DEX", 50),
         "hp": hp.get("current", 0), "max_hp": hp.get("max", hp.get("current", 0)),
-        "status": "ok", "weapon": weapon, "has_firearm": _weapon_is_firearm(weapon, rs=rs),
+        "status": "ok", "weapon": weapon, "has_firearm": False,
         "skills": char.skills or {}, "base_attributes": char.base_attributes or {},
         "system_data": sd, "db": (sd.get("damageBonus") or "0"),
         "armor": _coerce_armor(sd.get("armor")),   # 护甲值：每次受到的物理伤害先扣它（CoC7e）
@@ -142,16 +141,18 @@ def _char_participant(char: Character, side: str, is_human: bool = True, *, rs: 
         # P2 主动动作集：正交条件 / 瞄准 / 该处伤是否已急救（RAW 每处伤一次）
         "conditions": [], "aim": False, "first_aid_used": False,
     }
+    # 武器表里删掉/改名的武器也要按卡上数据认出火器（先攻火器优先），故建好参战方再判
+    p["has_firearm"] = _weapon_is_firearm(_attack_weapon(p, weapon, rs=rs), rs=rs)
+    return p
 
 
-def _npc_participant(npc: dict, side: str = "enemy", masker=None, *, rs: Ruleset | None = None) -> dict:
+def _npc_participant(npc: dict, side: str = "enemy", masker=None, *, rs: Ruleset) -> dict:
     """把模组 NPC（或临时敌）转成参战方。HP 由属性派生，只在战斗态追踪。
 
     ``name`` 存的是**对外称呼**（玩家还没认出这东西时是「不明存在」之类），
     HUD、先攻表、战报、命中日志一律读它——它们全是玩家可见面，不能替 KP
     把怪物的真名说出去。真名另存 ``true_name``，供按名定位与 KP 侧使用。
     """
-    rs = rs or _raw_rules()
     attrs = npc.get("attributes") or {}
     # 模组/KP 给了 hp 就用；没给按本局规则算（Pulp 等变体可换掉算法）
     max_hp = npc.get("hp") or rs.character.max_hp_of(attrs)
@@ -186,19 +187,64 @@ def _npc_participant(npc: dict, side: str = "enemy", masker=None, *, rs: Ruleset
     }
 
 
-def _attack_weapon(actor: dict, weapon: str, *, rs: Ruleset | None = None) -> str | dict:
-    """这次攻击喂给引擎的武器：参战方卡上写了 damage（怪物的「撕咬 1D6」）且这次用的正是那件
-    攻击方式 → 造一件以它命名、按它伤害结算的武器；否则原样给名字、走武器表。
+def _attack_weapon(actor: dict, weapon: str, *, rs: Ruleset) -> str | dict:
+    """这次攻击喂给引擎的武器（名字或武器 dict），按以下顺序认：
 
-    被缴械/临时换武器时 weapon 与卡上那件不符，就不能再套怪物卡的伤害，故要比对名字。
+    1. 参战方卡上写了 damage（怪物的「撕咬 1D6」）且这次用的正是那件攻击方式 → 造一件以它命名、
+       按它伤害结算的武器。被缴械/临时换武器时 weapon 与卡上那件不符，就不能再套怪物卡的伤害。
+    2. 本局武器表里有**同名**武器 → 原样给名字、走武器表（房主改了数值，已有角色也随之生效）。
+    3. 角色卡武器栏（``system_data.weapons``）里有同名武器 → 用卡上建卡时存下的数据。
+       房主在规则页删掉/改名一把武器后，已有角色手里那把就靠这一步，不至于悄悄变成徒手，
+       也不会被下一步的子串匹配误认成别的武器。
+    4. 其余原样给名字：引擎按子串匹配武器表（KP 给的通俗名如「匕首」），再查不到回落徒手。
     """
-    rs = rs or _raw_rules()
+    name = (weapon or "").strip()
     dam = actor.get("damage")
     dam = dam.strip() if isinstance(dam, str) else ""
-    if not dam or (weapon or "").strip() != (actor.get("weapon") or "").strip():
+    if dam and name == (actor.get("weapon") or "").strip():
+        base = rs.combat.lookup_weapon(weapon) or {"tho": 0, "range": "接触", "round": "1"}
+        return {**base, "name": weapon, "dam": dam}
+    hit = rs.combat.lookup_weapon(name)
+    if hit and hit["name"] == name:
         return weapon
-    base = rs.combat.lookup_weapon(weapon) or {"tho": 0, "range": "接触", "round": "1"}
-    return {**base, "name": weapon, "dam": dam}
+    return _card_weapon(actor, name) or weapon
+
+
+def _card_weapon(actor: dict, name: str) -> dict | None:
+    """角色卡武器栏里同名武器 → 武器表口径的 dict；没有或缺伤害骰 → None。
+
+    卡上字段由前端 ``normalizeWeapon`` 写入（name/skill/dam/range/tho/round/num/err），
+    ``tho`` 是布尔；更早的卡用 damage/attacks/ammo，这里一并兼容。"""
+    if not name or name == "徒手格斗":
+        return None
+    for w in (actor.get("system_data") or {}).get("weapons") or []:
+        if not isinstance(w, dict) or str(w.get("name") or "").strip() != name:
+            continue
+        dam = str(w.get("dam") or w.get("damage") or "").strip()
+        if not dam:
+            return None
+        tho = w.get("tho")
+        return {
+            "name": name, "skill": str(w.get("skill") or "").strip(), "dam": dam,
+            "tho": 1 if tho is True or str(tho) == "1" else 0,
+            "range": str(w.get("range") or ""),
+            "round": str(w.get("round") or w.get("attacks") or "1"),
+            "num": str(w.get("num") or w.get("ammo") or ""), "err": str(w.get("err") or ""),
+            "category": str(w.get("category") or ""),
+        }
+    return None
+
+
+def _unarmed_fallback_note(actor: dict, weapon: str, resolved: str | dict, *, rs: Ruleset) -> str | None:
+    """角色的武器在本局武器表和角色卡上都查不到 → 给战斗日志一句提示（否则只会莫名变成徒手）。
+
+    只对角色（有 char_id）提示：怪物的「撕咬」本就不在武器表里，按徒手估伤 + 同名技能是既定做法。"""
+    name = (weapon or "").strip()
+    if not actor.get("char_id") or not name or name == "徒手格斗" or not isinstance(resolved, str):
+        return None
+    if rs.combat.lookup_weapon(name):
+        return None
+    return f"{actor['name']} 的「{name}」在本局武器表和角色卡上都查不到，按徒手格斗结算。"
 
 
 def _char_data(p: dict) -> dict:
@@ -212,15 +258,14 @@ def _char_data(p: dict) -> dict:
 
 
 def _rules(db: Session, session_id: str | None) -> Ruleset:
-    """本局生效规则（村规已注入）。战斗内每一次结算都经它，不再手工传 options。"""
+    """本局生效规则（村规已注入）。战斗内每一次结算都经它，不再手工传 options。
+
+    没有 session_id 时只能取规则书原文：此时没有任何一局的村规可言（如无会话的工具调用）。
+    这是唯一允许取原文的地方——下面的辅助函数一律必传 ``rs``，漏传会直接报错，
+    而不是悄悄按原文结算、让开着的变体规则（如 Pulp 英雄生命值）失效。"""
     if not session_id:
-        return _raw_rules()
+        return ruleset_for(rule_options_service.DEFAULT_RULE_SYSTEM)
     return rule_options_service.ruleset_by_id(db, session_id)
-
-
-def _raw_rules() -> Ruleset:
-    """无会话上下文的纯函数辅助（几何、武器查表）兜底用：与村规无关，取 RAW。"""
-    return ruleset_for(rule_options_service.DEFAULT_RULE_SYSTEM)
 
 
 def get_combat(session: GameSession) -> dict | None:
@@ -553,21 +598,22 @@ async def _begin_player_attack(
     disarmed = "disarmed" in (actor.get("conditions") or [])
     if disarmed:
         weapon = "徒手格斗"
-    ranged = _weapon_is_firearm(weapon, rs=rs)
+    wpn = _attack_weapon(actor, weapon, rs=rs)
+    ranged = _weapon_is_firearm(wpn, rs=rs)
     aim_bonus = 1 if actor.get("aim") else 0
     target_grappled = "grappled" in (target.get("conditions") or [])
     defense = None if ranged else (
         action.get("defense")
         or rs.combat.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
     g_bonus, g_penalty, reachable, reason, g_notes = _attack_geometry(
-        state, actor, target, weapon, ranged, rs=rs,
+        state, actor, target, wpn, ranged, rs=rs,
     )
     if not reachable:
         raise ValueError(reason)   # 够不着 → 不结算、不推进，前端提示先移动接近或换目标
     if aim_bonus:
         g_notes = [{"kind": "bonus", "n": aim_bonus, "reason": "上一轮瞄准"}] + g_notes
     res = rs.combat.resolve_attack(
-        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon, rs=rs),
+        _char_data(actor), actor.get("db", "0"), wpn,
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus + g_bonus, penalty=g_penalty,
         defense_penalty=_flank_penalty(state, target, rs=rs),   # 目标被我方夹击 → 其闪避吃惩罚
@@ -580,6 +626,9 @@ async def _begin_player_attack(
     out = [_combat_roll_event(db, session_id, hit_content,
                               _hit_dice_detail(res["attacker_check"], g_notes),
                               opposed=_opposed_detail(res, actor["name"], target["name"]))]
+    note = _unarmed_fallback_note(actor, weapon, wpn, rs=rs)
+    if note:
+        out.insert(0, _combat_line(db, session_id, note))
 
     if res["hit"] and res["damage"] and res.get("damage_to"):
         # 命中 → 挂 pending_roll，等玩家亲自掷伤害；不立即扣血、不推进先攻。
@@ -636,10 +685,11 @@ async def _begin_player_burst(
     不走两段式手掷伤害（连射是泼弹、不逐发仪式）。命中即扣血（走护甲）。"""
     rs = _rules(db, session_id)
     weapon = action.get("weapon") or actor.get("weapon") or "徒手格斗"
-    cap = rs.combat.burst_capacity(weapon)
+    wpn = _attack_weapon(actor, weapon, rs=rs)
+    cap = rs.combat.burst_capacity(wpn)
     shots = [t for t in (action.get("shots") or []) if t][:cap]
     # 前置校验：需可连射的火器（cap≥2）且至少 2 发；否则降级为单发两段式攻击。
-    if cap < 2 or not _weapon_is_firearm(weapon, rs=rs) or len(shots) < 2:
+    if cap < 2 or not _weapon_is_firearm(wpn, rs=rs) or len(shots) < 2:
         single = {k: v for k, v in action.items() if k != "shots"}
         single["target_id"] = shots[0] if shots else action.get("target_id")
         return await _begin_player_attack(db, session_id, state, actor, single, agent, scene_hint)
@@ -659,7 +709,7 @@ async def _begin_player_burst(
             shot_results.append({"target": target["name"] if target else "已倒下目标",
                                  "hit": False, "penalty": pen, "damage": None, "gone": True})
             continue
-        res = rs.combat.resolve_attack(_char_data(actor), actor.get("db", "0"), weapon,
+        res = rs.combat.resolve_attack(_char_data(actor), actor.get("db", "0"), wpn,
                                     defender_data=None, ranged=True, bonus=aim_bonus, penalty=pen)
         chk = res["attacker_check"]
         rec = {"target": target["name"], "roll": chk.roll, "target_val": chk.skill_value,
@@ -770,7 +820,10 @@ def stage_aoe_damage(
     if not victims:
         return None, False
 
-    w = rs.combat.resolve_weapon(weapon) if weapon else None
+    thrower = _find(state, thrower_id)
+    # 投掷物同样先认本局武器表、再认投掷者卡上的同名武器（见 _attack_weapon）
+    w = _attack_weapon(thrower, weapon, rs=rs) if (weapon and thrower) else weapon
+    w = rs.combat.resolve_weapon(w) if isinstance(w, str) and w else w
     if w and w.get("name") not in ("徒手格斗", None):
         dmg = rs.combat.roll_weapon_damage(w, "0")
         if any(k in (w.get("dam") or "") for k in ("烧", "燃烧")):
@@ -780,7 +833,6 @@ def stage_aoe_damage(
         dmg = rs.combat.roll_weapon_damage({"dam": formula or "1D6"}, "0")
         weapon_name = weapon or "范围攻击"
 
-    thrower = _find(state, thrower_id)
     state["pending_roll"] = {
         "id": uuid.uuid4().hex, "actor_id": thrower_id, "kind": "aoe_damage",
         "victim_ids": [v["id"] for v in victims], "weapon": weapon_name,
@@ -1046,15 +1098,19 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
     disarmed = "disarmed" in (actor.get("conditions") or [])
     if disarmed:
         weapon = "徒手格斗"
-    ranged = _weapon_is_firearm(weapon, rs=rs)
+    wpn = _attack_weapon(actor, weapon, rs=rs)
+    ranged = _weapon_is_firearm(wpn, rs=rs)
     aim_bonus = 1 if actor.get("aim") else 0
+    note = _unarmed_fallback_note(actor, weapon, wpn, rs=rs)
+    if note:
+        chunks.append(_combat_line(db, session_id, note))
     # NPC 防御者被擒抱 → 近战无法闪避，收窄到反击（与真人 pending_reaction.allowed 对称）
     target_grappled = "grappled" in (target.get("conditions") or [])
     defense = None if ranged else (
         action.get("defense")
         or rs.combat.heuristic_defense(target, is_firearm=False, defender_grappled=target_grappled))
     res = rs.combat.resolve_attack(
-        _char_data(actor), actor.get("db", "0"), _attack_weapon(actor, weapon, rs=rs),
+        _char_data(actor), actor.get("db", "0"), wpn,
         defender_data=_char_data(target), defense=defense, ranged=ranged,
         attacker_disarmed=disarmed, bonus=aim_bonus,
     )
@@ -1132,6 +1188,7 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             tgt = _find(state, action.get("target_id"))
             if tgt and rs.combat.is_active(tgt):
                 wpn = action.get("weapon") or actor.get("weapon") or "徒手格斗"
+                wpn = _attack_weapon(actor, wpn, rs=rs)
                 _, _, reachable, _, _ = _attack_geometry(state, actor, tgt, wpn, _weapon_is_firearm(wpn, rs=rs), rs=rs)
                 if not reachable:
                     occ = {f'{p["pos"]["x"]},{p["pos"]["y"]}' for p in (state.get("initiative") or [])
@@ -1153,7 +1210,7 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             target = _find(state, action.get("target_id"))
             if target and rs.combat.is_active(target) and target.get("is_human"):
                 weapon = action.get("weapon") or actor.get("weapon") or "徒手格斗"
-                is_fire = _weapon_is_firearm(weapon, rs=rs)
+                is_fire = _weapon_is_firearm(_attack_weapon(actor, weapon, rs=rs), rs=rs)
                 # 名字一并落进 pending_reaction：广播与断线重连（_combat_meta 透传）都要用它渲染
                 # 提示文案，否则重连回来缺 *_name 会显示「undefined 用 X 攻击你」。
                 state["pending_reaction"] = {
@@ -1176,9 +1233,8 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
     return chunks, beats
 
 
-def _validate_npc_action(state: dict, actor: dict, action: dict | None, *, rs: Ruleset | None = None) -> dict | None:
+def _validate_npc_action(state: dict, actor: dict, action: dict | None, *, rs: Ruleset) -> dict | None:
     """校正子代理给的行动：attack 目标须存活且属敌对方；非法则丢弃（回落启发式）。"""
-    rs = rs or _raw_rules()
     if not action or action.get("action") not in ("attack", "flee", "dodge"):
         return None
     if action.get("action") != "attack":

@@ -21,7 +21,7 @@ from app.schemas.rulebook import (
     VillageRulesRead,
     VillageRulesUpdate,
 )
-from app.services import rule_options_service, rulebook_service
+from app.services import character_service, rule_options_service, rulebook_service
 
 router = APIRouter(prefix="/api/rulebooks", tags=["rulebooks"])
 logger = logging.getLogger(__name__)
@@ -217,6 +217,12 @@ def update_village_table(
     except rule_options_service.RuleDataError as e:
         raise HTTPException(400, "\n".join(e.errors)) from e
     return RuleTableView(table=table, **rule_options_service.table_view(rule_system, table, patches))
+
+
+@router.get("/weapon-holders/{rule_system}")
+def read_weapon_holders(rule_system: str, db: Session = Depends(get_db)) -> dict[str, dict[str, int]]:
+    """武器名 → 持有它的角色数。数据表编辑器删武器时据此提示「有 N 个角色持有这把武器」。"""
+    return {"holders": character_service.weapon_holders(db, rule_system)}
 
 
 @router.get("/plugins/{rule_system}", response_model=RulePluginList)

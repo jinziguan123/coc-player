@@ -7,6 +7,7 @@
 import pytest
 
 from app.services import dice_runtime
+from app.rules import ruleset_for
 
 
 class _Result:
@@ -75,7 +76,7 @@ def test_combat_geometry_reports_why(monkeypatch):
     monkeypatch.setattr("app.rules.coc.components.positioning.has_line_of_sight", lambda *a, **k: True)
 
     _b, penalty, reachable, _why, notes = combat_service._attack_geometry(
-        state, actor, target, "手枪", True,
+        state, actor, target, "手枪", True,rs=ruleset_for("coc")
     )
     assert reachable and penalty >= 1
     reasons = [n["reason"] for n in notes]
@@ -88,6 +89,6 @@ def test_combat_geometry_without_grid_is_silent():
     from app.services import combat_service
 
     b, p, reachable, why, notes = combat_service._attack_geometry(
-        {}, {}, {}, "手枪", True,
+        {}, {}, {}, "手枪", True,rs=ruleset_for("coc")
     )
     assert (b, p, reachable, why, notes) == (0, 0, True, "", [])
