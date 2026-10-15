@@ -83,7 +83,7 @@ def _hang_pending_check(db, session_id: str, char) -> str:
 
 
 def _roll(monkeypatch, value: int):
-    from app.rules.coc import checks as checks_mod
+    from app.rules.coc.components import check as checks_mod
 
     monkeypatch.setattr(checks_mod, "roll_percentile", lambda: value)
 

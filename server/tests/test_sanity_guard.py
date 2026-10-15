@@ -269,7 +269,7 @@ def test_scene_san_reaches_teammates_who_read_source_later(db_factory, monkeypat
         db, session.id, "dice", "江户川龙牙｜理智检定",
         actor_name="系统", metadata={"skill": "SAN", "actor": hero.name},
     )
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 1)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 1)
 
     chunks = _run(cs._ensure_planned_sanity(
         db,

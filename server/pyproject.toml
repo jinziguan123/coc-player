@@ -19,6 +19,8 @@ dependencies = [
     "fastembed>=0.8.0",
     # 速率限制（内存后端；桌面单进程单 worker，无需 Redis）
     "slowapi>=0.1.9",
+    # 房规文件（导出/导入村规）；只用 safe_load/safe_dump
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -58,7 +60,6 @@ ignore = []
 # `app.rules`（ruleset_for / rule_options_service.ruleset）取规则，不许直接碰组件实现。
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "app.rules.coc".msg = "规则组件实现不对外：经 app.rules.ruleset_for 或 rule_options_service.ruleset 取生效规则"
-"app.rules.registry".msg = "旧引擎注册表仅供规则包内部与测试：业务层用 app.rules.ruleset_for"
 
 [tool.ruff.lint.per-file-ignores]
 "app/rules/**" = ["TID251"]

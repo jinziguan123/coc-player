@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import random
 
+from app.rules.kernel import Component, Provide
+
 # 每种症状：key（稳定标识）/ label（中文）/ manifest（一句话表现，注入叙事与播报）/
 # penalty_skills（命中这些技能域的检定加一颗惩罚骰）/ incapacitated（发作期间无法正常自主行动=
 # 系统接管，由 KP 叙述其不自主的疯狂行为）/ override（接管时的强制行为：violence/faint/flee）。
@@ -76,3 +78,12 @@ def check_penalty(madness: dict | None, skill: str) -> int:
         if dom and (dom in s or s in dom):
             return 1
     return 0
+
+
+COMPONENT = Component(
+    id="coc7.madness", title="疯狂发作",
+    requires=("coc7.sanity",),
+    provides={"madness": Provide(__name__, plain=(
+        "BOUT_SYMPTOMS", "make_bout", "roll_symptom", "roll_duration", "check_penalty",
+    ))},
+)

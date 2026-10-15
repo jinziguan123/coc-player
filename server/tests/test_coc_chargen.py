@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 import pytest
 
-from app.rules.coc.character import (
+from app.rules.coc.components.character import (
     EDU_MAX,
     apply_age_modifiers,
     asset_tier,

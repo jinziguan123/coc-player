@@ -22,6 +22,8 @@ interface VillageRulesBrief {
   options: Record<string, unknown>
   table_notes: string
   enabled?: boolean
+  /** 差异项的短标签（后端各规则组件生成） */
+  labels?: string[]
 }
 
 export function RulebookPage() {
@@ -163,7 +165,8 @@ export function RulebookPage() {
 
           {rules && (
             <VillageRulesSummary
-              options={rules.options} notes={rules.table_notes} enabled={rules.enabled !== false}
+              options={rules.options} labels={rules.labels ?? []}
+              notes={rules.table_notes} enabled={rules.enabled !== false}
             />
           )}
 

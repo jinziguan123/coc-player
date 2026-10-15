@@ -5,40 +5,23 @@
 //
 // 它不在房间里设——村规是桌上的规矩，不该每开一局重填一遍。改动对所有用这套规则的
 // 房间即时生效（含进行中的局）。
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Download, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
+import type { components } from '@/api/generated'
 import { Switch } from '@/components/ui/switch'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import {
+  componentFields, fieldHint, isShown, panelGroups,
+  type RuleComponent, type RuleField, type RuleSystemManifest, type RuleValues,
+} from '@/lib/ruleSchema'
 
-export interface VillageRules {
-  critical_max: number
-  fumble_rule: string
-  dice_pool_cap: number
-  luck_spend: boolean
-  luck_spend_max: number
-  luck_spend_in_combat: boolean
-  luck_spend_blocks_improvement: boolean
-  luck_reroll: boolean
-  luck_reroll_cost: number
-  major_wound_divisor: number
-  insanity_rule: string
-  insanity_flat_threshold: number
-  improvement: boolean
-}
-
-const FUMBLE_LABELS: Record<string, string> = {
-  raw: '照规则书：100 必大失败，技能 < 50 时 96 起即大失败',
-  hundred_only: '只有掷出 100 才算大失败',
-  ninety_six_plus: '96 起一律大失败，不看技能高低',
-}
-
-const INSANITY_LABELS: Record<string, string> = {
-  fifth_of_san: '单次损失 ≥ 当前 SAN 的五分之一',
-  flat: '单次损失达到固定点数',
-}
+type VillageRulesRead = components['schemas']['VillageRulesRead']
+type HouseRulesPreview = components['schemas']['HouseRulesPreviewRead']
+type HouseRulesExport = components['schemas']['HouseRulesExport']
 
 /** 一条规则：标题与控件同行（控件一律靠右，右边缘天然对齐），说明另起一行占满宽度。
  *
@@ -91,33 +74,155 @@ function NumberBox({ label, value, onChange, min, max }: {
 
 const NOTES_MAX = 800
 
+/** 一个参数的控件：布尔→开关，整数→数字框，枚举→下拉。区间、文案全来自后端 schema。 */
+function FieldControl({ field, value, label, onChange }: {
+  field: RuleField
+  value: unknown
+  label: string
+  onChange: (v: unknown) => void
+}) {
+  if (field.kind === 'boolean') {
+    return <Switch label={label} checked={Boolean(value)} onChange={onChange} />
+  }
+  if (field.kind === 'choice') {
+    return (
+      <Select value={String(value)} onValueChange={onChange}>
+        <SelectTrigger className="w-[8.5rem] text-sm" aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {field.choices?.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    )
+  }
+  return (
+    <NumberBox label={label} value={Number(value)} min={field.min ?? 0} max={field.max ?? 999}
+      onChange={onChange} />
+  )
+}
+
+/** 一个组件在面板上的几行。
+ *
+ *  可选组件（有 toggle）：开关行用组件说明作提示，开着才展开它的其余参数（缩进表示从属）。
+ *  常驻组件：逐个参数一行；带 x-show-if 的参数只在条件满足时出现，同样缩进。 */
+function ComponentRows({ component, values, patch }: {
+  component: RuleComponent
+  values: RuleValues
+  patch: (next: RuleValues) => void
+}) {
+  const fields = componentFields(component)
+  const toggle = component.toggle ? fields.find((f) => f.key === component.toggle) : undefined
+  const rest = fields.filter((f) => f !== toggle)
+  const open = !toggle || Boolean(values[toggle.key])
+
+  const row = (f: RuleField, indent: boolean, hint?: string) => (
+    <Row key={f.key} indent={indent} label={f.title} hint={hint ?? fieldHint(f, values[f.key])}>
+      <FieldControl
+        field={f}
+        value={values[f.key]}
+        // 从属项的无障碍名带上组件名：「单次上限」单拎出来听不出是谁的上限
+        label={indent && toggle ? `${component.title}·${f.title}` : f.title}
+        onChange={(v) => patch({ [f.key]: v })}
+      />
+    </Row>
+  )
+
+  return (
+    <>
+      {toggle && row(toggle, false, component.description || toggle.hint)}
+      {open && rest.filter((f) => isShown(f, values)).map((f) => row(f, Boolean(toggle || f.showIf)))}
+    </>
+  )
+}
+
+/** 导入预览：先看清这份房规改了什么、有没有问题，确认后才保存。 */
+function ImportPreview({ preview, onConfirm, onCancel, busy }: {
+  preview: HouseRulesPreview
+  onConfirm: () => void
+  onCancel: () => void
+  busy: boolean
+}) {
+  const labels = preview.labels ?? []
+  const warnings = preview.warnings ?? []
+  return (
+    <div className="rounded-md px-3 py-2.5 mb-3 text-sm" role="region" aria-label="房规导入预览"
+      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+      <div style={{ color: 'var(--color-text-primary)' }}>
+        导入「{preview.name || '未命名房规'}」
+      </div>
+      {preview.description && (
+        <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          {preview.description}
+        </div>
+      )}
+
+      {preview.ok ? (
+        <div className="mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {labels.length === 0
+            ? '这份房规完全照规则书原文，没有改动。'
+            : `与规则书原文有 ${labels.length} 处不同：`}
+          {labels.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {labels.map((t) => <span key={t} className="chip">{t}</span>)}
+            </div>
+          )}
+          {preview.table_notes && <div className="mt-1.5">附带桌面约定：{preview.table_notes}</div>}
+          <div className="mt-1.5">导入会<b>整份替换</b>当前的村规与桌面约定。</div>
+        </div>
+      ) : (
+        <ul className="mt-2 text-xs list-disc pl-4" style={{ color: 'var(--color-danger)' }}>
+          {(preview.errors ?? []).map((e) => <li key={e}>{e}</li>)}
+        </ul>
+      )}
+
+      {warnings.length > 0 && (
+        <ul className="mt-2 text-xs list-disc pl-4" style={{ color: 'var(--color-text-secondary)' }}>
+          {warnings.map((w) => <li key={w}>{w}</li>)}
+        </ul>
+      )}
+
+      <div className="flex justify-end gap-2 mt-2.5">
+        <button onClick={onCancel} className="btn-secondary btn-sm">取消</button>
+        {preview.ok && (
+          <button onClick={onConfirm} disabled={busy} className="btn-primary btn-sm">
+            {busy ? '导入中…' : '确认导入'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
   ruleSystem: string
   /** 宽容器里把参数排成两列：单列十一行要滚半屏，两列一屏就看完了，
-   *  而且判定类与伤害/状态类天然分开，比一长串更有条理。 */
+   *  而且判定类与伤害/状态类天然分开（分栏取自各组件的 group），比一长串更有条理。 */
   twoColumn?: boolean
   /** 保存成功后回调——页面上方的规矩摘要靠它跟着刷新，否则会停在旧值上。 */
   onSaved?: () => void
 }) {
-  const [rules, setRules] = useState<VillageRules | null>(null)
+  const [manifest, setManifest] = useState<RuleSystemManifest | null>(null)
+  const [rules, setRules] = useState<RuleValues | null>(null)
   const [notes, setNotes] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [preview, setPreview] = useState<HouseRulesPreview | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const data = await api.get<{
-          options: Partial<VillageRules>
-          effective: VillageRules
-          table_notes: string
-          enabled: boolean
-        }>(`/rulebooks/village-rules/${ruleSystem}`)
+        const [data, m] = await Promise.all([
+          api.get<VillageRulesRead>(`/rulebooks/village-rules/${ruleSystem}`),
+          api.get<RuleSystemManifest>(`/rulebooks/village-rules/${ruleSystem}/manifest`),
+        ])
         if (alive) {
           setRules(data.effective)
           setNotes(data.table_notes || '')
           setEnabled(data.enabled !== false)
+          setManifest(m)
         }
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : '读取村规失败')
@@ -126,27 +231,76 @@ export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
     return () => { alive = false }
   }, [ruleSystem])
 
-  const patch = (next: Partial<VillageRules>) =>
-    setRules((cur) => (cur ? { ...cur, ...next } : cur))
+  const patch = (next: RuleValues) => setRules((cur) => (cur ? { ...cur, ...next } : cur))
 
-  const save = async () => {
-    if (!rules) return
+  const persist = async (options: RuleValues, tableNotes: string, message: string) => {
     setSaving(true)
     try {
       // 整份提交，后端负责白名单化、钳区间、只存与规则原文的差异
-      await api.put(`/rulebooks/village-rules/${ruleSystem}`, {
-        options: rules, table_notes: notes, enabled,
+      const saved = await api.put<VillageRulesRead>(`/rulebooks/village-rules/${ruleSystem}`, {
+        options, table_notes: tableNotes, enabled,
       })
-      toast.success(enabled ? '村规已更新，下一次掷骰起生效' : '村规已停用，这一桌回到规则原文')
+      if (saved?.effective) {
+        setRules(saved.effective)
+        setNotes(saved.table_notes ?? tableNotes)
+      }
+      toast.success(message)
       onSaved?.()
+      return true
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '保存失败')
+      return false
     } finally {
       setSaving(false)
     }
   }
 
-  if (!rules) {
+  const save = async () => {
+    if (!rules) return
+    await persist(
+      rules, notes,
+      enabled ? '村规已更新，下一次掷骰起生效' : '村规已停用，这一桌回到规则原文',
+    )
+  }
+
+  const exportRules = async () => {
+    try {
+      const r = await api.get<HouseRulesExport>(`/rulebooks/village-rules/${ruleSystem}/export`)
+      const url = URL.createObjectURL(new Blob([r.text], { type: 'application/x-yaml;charset=utf-8' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = r.filename
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('房规已导出（导出的是已保存的配置）')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '导出失败')
+    }
+  }
+
+  const pickFile = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const text = await file.text()
+      setPreview(await api.post<HouseRulesPreview>(
+        `/rulebooks/village-rules/${ruleSystem}/import-preview`, { text },
+      ))
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '读取房规文件失败')
+    } finally {
+      if (fileRef.current) fileRef.current.value = ''   // 同一个文件改完再选也要能触发
+    }
+  }
+
+  const confirmImport = async () => {
+    if (!preview) return
+    const ok = await persist(
+      preview.options ?? {}, preview.table_notes ?? '', `已导入「${preview.name || '房规'}」`,
+    )
+    if (ok) setPreview(null)
+  }
+
+  if (!rules || !manifest) {
     return (
       <div className="text-sm py-6 text-center" style={{ color: 'var(--color-text-secondary)' }}>
         读取中…
@@ -154,11 +308,18 @@ export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
     )
   }
 
+  const groups = panelGroups(manifest)
+
   return (
     <div>
       <div className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>
         这一桌长期沿用的规则改动，对所有用这套规则的房间生效（含进行中的局）；不改的项照规则书原文来。
       </div>
+
+      {preview && (
+        <ImportPreview preview={preview} busy={saving}
+          onConfirm={() => void confirmImport()} onCancel={() => setPreview(null)} />
+      )}
 
       {/* 总开关。关掉时下面配好的东西一条都不生效，但也**不会被清掉**——
           想先照规则原文跑一局试试，回头一开就全回来了。 */}
@@ -179,103 +340,14 @@ export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
       <div style={enabled ? undefined : { opacity: 0.55 }}>
 
       <div className={twoColumn ? 'grid gap-x-6 md:grid-cols-2' : ''}>
-        {/* 左组：一次检定怎么判 */}
-        <div className="divide-y self-start" style={{ borderColor: 'var(--color-border)' }}>
-          <Row label="大成功阈值" hint="骰值 ≤ 此值算大成功（规则书是 1）">
-            <NumberBox label="大成功阈值" value={rules.critical_max} min={1} max={20}
-              onChange={(v) => patch({ critical_max: v })} />
-          </Row>
-
-          <Row label="大失败阈值" hint={FUMBLE_LABELS[rules.fumble_rule]}>
-            <Select value={rules.fumble_rule} onValueChange={(v) => patch({ fumble_rule: v })}>
-              <SelectTrigger className="w-[8.5rem] text-sm" aria-label="大失败阈值">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="raw">照规则书</SelectItem>
-                <SelectItem value="hundred_only">只认 100</SelectItem>
-                <SelectItem value="ninety_six_plus">96 起</SelectItem>
-              </SelectContent>
-            </Select>
-          </Row>
-
-          <Row label="奖惩骰上限" hint="单次检定最多叠几个奖励或惩罚骰">
-            <NumberBox label="奖惩骰上限" value={rules.dice_pool_cap} min={0} max={3}
-              onChange={(v) => patch({ dice_pool_cap: v })} />
-          </Row>
-
-          <Row
-            label="幸运消费"
-            hint="规则书的可选规则：检定失败后可花幸运点抵掉差值买成功。开启后失败时会问玩家买不买。"
-          >
-            <Switch label="幸运消费" checked={rules.luck_spend}
-              onChange={(v) => patch({ luck_spend: v })} />
-          </Row>
-
-          {rules.luck_spend && (
-            <>
-              <Row indent label="单次上限" hint="一次检定最多花几点，0 = 不限">
-                <NumberBox label="幸运单次上限" value={rules.luck_spend_max} min={0} max={999}
-                  onChange={(v) => patch({ luck_spend_max: v })} />
-              </Row>
-              <Row indent label="战斗中可用" hint="常见做法是战斗中禁用，避免拿幸运硬扛伤害判定">
-                <Switch label="战斗中可用" checked={rules.luck_spend_in_combat}
-                  onChange={(v) => patch({ luck_spend_in_combat: v })} />
-              </Row>
-              <Row indent label="买来的成功不计成长" hint="照规则书：走运没教会你任何事">
-                <Switch label="买来的成功不计成长" checked={rules.luck_spend_blocks_improvement}
-                  onChange={(v) => patch({ luck_spend_blocks_improvement: v })} />
-              </Row>
-            </>
-          )}
-
-          <Row
-            label="燃运重骰"
-            hint="本桌自定，规则书里没有这条：失败后可烧固定点数幸运，整骰重掷一次。规则书的重掷叫「孤注一掷」，它不花幸运、且与花幸运二选一。"
-          >
-            <Switch label="燃运重骰" checked={rules.luck_reroll}
-              onChange={(v) => patch({ luck_reroll: v })} />
-          </Row>
-
-          {rules.luck_reroll && (
-            <Row indent label="每次烧几点" hint="买的是一次机会不是一次成功，所以是定价，不随差多少变">
-              <NumberBox label="燃运重骰花费" value={rules.luck_reroll_cost} min={1} max={99}
-                onChange={(v) => patch({ luck_reroll_cost: v })} />
-            </Row>
-          )}
-        </div>
-
-        {/* 右组：挨打与掉 SAN 之后怎么算 */}
-        <div className="divide-y self-start" style={{ borderColor: 'var(--color-border)' }}>
-          <Row label="重伤阈值" hint={`单击伤害 ≥ 最大 HP ÷ ${rules.major_wound_divisor} 判重伤（规则书是 2，即半血）`}>
-            <NumberBox label="重伤阈值" value={rules.major_wound_divisor} min={1} max={10}
-              onChange={(v) => patch({ major_wound_divisor: v })} />
-          </Row>
-
-          <Row label="临时疯狂口径" hint={INSANITY_LABELS[rules.insanity_rule]}>
-            <Select value={rules.insanity_rule} onValueChange={(v) => patch({ insanity_rule: v })}>
-              <SelectTrigger className="w-[8.5rem] text-sm" aria-label="临时疯狂口径">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fifth_of_san">SAN 的 1/5</SelectItem>
-                <SelectItem value="flat">固定点数</SelectItem>
-              </SelectContent>
-            </Select>
-          </Row>
-
-          {rules.insanity_rule === 'flat' && (
-            <Row indent label="固定点数" hint="规则书原文是 5">
-              <NumberBox label="临时疯狂固定点数" value={rules.insanity_flat_threshold} min={1} max={99}
-                onChange={(v) => patch({ insanity_flat_threshold: v })} />
-            </Row>
-          )}
-
-          <Row label="技能成长" hint="关掉则模组结束时不做成长检定（短模组常这么跑）">
-            <Switch label="技能成长" checked={rules.improvement}
-              onChange={(v) => patch({ improvement: v })} />
-          </Row>
-        </div>
+        {groups.map((g) => (
+          <div key={g.name} className="divide-y self-start" aria-label={g.name}
+            style={{ borderColor: 'var(--color-border)' }}>
+            {g.components.map((c) => (
+              <ComponentRows key={c.id} component={c} values={rules} patch={patch} />
+            ))}
+          </div>
+        ))}
       </div>
 
       {/* 桌面约定：参数表达不了的规矩走自由文本。**必须把界限写在界面上**——它进的是
@@ -306,7 +378,20 @@ export function VillageRulesPanel({ ruleSystem, twoColumn, onSaved }: {
       </div>
       </div>
 
-      <div className="flex justify-end mt-3">
+      {/* 房规文件：把这一桌的规矩发给别人，或用别人的。文件里只有数据，导入前先预览。 */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
+        <div className="flex gap-2">
+          <button onClick={() => void exportRules()}
+            className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+            <Download size={14} aria-hidden /> 导出房规
+          </button>
+          <button onClick={() => fileRef.current?.click()}
+            className="btn-secondary btn-sm inline-flex items-center gap-1.5">
+            <Upload size={14} aria-hidden /> 导入房规
+          </button>
+          <input ref={fileRef} type="file" accept=".yaml,.yml,text/yaml" className="hidden"
+            aria-label="选择房规文件" onChange={(e) => void pickFile(e.target.files?.[0])} />
+        </div>
         <button onClick={() => void save()} disabled={saving} className="btn-primary btn-sm">
           {saving ? '保存中…' : '保存村规'}
         </button>

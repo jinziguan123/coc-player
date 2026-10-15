@@ -6,10 +6,9 @@
 
 from __future__ import annotations
 
-from app.rules.coc.combat import compare_checks
-from app.rules.coc.checks import resolve_skill_check
-from app.rules.coc.options import CocRuleOptions
-
+from app.rules.coc.components.check import CheckConfig, resolve_skill_check
+from app.rules.coc.components.combat import compare_checks
+from app.rules.kernel import Component, Provide
 
 def resolve_chase_round(
     quarry_data: dict,
@@ -19,7 +18,7 @@ def resolve_chase_round(
     quarry_mov: int = 8,
     pursuer_mov: int = 8,
     hazard: dict | None = None,
-    options: CocRuleOptions | None = None,
+    options: CheckConfig | None = None,
 ) -> dict:
     """一轮追逐：逃方(quarry) vs 追方(pursuer) 移动对抗，MOV 快者得奖励骰。返回 gap 变化与明细。
 
@@ -72,3 +71,12 @@ def check_chase_end(gap: int, escape_at: int, caught_at: int) -> str | None:
     if gap <= caught_at:
         return "caught"
     return None
+
+
+COMPONENT = Component(
+    id="coc7.chase", title="追逐",
+    requires=("coc7.check",),
+    provides={"chase": Provide(
+        __name__, bound=("resolve_chase_round",), plain=("check_chase_end",),
+    )},
+)

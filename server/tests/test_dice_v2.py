@@ -250,7 +250,7 @@ def test_roll_generation_settles_pending_san_check(db_factory, monkeypatch):
         "broadcast",
         lambda _session_id, chunk, *args, **kwargs: broadcast.append(chunk.as_wire()),
     )
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 99)
 
     asyncio.run(chat_service.run_roll_generation(session.id, check_id))
 
@@ -321,7 +321,7 @@ def test_group_san_waits_until_all_human_players_roll(db_factory, monkeypatch):
         "broadcast",
         lambda _session_id, chunk, *args, **kwargs: broadcast.append(chunk.as_wire()),
     )
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 99)
 
     asyncio.run(chat_service.run_roll_generation(session.id, requests[0]["metadata"]["id"]))
     midway = db_factory().get(GameSession, session.id).turn_state or {}
@@ -380,7 +380,7 @@ def test_dice_continuation_sanity_guard_only_on_success(db_factory, monkeypatch)
         monkeypatch.setattr(chat_service, "_module_excerpts_for_context", lambda *a, **k: [])
         monkeypatch.setattr(chat_service, "_finish_generation", noop_finish)
         monkeypatch.setattr(turn_planner, "run_turn_planner", spy_planner)
-        monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: roll)
+        monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: roll)
         called["n"] = 0
         _asyncio.run(chat_service.run_roll_generation(session.id, "chk1"))
         return called["n"]
@@ -643,7 +643,7 @@ def test_group_check_waits_until_all_human_players_roll(db_factory, monkeypatch)
         "broadcast",
         lambda _session_id, chunk, *args, **kwargs: broadcast.append(chunk.as_wire()),
     )
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 10)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 10)
 
     asyncio.run(chat_service.run_roll_generation(session.id, requests[0]["metadata"]["id"]))
     midway = db_factory().get(GameSession, session.id).turn_state or {}
@@ -671,7 +671,7 @@ def test_mixed_group_check_keeps_ai_result_until_human_rolls(db_factory, monkeyp
     ally.skills = {"侦查": 55}
     session.kp_mode = "human"
     db.commit()
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 10)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 10)
 
     chunks = _run(
         db, module, hero, teammates, session,

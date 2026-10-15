@@ -6,9 +6,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_local_client
 from app.database import get_db
 from app.models.rulebook import Rulebook
+from app.rules import get_system
 from app.schemas.rulebook import (
+    HouseRulesExport,
+    HouseRulesImportRequest,
+    HouseRulesPreviewRead,
     RuleSearchResponse,
     RulebookRead,
+    RuleSystemManifest,
     VillageRulesRead,
     VillageRulesUpdate,
 )
@@ -102,6 +107,7 @@ def read_village_rules(rule_system: str, db: Session = Depends(get_db)):
         effective=rule_options_service.village_view(db, rule_system),
         table_notes=(row.table_notes if row else "") or "",
         enabled=bool(row.enabled) if row else True,
+        labels=rule_options_service.village_labels(db, rule_system),
     )
 
 
@@ -129,4 +135,50 @@ def update_village_rules(
         effective=rule_options_service.village_view(db, rule_system),
         table_notes=notes,
         enabled=rule_options_service.village_enabled(db, rule_system),
+        labels=rule_options_service.village_labels(db, rule_system),
     )
+
+
+@router.get("/village-rules/{rule_system}/manifest", response_model=RuleSystemManifest)
+def read_rule_manifest(rule_system: str):
+    """规则系统的组件目录与各组件参数的 schema——村规面板据此渲染，不再在前端写死字段。"""
+    return RuleSystemManifest(**_system_or_404(rule_system).manifest())
+
+
+@router.get("/village-rules/{rule_system}/export", response_model=HouseRulesExport)
+def export_house_rules(rule_system: str, db: Session = Depends(get_db)):
+    """把这一桌的村规导出成房规文件（YAML 原文 + 建议文件名），前端存成文件发给别人导入。
+
+    不限本机：读村规本就公开，导出只是换个格式。
+    """
+    _system_or_404(rule_system)
+    return HouseRulesExport(
+        filename=f"house-rules-{rule_system}.yaml",
+        text=rule_options_service.export_house_rules(db, rule_system),
+    )
+
+
+@router.post(
+    "/village-rules/{rule_system}/import-preview",
+    dependencies=[Depends(require_local_client)],
+    response_model=HouseRulesPreviewRead,
+)
+def preview_house_rules(rule_system: str, data: HouseRulesImportRequest):
+    """校验一份房规文件并返回预览，**不落库**。房主确认后前端走 PUT 保存。
+
+    限本机：与改村规同属桌面配置操作。
+    """
+    _system_or_404(rule_system)
+    preview, labels = rule_options_service.preview_house_rules(rule_system, data.text)
+    return HouseRulesPreviewRead(
+        ok=preview.ok, name=preview.name, description=preview.description,
+        options=preview.options, table_notes=preview.table_notes, labels=labels,
+        errors=preview.errors, warnings=preview.warnings,
+    )
+
+
+def _system_or_404(rule_system: str):
+    try:
+        return get_system(rule_system)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e

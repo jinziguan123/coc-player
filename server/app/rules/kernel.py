@@ -11,15 +11,25 @@
 - **读时查找**：服务对象每次取属性都现查目标模块，不在构造时拷贝函数引用。这样测试对
   规则模块打的桩（monkeypatch）照样生效，缓存的 Ruleset 也不会握着过期的函数。
 
+- **参数归组件**：每个组件用 :class:`~app.rules.config.RuleConfig` 声明自己的村规参数；
+  规则系统把它们合成一个完整的村规对象（``options_model``）。可选组件的「开关」就是它
+  自己的一个布尔参数（``toggle``），所以存档里只有参数，没有第二套「组件启用表」。
+
 生效规则不可变、按（规则系统, 村规）缓存：换一份村规就是换一个对象，不存在「卸载」。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+import importlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
+
+from app.rules.config import RuleConfig, parse_lenient, parse_strict
+
+#: 房规文件格式版本（见设计文档 6.3）。升级时在 house_rules 里补一个迁移函数。
+HOUSE_RULES_FORMAT_VERSION = 1
 
 
 class RulesetError(ValueError):
@@ -28,10 +38,11 @@ class RulesetError(ValueError):
 
 @dataclass(frozen=True)
 class Provide:
-    """组件向某个服务槽位提供的导出。
+    """组件向自己的服务槽位提供的导出。
 
-    ``target`` 是实现所在的模块（或对象）；``bound`` 里的名字调用时自动注入
-    ``options=<本局村规>``，``plain`` 里的名字原样透出（纯数据表、与村规无关的函数）。
+    ``target`` 是实现所在的模块：可以是模块对象，也可以是模块路径字符串——组件文件在
+    末尾声明 ``Provide(__name__, ...)`` 指向自身，组装时再解析。``bound`` 里的名字调用时
+    自动注入 ``options=<本局村规>``；``plain`` 里的名字原样透出（数据表、与村规无关的函数）。
     """
 
     target: Any
@@ -42,45 +53,135 @@ class Provide:
         dup = set(self.bound) & set(self.plain)
         if dup:
             raise RulesetError(f"导出名同时出现在 bound 与 plain：{sorted(dup)}")
-        missing = [n for n in (*self.bound, *self.plain) if not hasattr(self.target, n)]
+        if not isinstance(self.target, str):
+            self.check_exports()
+
+    @property
+    def obj(self) -> Any:
+        if isinstance(self.target, str):
+            return importlib.import_module(self.target)
+        return self.target
+
+    def check_exports(self) -> None:
+        obj = self.obj
+        missing = [n for n in (*self.bound, *self.plain) if not hasattr(obj, n)]
         if missing:
-            raise RulesetError(f"{_target_name(self.target)} 没有这些导出：{missing}")
+            raise RulesetError(f"{_target_name(obj)} 没有这些导出：{missing}")
 
 
 @dataclass(frozen=True)
 class Component:
-    """一块子规则。只声明「提供什么、依赖谁、和谁互斥、管哪些村规键」，不含状态。"""
+    """一块子规则。只声明「提供什么、依赖谁、和谁互斥、有哪些参数」，不含状态。"""
 
     id: str
     title: str
-    provides: dict[str, Provide]
+    provides: dict[str, Provide] = field(default_factory=dict)
     requires: tuple[str, ...] = ()
     conflicts: tuple[str, ...] = ()
-    #: 本组件读取的村规键。每个键必须恰好有一个所有者（P2 起由组件自己的 schema 定义）。
-    option_keys: tuple[str, ...] = ()
+    #: 本组件的村规参数。每个参数必须恰好归一个组件。
+    config: type[RuleConfig] | None = None
+    #: 可选组件的开关参数名（``config`` 里的一个 bool 字段）；None = 常驻组件。
+    toggle: str | None = None
+    #: 村规面板上的分栏（如「判定」「伤害与状态」）；空串 = 不在面板上出现。
+    group: str = ""
+    #: 给房主看的一句说明（可选组件的开关行下方显示它）。
+    description: str = ""
+
+    @property
+    def option_keys(self) -> tuple[str, ...]:
+        return tuple(self.config.model_fields) if self.config else ()
+
+    def is_enabled(self, options: Any) -> bool:
+        return self.toggle is None or bool(getattr(options, self.toggle))
 
 
 @dataclass(frozen=True, eq=False)  # 按身份哈希：作 lru_cache 的键
 class RuleSystem:
-    """一套规则系统：组件目录 + 官方预设 + 村规的解析/合并/描述。"""
+    """一套规则系统：组件目录 + 官方预设 + 合成后的村规模型。"""
 
     id: str
+    title: str
+    #: 官方预设的版本：房规文件记下它（``base_preset``），预设调整默认值时据此提示。
+    version: int
     components: tuple[Component, ...]
-    #: 官方预设启用的组件 id（P1 只有预设，房主开关组件见 P2）。
+    #: 官方预设包含的组件 id，顺序即 KP 描述、摘要标签、村规面板的顺序。
     preset: tuple[str, ...]
-    #: 村规键全集；用来校验「每个键恰好一个所有者」。
-    option_fields: tuple[str, ...]
-    #: dict（可为 None）→ 规范化、可哈希的村规对象（未知键丢弃、值钳进合法区间）。
-    parse_options: Callable[[dict | None], Any]
-    #: 多层村规按「后者覆盖前者」合并成一个 dict。
-    merge_options: Callable[..., dict]
-    #: 村规对象 → 与 RAW 不同的那几项的人话描述（注入 KP）。
-    #: 村规对象本身还须提供 ``to_dict()``（完整值）与 ``diff_from_default()``（差异项）。
-    describe_options: Callable[[Any], list[str]]
+    #: 各组件参数的合成（多继承各组件的 config）；字段全集须与组件参数一一对应。
+    options_model: type[RuleConfig]
     _slots: dict[str, tuple[str, Provide]] = field(default_factory=dict, repr=False)
+    _active: tuple[Component, ...] = field(default=(), repr=False)
+    _default: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "_slots", _resolve(self))
+        object.__setattr__(self, "_default", self.options_model())
+        active, slots = _resolve(self)
+        object.__setattr__(self, "_active", active)
+        object.__setattr__(self, "_slots", slots)
+
+    @property
+    def active_components(self) -> tuple[Component, ...]:
+        """预设内的组件，按预设顺序。"""
+        return self._active
+
+    # ── 村规 ──
+
+    @property
+    def default_options(self) -> Any:
+        return self._default
+
+    def parse_options(self, raw: dict | None) -> Any:
+        """宽松解析（落库/界面提交）：未知键丢弃、值钳进合法区间。"""
+        return parse_lenient(self.options_model, raw, self._default)
+
+    def parse_options_strict(self, raw: Any) -> tuple[dict, list[str], list[str]]:
+        """严格解析（导入房规文件）：返回 (差异项, 错误, 未知键)。"""
+        return parse_strict(self.options_model, raw)
+
+    @staticmethod
+    def merge_options(*layers: dict | None) -> dict:
+        """按「后者覆盖前者」合并村规层（模组默认 → 村规 → 本局覆盖）。
+
+        不做 Foundry 那种 mode/priority——村规是标量参数，不存在「多来源叠加同一个值」，
+        引进优先级只会让「我改的这一项到底生效没有」变得不可解释。
+        """
+        merged: dict = {}
+        for layer in layers:
+            for key, value in (layer or {}).items():
+                if value is not None:
+                    merged[key] = value
+        return merged
+
+    def describe_options(self, options: Any) -> list[str]:
+        """与 RAW 不同之处的人话（给 KP），按预设顺序逐组件拼接。"""
+        return [line for c in self._active if c.config for line in c.config.describe(options)]
+
+    def option_labels(self, options: Any) -> list[str]:
+        """与 RAW 不同之处的短标签（给玩家看的规矩摘要）。"""
+        return [text for c in self._active if c.config for text in c.config.labels(options)]
+
+    # ── 组件 ──
+
+    def manifest(self) -> dict:
+        """前端村规面板与房规文件的契约：组件目录 + 各组件参数的 JSON Schema。"""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "version": self.version,
+            "house_rules_format_version": HOUSE_RULES_FORMAT_VERSION,
+            "components": [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "description": c.description,
+                    "group": c.group,
+                    "toggle": c.toggle,
+                    "requires": list(c.requires),
+                    "conflicts": list(c.conflicts),
+                    "config_schema": c.config.model_json_schema() if c.config else None,
+                }
+                for c in self._active
+            ],
+        }
 
     def ruleset(self, options: dict | None = None) -> Ruleset:
         """按村规取生效规则（同一份村规返回同一个缓存对象）。"""
@@ -100,9 +201,9 @@ class Service:
     def __getattr__(self, name: str) -> Any:
         p = self._provide
         if name in p.plain:
-            return getattr(p.target, name)
+            return getattr(p.obj, name)
         if name in p.bound:
-            fn = getattr(p.target, name)  # 读时查找：monkeypatch 与热替换都能看到
+            fn = getattr(p.obj, name)  # 读时查找：monkeypatch 与热替换都能看到
             options = self._options
 
             def call(*args, **kwargs):
@@ -118,7 +219,7 @@ class Service:
         raise AttributeError(f"规则服务 {self._slot!r} 没有导出 {name!r}")
 
     def __repr__(self) -> str:
-        return f"<Service {self._slot} → {_target_name(self._provide.target)}>"
+        return f"<Service {self._slot} → {_target_name(self._provide.obj)}>"
 
 
 class Ruleset:
@@ -129,7 +230,8 @@ class Ruleset:
     def __init__(self, system: RuleSystem, options: Any) -> None:
         self.system = system.id
         self.options = options
-        self.components = system.preset
+        #: 本份村规下实际启用的组件（可选组件随其开关参数进出）。
+        self.components = tuple(c.id for c in system._active if c.is_enabled(options))
         self._services = {
             slot: Service(slot, provide, options)
             for slot, (_cid, provide) in system._slots.items()
@@ -144,9 +246,17 @@ class Ruleset:
                 f"（已有：{', '.join(sorted(self._services))}）",
             ) from None
 
+    def has(self, slot: str) -> bool:
+        """这套规则系统有没有某个服务槽位（如某些规则系统根本没有「成长」）。"""
+        return slot in self._services
+
     def describe(self) -> list[str]:
         """本份村规与 RAW 不同之处的人话描述（供注入 KP 与规划器）。"""
         return _SYSTEMS[self.system].describe_options(self.options)
+
+    def labels(self) -> list[str]:
+        """本份村规与 RAW 不同之处的短标签（给玩家看）。"""
+        return _SYSTEMS[self.system].option_labels(self.options)
 
     def __repr__(self) -> str:
         return f"<Ruleset {self.system} components={len(self.components)}>"
@@ -187,8 +297,8 @@ def _build(system: RuleSystem, options: Any) -> Ruleset:
     return Ruleset(system, options)
 
 
-def _resolve(system: RuleSystem) -> dict[str, tuple[str, Provide]]:
-    """校验预设并算出「槽位 → (组件 id, 导出)」。任何问题都在这里一次性报全。"""
+def _resolve(system: RuleSystem) -> tuple[tuple[Component, ...], dict[str, tuple[str, Provide]]]:
+    """校验预设并算出（预设内组件, 槽位 → (组件 id, 导出)）。任何问题都在这里一次性报全。"""
     catalog: dict[str, Component] = {}
     errors: list[str] = []
     for comp in system.components:
@@ -212,15 +322,20 @@ def _resolve(system: RuleSystem) -> dict[str, tuple[str, Provide]]:
     slots: dict[str, tuple[str, Provide]] = {}
     for comp in active:
         for slot, provide in comp.provides.items():
+            try:
+                provide.check_exports()
+            except RulesetError as e:
+                errors.append(f"组件 {comp.id}：{e}")
             if slot in slots:
                 errors.append(f"服务槽位 {slot} 同时由 {slots[slot][0]} 与 {comp.id} 提供")
             else:
                 slots[slot] = (comp.id, provide)
 
-    errors += _check_option_owners(active, system.option_fields)
+    errors += _check_option_owners(active, tuple(system.options_model.model_fields))
+    errors += _check_toggles(active)
     if errors:
         raise RulesetError(f"规则系统 {system.id} 组装失败：\n- " + "\n- ".join(errors))
-    return slots
+    return tuple(active), slots
 
 
 def _check_option_owners(active: Iterable[Component], option_fields: tuple[str, ...]) -> list[str]:
@@ -236,6 +351,18 @@ def _check_option_owners(active: Iterable[Component], option_fields: tuple[str, 
             else:
                 owner[key] = comp.id
     errors += [f"村规键 {key} 没有任何组件认领" for key in option_fields if key not in owner]
+    return errors
+
+
+def _check_toggles(active: Iterable[Component]) -> list[str]:
+    errors: list[str] = []
+    for comp in active:
+        if comp.toggle is None:
+            continue
+        if comp.toggle not in comp.option_keys:
+            errors.append(f"组件 {comp.id} 的开关 {comp.toggle} 不是它自己的参数")
+        elif comp.config.model_fields[comp.toggle].annotation is not bool:
+            errors.append(f"组件 {comp.id} 的开关 {comp.toggle} 必须是布尔参数")
     return errors
 
 

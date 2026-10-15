@@ -12,8 +12,7 @@ from app.models.event_log import EventLog  # noqa: F401
 from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401
-from app.rules.coc.engine import CoCRuleEngine
-from app.rules.registry import get_engine
+from app.rules.coc.components import growth as growth_rules
 from app.services import growth_service, session_service
 
 
@@ -28,7 +27,7 @@ def db_factory(tmp_path):
 
 
 def test_improvement_check_invariants():
-    eng = CoCRuleEngine()
+    eng = growth_rules
     random.seed(1)
     for _ in range(200):
         for v in (10, 55, 90, 99):
@@ -43,34 +42,18 @@ def test_improvement_check_invariants():
 
 
 def test_improvement_low_skill_always_grows_on_high_roll(monkeypatch):
-    eng = CoCRuleEngine()
-    import app.rules.coc.engine as engmod
-    monkeypatch.setattr(engmod, "roll_percentile", lambda: 80)   # 80 > 30 → 成长
-    monkeypatch.setattr(engmod, "roll", lambda n: type("R", (), {"total": 5})())
+    eng = growth_rules
+    monkeypatch.setattr(growth_rules, "roll_percentile", lambda: 80)   # 80 > 30 → 成长
+    monkeypatch.setattr(growth_rules, "roll", lambda n: type("R", (), {"total": 5})())
     r = eng.improvement_check(30)
     assert r["improved"] and r["new_value"] == 35
 
 
 def test_improvement_high_skill_no_grow_on_low_roll(monkeypatch):
-    eng = CoCRuleEngine()
-    import app.rules.coc.engine as engmod
-    monkeypatch.setattr(engmod, "roll_percentile", lambda: 40)   # 40 <= 90 且 <=95 → 不成长
+    eng = growth_rules
+    monkeypatch.setattr(growth_rules, "roll_percentile", lambda: 40)   # 40 <= 90 且 <=95 → 不成长
     r = eng.improvement_check(90)
     assert not r["improved"] and r["new_value"] == 90 and r["gain"] == 0
-
-
-def test_base_engine_no_improvement():
-    from app.rules.base import RuleEngine
-
-    class _Dummy(RuleEngine):
-        def get_rule_system_id(self): return "x"
-        def get_character_schema(self): return {}
-        def create_character(self, d): return d
-        def validate_character(self, d): return True, []
-        def resolve_check(self, *a, **k): ...
-        def apply_damage(self, *a, **k): ...
-
-    assert _Dummy().improvement_check(50) is None
 
 
 def _seed(db) -> tuple[str, str]:
@@ -109,7 +92,7 @@ def test_settle_growth_applies_gain(db_factory, monkeypatch):
     sid, cid = _seed(db)
     # 强制侦查成长 +5
     monkeypatch.setattr(
-        get_engine("coc"), "improvement_check",
+        growth_rules, "improvement_check",
         lambda v, options=None: {
             "roll": 99, "improved": True, "gain": 5, "old_value": v, "new_value": v + 5,
         },

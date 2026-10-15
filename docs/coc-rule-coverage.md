@@ -10,17 +10,17 @@
 
 | 领域 | 已实现内容 | 主要位置 |
 |---|---|---|
-| 属性 | 8 项属性骰法（3d6×5、2d6+6×5）、幸运 3d6×5、15–19 岁两次取高 | `rules/coc/character.py` |
-| 年龄 | 各年龄档体能/APP 减值、EDU 增强检定、教育上限 99、未成年修正 | `rules/coc/character.py` |
+| 属性 | 8 项属性骰法（3d6×5、2d6+6×5）、幸运 3d6×5、15–19 岁两次取高 | `rules/coc/components/character.py` |
+| 年龄 | 各年龄档体能/APP 减值、EDU 增强检定、教育上限 99、未成年修正 | `rules/coc/components/character.py` |
 | 派生值 | HP / MP / SAN / MOV（含年龄减值）/ 伤害加值 / 体格 / 闪避 / 母语 | 同上 |
-| 建卡 | 技能点预算、信用评级上限、职业列表 112 个、装备 52 件、武器 106 件 | `rules/coc/occupations.py` 等 |
-| 技能检定 | 普通 / 困难 / 极难难度，大成功、极难、困难、大失败边界，奖励/惩罚骰 | `rules/coc/checks.py` |
-| 对抗检定 | 双方等级比较，贯穿与战斗对抗路径共用 | `rules/coc/checks.py` |
-| 理智 | SAN 检定、固定/骰式损失、单次损失 ≥1/5 触发临时疯狂、SAN 归零永久疯狂 | `rules/coc/checks.py`、`turn_effects.py` |
-| 疯狂发作 | 10 种「一阵疯狂」症状、症状惩罚域、失能接管、持续回合、到期解除 | `rules/coc/madness.py` |
-| 战斗 | 先攻（火器优先）、命中/闪避/反击、伤害/DB、贯穿、连射、抵近、掩体、视线、夹击、重伤/濒死/昏迷/死亡 | `rules/coc/combat.py`、`combat_service.py` |
+| 建卡 | 技能点预算、信用评级上限、职业列表 112 个、装备 52 件、武器 106 件 | `rules/coc/components/occupation.py`、`equipment.py`、`combat.py` |
+| 技能检定 | 普通 / 困难 / 极难难度，大成功、极难、困难、大失败边界，奖励/惩罚骰 | `rules/coc/components/check.py` |
+| 对抗检定 | 双方等级比较，贯穿与战斗对抗路径共用 | `rules/coc/components/check.py` |
+| 理智 | SAN 检定、固定/骰式损失、单次损失 ≥1/5 触发临时疯狂、SAN 归零永久疯狂 | `rules/coc/components/sanity.py`、`turn_effects.py` |
+| 疯狂发作 | 10 种「一阵疯狂」症状、症状惩罚域、失能接管、持续回合、到期解除 | `rules/coc/components/madness.py` |
+| 战斗 | 先攻（火器优先）、命中/闪避/反击、伤害/DB、贯穿、连射、抵近、掩体、视线、夹击、重伤/濒死/昏迷/死亡 | `rules/coc/components/combat.py`、`wound.py`、`combat_service.py` |
 | 治疗 | 急救稳定伤势/回复 1 点、医学 1d3、每处伤一次急救 | `combat.py`、`first_aid` 相关服务 |
-| 追逐 | 距离轨、移动对抗、速度差奖惩、障碍、脱身/追上判定 | `rules/coc/chase.py` |
+| 追逐 | 距离轨、移动对抗、速度差奖惩、障碍、脱身/追上判定 | `rules/coc/components/chase.py` |
 | 成长 | 幕间技能成长检定（成功技能才可成长） | `engine.py`、`growth_service.py` |
 | 财富 | 信用评级 → 消费水平/现金/资产换算 | `character.py` |
 

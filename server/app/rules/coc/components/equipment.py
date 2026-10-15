@@ -1,7 +1,10 @@
 """COC 7th Edition 装备目录"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
+from app.rules.kernel import Component, Provide
 
 @dataclass
 class Equipment:
@@ -102,3 +105,12 @@ def get_available_equipment(
         if era_match and eq.min_credit <= credit_rating:
             results.append(eq.to_dict())
     return results
+
+
+COMPONENT = Component(
+    id="coc7.equipment", title="装备",
+    requires=("coc7.character",),
+    provides={"equipment": Provide(
+        __name__, plain=("COC_EQUIPMENT", "get_available_equipment"),
+    )},
+)

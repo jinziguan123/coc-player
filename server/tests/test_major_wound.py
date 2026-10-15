@@ -60,7 +60,7 @@ def test_重伤且体质检定失败则昏迷(db_factory, monkeypatch):
     db = db_factory()
     module, char, sid = _seed(db)
     # 钉死掷骰为 99 → 必失败（CON 60）
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 99)
 
     chunks = _run_hp_change(db, module, char, sid, "-5")  # 5 ≥ 10//2 → 重伤
 
@@ -76,7 +76,7 @@ def test_重伤且体质检定失败则昏迷(db_factory, monkeypatch):
 def test_重伤但体质检定成功保持清醒(db_factory, monkeypatch):
     db = db_factory()
     module, char, sid = _seed(db)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 30)  # 30 ≤ 60 成功
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 30)  # 30 ≤ 60 成功
 
     _run_hp_change(db, module, char, sid, "-5")
 
@@ -165,7 +165,7 @@ def test_队友受伤也结算并重伤昏迷(db_factory, monkeypatch):
     db = db_factory()
     module, hero, sid = _seed(db)
     ally = _ally(db)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)  # 体质必失败→昏迷
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 99)  # 体质必失败→昏迷
     asyncio.run(chat_service._exec_hp_change(
         db, sid, hero, "阿尔法", "-5", "被兽爪撕开", module=module, teammates=[ally],
     ))

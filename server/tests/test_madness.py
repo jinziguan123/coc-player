@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ai.context import _format_player_info
 from app.models import Base, Character, GameSession, Module  # noqa: F401
-from app.rules.coc import madness as m
+from app.rules.coc.components import madness as m
 from tests.wire import wires
 from app.services import chat_service as cs
 

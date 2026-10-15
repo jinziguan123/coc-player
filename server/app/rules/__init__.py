@@ -5,6 +5,7 @@
 """
 
 import app.rules.coc  # noqa: F401 — 触发注册
+from app.rules import house_rules  # noqa: F401
 from app.rules.kernel import (  # noqa: F401
     Ruleset,
     RulesetError,

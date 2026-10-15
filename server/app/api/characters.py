@@ -73,7 +73,7 @@ def get_occupation_categories(rule_system: str):
 @router.get("/rules/{rule_system}/statuses")
 def get_statuses(rule_system: str):
     """角色状态可选项（正常/重伤/昏迷/死亡/临时·不定期·永久疯狂）。"""
-    return _rules_slot(rule_system, "status").CHARACTER_STATUSES
+    return _rules_slot(rule_system, "wound").CHARACTER_STATUSES
 
 
 class SkillPointsRequest(BaseModel):
@@ -98,14 +98,14 @@ def get_equipment(rule_system: str, era: str = "1920s", credit_rating: int = 0):
 @router.get("/rules/{rule_system}/weapons")
 def get_weapons(rule_system: str):
     """CoC 武器表 + 大类展示顺序，供武器选择器两级筛选使用。"""
-    weapons = _rules_slot(rule_system, "weapons", "武器表")
-    return {"weapons": weapons.COC_WEAPONS, "categories": weapons.WEAPON_CATEGORY_ORDER}
+    combat = _rules_slot(rule_system, "combat", "武器表")
+    return {"weapons": combat.COC_WEAPONS, "categories": combat.WEAPON_CATEGORY_ORDER}
 
 
 @router.get("/rules/{rule_system}/specializations")
 def get_specializations(rule_system: str):
     """专精技能类别（母语/外语/格斗/射击/科学/生存/技艺/驾驶）及各专精起始值。"""
-    spec = _rules_slot(rule_system, "specialization", "专精列表")
+    spec = _rules_slot(rule_system, "occupation", "专精列表")
     return {"categories": spec.SPECIALIZATIONS, "single": sorted(spec.SINGLE_SPEC)}
 
 
@@ -221,11 +221,11 @@ def base_skills(data: BaseSkillsRequest, rule_system: str = "coc"):
 
     建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避
     是占位的 0，界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的
-    `max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 RuleEngine 里实现一次。
+    `max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 coc7.character 组件里实现一次。
     """
     try:
-        sheet = _rules_slot(rule_system, "sheet")
-        return BaseSkillsResponse(skills=sheet.base_skills(data.base_attributes))
+        character = _rules_slot(rule_system, "character")
+        return BaseSkillsResponse(skills=character.base_skills(data.base_attributes))
     except ValueError as e:
         raise HTTPException(400, str(e))
 

@@ -1,14 +1,15 @@
 import app.rules  # noqa: F401 — 触发注册
 
-from app.rules.coc.character import (
+from app.rules.coc.components.character import (
     build_default_skills,
     compute_derived,
     roll_attributes,
 )
-from app.rules.coc.checks import resolve_skill_check, san_check
-from app.rules.coc.combat import resolve_wound
+from app.rules.coc.components.check import resolve_skill_check
+from app.rules.coc.components.sanity import san_check
+from app.rules.coc.components.wound import resolve_wound
 from app.rules.dice import roll
-from app.rules.registry import get_engine
+from app.rules import get_system, ruleset_for
 
 
 class TestDice:
@@ -72,17 +73,16 @@ class TestCoCCharacter:
 
 class TestCoCEngine:
     def test_registry(self):
-        engine = get_engine("coc")
-        assert engine.get_rule_system_id() == "coc"
+        assert get_system("coc").id == "coc"
 
     def test_character_schema(self):
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         schema = engine.get_character_schema()
         assert schema["rule_system"] == "coc"
         assert len(schema["attributes"]) == 8
 
     def test_create_character(self):
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         result = engine.create_character({"age": 30})
         assert "base_attributes" in result
         assert "skills" in result
@@ -90,7 +90,7 @@ class TestCoCEngine:
         assert result["system_data"]["age"] == 30
 
     def test_create_character_with_attrs(self):
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         attrs = {"STR": 50, "CON": 60, "SIZ": 65, "DEX": 55,
                  "APP": 45, "INT": 70, "POW": 50, "EDU": 65}
         result = engine.create_character({"base_attributes": attrs})
@@ -98,7 +98,7 @@ class TestCoCEngine:
 
     def test_create_character_dodge_from_dex(self):
         # 回归：未提供 skills 时，闪避应为 DEX//2 而非旧 bug 的固定 25
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         attrs = {"STR": 50, "CON": 60, "SIZ": 65, "DEX": 70,
                  "APP": 45, "INT": 70, "POW": 50, "EDU": 65}
         result = engine.create_character({"base_attributes": attrs})
@@ -107,7 +107,7 @@ class TestCoCEngine:
 
     def test_create_character_floors_provided_skills(self):
         # 回归：前端自带 skills（闪避=0、无母语）时，后端兜底补齐属性派生值
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         attrs = {"STR": 50, "CON": 60, "SIZ": 65, "DEX": 70,
                  "APP": 45, "INT": 70, "POW": 50, "EDU": 80}
         provided = {"闪避": 0, "侦查": 60}  # 模拟前端静态默认表 + 加点
@@ -120,7 +120,7 @@ class TestCoCEngine:
 
     def test_create_character_keeps_invested_dodge(self):
         # 玩家在基线之上加点闪避时，保留较高值（不被兜底下调）
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         attrs = {"STR": 50, "CON": 60, "SIZ": 65, "DEX": 70,
                  "APP": 45, "INT": 70, "POW": 50, "EDU": 65}
         result = engine.create_character(
@@ -129,7 +129,7 @@ class TestCoCEngine:
         assert result["skills"]["闪避"] == 50  # max(50, 35)
 
     def test_validate_character(self):
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         valid_data = {
             "base_attributes": {"STR": 50, "CON": 60, "SIZ": 65, "DEX": 55,
                                 "APP": 45, "INT": 70, "POW": 50, "EDU": 65}
@@ -139,13 +139,13 @@ class TestCoCEngine:
         assert errors == []
 
     def test_validate_missing_attr(self):
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         ok, errors = engine.validate_character({"base_attributes": {"STR": 50}})
         assert ok is False
         assert len(errors) == 7
 
     def test_roll_attribute_sets(self):
-        engine = get_engine("coc")
+        engine = ruleset_for("coc").character
         sets = engine.roll_attribute_sets(3)
         assert len(sets) == 3
         for s in sets:
@@ -237,7 +237,7 @@ class TestCoCWound:
         assert r["status"] == "dying"
 
     def test_重伤未归零走体质检定(self, monkeypatch):
-        monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)  # CON 必失败
+        monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 99)  # CON 必失败
         r = resolve_wound(12, 12, 6, self._CD)           # 6=半血 → 重伤未归零 → 体质失败 → 昏迷
         assert r["status"] == "unconscious"
 
@@ -341,18 +341,18 @@ class TestOccupationWeaponData:
     """112 职业 / 106 武器 / 专精数据完整性。"""
 
     def test_counts(self):
-        from app.rules.coc.occupations import COC_OCCUPATIONS
-        from app.rules.coc.specializations import SPECIALIZATIONS
-        from app.rules.coc.weapons import COC_WEAPONS
+        from app.rules.coc.components.occupation import COC_OCCUPATIONS
+        from app.rules.coc.components.occupation import SPECIALIZATIONS
+        from app.rules.coc.components.combat import COC_WEAPONS
         assert len(COC_OCCUPATIONS) == 112
         assert len(COC_WEAPONS) == 106
         assert set(SPECIALIZATIONS) == {"母语", "外语", "格斗", "射击", "科学", "生存", "技艺", "驾驶"}
 
     def test_every_occupation_skill_is_allocatable(self):
         """每个职业技能（按基名）要么在默认技能表，要么是专精占位——否则向导里看不到。"""
-        from app.rules.coc.character import COC_DEFAULT_SKILLS
-        from app.rules.coc.occupations import COC_OCCUPATIONS
-        from app.rules.coc.specializations import SPECIALIZATIONS
+        from app.rules.coc.components.character import COC_DEFAULT_SKILLS
+        from app.rules.coc.components.occupation import COC_OCCUPATIONS
+        from app.rules.coc.components.occupation import SPECIALIZATIONS
 
         def base(s: str) -> str:
             return s.split("(")[0]
@@ -363,7 +363,7 @@ class TestOccupationWeaponData:
                 assert base(sk) in allocatable, f"{occ.name} 的技能 {sk} 不可分配"
 
     def test_weapon_fields_present(self):
-        from app.rules.coc.weapons import COC_WEAPONS
+        from app.rules.coc.components.combat import COC_WEAPONS
         w = COC_WEAPONS[0]
         for key in ("name", "skill", "dam", "tho", "range", "round", "num", "err"):
             assert key in w

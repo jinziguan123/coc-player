@@ -1,7 +1,7 @@
 """成长结算（P4 5.2c）：会话内成功使用过的技能，战后按规则引擎做成长检定并落库。
 
-数据源确定性：dice 事件的 metadata（skill / outcome / actor）。规则逻辑走 RuleEngine
-的 improvement_check（插件式，不硬编码 CoC）。不支持成长的规则系统自然降级为空结果。
+数据源确定性：dice 事件的 metadata（skill / outcome / actor）。规则逻辑走本局生效规则的
+``rs.growth.improvement_check``（成长组件，不硬编码 CoC）；村规关掉成长时返回空结果。
 """
 
 from __future__ import annotations
@@ -52,8 +52,7 @@ def eligible_skills(db: Session, session_id: str, character_id: str) -> list[dic
 def settle_growth(db: Session, session_id: str, character_id: str) -> dict | None:
     """对全部可成长技能逐项做成长检定并把成长应用到角色技能表；返回逐项结果。
 
-    会话/角色/模组缺失返回 None。规则系统不支持成长时 results 为空（各项 improvement_check
-    返回 None 被跳过）。掷骰在服务端权威进行，前端可据结果做逐项揭示动画。
+    会话/角色/模组缺失返回 None。规则系统没有成长组件、或本局村规关掉了成长时 results 为空。掷骰在服务端权威进行，前端可据结果做逐项揭示动画。
     """
     session = db.get(GameSession, session_id)
     char = db.get(Character, character_id)
@@ -62,7 +61,10 @@ def settle_growth(db: Session, session_id: str, character_id: str) -> dict | Non
     module = db.get(Module, session.module_id) if session.module_id else None
     if module is None:
         return None
-    growth = rule_options_service.ruleset(db, session).growth
+    rs = rule_options_service.ruleset(db, session)
+    if not rs.has("growth"):   # 这套规则系统没有成长组件：照常返回，只是没有逐项结果
+        return {"character_id": character_id, "character_name": char.name, "results": []}
+    growth = rs.growth
 
     skills = dict(char.skills or {})
     results: list[dict] = []

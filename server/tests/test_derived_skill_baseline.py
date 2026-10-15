@@ -12,8 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.rules.coc.character import COC_DEFAULT_SKILLS
-from app.rules.registry import get_engine
+from app.rules.coc.components.character import COC_DEFAULT_SKILLS
+from app.rules import ruleset_for
 
 ATTRS = {"STR": 50, "CON": 50, "SIZ": 50, "DEX": 61, "APP": 50,
          "INT": 60, "POW": 50, "EDU": 70}
@@ -32,7 +32,7 @@ def test_静态表里这两项是占位的零():
 
 
 def test_base_skills_按属性填好派生值():
-    skills = get_engine("coc").base_skills(ATTRS)
+    skills = ruleset_for("coc").character.base_skills(ATTRS)
     assert skills["母语"] == 70          # = EDU
     assert skills["闪避"] == 30          # = DEX // 2，向下取整
     assert skills["侦查"] == COC_DEFAULT_SKILLS["侦查"]   # 其余照抄静态表
@@ -41,7 +41,7 @@ def test_base_skills_按属性填好派生值():
 def test_base_skills_接口与引擎同源(client):
     r = client.post("/api/rules/coc/base-skills", json={"base_attributes": ATTRS})
     assert r.status_code == 200, r.text
-    assert r.json()["skills"] == get_engine("coc").base_skills(ATTRS)
+    assert r.json()["skills"] == ruleset_for("coc").character.base_skills(ATTRS)
 
 
 def test_按界面显示的起始值加点不会蒸发(client):
@@ -49,12 +49,12 @@ def test_按界面显示的起始值加点不会蒸发(client):
 
     回归：界面若拿静态表的 0，提交 0+20=20，落库被顶成 70，那 20 点白花。
     """
-    base = get_engine("coc").base_skills(ATTRS)
+    base = ruleset_for("coc").character.base_skills(ATTRS)
     submitted = dict(base)
     submitted["母语"] = base["母语"] + 20      # 玩家加了 20 点
     submitted["闪避"] = base["闪避"] + 10
 
-    landed = get_engine("coc").create_character(
+    landed = ruleset_for("coc").character.create_character(
         {"base_attributes": ATTRS, "age": 25, "skills": submitted},
     )["skills"]
     assert landed["母语"] == 90              # 70 + 20，一点没丢
@@ -64,7 +64,7 @@ def test_按界面显示的起始值加点不会蒸发(client):
 def test_教育高于九十时母语不被建卡上限砍掉():
     """90 是「加点不得超过」的上限，不是属性派生基础值的上限。EDU 上限是 99。"""
     attrs = {**ATTRS, "EDU": 95}
-    assert get_engine("coc").base_skills(attrs)["母语"] == 95
+    assert ruleset_for("coc").character.base_skills(attrs)["母语"] == 95
 
     from app.services import ai_character_service
 

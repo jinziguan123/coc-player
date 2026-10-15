@@ -10,14 +10,24 @@
 - 推动骰（pushed roll）之后不可再花幸运；
 - 买来的成功**不计成长勾**——走运没教会你任何事。
 
-余下几项（单次上限、战斗中是否可用）原文没管，是常见村规，交给 ``CocRuleOptions``。
+余下几项（单次上限、战斗中是否可用）原文没管，是常见村规，交给 ``LuckSpendConfig``。
 """
 
 from __future__ import annotations
 
 from app.rules.base import CheckResult
-from app.rules.coc.checks import achieved_tier, judge, normalize_skill_name
-from app.rules.coc.options import DEFAULT_OPTIONS, CocRuleOptions
+from app.rules.coc.components.check import achieved_tier, judge, normalize_skill_name
+from app.rules.coc.components.luck_reroll import LuckRerollConfig
+from app.rules.coc.components.luck_spend import LuckSpendConfig
+from app.rules.kernel import Component, Provide
+
+
+class LuckOptions(LuckSpendConfig, LuckRerollConfig):
+    """本组件读的参数：两个可选组件（幸运消费、燃运重骰）的参数之和。"""
+
+
+_RAW = LuckOptions()
+
 
 #: 不可用幸运挽回的检定。SAN 与幸运本身按原文排除；「幸运」还有个更实际的理由——
 #: 花幸运去买幸运检定的成功是拿自己垫自己，规则上说不通。
@@ -50,7 +60,7 @@ def rescue_offer(
     result: CheckResult,
     difficulty: str,
     character_data: dict,
-    options: CocRuleOptions | None = None,
+    options: LuckOptions | None = None,
     *,
     in_combat: bool = False,
     pushed: bool = False,
@@ -65,7 +75,7 @@ def rescue_offer(
 
     两者各自独立：差 40 点而只有 30 点幸运时补不起，但烧 10 点重掷仍烧得起。
     """
-    opts = options or DEFAULT_OPTIONS
+    opts = options or _RAW
     # 两种用法共同的前提。「孤注一掷之后不能再花幸运」是原文明写的
     # （「当技能检定失败时，玩家可以选择孤注一掷或是花费幸运，孤注一掷的结果不能用幸运值改变」）。
     if pushed or (not opts.luck_spend and not opts.luck_reroll):
@@ -108,14 +118,14 @@ def apply_rescue(
     result: CheckResult,
     difficulty: str,
     points: int,
-    options: CocRuleOptions | None = None,
+    options: LuckOptions | None = None,
 ) -> CheckResult:
     """花掉 ``points`` 点幸运后的检定结果：骰值降下去，再走同一套判据重判。
 
     原件不改（``CheckResult`` 逐字段复制出一份新的）——与村规「读时覆盖」同一个道理，
     掷出来的原始骰值是既成事实，得留着给玩家看「我本来掷了多少、花了几点买回来」。
     """
-    opts = options or DEFAULT_OPTIONS
+    opts = options or _RAW
     new_roll = max(1, result.roll - max(0, points))
     outcome, desc = judge(new_roll, result.skill_value, difficulty, result.target, opts)
     return CheckResult(
@@ -141,17 +151,17 @@ def apply_reroll(
     difficulty: str,
     bonus: int = 0,
     penalty: int = 0,
-    options: CocRuleOptions | None = None,
+    options: LuckOptions | None = None,
 ):
     """燃运重骰：整骰重来一次，走的还是同一套 ``resolve_skill_check``。
 
     **重掷结果照单全收**——包括掷出大失败。买的是一次机会，不是一次成功；
     要是重掷还能接着花幸运补差额，这条村规就成了「幸运够多就永不失败」。
     """
-    from app.rules.coc.checks import resolve_skill_check
+    from app.rules.coc.components.check import resolve_skill_check
 
     return resolve_skill_check(
-        character_data, skill_name, difficulty, bonus, penalty, options or DEFAULT_OPTIONS,
+        character_data, skill_name, difficulty, bonus, penalty, options,
     )
 
 
@@ -168,3 +178,16 @@ def deduct(character_data: dict, points: int) -> dict:
     attrs = character_data.get("base_attributes") or {}
     old = max(0, int(attrs.get("LUCK") or 0))
     return {"path": "base_attributes.LUCK", "old": old, "new": max(0, old - points)}
+
+
+# 两种花幸运的方式各是一个可选组件（luck_spend / luck_reroll），只带参数与开关；
+# 结算函数共用这里。本组件常驻、无参数。
+COMPONENT = Component(
+    id="coc7.luck", title="幸运结算",
+    requires=("coc7.check",),
+    provides={"luck": Provide(
+        __name__,
+        bound=("rescue_offer", "apply_rescue", "apply_reroll"),
+        plain=("FORBIDDEN_SKILLS", "available_luck", "is_forbidden_skill", "deduct"),
+    )},
+)

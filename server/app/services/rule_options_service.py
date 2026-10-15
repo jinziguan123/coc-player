@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.module import Module
 from app.models.rulebook import RuleSystemOptions
 from app.models.session import GameSession
-from app.rules import Ruleset, get_system
+from app.rules import Ruleset, get_system, house_rules
 
 DEFAULT_RULE_SYSTEM = "coc"
 
@@ -135,6 +135,33 @@ def normalized(raw: dict | None, rule_system: str = DEFAULT_RULE_SYSTEM) -> dict
 def resolved_view(db: Session, game_session: GameSession | None) -> dict:
     """给界面看的完整生效值（含未被改动的默认项），供设置面板回显。"""
     return ruleset(db, game_session).options.to_dict()
+
+
+def village_labels(db: Session, rule_system: str) -> list[str]:
+    """存着的村规（不看总开关）与规则原文不同之处的短标签，供规矩摘要显示。"""
+    row = village_row(db, rule_system)
+    system = get_system(rule_system)
+    return system.option_labels(system.parse_options(dict((row.options if row else None) or {})))
+
+
+def export_house_rules(db: Session, rule_system: str) -> str:
+    """把这一桌存着的村规与桌面约定导出成房规文件（YAML）。不看总开关：导出的是配置本身。"""
+    row = village_row(db, rule_system)
+    system = get_system(rule_system)
+    diff = system.parse_options(dict((row.options if row else None) or {})).diff_from_default()
+    return house_rules.export_text(system, diff, (row.table_notes if row else "") or "")
+
+
+def preview_house_rules(rule_system: str, text: str) -> tuple[house_rules.HouseRulesPreview, list[str]]:
+    """校验一份房规文件，返回（预览, 它与规则原文不同之处的短标签）。不落库。
+
+    房主确认后，前端拿预览里的 options/table_notes 走 :func:`save_village_options` 保存——
+    导入不另开一条写路径。
+    """
+    system = get_system(rule_system)
+    preview = house_rules.parse_text(system, text, notes_max=TABLE_NOTES_MAX)
+    labels = system.option_labels(system.parse_options(preview.options)) if preview.ok else []
+    return preview, labels
 
 
 def village_view(db: Session, rule_system: str) -> dict:

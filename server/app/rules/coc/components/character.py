@@ -1,6 +1,12 @@
-"""CoC 7th Edition 角色创建逻辑"""
+"""coc7.character：属性、年龄修正、派生值、技能起始值，以及建卡入口。
+
+槽位 ``rs.character``。本组件没有村规参数。
+"""
+
+from __future__ import annotations
 
 from app.rules.dice import roll
+from app.rules.kernel import Component, Provide
 
 # CoC 7th 基础属性掷骰规则
 ATTRIBUTE_ROLLS = {
@@ -296,3 +302,105 @@ def apply_attr_derived_skills(
 def build_default_skills(attrs: dict[str, int]) -> dict[str, int]:
     """基于属性构建默认技能列表（全部基础技能 + 母语/闪避派生值）"""
     return apply_attr_derived_skills(dict(COC_DEFAULT_SKILLS), attrs)
+
+
+# ── 建卡入口（原 CoCRuleEngine）────────────────────────────────────────
+
+ATTRIBUTE_SCHEMA = [
+    {"key": "STR", "name": "力量", "roll": "3d6×5"},
+    {"key": "CON", "name": "体质", "roll": "3d6×5"},
+    {"key": "SIZ", "name": "体型", "roll": "(2d6+6)×5"},
+    {"key": "DEX", "name": "敏捷", "roll": "3d6×5"},
+    {"key": "APP", "name": "外貌", "roll": "3d6×5"},
+    {"key": "INT", "name": "智力", "roll": "(2d6+6)×5"},
+    {"key": "POW", "name": "意志", "roll": "3d6×5"},
+    {"key": "EDU", "name": "教育", "roll": "(2d6+6)×5"},
+]
+
+
+def get_character_schema() -> dict:
+    """角色卡字段定义。注意：母语/闪避在 default_skills 里是占位的 0——它们由属性派生，
+    静态表填不了真值；要拿「这组属性下的真实起始值」请走 :func:`base_skills`。"""
+    return {
+        "rule_system": "coc",
+        "attributes": ATTRIBUTE_SCHEMA,
+        "derived": ["HP", "MP", "SAN", "MOV", "伤害加值", "体格", "幸运"],
+        "system_specific_fields": ["sanity", "luck", "age", "occupation"],
+        "default_skills": COC_DEFAULT_SKILLS,
+    }
+
+
+def base_skills(attrs: dict[str, int]) -> dict[str, int]:
+    """这组属性下、**未加任何点**时的技能起始值：静态表 + 母语(=EDU)、闪避(=DEX//2)。
+
+    建卡界面必须拿这一份而不是 schema 里的 default_skills：后者的母语/闪避是占位的 0，
+    界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的
+    ``max(提交值, 派生值)`` 顶掉，凭空蒸发。
+    """
+    return build_default_skills(attrs)
+
+
+def create_character(data: dict) -> dict:
+    """根据输入创建角色，自动计算派生属性。"""
+    attrs = data.get("base_attributes", {})
+    if not attrs:
+        attrs = roll_attributes()
+
+    age = data.get("age", 25)
+    system_data = compute_derived(attrs, age)
+
+    extra_sd = data.get("system_data", {})
+    if isinstance(extra_sd, dict):
+        for k, v in extra_sd.items():
+            if v is not None and v != "":
+                system_data[k] = v
+
+    skills = data.get("skills")
+    if not skills:
+        skills = build_default_skills(attrs)
+    else:
+        # 客户端自带 skills（如前端加点）时，静态默认表缺少母语/闪避的属性
+        # 派生值，这里兜底补齐，避免绕过 build_default_skills 导致两者为 0
+        skills = apply_attr_derived_skills(dict(skills), attrs)
+
+    return {
+        "base_attributes": attrs,
+        "skills": skills,
+        "system_data": system_data,
+    }
+
+
+def validate_character(character_data: dict) -> tuple[bool, list[str]]:
+    errors = []
+    attrs = character_data.get("base_attributes", {})
+    required = ["STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU"]
+
+    for attr in required:
+        val = attrs.get(attr)
+        if val is None:
+            errors.append(f"缺少属性: {attr}")
+        elif not (15 <= val <= 90):
+            errors.append(f"{attr} 值 {val} 超出合理范围 (15-90)")
+
+    return (len(errors) == 0, errors)
+
+
+def roll_attribute_sets(count: int = 3) -> list[dict[str, int]]:
+    """掷多组属性供玩家选择。"""
+    return [roll_attributes() for _ in range(count)]
+
+
+COMPONENT = Component(
+    id="coc7.character", title="属性与建卡",
+    requires=("coc7.dice",),
+    provides={"character": Provide(
+        __name__,
+        plain=(
+            "ATTRIBUTE_ROLLS", "COC_DEFAULT_SKILLS", "roll_attributes", "apply_age_modifiers",
+            "roll_luck", "damage_bonus", "compute_derived", "derive_assets",
+            "build_default_skills", "apply_attr_derived_skills",
+            "get_character_schema", "base_skills", "create_character", "validate_character",
+            "roll_attribute_sets",
+        ),
+    )},
+)

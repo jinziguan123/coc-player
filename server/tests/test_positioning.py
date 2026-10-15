@@ -1,6 +1,6 @@
 """战斗方格几何纯函数单测（钉死坐标、不掷骰）。对应 MVP / P-Grid-1。"""
 
-from app.rules.coc import positioning as pos
+from app.rules.coc.components import positioning as pos
 
 
 def _u(x, y, side="player"):

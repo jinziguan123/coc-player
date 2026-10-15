@@ -118,7 +118,7 @@ docs/adr/              架构决策记录；docs/plans/ 设计稿
 | 回合编排 | `turn_orchestrator.py` | 回合用例编排：开场、玩家行动、检定申请、投骰续写、分头行动、战斗善后、前往、重新生成 |
 | 回合支撑 | `turn_context.py`、`turn_effects.py`、`planned_effects.py`、`turn_event_order.py`、`kp_tool_loop.py`、`kp_actions.py`、`command_protocol.py`、`chat_event_writer.py`、`dice_runtime.py`、`team_turn_service.py` | 上下文取数与校验、确定性副作用、计划落实、事件重排、工具循环与文本兼容路径、NPC/战斗/追逐动作、事件落库、骰子协议与检定对象解析、AI 队友回合决策 |
 | 生成生命周期 | `generation_manager.py`、`generation_lifecycle.py`、`generation_housekeeping.py`、`ai_quota.py` | 单房间生成锁、错误分类、后台收尾任务、房间级配额 |
-| 战斗/追逐 | `combat_service.py`、`chase_service.py` + `rules/coc/combat.py`、`chase.py`、`positioning.py` | 可暂停状态机、先攻队列、方格站位与掩体、抽象距离轨 |
+| 战斗/追逐 | `combat_service.py`、`chase_service.py` + `rules/coc/components/combat.py`、`wound.py`、`chase.py`、`positioning.py` | 可暂停状态机、先攻队列、方格站位与掩体、抽象距离轨 |
 | 模组/规则书 | `module_service.py`、`module_rag_service.py`、`rulebook_service.py`、`module_map_service.py`、`module_ocr.py`、`module_map_vision.py`、`hex_map.py`、`excel_import.py` | 导入解析、结构化、切块与向量检索、扫描件 OCR 与地图视觉定位、六边形沙盘落位 |
 | 向量检索共用件 | `vector_search.py` | float32 BLOB 上的余弦 top-k；规则书 RAG、模组 RAG、事件召回三处共用同一份实现 |
 | 世界状态 | `world_state.py`、`world_memory.py`、`event_recall.py` | `world_state` 的唯一读写口径；线索台账与 NPC 记忆；本局事件原文的向量索引与回捞 |
@@ -429,11 +429,15 @@ KP 当成叙事顺过去，玩家点的那一下等于没发生。明确的战�
 
 ### 8.1 规则系统插件化
 
-`rules/base.py` 定义 `RuleEngine` 抽象（角色 schema、建卡、校验、技能检定、SAN 检定、
-成长检定等），`rules/registry.py` 按 `rule_system` 注册与取用，`rules/coc/` 是唯一完整实现
-（建卡与职业、检定与难度分档、战斗与方格站位、追逐、疯狂、装备与武器、专精、状态）。
-调用方一律 `get_engine(rule_system)`，不硬编码 CoC。DnD 目前只是**数据类型可选**，
-没有规则引擎实现——这一点在 README 里明确标注为未实现。
+规则引擎由**规则内核**（`rules/kernel.py`）把一组**子规则组件**组装成一份「生效规则」
+（`Ruleset`）。官方 CoC 7e 只是一张组件清单（`rules/coc/preset.py`），每个组件一个文件
+（`rules/coc/components/`：检定、理智、疯狂、伤害与状态、战斗、站位、追逐、成长、幸运、
+职业、装备、属性与建卡……），文件里自带村规参数（默认值即规则书原文）、算法与组件声明。
+业务层只经 `rule_options_service.ruleset(...)` / `ruleset_for(...)` 取生效规则，以
+`rs.<槽位>.<导出>` 调用，本局村规自动注入；直接 import 组件实现由 ruff TID251 拦下。
+村规面板、KP 提示词里的规则陈述、玩家看的规矩摘要、房规文件校验都由组件参数生成。
+设计见 `docs/plans/2026-10-14-规则引擎组件化-design.md`。DnD 目前只是**数据类型可选**，
+没有规则实现——这一点在 README 里明确标注为未实现。
 
 `CheckResult` 除成败外还带 d100 逐骰明细（`tens` / `tens_kept` / `units` / `bonus` / `penalty`），
 供前端 3D 骰子严格还原真实掷骰过程，而不是先给结果再演动画。

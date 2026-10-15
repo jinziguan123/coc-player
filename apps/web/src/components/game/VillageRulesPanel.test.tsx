@@ -2,15 +2,25 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { VillageRulesPanel } from './VillageRulesPanel'
+// 后端真实导出的 manifest（server/tests/test_house_rules.py 校验它与后端一致）
+import MANIFEST from './__fixtures__/coc-manifest.json'
 
 const get = vi.fn()
 const put = vi.fn()
+const post = vi.fn()
 vi.mock('../../api/client', () => ({
   api: {
     get: (...a: unknown[]) => get(...a),
     put: (...a: unknown[]) => put(...a),
+    post: (...a: unknown[]) => post(...a),
   },
 }))
+
+/** 村规读取走 villageRead；manifest 固定用真实夹具。 */
+let villageRead: unknown
+function routeGet(path: string) {
+  return Promise.resolve(path.endsWith('/manifest') ? MANIFEST : villageRead)
+}
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const RAW = {
@@ -21,6 +31,8 @@ const RAW = {
   luck_spend_max: 0,
   luck_spend_in_combat: true,
   luck_spend_blocks_improvement: true,
+  luck_reroll: false,
+  luck_reroll_cost: 10,
   major_wound_divisor: 2,
   insanity_rule: 'fifth_of_san',
   insanity_flat_threshold: 5,
@@ -30,13 +42,15 @@ const RAW = {
 beforeEach(() => {
   get.mockReset()
   put.mockReset()
-  get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '' })
+  post.mockReset()
+  villageRead = { options: {}, effective: RAW, table_notes: '' }
+  get.mockImplementation(routeGet)
   put.mockResolvedValue({ rule_system: 'coc', options: {}, effective: RAW, table_notes: '' })
 })
 
 describe('村规面板', () => {
   it('按规则系统读取，回显后端算好的生效值', async () => {
-    get.mockResolvedValue({
+    villageRead = ({
       options: { critical_max: 5 }, effective: { ...RAW, critical_max: 5 }, table_notes: '',
     })
     render(<VillageRulesPanel ruleSystem="coc" />)
@@ -68,7 +82,7 @@ describe('村规面板', () => {
   })
 
   it('桌面约定回显、可编辑，并把界限写在界面上', async () => {
-    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '本局重调查轻战斗。' })
+    villageRead = ({ options: {}, effective: RAW, table_notes: '本局重调查轻战斗。' })
     render(<VillageRulesPanel ruleSystem="coc" />)
 
     const box = await screen.findByLabelText('桌面约定')
@@ -98,7 +112,7 @@ describe('村规总开关', () => {
   it('关掉后保存：配置照旧整份提交，只是 enabled 变 false', async () => {
     // 关键在于**不清空**——玩家想先照规则原文跑一局试试，回头一开就全回来了。
     const user = userEvent.setup()
-    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '', enabled: true })
+    villageRead = ({ options: {}, effective: RAW, table_notes: '', enabled: true })
     render(<VillageRulesPanel ruleSystem="coc" />)
     await screen.findByText('启用村规')
 
@@ -112,15 +126,78 @@ describe('村规总开关', () => {
   })
 
   it('后端说停用就照实回显，别让人以为还开着', async () => {
-    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '', enabled: false })
+    villageRead = ({ options: {}, effective: RAW, table_notes: '', enabled: false })
     render(<VillageRulesPanel ruleSystem="coc" />)
     expect(await screen.findByRole('switch', { name: '启用村规' })).not.toBeChecked()
     expect(screen.getByText(/完全照规则书原文跑/)).toBeInTheDocument()
   })
 
   it('旧后端没有这个字段时按开着算——升级不该让人的村规突然失效', async () => {
-    get.mockResolvedValue({ options: {}, effective: RAW, table_notes: '' })
+    villageRead = ({ options: {}, effective: RAW, table_notes: '' })
     render(<VillageRulesPanel ruleSystem="coc" />)
     expect(await screen.findByRole('switch', { name: '启用村规' })).toBeChecked()
+  })
+})
+
+describe('按后端 manifest 渲染', () => {
+  it('分栏、标题、说明全部来自组件 schema', async () => {
+    render(<VillageRulesPanel ruleSystem="coc" twoColumn />)
+    await screen.findByText('大成功阈值')
+    expect(screen.getByLabelText('判定')).toBeInTheDocument()
+    expect(screen.getByLabelText('伤害与状态')).toBeInTheDocument()
+    // 说明里的 {value} 代入当前值
+    expect(screen.getByText(/最大 HP ÷ 2 判重伤/)).toBeInTheDocument()
+    expect(get).toHaveBeenCalledWith('/rulebooks/village-rules/coc/manifest')
+  })
+
+  it('依附参数只在条件满足时出现（临时疯狂选「固定点数」才显示点数框）', async () => {
+    render(<VillageRulesPanel ruleSystem="coc" />)
+    await screen.findByText('临时疯狂口径')
+    expect(screen.queryByText('固定点数', { selector: 'span' })).not.toBeInTheDocument()
+  })
+
+  it('口径选了固定点数时，点数框出现', async () => {
+    villageRead = { options: {}, effective: { ...RAW, insanity_rule: 'flat' }, table_notes: '' }
+    render(<VillageRulesPanel ruleSystem="coc" />)
+    expect(await screen.findByRole('spinbutton', { name: '固定点数' })).toHaveValue(5)
+  })
+})
+
+describe('房规导入', () => {
+  const upload = async () => {
+    const user = userEvent.setup()
+    render(<VillageRulesPanel ruleSystem="coc" />)
+    await screen.findByText('大成功阈值')
+    const file = new File(['format: coc-player/house-rules'], 'rules.yaml', { type: 'text/yaml' })
+    await user.upload(screen.getByLabelText('选择房规文件'), file)
+    return user
+  }
+
+  it('先预览、确认后才保存，保存的是文件里的参数', async () => {
+    post.mockResolvedValue({
+      ok: true, name: '老张的桌', description: '', options: { critical_max: 5 },
+      table_notes: '重调查', labels: ['大成功 ≤ 5'], errors: [], warnings: [],
+    })
+    const user = await upload()
+
+    expect(await screen.findByText(/导入「老张的桌」/)).toBeInTheDocument()
+    expect(screen.getByText('大成功 ≤ 5')).toBeInTheDocument()
+    expect(put).not.toHaveBeenCalled()      // 预览不落库
+
+    await user.click(screen.getByRole('button', { name: '确认导入' }))
+    await waitFor(() => expect(put).toHaveBeenCalledWith(
+      '/rulebooks/village-rules/coc',
+      { options: { critical_max: 5 }, table_notes: '重调查', enabled: true },
+    ))
+  })
+
+  it('文件有错时列出错误、不给确认按钮', async () => {
+    post.mockResolvedValue({
+      ok: false, name: '', description: '', options: {}, table_notes: '', labels: [],
+      errors: ['options.critical_max（大成功阈值）应在 1–20 之间，实际是 0'], warnings: [],
+    })
+    await upload()
+    expect(await screen.findByText(/应在 1–20 之间/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认导入' })).not.toBeInTheDocument()
   })
 })

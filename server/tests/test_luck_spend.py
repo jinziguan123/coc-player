@@ -9,9 +9,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module, SessionParticipant  # noqa: F401
-from app.rules.coc import luck as coc_luck
+from app.rules.coc.components import luck as coc_luck
 from app.rules.coc import options as coc_options
-from app.rules.coc.checks import resolve_skill_check
+from app.rules.coc.components.check import resolve_skill_check
 from app.services import session_service
 
 ON = coc_options.from_dict({"luck_spend": True})
@@ -27,7 +27,7 @@ def db_factory(tmp_path):
 
 
 def _rolled(roll: int, skill_value: int = 60, difficulty: str = "normal", monkeypatch=None):
-    from app.rules.coc import checks as checks_mod
+    from app.rules.coc.components import check as checks_mod
 
     monkeypatch.setattr(checks_mod, "roll_percentile", lambda: roll)
     return resolve_skill_check({"skills": {"侦查": skill_value}}, "侦查", difficulty)
@@ -72,7 +72,7 @@ def test_success_needs_no_rescue(monkeypatch):
 
 
 def test_san_and_luck_checks_are_forbidden(monkeypatch):
-    from app.rules.coc import checks as checks_mod
+    from app.rules.coc.components import check as checks_mod
 
     monkeypatch.setattr(checks_mod, "roll_percentile", lambda: 65)
     for skill in ("SAN", "理智", "幸运"):
@@ -245,6 +245,6 @@ def test_烧不起就不给这个选项(monkeypatch):
 
 def test_重掷是整骰重来_结果照单全收(monkeypatch):
     """买的是一次机会，不是一次成功——重掷掷出大失败也认。"""
-    monkeypatch.setattr("app.rules.coc.checks.random.randint", lambda a, b: 0)
+    monkeypatch.setattr("app.rules.coc.components.check.random.randint", lambda a, b: 0)
     out = coc_luck.apply_reroll(_char(40), "侦查", "normal", options=BOTH_ON)
     assert out.roll != 65                # 不是原来那一骰了

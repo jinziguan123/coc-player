@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module
-from app.rules.coc import combat as coc_combat
+from app.rules.coc.components import combat as coc_combat
 from app.services import combat_service
 
 
@@ -27,8 +27,8 @@ def _seq(values):
 
 
 def _fix_rolls(monkeypatch, d100_seq, die=3):
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq(d100_seq))
-    monkeypatch.setattr("app.rules.coc.combat.random.randint", lambda a, b: die)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", _seq(d100_seq))
+    monkeypatch.setattr("app.rules.coc.components.combat.random.randint", lambda a, b: die)
 
 
 def _seed(db):
@@ -272,7 +272,7 @@ def test_participant_reads_armor_from_sheet_and_npc(db_factory):
 
 def test_char_data_carries_named_attack_for_monster(db_factory):
     """怪物 NPC 的攻击方式名随 _char_data 下传，命中检定掷它自己的「撕咬」而非格斗(斗殴)。"""
-    from app.rules.coc import combat as coc
+    from app.rules.coc.components import combat as coc
     npc = combat_service._npc_participant(
         {"id": "e", "name": "循声者", "weapon": "撕咬",
          "skills": {"撕咬": 60, "聆听": 80}, "attributes": {"STR": 100, "SIZ": 60}})
@@ -308,7 +308,7 @@ def test_monster_damage_overrides_table_weapon(db_factory):
 
 def test_impale_damage_flags_penetration():
     """贯穿武器大成功/极难加伤时，flags 带『贯穿』供前端标注；非贯穿武器不带。"""
-    from app.rules.coc import combat as coc
+    from app.rules.coc.components import combat as coc
     dmg = coc.roll_weapon_damage({"name": "步枪", "dam": "2D6+4", "tho": 1}, "0", impale=True)
     assert "贯穿" in dmg["flags"]
     plain = coc.roll_weapon_damage({"name": "棍", "dam": "1D6", "tho": 0}, "0", impale=True)
@@ -317,7 +317,7 @@ def test_impale_damage_flags_penetration():
 
 def test_burst_capacity_parses_round():
     """连发射速上限 = 武器 round 括号内数字；单发/慢速装填 → 1（不可连发）。"""
-    from app.rules.coc import combat as coc
+    from app.rules.coc.components import combat as coc
     assert coc.burst_capacity({"round": "1(3)"}) == 3
     assert coc.burst_capacity({"round": "1"}) == 1
     assert coc.burst_capacity({"round": "1/4"}) == 1
@@ -421,7 +421,7 @@ def test_start_combat_lays_grid_and_positions(db_factory):
     assert state["grid"]["cols"] == 12 and state["grid"]["rows"] == 8
     hp = combat_service._find(state, hero.id); e1 = combat_service._find(state, "e1")
     assert hp["pos"] and e1["pos"]
-    from app.rules.coc import positioning
+    from app.rules.coc.components import positioning
     assert not positioning.is_adjacent(hp, e1)   # 拉开布阵，开局不相邻
 
 

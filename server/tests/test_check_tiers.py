@@ -1,7 +1,7 @@
 """检定达成等级（六档）回归：纯按骰值 vs 技能值算出的 tier，与要求难度无关。"""
 
-import app.rules.coc.checks as checks
-from app.rules.coc.checks import achieved_tier, resolve_skill_check, TIER_LABEL_CN
+import app.rules.coc.components.check as checks
+from app.rules.coc.components.check import achieved_tier, resolve_skill_check, TIER_LABEL_CN
 
 
 def test_achieved_tier_thresholds():

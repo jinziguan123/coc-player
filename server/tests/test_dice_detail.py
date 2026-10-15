@@ -15,11 +15,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.rules.dice as dice
-import app.rules.coc.checks as checks
+import app.rules.coc.components.check as checks
 from app.models import (  # noqa: F401 注册表
     Base, Character, EventLog, GameSession, Module, SessionParticipant,
 )
-from app.rules.coc.checks import resolve_skill_check
+from app.rules.coc.components.check import resolve_skill_check
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile_detailed
 from app.services import chat_service, session_service
 

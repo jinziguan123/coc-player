@@ -6,9 +6,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module  # noqa: F401
 from app.rules.coc import options as coc_options
-from app.rules.coc.checks import achieved_tier, is_fumble, san_check
-from app.rules.coc.combat import resolve_wound
-from app.rules.coc.engine import CoCRuleEngine
+from app.rules import ruleset_for
+from app.rules.coc.components.check import achieved_tier, is_fumble
+from app.rules.coc.components.sanity import san_check
+from app.rules.coc.components.wound import resolve_wound
 from app.services import rule_options_service
 
 
@@ -144,7 +145,7 @@ def test_critical_threshold_widens():
 
 def test_dice_pool_cap_clamps_bonus(monkeypatch):
     """奖惩骰上限调到 0 → 传进来的奖励骰不再生效（只掷一个十位）。"""
-    from app.rules.coc import checks as checks_mod
+    from app.rules.coc.components import check as checks_mod
 
     monkeypatch.setattr(checks_mod, "roll_percentile", lambda: 55)
     capped = coc_options.from_dict({"dice_pool_cap": 0})
@@ -157,7 +158,7 @@ def test_dice_pool_cap_clamps_bonus(monkeypatch):
 
 def test_insanity_rule_switches_to_flat(monkeypatch):
     """临时疯狂口径可切到 CoC 原文的「单次 ≥5 点」。"""
-    from app.rules.coc import checks as checks_mod
+    from app.rules.coc.components import check as checks_mod
 
     monkeypatch.setattr(checks_mod, "roll_percentile", lambda: 99)  # 必失败
     char = {"system_data": {"sanity": {"current": 60, "max": 99}}}
@@ -179,9 +180,8 @@ def test_major_wound_divisor_changes_threshold():
 
 
 def test_improvement_can_be_switched_off():
-    engine = CoCRuleEngine()
-    assert engine.improvement_check(50) is not None
-    assert engine.improvement_check(50, {"improvement": False}) is None
+    assert ruleset_for("coc").growth.improvement_check(50) is not None
+    assert ruleset_for("coc", {"improvement": False}).growth.improvement_check(50) is None
 
 
 # ── 规划器看得见玩家状态 ──────────────────────────────────────────────────

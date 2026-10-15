@@ -1,12 +1,85 @@
-"""CoC 7th Edition 检定逻辑"""
+"""coc7.check：技能检定——d100、达成等级、大成功/大失败、技能名归一。
+
+槽位 ``rs.check``。村规参数见 :class:`CheckConfig`；未传村规时按其默认值（规则书原文）。
+"""
+
+from __future__ import annotations
 
 import random
 import re
+from typing import Literal
 
 from app.rules.base import CheckResult
-from app.rules.coc.character import COC_DEFAULT_SKILLS
-from app.rules.coc.options import DEFAULT_OPTIONS, CocRuleOptions
+from app.rules.coc.components.character import COC_DEFAULT_SKILLS
+from app.rules.config import RuleConfig, rule_field
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile
+from app.rules.kernel import Component, Provide
+
+#: 大失败判定规则。
+#: - ``raw``：CoC 7e 原文——掷出 100 必大失败，技能值 < 50 时 96 起即大失败；
+#: - ``hundred_only``：只有 100 才是大失败（最常见的一条村规，嫌新手角色太容易翻车）；
+#: - ``ninety_six_plus``：96 起一律大失败，不看技能值高低。
+FUMBLE_RULES = ("raw", "hundred_only", "ninety_six_plus")
+
+
+class CheckConfig(RuleConfig):
+    """coc7.check：一次检定怎么判。"""
+
+    critical_max: int = rule_field(
+        1, ge=1, le=20, title="大成功阈值", hint="骰值 ≤ 此值算大成功（规则书是 1）",
+    )
+    fumble_rule: Literal["raw", "hundred_only", "ninety_six_plus"] = rule_field(
+        "raw", title="大失败阈值", choices={
+            "raw": ("照规则书", "照规则书：100 必大失败，技能 < 50 时 96 起即大失败"),
+            "hundred_only": ("只认 100", "只有掷出 100 才算大失败"),
+            "ninety_six_plus": ("96 起", "96 起一律大失败，不看技能高低"),
+        },
+    )
+    dice_pool_cap: int = rule_field(
+        2, ge=0, le=3, title="奖惩骰上限", hint="单次检定最多叠几个奖励或惩罚骰",
+    )
+
+    def describe(self) -> list[str]:
+        lines: list[str] = []
+        if self.critical_max != 1:
+            lines.append(f"大成功：掷出 {self.critical_max} 及以下都算大成功（原文只有 01）")
+        if self.fumble_rule == "hundred_only":
+            lines.append("大失败：只有掷出 100 才算（技能低于 50 时的 96-99 不再是大失败）")
+        elif self.fumble_rule == "ninety_six_plus":
+            lines.append("大失败：96 及以上一律算，不看技能高低")
+        if self.dice_pool_cap != 2:
+            lines.append(
+                f"奖励骰/惩罚骰单次最多 {self.dice_pool_cap} 个"
+                + ("（即本局不使用奖惩骰）" if self.dice_pool_cap == 0 else "")
+            )
+        return lines
+
+    # ── KP 手册（静态提示词）里的规则陈述：按 RAW 生成，与判定代码同源 ──
+
+    def critical_roll_text(self) -> str:
+        return "01" if self.critical_max == 1 else f"01–{self.critical_max:02d}"
+
+    def fumble_text(self) -> str:
+        if self.fumble_rule == "hundred_only":
+            return "只有出 00 才算，不看技能值"
+        if self.fumble_rule == "ninety_six_plus":
+            return "出 96–00 一律算，不看技能值"
+        return "技能值<50 时出 96–00；技能值≥50 时出 00"
+
+    def labels(self) -> list[str]:
+        out: list[str] = []
+        if self.critical_max != 1:
+            out.append(f"大成功 ≤ {self.critical_max}")
+        if self.fumble_rule == "hundred_only":
+            out.append("大失败只认 100")
+        elif self.fumble_rule == "ninety_six_plus":
+            out.append("大失败 96 起（不看技能）")
+        if self.dice_pool_cap != 2:
+            out.append("不使用奖惩骰" if self.dice_pool_cap == 0 else f"奖惩骰最多 {self.dice_pool_cap} 个")
+        return out
+
+
+_RAW = CheckConfig()
 
 
 # 属性骰别名：base_attributes 用英文键存（INT/EDU…），但 KP/规则常用中文属性名或
@@ -135,9 +208,9 @@ TIER_LABEL_CN = {
 }
 
 
-def is_fumble(d100: int, skill_value: int, options: CocRuleOptions | None = None) -> bool:
+def is_fumble(d100: int, skill_value: int, options: CheckConfig | None = None) -> bool:
     """这一骰算不算大失败——阈值由村规定（默认 RAW）。"""
-    rule = (options or DEFAULT_OPTIONS).fumble_rule
+    rule = (options or _RAW).fumble_rule
     if rule == "hundred_only":
         return d100 == 100
     if rule == "ninety_six_plus":
@@ -146,10 +219,10 @@ def is_fumble(d100: int, skill_value: int, options: CocRuleOptions | None = None
 
 
 def achieved_tier(
-    d100: int, skill_value: int, options: CocRuleOptions | None = None,
+    d100: int, skill_value: int, options: CheckConfig | None = None,
 ) -> str:
     """仅按骰值 vs 技能值判定达成的成功等级（与「要求难度」无关）。"""
-    opts = options or DEFAULT_OPTIONS
+    opts = options or _RAW
     if d100 <= opts.critical_max:
         return "critical"
     if d100 <= skill_value // 5:
@@ -165,14 +238,14 @@ def achieved_tier(
 
 def judge(
     d100: int, skill_value: int, difficulty: str, target: int,
-    options: CocRuleOptions | None = None,
+    options: CheckConfig | None = None,
 ) -> tuple[str, str]:
     """给定骰值判成败：返回 (outcome, 描述)。**只判不掷**。
 
     掷骰与判定分开，是为了让幸运消费能拿降低后的骰值重走同一套判据——买来的成功和
     掷出来的成功必须由同一段代码认定，否则迟早会出现「花了幸运却仍显示失败」这种账对不上的事。
     """
-    opts = options or DEFAULT_OPTIONS
+    opts = options or _RAW
     if d100 <= opts.critical_max:
         return "critical_success", f"大成功！掷出了 {d100:02d}"
     if d100 <= skill_value // 5:
@@ -199,7 +272,7 @@ def resolve_skill_check(
     difficulty: str = "normal",
     bonus: int = 0,
     penalty: int = 0,
-    options: CocRuleOptions | None = None,
+    options: CheckConfig | None = None,
 ) -> CheckResult:
     """CoC 技能检定
 
@@ -213,7 +286,7 @@ def resolve_skill_check(
 
     ``options`` 是本局村规（大成功/大失败阈值、奖惩骰上限）；缺省即 RAW。
     """
-    opts = options or DEFAULT_OPTIONS
+    opts = options or _RAW
     skill_value = resolve_skill_value(character_data, skill_name)
     # 奖惩骰上限也是村规：净奖惩先各自钳到上限内，再抵消。
     bonus = max(0, min(bonus, opts.dice_pool_cap))
@@ -255,62 +328,13 @@ def resolve_skill_check(
     )
 
 
-def san_check(
-    character_data: dict,
-    success_loss: str,
-    failure_loss: str,
-    options: CocRuleOptions | None = None,
-) -> dict:
-    """理智检定
-
-    Args:
-        success_loss: 成功时的 SAN 损失，如 "0" 或 "1d3"
-        failure_loss: 失败时的 SAN 损失，如 "1d6" 或 "1d10"
-        options: 本局村规（判定阈值、临时疯狂口径）；缺省即 RAW
-    """
-    from app.rules.dice import roll
-
-    opts = options or DEFAULT_OPTIONS
-    system_data = character_data.get("system_data", {})
-    san = system_data.get("sanity", {})
-    current_san = san.get("current", 0)
-
-    check = resolve_skill_check(
-        {"skills": {"SAN": current_san}, "base_attributes": {}},
-        "SAN",
-        options=opts,
-    )
-
-    if check.outcome in ("critical_success", "hard_success", "success"):
-        loss_expr = success_loss
-    else:
-        loss_expr = failure_loss
-
-    # 纯数字 = 固定损失，不掷骰。CoC 的 SAN 损失本就常是「固定值/骰式」混排（0/1d3、
-    # 1/1d6），planner 的指引也明确给出「血腥或怪物 1/1d6」——只特判 "0" 会让
-    # "1"、"2" 落进 roll() 抛「无效的骰子表达式」，整次理智检定被吞。
-    loss_expr = str(loss_expr or "0").strip()
-    if loss_expr.isdigit():
-        loss = int(loss_expr)
-        loss_roll = None
-    else:
-        loss_roll = roll(loss_expr)
-        loss = loss_roll.total
-
-    new_san = max(0, current_san - loss)
-
-    return {
-        "check": check,
-        "san_loss": loss,
-        "loss_roll": loss_roll,   # DiceRollResult（损失骰池，供前端动画）；固定损失 "0" 时为 None
-        "old_san": current_san,
-        "new_san": new_san,
-        "went_insane": _went_insane(loss, current_san, opts),
-    }
-
-
-def _went_insane(loss: int, current_san: int, options: CocRuleOptions) -> bool:
-    """这次损失够不够触发临时疯狂——口径由村规定。"""
-    if options.insanity_rule == "flat":
-        return loss >= options.insanity_flat_threshold
-    return loss >= current_san // 5
+COMPONENT = Component(
+    id="coc7.check", title="技能检定",
+    requires=("coc7.dice", "coc7.character"),
+    config=CheckConfig, group="判定",
+    provides={"check": Provide(
+        __name__,
+        bound=("resolve_skill_check", "is_fumble", "achieved_tier", "judge"),
+        plain=("TIER_LABEL_CN", "display_skill_name", "normalize_skill_name", "resolve_skill_value"),
+    )},
+)

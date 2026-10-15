@@ -745,6 +745,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rulebooks/village-rules/{rule_system}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export House Rules
+         * @description 把这一桌的村规导出成房规文件（YAML 原文 + 建议文件名），前端存成文件发给别人导入。
+         *
+         *     不限本机：读村规本就公开，导出只是换个格式。
+         */
+        get: operations["export_house_rules_api_rulebooks_village_rules__rule_system__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rulebooks/village-rules/{rule_system}/import-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview House Rules
+         * @description 校验一份房规文件并返回预览，**不落库**。房主确认后前端走 PUT 保存。
+         *
+         *     限本机：与改村规同属桌面配置操作。
+         */
+        post: operations["preview_house_rules_api_rulebooks_village_rules__rule_system__import_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rulebooks/village-rules/{rule_system}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Rule Manifest
+         * @description 规则系统的组件目录与各组件参数的 schema——村规面板据此渲染，不再在前端写死字段。
+         */
+        get: operations["read_rule_manifest_api_rulebooks_village_rules__rule_system__manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rulebooks/{rulebook_id}": {
         parameters: {
             query?: never;
@@ -800,7 +864,7 @@ export interface paths {
          *
          *     建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避
          *     是占位的 0，界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的
-         *     `max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 RuleEngine 里实现一次。
+         *     `max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 coc7.character 组件里实现一次。
          */
         post: operations["base_skills_api_rules__rule_system__base_skills_post"];
         delete?: never;
@@ -3136,6 +3200,69 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * HouseRulesExport
+         * @description 房规文件：YAML 原文与建议的文件名。
+         */
+        HouseRulesExport: {
+            /** Filename */
+            filename: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * HouseRulesImportRequest
+         * @description 导入房规：文件原文（YAML）。只预览、不落库。
+         */
+        HouseRulesImportRequest: {
+            /** Text */
+            text: string;
+        };
+        /**
+         * HouseRulesPreviewRead
+         * @description 房规文件的导入预览。``errors`` 为空才能保存；``warnings`` 只是提示。
+         */
+        HouseRulesPreviewRead: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Errors
+             * @default []
+             */
+            errors: string[];
+            /**
+             * Labels
+             * @default []
+             */
+            labels: string[];
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Options
+             * @default {}
+             */
+            options: {
+                [key: string]: unknown;
+            };
+            /**
+             * Table Notes
+             * @default
+             */
+            table_notes: string;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+        };
+        /**
          * ImageProfile
          * @description 生图配置：与文本模型完全解耦，独立增删改与激活。
          *
@@ -3805,6 +3932,39 @@ export interface components {
              */
             type: "generating" | "done" | "ready" | "typing" | "presence" | "housekeeping" | "narration" | "dialogue" | "action" | "dice" | "narration_full" | "npc_dialogue" | "system" | "ooc" | "check_request" | "lobby" | "seat" | "started" | "status" | "end_vote" | "turn_state" | "character_update" | "inventory_update" | "kp_turn_ready" | "kp_roll_ready" | "kp_action" | "kp_request" | "event_update" | "event_delete" | "event_patch" | "combat_start" | "combat_state" | "combat_reaction_prompt" | "combat_end" | "chase_start" | "chase_state" | "chase_end" | "map_update" | "luck_offer";
         };
+        /** RuleComponentManifest */
+        RuleComponentManifest: {
+            /** Config Schema */
+            config_schema?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: string[];
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Group
+             * @default
+             */
+            group: string;
+            /** Id */
+            id: string;
+            /**
+             * Requires
+             * @default []
+             */
+            requires: string[];
+            /** Title */
+            title: string;
+            /** Toggle */
+            toggle?: string | null;
+        };
         /** RuleHit */
         RuleHit: {
             /** Page */
@@ -3822,6 +3982,22 @@ export interface components {
             hits: components["schemas"]["RuleHit"][];
             /** Query */
             query: string;
+        };
+        /**
+         * RuleSystemManifest
+         * @description 规则系统的组件目录：前端村规面板据此渲染，房规文件据此校验。
+         */
+        RuleSystemManifest: {
+            /** Components */
+            components: components["schemas"]["RuleComponentManifest"][];
+            /** House Rules Format Version */
+            house_rules_format_version: number;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Version */
+            version: number;
         };
         /** RulebookRead */
         RulebookRead: {
@@ -4032,6 +4208,11 @@ export interface components {
              * @default true
              */
             enabled: boolean;
+            /**
+             * Labels
+             * @default []
+             */
+            labels: string[];
             /** Options */
             options: {
                 [key: string]: unknown;
@@ -5408,6 +5589,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VillageRulesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_house_rules_api_rulebooks_village_rules__rule_system__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HouseRulesExport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_house_rules_api_rulebooks_village_rules__rule_system__import_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HouseRulesImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HouseRulesPreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_rule_manifest_api_rulebooks_village_rules__rule_system__manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleSystemManifest"];
                 };
             };
             /** @description Validation Error */

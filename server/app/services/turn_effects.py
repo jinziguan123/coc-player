@@ -81,7 +81,7 @@ def _apply_madness_status(
     else:
         return None
     rs = rs or ruleset_for(rule_options_service.DEFAULT_RULE_SYSTEM)
-    severity = rs.status.STATUS_SEVERITY
+    severity = rs.wound.STATUS_SEVERITY
     cur = char.status or "active"
     if severity.get(target, 0) <= severity.get(cur, 0):
         return None  # 既有状态已同等或更严重，不降级

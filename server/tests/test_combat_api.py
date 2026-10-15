@@ -29,8 +29,8 @@ def _seq(values):
 
 
 def _fix_rolls(monkeypatch, d100_seq, die=3):
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq(d100_seq))
-    monkeypatch.setattr("app.rules.coc.combat.random.randint", lambda a, b: die)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", _seq(d100_seq))
+    monkeypatch.setattr("app.rules.coc.components.combat.random.randint", lambda a, b: die)
 
 
 @pytest.fixture

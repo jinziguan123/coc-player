@@ -8,12 +8,14 @@
 抵近奖励 / 夹击 / 掩体 / 视线属后续阶段（P-Grid-2/3），届时再补。
 """
 
+from __future__ import annotations
+
 import math
 import re
 from collections import deque
 
-from app.rules.coc.combat import resolve_weapon
-
+from app.rules.coc.components.combat import resolve_weapon
+from app.rules.kernel import Component, Provide
 
 def _xy(o: dict | None) -> tuple[int, int] | None:
     """从参战方 dict（含 pos）或 {"x","y"} 取整数坐标；无坐标返回 None。"""
@@ -222,3 +224,14 @@ def reachable_cells(start: dict, budget: int, grid: dict, occupied: set[str]) ->
                 out.add(key)
                 q.append((nx, ny))
     return out
+
+
+COMPONENT = Component(
+    id="coc7.positioning", title="方格站位",
+    requires=("coc7.combat",),
+    provides={"positioning": Provide(__name__, plain=(
+        "cell_distance", "is_adjacent", "range_in_cells", "range_check", "has_line_of_sight",
+        "cover_penalty", "point_blank_bonus", "flank_penalty", "sweep_targets",
+        "default_deployment", "step_toward", "reachable_cells",
+    ))},
+)

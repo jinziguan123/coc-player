@@ -1,0 +1,350 @@
+{
+  "id": "coc",
+  "title": "克苏鲁的呼唤 第七版",
+  "version": 1,
+  "house_rules_format_version": 1,
+  "components": [
+    {
+      "id": "coc7.dice",
+      "title": "骰子",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.character",
+      "title": "属性与建卡",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.dice"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.occupation",
+      "title": "职业与专精",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.character"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.equipment",
+      "title": "装备",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.character"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.check",
+      "title": "技能检定",
+      "description": "",
+      "group": "判定",
+      "toggle": null,
+      "requires": [
+        "coc7.dice",
+        "coc7.character"
+      ],
+      "conflicts": [],
+      "config_schema": {
+        "description": "coc7.check：一次检定怎么判。",
+        "properties": {
+          "critical_max": {
+            "default": 1,
+            "description": "骰值 ≤ 此值算大成功（规则书是 1）",
+            "maximum": 20,
+            "minimum": 1,
+            "title": "大成功阈值",
+            "type": "integer"
+          },
+          "fumble_rule": {
+            "default": "raw",
+            "enum": [
+              "raw",
+              "hundred_only",
+              "ninety_six_plus"
+            ],
+            "title": "大失败阈值",
+            "type": "string",
+            "x-choices": [
+              {
+                "hint": "照规则书：100 必大失败，技能 < 50 时 96 起即大失败",
+                "label": "照规则书",
+                "value": "raw"
+              },
+              {
+                "hint": "只有掷出 100 才算大失败",
+                "label": "只认 100",
+                "value": "hundred_only"
+              },
+              {
+                "hint": "96 起一律大失败，不看技能高低",
+                "label": "96 起",
+                "value": "ninety_six_plus"
+              }
+            ]
+          },
+          "dice_pool_cap": {
+            "default": 2,
+            "description": "单次检定最多叠几个奖励或惩罚骰",
+            "maximum": 3,
+            "minimum": 0,
+            "title": "奖惩骰上限",
+            "type": "integer"
+          }
+        },
+        "title": "CheckConfig",
+        "type": "object"
+      }
+    },
+    {
+      "id": "coc7.luck",
+      "title": "幸运结算",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.check"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.luck-spend",
+      "title": "幸运消费",
+      "description": "规则书的可选规则：检定失败后可花幸运点抵掉差值买成功。开启后失败时会问玩家买不买。",
+      "group": "判定",
+      "toggle": "luck_spend",
+      "requires": [
+        "coc7.luck"
+      ],
+      "conflicts": [],
+      "config_schema": {
+        "description": "coc7.luck-spend：花幸运抵差值（CoC 7e 官方可选规则，Keeper Rulebook p.99；默认关）。",
+        "properties": {
+          "luck_spend": {
+            "default": false,
+            "title": "幸运消费",
+            "type": "boolean"
+          },
+          "luck_spend_max": {
+            "default": 0,
+            "description": "一次检定最多花几点，0 = 不限",
+            "maximum": 999,
+            "minimum": 0,
+            "title": "单次上限",
+            "type": "integer"
+          },
+          "luck_spend_in_combat": {
+            "default": true,
+            "description": "常见做法是战斗中禁用，避免拿幸运硬扛伤害判定",
+            "title": "战斗中可用",
+            "type": "boolean"
+          },
+          "luck_spend_blocks_improvement": {
+            "default": true,
+            "description": "照规则书：走运没教会你任何事",
+            "title": "买来的成功不计成长",
+            "type": "boolean"
+          }
+        },
+        "title": "LuckSpendConfig",
+        "type": "object"
+      }
+    },
+    {
+      "id": "coc7.luck-reroll",
+      "title": "燃运重骰",
+      "description": "本桌自定，规则书里没有这条：失败后可烧固定点数幸运，整骰重掷一次。规则书的重掷叫「孤注一掷」，它不花幸运、且与花幸运二选一。",
+      "group": "判定",
+      "toggle": "luck_reroll",
+      "requires": [
+        "coc7.luck"
+      ],
+      "conflicts": [],
+      "config_schema": {
+        "description": "coc7.luck-reroll：燃运重骰（**不是官方规则**，常见村规；默认关）。\n\n第七版规则书 p.85 只给了「1:1 花幸运改变掷骰结果」这一种用法，没有花幸运重掷的条目；\n重掷在原文里叫**孤注一掷**，它不花幸运，代价是失败后果加重，而且与花幸运二选一。",
+        "properties": {
+          "luck_reroll": {
+            "default": false,
+            "title": "燃运重骰",
+            "type": "boolean"
+          },
+          "luck_reroll_cost": {
+            "default": 10,
+            "description": "买的是一次机会不是一次成功，所以是定价，不随差多少变",
+            "maximum": 99,
+            "minimum": 1,
+            "title": "每次烧几点",
+            "type": "integer"
+          }
+        },
+        "title": "LuckRerollConfig",
+        "type": "object"
+      }
+    },
+    {
+      "id": "coc7.wound",
+      "title": "伤害与状态",
+      "description": "",
+      "group": "伤害与状态",
+      "toggle": null,
+      "requires": [
+        "coc7.check"
+      ],
+      "conflicts": [],
+      "config_schema": {
+        "description": "coc7.wound：伤害与重伤。",
+        "properties": {
+          "major_wound_divisor": {
+            "default": 2,
+            "description": "单击伤害 ≥ 最大 HP ÷ {value} 判重伤（规则书是 2，即半血）",
+            "maximum": 10,
+            "minimum": 1,
+            "title": "重伤阈值",
+            "type": "integer"
+          }
+        },
+        "title": "WoundConfig",
+        "type": "object"
+      }
+    },
+    {
+      "id": "coc7.combat",
+      "title": "战斗轮",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.check",
+        "coc7.wound"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.positioning",
+      "title": "方格站位",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.combat"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.chase",
+      "title": "追逐",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.check"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.sanity",
+      "title": "理智",
+      "description": "",
+      "group": "伤害与状态",
+      "toggle": null,
+      "requires": [
+        "coc7.check"
+      ],
+      "conflicts": [],
+      "config_schema": {
+        "description": "coc7.sanity：临时疯狂的触发口径。",
+        "properties": {
+          "insanity_rule": {
+            "default": "fifth_of_san",
+            "enum": [
+              "fifth_of_san",
+              "flat"
+            ],
+            "title": "临时疯狂口径",
+            "type": "string",
+            "x-choices": [
+              {
+                "hint": "单次损失 ≥ 当前 SAN 的五分之一",
+                "label": "SAN 的 1/5",
+                "value": "fifth_of_san"
+              },
+              {
+                "hint": "单次损失达到固定点数",
+                "label": "固定点数",
+                "value": "flat"
+              }
+            ]
+          },
+          "insanity_flat_threshold": {
+            "default": 5,
+            "description": "规则书原文是 5",
+            "maximum": 99,
+            "minimum": 1,
+            "title": "固定点数",
+            "type": "integer",
+            "x-show-if": {
+              "insanity_rule": "flat"
+            }
+          }
+        },
+        "title": "SanityConfig",
+        "type": "object"
+      }
+    },
+    {
+      "id": "coc7.madness",
+      "title": "疯狂发作",
+      "description": "",
+      "group": "",
+      "toggle": null,
+      "requires": [
+        "coc7.sanity"
+      ],
+      "conflicts": [],
+      "config_schema": null
+    },
+    {
+      "id": "coc7.growth",
+      "title": "技能成长",
+      "description": "关掉则模组结束时不做成长检定（短模组常这么跑）",
+      "group": "伤害与状态",
+      "toggle": "improvement",
+      "requires": [
+        "coc7.check"
+      ],
+      "conflicts": [],
+      "config_schema": {
+        "description": "coc7.growth：技能成长（默认开；一夜之间的短模组常关掉）。",
+        "properties": {
+          "improvement": {
+            "default": true,
+            "title": "技能成长",
+            "type": "boolean"
+          }
+        },
+        "title": "GrowthConfig",
+        "type": "object"
+      }
+    }
+  ]
+}

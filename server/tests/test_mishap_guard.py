@@ -95,7 +95,7 @@ def test_kp已自行扣血则幂等跳过(db_factory):
 def test_反噬构成重伤时体质检定失败昏迷(db_factory, monkeypatch):
     """守卫路径也要走重伤钩子（曾漏传 module 被静默跳过）：反噬 ≥ 半血 → 落重伤 + 自动体质检定。"""
     db = db_factory(); sid, pc, module = _seed(db, hp=15)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 99)  # CON 60 必失败
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 99)  # CON 60 必失败
     plan = TurnPlan(mishap=MishapPolicy(
         trigger=True, hp_delta=-8, target="江户川龙牙", reason="从崩塌的阁楼跌落"))
     chunks = _run(cs._ensure_planned_mishap(db, sid, pc, [], plan, pre_gen_seq=0, module=module))
@@ -106,7 +106,7 @@ def test_反噬构成重伤时体质检定失败昏迷(db_factory, monkeypatch):
 
 def test_反噬构成重伤时体质检定成功保持清醒(db_factory, monkeypatch):
     db = db_factory(); sid, pc, module = _seed(db, hp=15)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 30)  # CON 60 成功
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 30)  # CON 60 成功
     plan = TurnPlan(mishap=MishapPolicy(trigger=True, hp_delta=-8, reason="跌落"))
     _run(cs._ensure_planned_mishap(db, sid, pc, [], plan, pre_gen_seq=0, module=module))
     assert db.get(Character, pc.id).status == "major_wound"      # 重伤在案但未昏迷

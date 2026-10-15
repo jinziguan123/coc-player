@@ -3,15 +3,15 @@
 // 这一页此前把整张村规配置表铺在主区，可改村规是房主的低频动作（联机进来的客人连改
 // 都改不了，端点限本机）。玩家来这里想知道的只有一件事：**我在什么规则下掷骰**。
 // 那件事本该一眼看完，而不是拿十一个开关去跟规则书原文逐条对照。
-import { ruleDiffLabels } from '@/lib/villageRules'
-
-export function VillageRulesSummary({ options, notes, enabled }: {
-  /** 后端存下的**差异项**（不是 effective）——没改过的项不该出现在摘要里 */
+export function VillageRulesSummary({ options, labels: allLabels, notes, enabled }: {
+  /** 后端存下的**差异项**（不是 effective）——用来判断「停用前是否配过东西」 */
   options: Record<string, unknown>
+  /** 差异项的短标签，由后端各规则组件生成（前端不再自己翻译参数） */
+  labels: string[]
   notes: string
   enabled: boolean
 }) {
-  const labels = enabled ? ruleDiffLabels(options) : []
+  const labels = enabled ? allLabels : []
   const stopped = !enabled && (Object.keys(options || {}).length > 0 || !!notes)
 
   return (

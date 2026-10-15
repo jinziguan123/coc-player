@@ -44,7 +44,7 @@ def test_quarry_wins_round_opens_gap(db_factory, monkeypatch):
     db = db_factory()
     sid, hero = _seed(db)
     _start(db, sid, hero, escape_at=5, caught_at=-3)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([45, 80]))  # 逃成功、追失败
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", _seq([45, 80]))  # 逃成功、追失败
     asyncio.run(chase_service.resolve_chase_round(db, sid, {"type": "run"}))
     st = chase_service.get_chase(db.get(GameSession, sid))
     assert st["gap"] == 1 and st["round"] == 1
@@ -55,7 +55,7 @@ def test_escape_folds_result(db_factory, monkeypatch):
     sid, hero = _seed(db)
     _start(db, sid, hero, escape_at=2, caught_at=-3)     # 阈值调小，易脱身
     # 连续两轮逃方大成功（+2）→ gap 达 2 → 脱身
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([10, 80]))
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", _seq([10, 80]))
     chunks = asyncio.run(chase_service.resolve_chase_round(db, sid, {"type": "run"}))
     session = db.get(GameSession, sid)
     assert chase_service.get_chase(session) is None                       # 追逐态已清
@@ -67,7 +67,7 @@ def test_caught_folds_result(db_factory, monkeypatch):
     db = db_factory()
     sid, hero = _seed(db)
     _start(db, sid, hero, escape_at=5, caught_at=-1)     # 一轮被追上
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([80, 10]))  # 逃失败、追大成功(-2)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", _seq([80, 10]))  # 逃失败、追大成功(-2)
     asyncio.run(chase_service.resolve_chase_round(db, sid, {"type": "run"}))
     session = db.get(GameSession, sid)
     assert chase_service.get_chase(session) is None

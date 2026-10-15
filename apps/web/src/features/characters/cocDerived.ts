@@ -1,7 +1,7 @@
 /**
  * CoC 7 版派生值（HP / MP / SAN / MOV / 伤害加值 / 体格 / 闪避）。
  *
- * 这是 `server/app/rules/coc/character.py::compute_derived` 的前端镜像：建卡时属性每点一下
+ * 这是 `server/app/rules/coc/components/character.py::compute_derived` 的前端镜像：建卡时属性每点一下
  * 就要刷新预览，走一次网络太黏；但**两份实现必然会漂**——原先内联在建卡页里的那份
  * 就漂出了两个 bug（MOV 的 9 永远取不到、伤害加值 165 以上全归 1D6）。
  * 所以这里的每个数字都由 cocDerived.test.ts 钉住，和 Python 侧 test_coc_chargen.py 逐条对齐；

@@ -14,7 +14,7 @@
 
 ## 技术栈与架构
 - 前端 React + TypeScript + Vite + Tailwind；后端 FastAPI + SQLAlchemy + SQLite。
-- 规则相关逻辑走插件式 `RuleEngine`，不硬编码；AI 调用走 Provider 抽象。
+- 规则相关逻辑走规则内核的组件（`server/app/rules/kernel.py`；CoC 的组件在 `app/rules/coc/components/`，一个组件一个文件），业务层只经 `rs.<槽位>.<导出>` 调用、村规自动注入，不直接 import 组件实现（ruff TID251 守边界）；AI 调用走 Provider 抽象。
 - 玩家角色一视同仁，无「主角」特权（房主角色只是默认锚点）。
 
 ## 提交与验证

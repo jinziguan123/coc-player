@@ -9,7 +9,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ai.prompts.kp_system import KP_SYSTEM_PROMPT
 from app.models import Base, Character, GameSession, Module  # noqa: F401
-from app.rules.coc import chase, combat
+from app.rules import ruleset_for
+from app.rules.coc.components import chase, combat, sanity, wound
 from app.rules.coc import options as coc_options
 from app.services import chat_service, combat_service, rule_options_service, session_service, turn_effects
 from tests.wire import wires
@@ -59,7 +60,7 @@ def _major_wound_checks(db, sid):
 def test_narrative_damage_raw_half_threshold(db_factory, monkeypatch):
     """RAW：最大 HP 12，单击 4 点 < 半血 6 → 不算重伤。"""
     db = db_factory(); module, hero, sid = _seed(db)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 30)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 30)
     _narrative_damage(db, module, hero, sid, "-4")
     assert hero.status == "active"
     assert _major_wound_checks(db, sid) == []
@@ -69,7 +70,7 @@ def test_narrative_damage_respects_major_wound_divisor(db_factory, monkeypatch):
     """村规重伤线 1/3：最大 HP 12，单击 4 点 ≥ 4 → 叙事扣血也判重伤并过体质检定。"""
     db = db_factory(); module, hero, sid = _seed(db)
     rule_options_service.save_village_options(db, "coc", {"major_wound_divisor": 3})
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 30)   # 体质 60 成功
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 30)   # 体质 60 成功
     _narrative_damage(db, module, hero, sid, "-4")
     assert hero.status == "major_wound"
     assert len(_major_wound_checks(db, sid)) == 1
@@ -77,9 +78,9 @@ def test_narrative_damage_respects_major_wound_divisor(db_factory, monkeypatch):
 
 def test_is_major_wound_shared_threshold():
     thirds = coc_options.from_dict({"major_wound_divisor": 3})
-    assert combat.is_major_wound(6, 12) is True
-    assert combat.is_major_wound(5, 12) is False
-    assert combat.is_major_wound(4, 12, thirds) is True
+    assert wound.is_major_wound(6, 12) is True
+    assert wound.is_major_wound(5, 12) is False
+    assert wound.is_major_wound(4, 12, thirds) is True
 
 
 # ── 2. 战斗 / 追逐内部检定读本局村规 ──────────────────────────────────────
@@ -90,14 +91,14 @@ _CRIT5 = coc_options.from_dict({"critical_max": 5})
 
 
 def test_combat_attack_check_uses_critical_max(monkeypatch):
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 3)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 3)
     assert combat.resolve_attack(_ATK, "0", "徒手格斗")["attacker_check"].outcome != "critical_success"
     r = combat.resolve_attack(_ATK, "0", "徒手格斗", options=_CRIT5)
     assert r["attacker_check"].outcome == "critical_success"
 
 
 def test_combat_other_checks_take_options(monkeypatch):
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 3)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 3)
     data = {"skills": {"急救": 50, "侦查": 50, "格斗(斗殴)": 50}, "base_attributes": {"CON": 50}}
     assert combat.resolve_first_aid(data, options=_CRIT5)["lines"][0].count("大成功")
     assert combat.resolve_observe(data, options=_CRIT5)["lines"][0].count("大成功")
@@ -106,7 +107,7 @@ def test_combat_other_checks_take_options(monkeypatch):
 
 
 def test_chase_round_uses_options(monkeypatch):
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", lambda: 3)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", lambda: 3)
     q = {"skills": {"运动": 60}, "base_attributes": {}}
     r = chase.resolve_chase_round(q, q, options=_CRIT5)
     assert r["quarry_check"].outcome == "critical_success"
@@ -133,8 +134,8 @@ def test_combat_service_passes_session_options(db_factory, monkeypatch):
         seen["outcome"] = r["attacker_check"].outcome
         return r
     monkeypatch.setattr(combat, "resolve_attack", spy)
-    monkeypatch.setattr("app.rules.coc.checks.roll_percentile", _seq([3, 90] + [50] * 20))
-    monkeypatch.setattr("app.rules.coc.combat.random.randint", lambda a, b: 1)
+    monkeypatch.setattr("app.rules.coc.components.check.roll_percentile", _seq([3, 90] + [50] * 20))
+    monkeypatch.setattr("app.rules.coc.components.combat.random.randint", lambda a, b: 1)
     asyncio.run(combat_service.resolve_player_action(
         db, sid, hero.id, {"type": "attack", "target_id": "npc_thug", "weapon": "徒手格斗"},
     ))
@@ -146,24 +147,43 @@ def test_combat_service_passes_session_options(db_factory, monkeypatch):
 
 def test_kp_prompt_insanity_matches_default_rule():
     assert coc_options.DEFAULT_OPTIONS.insanity_rule == "fifth_of_san"
-    assert coc_options.insanity_trigger_text(coc_options.DEFAULT_OPTIONS) in KP_SYSTEM_PROMPT
+    assert sanity.insanity_trigger_text(coc_options.DEFAULT_OPTIONS) in KP_SYSTEM_PROMPT
     assert "≥5 临时性疯狂" not in KP_SYSTEM_PROMPT
 
 
 def test_describe_flat_insanity_uses_same_text():
     flat = coc_options.from_dict({"insanity_rule": "flat", "insanity_flat_threshold": 5})
-    lines = coc_options.describe(flat)
-    assert any(coc_options.insanity_trigger_text(flat) in line for line in lines)
+    lines = ruleset_for("coc", flat.to_dict()).describe()
+    assert any(sanity.insanity_trigger_text(flat) in line for line in lines)
 
 
 # ── 4. 状态严重度表只有一份 ───────────────────────────────────────────────
 
 
 def test_status_severity_single_source():
-    from app.rules.coc.status import STATUS_SEVERITY
-
-    from app.rules import ruleset_for
+    from app.rules.coc.components.wound import STATUS_SEVERITY
 
     assert not hasattr(turn_effects, "_STATUS_SEVERITY")
     # 业务层经生效规则取表（P1 收口后不再直接 import），拿到的必须就是 status.py 那一份
-    assert ruleset_for("coc").status.STATUS_SEVERITY is STATUS_SEVERITY
+    assert ruleset_for("coc").wound.STATUS_SEVERITY is STATUS_SEVERITY
+
+
+# ── 5. KP 手册里的规则陈述由组件生成（P2）──────────────────────────────────
+
+
+def test_kp_manual_rule_lines_come_from_components():
+    raw = ruleset_for("coc").options
+    for line in raw.manual_lines():
+        assert line in KP_SYSTEM_PROMPT
+    assert raw.manual_text() in KP_SYSTEM_PROMPT
+    assert f"{raw.critical_roll_text()}=大成功" in KP_SYSTEM_PROMPT
+    assert raw.fumble_text() in KP_SYSTEM_PROMPT
+    # 旧手册与判定代码相左的三句不得回来
+    assert "HP 归 0 = 濒死" not in KP_SYSTEM_PROMPT
+    assert "负的最大 HP" not in KP_SYSTEM_PROMPT
+    assert "不能补成困难/极难" not in KP_SYSTEM_PROMPT
+
+
+def test_wound_manual_follows_divisor():
+    opts = ruleset_for("coc", {"major_wound_divisor": 3}).options
+    assert "最大 HP 的 1/3" in opts.manual_lines()[0]

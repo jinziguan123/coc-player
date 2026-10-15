@@ -5,20 +5,20 @@ from app.rules import ruleset_for
 
 
 def roll_attribute_sets(rule_system: str, count: int = 3) -> list[dict[str, int]]:
-    return ruleset_for(rule_system).sheet.roll_attribute_sets(count)
+    return ruleset_for(rule_system).character.roll_attribute_sets(count)
 
 
 def get_character_schema(rule_system: str) -> dict:
-    return ruleset_for(rule_system).sheet.get_character_schema()
+    return ruleset_for(rule_system).character.get_character_schema()
 
 
 def create_character(db: Session, data: dict) -> Character:
     rule_system = data["rule_system"]
-    sheet = ruleset_for(rule_system).sheet
+    character_rules = ruleset_for(rule_system).character
 
-    computed = sheet.create_character(data)
+    computed = character_rules.create_character(data)
 
-    ok, errors = sheet.validate_character(computed)
+    ok, errors = character_rules.validate_character(computed)
     if not ok:
         raise ValueError(f"角色数据校验失败: {', '.join(errors)}")
 

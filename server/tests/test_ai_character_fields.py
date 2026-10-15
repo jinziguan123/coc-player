@@ -8,7 +8,7 @@
 
 import pytest
 
-from app.rules.coc.character import derive_assets, roll_attributes
+from app.rules.coc.components.character import derive_assets, roll_attributes
 from app.services import ai_character_service
 
 

@@ -42,7 +42,7 @@ const ATTR_LABELS: Record<string, string> = {
 // 专精基名（与后端 SPECIALIZATIONS 对齐）
 const SPEC_BASES = ['母语', '外语', '格斗', '射击', '科学', '生存', '技艺', '驾驶']
 
-// 与后端 app/rules/coc/status.py 对齐
+// 与后端 app/rules/coc/components/wound.py 的 CHARACTER_STATUSES 对齐
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'active', label: '正常' },
   { value: 'major_wound', label: '重伤' },

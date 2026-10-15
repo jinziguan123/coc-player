@@ -1182,6 +1182,98 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HouseRulesExport": {
+        "description": "房规文件：YAML 原文与建议的文件名。",
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "text"
+        ],
+        "title": "HouseRulesExport",
+        "type": "object"
+      },
+      "HouseRulesImportRequest": {
+        "description": "导入房规：文件原文（YAML）。只预览、不落库。",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "HouseRulesImportRequest",
+        "type": "object"
+      },
+      "HouseRulesPreviewRead": {
+        "description": "房规文件的导入预览。``errors`` 为空才能保存；``warnings`` 只是提示。",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "errors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "labels": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "options": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Options",
+            "type": "object"
+          },
+          "table_notes": {
+            "default": "",
+            "title": "Table Notes",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "HouseRulesPreviewRead",
+        "type": "object"
+      },
       "ImageProfile": {
         "description": "生图配置：与文本模型完全解耦，独立增删改与激活。\n\n从前生图字段寄生在文本 AIProfile 上，后果有二：①同一台 ComfyUI 要在每个文本配置里\n重抄一遍；②`image_model` 只传给 OpenAICompatProvider，Anthropic 协议的配置填了也**静默\n失效**。拆开之后，用什么文本模型跑团与用什么后端出图互不相干。",
         "properties": {
@@ -2526,6 +2618,73 @@
         "title": "RoomEvent",
         "type": "object"
       },
+      "RuleComponentManifest": {
+        "properties": {
+          "config_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Schema"
+          },
+          "conflicts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "group": {
+            "default": "",
+            "title": "Group",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "requires": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Requires",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "toggle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toggle"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "RuleComponentManifest",
+        "type": "object"
+      },
       "RuleHit": {
         "properties": {
           "page": {
@@ -2573,6 +2732,43 @@
           "hits"
         ],
         "title": "RuleSearchResponse",
+        "type": "object"
+      },
+      "RuleSystemManifest": {
+        "description": "规则系统的组件目录：前端村规面板据此渲染，房规文件据此校验。",
+        "properties": {
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/RuleComponentManifest"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "house_rules_format_version": {
+            "title": "House Rules Format Version",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "version",
+          "house_rules_format_version",
+          "components"
+        ],
+        "title": "RuleSystemManifest",
         "type": "object"
       },
       "RulebookRead": {
@@ -3038,6 +3234,14 @@
             "default": true,
             "title": "Enabled",
             "type": "boolean"
+          },
+          "labels": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
           },
           "options": {
             "additionalProperties": true,
@@ -5014,6 +5218,145 @@
         ]
       }
     },
+    "/api/rulebooks/village-rules/{rule_system}/export": {
+      "get": {
+        "description": "把这一桌的村规导出成房规文件（YAML 原文 + 建议文件名），前端存成文件发给别人导入。\n\n不限本机：读村规本就公开，导出只是换个格式。",
+        "operationId": "export_house_rules_api_rulebooks_village_rules__rule_system__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HouseRulesExport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export House Rules",
+        "tags": [
+          "rulebooks"
+        ]
+      }
+    },
+    "/api/rulebooks/village-rules/{rule_system}/import-preview": {
+      "post": {
+        "description": "校验一份房规文件并返回预览，**不落库**。房主确认后前端走 PUT 保存。\n\n限本机：与改村规同属桌面配置操作。",
+        "operationId": "preview_house_rules_api_rulebooks_village_rules__rule_system__import_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HouseRulesImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HouseRulesPreviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview House Rules",
+        "tags": [
+          "rulebooks"
+        ]
+      }
+    },
+    "/api/rulebooks/village-rules/{rule_system}/manifest": {
+      "get": {
+        "description": "规则系统的组件目录与各组件参数的 schema——村规面板据此渲染，不再在前端写死字段。",
+        "operationId": "read_rule_manifest_api_rulebooks_village_rules__rule_system__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_system",
+            "required": true,
+            "schema": {
+              "title": "Rule System",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleSystemManifest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Rule Manifest",
+        "tags": [
+          "rulebooks"
+        ]
+      }
+    },
     "/api/rulebooks/{rulebook_id}": {
       "delete": {
         "operationId": "delete_rulebook_api_rulebooks__rulebook_id__delete",
@@ -5109,7 +5452,7 @@
     },
     "/api/rules/{rule_system}/base-skills": {
       "post": {
-        "description": "这组属性下、未加任何点时的技能起始值（母语=EDU、闪避=DEX//2 已填好）。\n\n建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避\n是占位的 0，界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的\n`max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 RuleEngine 里实现一次。",
+        "description": "这组属性下、未加任何点时的技能起始值（母语=EDU、闪避=DEX//2 已填好）。\n\n建卡界面必须拿这一份而不是 character-schema 里的 default_skills：后者的母语/闪避\n是占位的 0，界面照着 0 展示，玩家为了把它填上去而花掉的点，落库时会被兜底的\n`max(提交值, 派生值)` 顶掉，凭空蒸发。同一条规则只在 coc7.character 组件里实现一次。",
         "operationId": "base_skills_api_rules__rule_system__base_skills_post",
         "parameters": [
           {
