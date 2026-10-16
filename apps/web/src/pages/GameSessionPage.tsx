@@ -56,6 +56,7 @@ import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpPartyMonitor } from '../components/game/KpPartyMonitor'
+import { KpCombatStrip } from '../components/game/KpCombatStrip'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
 import { Modal, ModalPresence } from '../components/ui/modal'
@@ -525,6 +526,9 @@ export function GameSessionPage() {
   // 原型里开战即切战术台（KP 不该在打起来之后还要自己去按一下），之后仍可手动切回叙事看流。
   const [kpStage, setKpStage] = useState<'narrative' | 'tactical'>('narrative')
   useEffect(() => { if (combat) setKpStage('tactical') }, [combat])
+  // 战术模式下 KP 临时展开完整写作台；每场战斗开始时收回成底条
+  const [kpFullDesk, setKpFullDesk] = useState(false)
+  useEffect(() => { if (!combat) setKpFullDesk(false) }, [combat])
   // KP 席由 kpStage 决定沉浸战场；玩家席沿用 battleLayout 偏好。
   const immersiveOn = !!combat && (isKp ? kpStage === 'tactical' : battleLayout === 'immersive') && wideViewport
   // 聊天侧栏折叠：折叠后战场更大；期间到达的新消息计入未读徽标（展开即清）。
@@ -2330,13 +2334,20 @@ export function GameSessionPage() {
           在那么窄的框里写一段话很难受。挪到底部之后输入框有上千像素，监控列也能在它左边
           铺开，与舞台上下分工：上面是这一局的样子，下面是你要做的事。
           值班台形态下监控列与场景速查已上主台，坞里只留写作台（hideSituation）。 */}
-      {isKp && !kpCollapsed && (
+      {/* 战术模式：写作台只剩一条（最近结算 + 一行描写 + 收场），把高度还给战场；
+          「更多动作」展开回完整写作台，打完自动收回 */}
+      {isKp && !kpCollapsed && desk && immersiveOn && !kpFullDesk && (
+        <aside className="kp-console-dock kp-console-dock--strip flex-shrink-0">
+          <KpCombatStrip sessionId={currentSession.id} log={combatLog} onExpand={() => setKpFullDesk(true)} />
+        </aside>
+      )}
+      {isKp && !kpCollapsed && !(desk && immersiveOn && !kpFullDesk) && (
         <aside className={`kp-console-dock flex-shrink-0${desk ? ' kp-console-dock--lean' : ''}`}>
           <HumanKpPanel
             sessionId={currentSession.id}
             turnReady={turnState?.ready === true}
             variant="sidebar"
-            onCollapse={() => setKpCollapsed(true)}
+            onCollapse={() => (desk && immersiveOn ? setKpFullDesk(false) : setKpCollapsed(true))}
             hideSituation={desk}
             inCombat={!!combat}
             aside={desk ? undefined : <KpSceneBrief places={locations} />}

@@ -3098,6 +3098,46 @@ body {
 .kp-console-dock--lean { height: auto; max-height: clamp(260px, 46vh, 520px); }
 .kp-console-dock--lean .kp-console-body { overflow-y: auto; }
 
+/* 战术模式底条（KpCombatStrip）：左边最近三次结算，右边一行描写 + 收场 */
+.kp-console-dock--strip { height: auto; }
+.kp-combat-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+  box-shadow: inset 0 1px 0 rgba(200, 162, 90, 0.12);
+}
+.kp-combat-strip-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 44%;
+  min-width: 0;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.kp-combat-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.1rem;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--color-brass-dim);
+}
+.kp-combat-strip-row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-combat-strip-row:nth-child(2) { color: var(--color-text-primary); }
+.kp-combat-strip-row--idle { opacity: 0.7; }
+.kp-combat-strip-input { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.45rem; }
+.kp-combat-strip-input .input { flex: 1; min-width: 0; font-family: var(--font-game); font-size: var(--text-sm); }
+.kp-combat-strip-end { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 55%, transparent); }
+
 /* 顶栏值班条附加物：场景定位串 + 主台分段切换 */
 .kp-locus {
   font-family: var(--font-mono);
