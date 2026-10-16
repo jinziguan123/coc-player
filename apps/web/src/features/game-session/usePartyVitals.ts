@@ -24,6 +24,8 @@ export interface PartyVital {
   hp?: Vital
   san?: Vital
   mp?: Vital
+  /** 原始 system_data：监控卡据此画持续状态徽标（流血等），与角色卡同一份 */
+  systemData?: Record<string, unknown>
 }
 
 interface SeatLike {
@@ -64,6 +66,7 @@ export function usePartyVitals(seats: SeatLike[] | undefined, refreshTick: numbe
           hp: sd.hitPoints as Vital | undefined,
           san: sd.sanity as Vital | undefined,
           mp: sd.magicPoints as Vital | undefined,
+          systemData: sd,
         }
       }))
     })

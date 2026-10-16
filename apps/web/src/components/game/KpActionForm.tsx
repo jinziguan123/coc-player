@@ -5,7 +5,7 @@
  * 提交逻辑（字段 → payload）仍留在面板的 submit 里，这里只负责「长什么样」。
  */
 import type { KeyboardEvent, ReactNode } from 'react'
-import { GiFootTrip, GiPadlock, GiScrollUnfurled, GiSkullCrossedBones } from 'react-icons/gi'
+import { GiFootTrip, GiPadlock, GiRun, GiScrollUnfurled, GiSkullCrossedBones } from 'react-icons/gi'
 import { Mic, MicOff, Swords } from 'lucide-react'
 import {
   Select,
@@ -267,6 +267,19 @@ export function KpActionForm({
           className="min-w-48 flex-1"
         />
         <KpInput name="trigger" placeholder="开战原因（可选）" fields={fields} onChange={setField} />
+      </>}
+      {/* 发起追逐：逃方（在座调查员）对追方（模组 NPC 或临场起名）。距离轨的三个数
+          留空即取规则书建议值（起点 0、甩脱 5、被追上 −3），后端校验起点落在两端之间。 */}
+      {action === 'start_chase' && <>
+        <GiRun size={16} />
+        <ActorSelect label="逃方" value={fields.quarry || ''} workspace={workspace} onChange={(v) => setField('quarry', v)} />
+        <KpInput name="pursuer" placeholder="追方（NPC 名，或临场起名）" options={catalogs.npcs} fields={fields} onChange={setField} />
+        <input value={fields.pursuer_mov || ''} onChange={(e) => setField('pursuer_mov', e.target.value)} placeholder="追方 MOV" className="input w-24 text-xs" inputMode="numeric" />
+        <input value={fields.skill || ''} onChange={(e) => setField('skill', e.target.value)} placeholder="比拼技能（运动）" className="input w-32 text-xs" />
+        <input value={fields.start_gap || ''} onChange={(e) => setField('start_gap', e.target.value)} placeholder="起始距离 0" className="input w-24 text-xs" inputMode="numeric" />
+        <input value={fields.escape_at || ''} onChange={(e) => setField('escape_at', e.target.value)} placeholder="甩脱 5" className="input w-20 text-xs" inputMode="numeric" />
+        <input value={fields.caught_at || ''} onChange={(e) => setField('caught_at', e.target.value)} placeholder="被追上 −3" className="input w-24 text-xs" inputMode="numeric" />
+        <KpInput name="trigger" placeholder="起因（写进叙事，可选）" fields={fields} onChange={setField} />
       </>}
       {/* 结束战斗：主观收尾动作，没有参数——机械收场（击溃/全灭）走自动结算，
           这一条给 KP 主观裁定：敌人逃了、谈和了、或这一架不值得再打下去。 */}

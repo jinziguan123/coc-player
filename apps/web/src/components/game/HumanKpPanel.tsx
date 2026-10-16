@@ -151,6 +151,10 @@ interface Props {
   aside?: ReactNode
   /** 值班台形态：监控列与场景速查由页面左侧栏接管，坞里只保留写作台，不再重复渲染。 */
   hideSituation?: boolean
+  /** 战斗中：动作条「局势」组给「结束战斗」而不是「开战」 */
+  inCombat?: boolean
+  /** 追逐中：动作条不再给开战 / 追逐 */
+  inChase?: boolean
 }
 
 
@@ -187,7 +191,7 @@ function highlightText(text: string, query: string) {
   ))
 }
 
-export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline', onCollapse, aside, hideSituation = false }: Props) {
+export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline', onCollapse, aside, hideSituation = false, inCombat = false, inChase = false }: Props) {
   const sidebar = variant === 'sidebar'
   // 侧栏形态没有「内联收起」这回事——整栏的显隐由外层窄条控制，此处恒展开。
   const [collapsedInline, setCollapsedInline] = useState(false)
@@ -197,6 +201,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
   /** 点「资料」回到上次看的那一页，而不是每次都从参谋重新找。 */
   const [lastRefTab, setLastRefTab] = useState<PanelTab>('advisor')
   const [action, setAction] = useState<KpAction>('narration')
+  // 开战 / 开追逐之后对应的按钮会从动作条上消失，表单不该还停在那儿——回到写旁白
+  if ((inCombat && action === 'start_combat') || (inChase && action === 'start_chase')) setAction('narration')
   const [busy, setBusy] = useState('')
   const [fields, setFields] = useState<Record<string, string>>({})
   const [lastActionResult, setLastActionResult] = useState('')
@@ -350,7 +356,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
     const payload = Object.fromEntries(
       Object.entries(nextFields).filter(([, value]) => value.trim()),
     )
-    const doneText = action === 'end_combat' ? '战斗已结束' : `${ACTION_LABELS[action]}已发布`
+    const doneText = action === 'end_combat' ? '战斗已结束' : action === 'start_chase' ? '追逐开始' : `${ACTION_LABELS[action]}已发布`
     if (await postAction(action, payload, doneText)) {
       // 连续 NPC 台词时保留说话人，只清空上一句正文。
       setFields(action === 'dialogue' ? { npc_id: fields.npc_id || '' } : {})
@@ -608,46 +614,45 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
             </button>
           </div>
         )}
+        {/* 回合信号与「开放行动」并进抬头这一行：它们是时效信号，翻资料时也要看得见，
+            但不值得再单独占一整行——写作台的竖向空间要留给叙事流与战场 */}
+        {!collapsed && (
+          <div className="kp-turn-bar">
+            <button
+              type="button"
+              onClick={() => setTab(signalChips.length ? 'director' : tab)}
+              className="kp-turn-signals"
+              disabled={!signalChips.length}
+              title={signalChips.length ? '点击查看导演台详情' : undefined}
+            >
+              <Info size={12} className="flex-shrink-0" />
+              {signalChips.length
+                ? signalChips.map((chip) => (
+                  <span key={chip.key} className={`chip ${chip.tone}`}>{chip.label}</span>
+                ))
+                : <span className="kp-turn-idle">本回合没有待办信号</span>}
+            </button>
+            <button
+              type="button"
+              onClick={() => void endTurn()}
+              disabled={!!busy}
+              className="btn-primary inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap !px-2 !py-1 text-xs"
+              title="结束 KP 回合，把行动权交还给玩家"
+            >
+              <Send size={13} /> {busy === 'end-turn' ? '处理中…' : '开放行动'}
+            </button>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => (sidebar ? onCollapse?.() : setCollapsed((value) => !value))}
-          className="btn-secondary ml-auto !p-1.5"
+          className="btn-secondary !p-1.5"
           aria-expanded={!collapsed}
           title={sidebar ? '收起 KP 控制台' : collapsed ? '展开 KP 控制台' : '收起 KP 控制台'}
         >
           {sidebar ? <ChevronRight size={15} /> : collapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
         </button>
       </div>
-
-      {/* 回合条：本回合还差什么 + 把回合交还给玩家。常驻（不随标签切换消失）——
-          冷场/卡关/待回收都是**时效**信号，KP 正在翻模组资料时同样要看得见。 */}
-      {!collapsed && (
-        <div className="kp-turn-bar">
-          <button
-            type="button"
-            onClick={() => setTab(signalChips.length ? 'director' : tab)}
-            className="kp-turn-signals"
-            disabled={!signalChips.length}
-            title={signalChips.length ? '点击查看导演台详情' : undefined}
-          >
-            <Info size={12} className="flex-shrink-0" />
-            {signalChips.length
-              ? signalChips.map((chip) => (
-                <span key={chip.key} className={`chip ${chip.tone}`}>{chip.label}</span>
-              ))
-              : <span className="kp-turn-idle">本回合没有待办信号</span>}
-          </button>
-          <button
-            type="button"
-            onClick={() => void endTurn()}
-            disabled={!!busy}
-            className="btn-primary inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap !px-2 !py-1 text-xs"
-            title="结束 KP 回合，把行动权交还给玩家"
-          >
-            <Send size={13} /> {busy === 'end-turn' ? '处理中…' : '开放行动'}
-          </button>
-        </div>
-      )}
 
       {/* 分栏：宽屏「看的」在左、「做的」在右；窄屏顺次堆叠。见 index.css */}
       <div className="kp-console-split">
@@ -685,7 +690,8 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               切动作只换输入区的形态，不换页面。 */}
           <div className="kp-composer">
           {/* 全部动作直达、按四组排开（见 kpActions.ACTION_GROUPS）——一个不藏 */}
-          <KpActionBar action={action} onPick={(id) => { setAction(id); setFields({}) }} />
+          <KpActionBar action={action} inCombat={inCombat} inChase={inChase} onPick={(id) => { setAction(id); setFields({}) }} />
+          <div className="kp-composer-row">
           <div className={`kp-composer-form flex flex-wrap gap-2${PROSE_ACTIONS.has(action) ? ' kp-composer-form--prose' : ''}`}>
             <KpActionForm
               action={action}
@@ -705,6 +711,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
               {(['dice_check', 'opposed_check', 'generic_roll'] as KpAction[]).includes(action) ? <GiRollingDices size={13} /> : <Send size={13} />}
               {busy ? '处理中…' : ACTION_LABELS[action]}
             </button>
+          </div>
           </div>
           </div>
           {lastActionResult && (

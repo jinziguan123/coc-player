@@ -2799,20 +2799,26 @@ body {
 /* ===== 回合条：本回合还差什么 + 把回合交还给玩家 =====
    常驻（不随标签切换消失）：冷场/卡关/待回收都是时效信号，KP 正翻模组资料时同样要看得见。
    「开放行动」从抬头挪到这里——它是本回合的事，不该和导航挤在同一排。 */
+/* 回合条并进抬头行之后：占满中间那段，信号在左伸缩，「开放行动」贴右 */
 .kp-turn-bar {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 0.5rem;
-  padding: 0.3rem 0.35rem 0.3rem 0.45rem;
+  margin: 0 0.25rem 0 0.5rem;
+  padding: 0.2rem 0.3rem 0.2rem 0.45rem;
   border-radius: var(--radius-sm);
   border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
   background: color-mix(in srgb, var(--color-accent) 7%, transparent);
 }
 .kp-turn-signals {
   display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.3rem;
   flex: 1;
   min-width: 0;
@@ -3028,11 +3034,36 @@ body {
   display: flex; align-items: center; gap: 0.4rem;
 }
 .kp-desk-rail .kp-monitor-label::after { content: ''; flex: 1; height: 1px; background: var(--color-border); }
-.kp-desk-rail .kp-mon { padding: 0.55rem 0.6rem 0.5rem; }
-.kp-desk-rail .kp-mon-head { margin-bottom: 0.35rem; }
-.kp-desk-rail .kp-mon .game-vital-track { height: 6px; }
-.kp-desk-rail .kp-mon .game-vital-item + .game-vital-item { margin-top: 0.2rem; }
-.kp-desk-rail .kp-mon-acts { margin-top: 0.45rem; }
+.kp-desk-rail .kp-mon { padding: 0.55rem 0.6rem 0.5rem; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+.kp-desk-rail .kp-mon:hover, .kp-desk-rail .kp-mon:focus-within { border-color: var(--color-border-strong); box-shadow: inset 2px 0 0 var(--color-accent); }
+.kp-desk-rail .kp-mon-head { margin-bottom: 0.4rem; }
+/* 体征：三格并排的大号读数（与对局角色卡窄栏同一写法），一张卡竖向省掉一半 */
+.kp-desk-rail .kp-mon-vitals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+.kp-desk-rail .kp-mon .game-vital-item { gap: 0.25rem; margin: 0 !important; }
+.kp-desk-rail .kp-mon .game-vital-header { flex-direction: column-reverse; align-items: flex-start; gap: 0.2rem; }
+.kp-desk-rail .kp-mon .game-vital-sublabel { display: none; }
+.kp-desk-rail .kp-mon .game-vital-label { font-size: 0.625rem; letter-spacing: 0.14em; }
+.kp-desk-rail .kp-mon .game-vital-values { padding-left: 0; }
+.kp-desk-rail .kp-mon .game-vital-cur { font-size: 1.35rem; line-height: 1; }
+.kp-desk-rail .kp-mon .game-vital-max { font-size: 0.625rem; }
+.kp-desk-rail .kp-mon .game-vital-track { height: 3px; }
+.kp-mon-badges { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.kp-mon-badges:empty { display: none; }
+.kp-desk-rail .kp-mon-acts { margin-top: 0.45rem; opacity: 1; }
+/* 能悬停的设备上，四个快捷动作平时收起：两三个人就是八到十二个按钮，静息态只该看体征 */
+@media (hover: hover) {
+  .kp-desk-rail .kp-mon-acts {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    max-height: 0;
+    margin-top: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease, margin-top 0.25s ease;
+  }
+  .kp-desk-rail .kp-mon:hover .kp-mon-acts,
+  .kp-desk-rail .kp-mon:focus-within .kp-mon-acts { max-height: 2.5rem; margin-top: 0.45rem; opacity: 1; }
+}
 
 /* 信号灯：与原型 kl-signal 一致——点灯 + 告警脉冲 */
 .kp-signal {
@@ -3062,8 +3093,143 @@ body {
 }
 .kp-desk-brief .kp-brief { padding: 0 0 0.25rem; border-bottom: none; }
 
-/* 操作台：态势列已被左列接管，坞只留写作台 → 高度从 36vh 收紧一档 */
-.kp-console-dock--lean { height: clamp(230px, 30vh, 380px); }
+/* 操作台：态势列已被左列接管，坞只留写作台。高度不再预留 30vh，跟内容走——
+   抬头一行 + 动作一行 + 输入一行，叙事流与战场拿回大半屏；切到「资料」档时再按需长高。 */
+.kp-console-dock--lean { height: auto; max-height: clamp(260px, 46vh, 520px); }
+.kp-console-dock--lean .kp-console-body { overflow-y: auto; }
+
+/* 战术模式底条（KpCombatStrip）：左边最近三次结算，右边一行描写 + 收场 */
+.kp-console-dock--strip { height: auto; }
+.kp-combat-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+  box-shadow: inset 0 1px 0 rgba(200, 162, 90, 0.12);
+}
+.kp-combat-strip-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 44%;
+  min-width: 0;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.kp-combat-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.1rem;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--color-brass-dim);
+}
+.kp-combat-strip-row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-combat-strip-row:nth-child(2) { color: var(--color-text-primary); }
+.kp-combat-strip-row--idle { opacity: 0.7; }
+.kp-combat-strip-input { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.45rem; }
+.kp-combat-strip-input .input { flex: 1; min-width: 0; font-family: var(--font-game); font-size: var(--text-sm); }
+.kp-combat-strip-end { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 55%, transparent); }
+
+/* ===== 追逐台（KpChaseStage）：距离轨为主体，右栏逐轮记录 ===== */
+.kp-chase { flex: 1; min-height: 0; display: flex; gap: 0.85rem; }
+.kp-chase-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, #16271f, var(--color-bg-primary));
+  padding: 0.85rem 1.25rem 0.85rem;
+}
+.kp-chase-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: var(--text-sm); color: var(--color-text-secondary); }
+.kp-chase-head > svg { color: var(--color-verdigris); font-size: 1.1rem; }
+.kp-chase-head b { font-family: var(--font-title); font-size: var(--text-base); letter-spacing: 0.12em; color: var(--color-text-primary); }
+.kp-chase-rule { margin-left: auto; font-size: var(--text-2xs); padding: 0.1rem 0.5rem; border: 1px solid var(--color-border-strong); }
+/* 距离轨：左端被追上（牛血红）→ 右端甩脱（铜绿），菱形节点逐格排开 */
+.kp-chase-track { position: relative; height: 7.5rem; margin: auto 3rem 0; }
+.kp-chase-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3.6rem;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-danger-deep), var(--color-brass-dim) 45%, var(--color-verdigris));
+}
+.kp-chase-cell { position: absolute; top: 3.6rem; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
+.kp-chase-node {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-top: -0.75rem;
+  transform: rotate(45deg);
+  border: 1.5px solid var(--color-brass-dim);
+  background: var(--color-bg-secondary);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.kp-chase-node--caught { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger-deep) 45%, var(--color-bg-secondary)); }
+.kp-chase-node--escape { border-color: var(--color-verdigris); background: color-mix(in srgb, var(--color-verdigris) 25%, var(--color-bg-secondary)); }
+.kp-chase-node--here { border-color: var(--color-accent); box-shadow: 0 0 14px rgba(200, 162, 90, 0.45); }
+.kp-chase-label { margin-top: 0.85rem; font-family: var(--font-display); font-size: var(--text-xs); color: var(--color-text-secondary); white-space: nowrap; }
+.kp-chase-token {
+  position: absolute;
+  top: 0.4rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin-left: -1.2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.kp-chase-token--quarry { background: #1d3b4c; border: 2px solid var(--combat-friend); color: #d6e8f6; box-shadow: 0 0 16px rgba(157, 195, 230, 0.35); }
+.kp-chase-token--pursuer { background: #3a1416; border: 2px solid var(--combat-foe); color: #f2c4c7; }
+.kp-chase-gap { text-align: center; margin: 1.25rem 0 auto; }
+.kp-chase-gap b { display: block; font-family: var(--font-display); font-size: 3.6rem; font-weight: 400; line-height: 1; color: var(--color-dice-gold); }
+.kp-chase-gap span { display: block; margin-top: 0.5rem; font-size: var(--text-xs); letter-spacing: 0.14em; color: var(--color-brass-dim); }
+.kp-chase-vs { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1rem; margin: 1rem 0 0.75rem; }
+.kp-chase-vs > div { padding: 0.55rem 0.8rem; border: 1px solid var(--color-border); background: var(--surface-1); font-size: var(--text-xs); color: var(--color-text-secondary); }
+.kp-chase-vs > div:last-child { text-align: right; }
+.kp-chase-vs b { display: block; font-family: var(--font-game); font-size: var(--text-base); color: var(--color-text-primary); }
+.kp-chase-vs > span { font-family: var(--font-display); font-size: 1.3rem; color: var(--color-brass-dim); }
+/* 本轮操作：一行 */
+.kp-chase-round {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+.kp-chase-field { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--text-2xs); letter-spacing: 0.1em; color: var(--color-text-secondary); }
+.kp-chase-field .input { width: 13rem; font-size: var(--text-sm); }
+.kp-chase-seg { display: inline-flex; border: 1px solid var(--color-border-strong); border-radius: 2px; overflow: hidden; }
+.kp-chase-seg button { padding: 0.32rem 0.65rem; font-size: var(--text-xs); color: var(--color-text-secondary); }
+.kp-chase-seg button + button { border-left: 1px solid var(--color-border); }
+.kp-chase-seg button.on { background: linear-gradient(180deg, var(--color-accent-hover), var(--color-accent)); color: var(--color-on-accent); font-weight: 700; }
+/* 右栏逐轮记录 */
+.kp-chase-log {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--surface-1);
+}
+.kp-chase-log-row { font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-secondary); padding-bottom: 0.4rem; border-bottom: 1px dashed var(--color-border); }
+.kp-chase-log-row b { font-family: var(--font-display); color: var(--color-text-accent); margin-right: 0.3rem; }
+.kp-chase-log-row--idle { border-bottom: none; }
 
 /* 顶栏值班条附加物：场景定位串 + 主台分段切换 */
 .kp-locus {
@@ -3211,11 +3377,38 @@ body {
      的空框子只是碍事。剩下的交给 resize-y——想写长的自己往下拖。 */
   min-height: clamp(4.5rem, 19vh, 11rem);
 }
+/* 输入与发布并排：发布是这条流水线的出口，贴在输入框右边，不再单独占一行 */
+.kp-composer-row { display: flex; align-items: stretch; gap: 0.5rem; padding-right: 0.5rem; }
+.kp-composer-row > .kp-composer-form { flex: 1; min-width: 0; }
 .kp-composer-submit {
   display: flex;
-  justify-content: flex-end;
-  padding: 0 0.45rem 0.5rem;
+  align-items: stretch;
+  padding: 0.5rem 0;
 }
+.kp-composer-submit > button { justify-content: center; min-width: 6.5rem; padding-left: 1rem; padding-right: 1rem; }
+/* 值班台写作台：输入框平时两行，聚焦（或已有内容）时展开到可写一段的高度 */
+.kp-console-dock--lean .kp-composer-form--prose textarea {
+  min-height: 3.6rem;
+  height: 3.6rem;
+  transition: height 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kp-console-dock--lean .kp-composer-form--prose textarea:focus,
+.kp-console-dock--lean .kp-composer-form--prose textarea:not(:placeholder-shown) { height: 8.5rem; }
+/* 动作条一行放下：组间距收紧，「更多」跟在条尾 */
+.kp-console-dock--lean .kp-action-bar { flex-wrap: nowrap; overflow-x: auto; gap: 0.4rem 0.75rem; padding: 0.4rem 0.55rem; scrollbar-width: none; }
+.kp-console-dock--lean .kp-quick-action { padding: 0.3rem 0.5rem; }
+.kp-action-more {
+  flex-shrink: 0;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  font-family: var(--font-title);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.kp-action-more:hover, .kp-action-more[data-state='open'] { color: var(--color-text-accent); border-color: var(--color-accent); }
 
 /* ===== 新手引导浮层 ===== */
 .coach-body {

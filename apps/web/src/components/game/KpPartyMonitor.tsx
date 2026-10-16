@@ -9,6 +9,7 @@
  * 第 3 条是这个组件真正的价值：点一下就把动作与目标一起填进工作台，KP 过目后再发出去
  * （沿用「采纳建议」那条路径，不是直接广播——裁定权仍在 KP 手里）。
  */
+import { ConditionBadges } from '@/components/character/ConditionBadges'
 import { GameVitalBar } from '@/components/character/GameVitalBar'
 
 import { SeatIcon } from './SeatIcon'
@@ -55,9 +56,15 @@ export function KpPartyMonitor({ party, onPrefill }: {
             </span>
             <SeatIcon kind={p.isAi ? 'ai' : 'human'} size={12} />
           </div>
-          {p.hp && <GameVitalBar type="hp" current={p.hp.current} max={p.hp.max} />}
-          {p.san && <GameVitalBar type="san" current={p.san.current} max={p.san.max} />}
-          {p.mp && <GameVitalBar type="mp" current={p.mp.current} max={p.mp.max} />}
+          <div className="kp-mon-vitals">
+            {p.hp && <GameVitalBar type="hp" current={p.hp.current} max={p.hp.max} />}
+            {p.san && <GameVitalBar type="san" current={p.san.current} max={p.san.max} />}
+            {p.mp && <GameVitalBar type="mp" current={p.mp.current} max={p.mp.max} />}
+          </div>
+          {p.systemData && (
+            <div className="kp-mon-badges"><ConditionBadges systemData={p.systemData} /></div>
+          )}
+          {/* 四个快捷动作：值班台左列里平时收起，悬停或键盘聚焦到这张卡时展开（见 index.css） */}
           <div className="kp-mon-acts">
             {ACTS.map((a) => (
               <button

@@ -56,10 +56,12 @@ import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpPartyMonitor } from '../components/game/KpPartyMonitor'
+import { KpCombatStrip } from '../components/game/KpCombatStrip'
+import { KpChaseStage } from '../components/game/KpChaseStage'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
 import { Modal, ModalPresence } from '../components/ui/modal'
-import { GiReturnArrow, GiScrollUnfurled, GiTreasureMap, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
+import { GiReturnArrow, GiScrollUnfurled, GiTreasureMap, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiRun, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
@@ -494,6 +496,11 @@ export function GameSessionPage() {
   // 战斗日志抽屉内容：从消息流里筛出带 combat_log 标记的机械结算行（dice/system），
   // 按 combatLogSince 下限只留本场（重连时 since=null → 全收，与落库历史一致）。
   // 派生自 messages，故实时/历史/重连三路统一，无需单独维护日志数组。
+  // 追逐台的逐轮记录：追逐结算行（actor「追逐」的 dice），只取本场的那几轮
+  const chaseRounds = useMemo(() => {
+    if (!chase || chase.round <= 0) return []
+    return messages.filter((m) => m.type === 'dice' && m.actor_name === '追逐').slice(-chase.round).map((m) => m.content)
+  }, [messages, chase])
   const combatLog = useMemo<CombatLogEntry[]>(
     () => selectCombatLog(messages, combatLogSince),
     [messages, combatLogSince],
@@ -524,7 +531,12 @@ export function GameSessionPage() {
   // —— 真人 KP 值班台：主台在「叙事 / 战术」间切换 ——
   // 原型里开战即切战术台（KP 不该在打起来之后还要自己去按一下），之后仍可手动切回叙事看流。
   const [kpStage, setKpStage] = useState<'narrative' | 'tactical'>('narrative')
-  useEffect(() => { if (combat) setKpStage('tactical') }, [combat])
+  // 开追逐同理：主台切到追逐台（依赖取「有没有」而不是追逐态本身，免得每轮都把 KP 拽回去）
+  const chaseOn = !!chase
+  useEffect(() => { if (combat || chaseOn) setKpStage('tactical') }, [combat, chaseOn])
+  // 战术模式下 KP 临时展开完整写作台；每场战斗开始时收回成底条
+  const [kpFullDesk, setKpFullDesk] = useState(false)
+  useEffect(() => { if (!combat) setKpFullDesk(false) }, [combat])
   // KP 席由 kpStage 决定沉浸战场；玩家席沿用 battleLayout 偏好。
   const immersiveOn = !!combat && (isKp ? kpStage === 'tactical' : battleLayout === 'immersive') && wideViewport
   // 聊天侧栏折叠：折叠后战场更大；期间到达的新消息计入未读徽标（展开即清）。
@@ -1328,6 +1340,8 @@ export function GameSessionPage() {
   // 对应原型 /lab/kp：左列监控常驻、主台在叙事/战术间切换、写作台沉底。
   // 玩家席与窄视口维持原布局——监控与场景速查仍由坞内的态势列提供。
   const desk = isKp && wideViewport
+  // 追逐台：值班台 + 追逐中 + 主台在「追逐」档
+  const kpChaseOn = desk && !!chase && kpStage === 'tactical'
 
   return (
     <div className="game-session-layout flex flex-col h-full">
@@ -1387,12 +1401,12 @@ export function GameSessionPage() {
                   type="button"
                   className={`kp-mode ${kpStage === 'tactical' ? 'kp-mode--on' : ''}`}
                   onClick={() => setKpStage('tactical')}
-                  disabled={!combat}
+                  disabled={!combat && !chase}
                   aria-pressed={kpStage === 'tactical'}
-                  style={!combat ? { opacity: 0.4 } : undefined}
-                  title={combat ? '整段主台切到战术棋盘' : '开战后才能进战术台'}
+                  style={!combat && !chase ? { opacity: 0.4 } : undefined}
+                  title={chase ? '整段主台切到追逐台' : combat ? '整段主台切到战术棋盘' : '开战或开追逐后才能进'}
                 >
-                  <GiCrossedSwords size={13} /> 战术
+                  {chase ? <><GiRun size={13} /> 追逐</> : <><GiCrossedSwords size={13} /> 战术</>}
                 </button>
               </span>
             </>
@@ -1547,6 +1561,11 @@ export function GameSessionPage() {
       {/* 聊天侧栏折叠后的把手：一颗圆 token（与大厅聊天同一套视觉语言），
           从前是一条 2.4rem 的窄板 + lucide 面板图标，既看不出是什么、也和全站不搭。
           真人 KP 值班台的战术模式整段都是战场，没有聊天侧栏，这个把手不出现。 */}
+      {kpChaseOn && chase && (
+        <div className="battle-stage-pane flex-1 min-w-0 flex flex-col min-h-0">
+          <KpChaseStage chase={chase} sessionId={currentSession.id} rounds={chaseRounds} />
+        </div>
+      )}
       {immersiveOn && chatCollapsed && !isKp && (
         <div className="side-token-rail">
           <button onClick={toggleChatCollapsed} className="side-token" title="展开聊天侧栏">
@@ -1560,7 +1579,7 @@ export function GameSessionPage() {
       <DiceRoller ref={diceRollerRef} />
       {/* 值班台战术模式：整段主台都是战场，聊天列整个不渲染（KP 要看叙事流就切回叙事）。
           玩家与叙事模式照旧：收成侧栏 / 折叠把手那一套只在玩家侧保留。 */}
-      {!(isKp && immersiveOn) && (
+      {!(isKp && (immersiveOn || kpChaseOn)) && (
       <div
         className={`flex-col relative ${immersiveOn
           ? (chatCollapsed ? 'hidden' : 'flex flex-shrink-0 chat-side-pane')
@@ -2093,7 +2112,7 @@ export function GameSessionPage() {
             onToggleLayout={wideViewport ? () => (isKp ? setKpStage('tactical') : setBattleLayout('immersive')) : undefined}
           />
         )}
-        {chase && (
+        {chase && !desk && (
           <ChasePanel chase={chase} sessionId={currentSession.id} />
         )}
         {typers.label && (
@@ -2206,12 +2225,11 @@ export function GameSessionPage() {
             {hasNewBelow ? '有新内容' : '最新'}
           </button>
         )}
-        {isKp ? (
+        {isKp ? (desk ? null : (
           <div className="chat-input-bar chat-input-bar--kp">
-            用右侧 KP 工作台推进本回合。你是 KP，不占玩家席，所以没有单独的发言框——
-            想跟同桌说句场外的话，写在叙事框的（圆括号）里即可。
+            用下方的 KP 写作台推进本回合；想跟同桌说场外的话，写在（圆括号）里即可。
           </div>
-        ) : (
+        )) : (
         <div className="chat-input-bar">
           <textarea
             ref={inputRef}
@@ -2331,14 +2349,23 @@ export function GameSessionPage() {
           在那么窄的框里写一段话很难受。挪到底部之后输入框有上千像素，监控列也能在它左边
           铺开，与舞台上下分工：上面是这一局的样子，下面是你要做的事。
           值班台形态下监控列与场景速查已上主台，坞里只留写作台（hideSituation）。 */}
-      {isKp && !kpCollapsed && (
+      {/* 战术模式：写作台只剩一条（最近结算 + 一行描写 + 收场），把高度还给战场；
+          「更多动作」展开回完整写作台，打完自动收回 */}
+      {isKp && !kpCollapsed && desk && immersiveOn && !kpFullDesk && (
+        <aside className="kp-console-dock kp-console-dock--strip flex-shrink-0">
+          <KpCombatStrip sessionId={currentSession.id} log={combatLog} onExpand={() => setKpFullDesk(true)} />
+        </aside>
+      )}
+      {isKp && !kpCollapsed && !(desk && immersiveOn && !kpFullDesk) && (
         <aside className={`kp-console-dock flex-shrink-0${desk ? ' kp-console-dock--lean' : ''}`}>
           <HumanKpPanel
             sessionId={currentSession.id}
             turnReady={turnState?.ready === true}
             variant="sidebar"
-            onCollapse={() => setKpCollapsed(true)}
+            onCollapse={() => (desk && immersiveOn ? setKpFullDesk(false) : setKpCollapsed(true))}
             hideSituation={desk}
+            inCombat={!!combat}
+            inChase={!!chase}
             aside={desk ? undefined : <KpSceneBrief places={locations} />}
           />
         </aside>
