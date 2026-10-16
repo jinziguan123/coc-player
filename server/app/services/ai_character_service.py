@@ -163,63 +163,22 @@ def _assemble(
         occ = _default_occupation(module, rs=rs)
     occ_name = occ.name
 
-    cr = _clamp_int(ai.get("credit_rating"), occ.credit_min, occ.credit_max, occ.credit_min)
-    occ_points = rs.occupation.calc_occupation_points(occ.name, attrs)
-    int_points = rs.occupation.calc_interest_points(attrs)
-    occ_points_remaining = max(0, occ_points - cr)  # 信用评级占用本职点
-
-    base = rs.character.build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
-    base["信用评级"] = 0
-
-    # 仅保留名单内、可分配的技能
+    wanted: dict[str, int] = {}
     ai_skills_raw = ai.get("skills")
-    ai_skills: dict[str, Any] = ai_skills_raw if isinstance(ai_skills_raw, dict) else {}
-    ai_skills = {
-        k: v for k, v in ai_skills.items()
-        if k in base and k not in NON_ALLOCATABLE and k != "信用评级"
-    }
-
-    fixed_occ = set(occ.skills)
-    extra = [k for k in ai_skills if k not in fixed_occ]
-    chosen_extra = set(extra[: occ.choices]) if occ.choices > 0 else set()
-    effective_occ = fixed_occ | chosen_extra
-
-    occ_delta: dict[str, int] = {}
-    int_delta: dict[str, int] = {}
-    for name, target in ai_skills.items():
+    for k, v in (ai_skills_raw.items() if isinstance(ai_skills_raw, dict) else ()):
         try:
-            t = int(target)
+            wanted[str(k)] = int(v)
         except (ValueError, TypeError):
             continue
-        delta = max(0, t - base.get(name, 0))
-        if delta == 0:
-            continue
-        if name in effective_occ:
-            occ_delta[name] = delta
-        else:
-            int_delta[name] = delta
+    cr_wanted = _clamp_int(ai.get("credit_rating"), occ.credit_min, occ.credit_max, occ.credit_min)
+    final_attrs, final, cr, creation = _rule_build(rs, attrs, age, occ, wanted, cr_wanted)
 
-    occ_delta = _scale_to_budget(occ_delta, occ_points_remaining)
-    int_delta = _scale_to_budget(int_delta, int_points)
-
-    final = dict(base)
-    for k, d in {**occ_delta, **int_delta}.items():
-        final[k] = base.get(k, 0) + d
-    final["信用评级"] = cr
-    for k in list(final):
-        if k != "克苏鲁神话":
-            final[k] = min(90, max(0, final[k]))
-    final["克苏鲁神话"] = 0
-    # 90 是「建卡时加点不得超过」的上限，不该去砍属性派生的**基础值**：EDU 上限 99，
-    # 一个 EDU=95 的角色母语就该是 95。收口之后重新兜一次底线，与手动建卡同一个函数。
-    rs.character.apply_attr_derived_skills(final, attrs)
-
-    return _build_result(attrs, age, occ_name, cr, final, ai, rs=rs)
+    return _build_result(final_attrs, age, occ_name, cr, final, ai, rs=rs, creation=creation)
 
 
 def _build_result(
     attrs: dict[str, int], age: int, occ_name: str, cr: int,
-    skills: dict[str, int], ai: dict, *, rs: Ruleset | None = None,
+    skills: dict[str, int], ai: dict, *, rs: Ruleset | None = None, creation: dict | None = None,
 ) -> dict[str, Any]:
     rs = rs or _raw()
     system_data = rs.character.compute_derived(attrs, age)
@@ -257,6 +216,8 @@ def _build_result(
         "system_data": system_data,
         "backstory": "\n".join(backstory_parts),
         "equipment": equipment,
+        # 建卡记录：前端据此把这张卡当成一次正常车卡载入（清单、点数照常算），创建时后端再校验
+        "creation": creation,
     }
 
 
@@ -283,25 +244,9 @@ def _rule_only_fallback(
 ) -> dict[str, Any]:
     rs = rs or _raw()
     occ = _default_occupation(module, rs=rs)
-    cr = occ.credit_min
-    occ_points_remaining = max(0, rs.occupation.calc_occupation_points(occ.name, attrs) - cr)
+    final_attrs, base, cr, creation = _rule_build(rs, attrs, 25, occ, {}, occ.credit_min)
 
-    base = rs.character.build_default_skills(attrs)   # 已含母语=EDU、闪避=DEX//2
-    base["信用评级"] = cr
-
-    occ_skills = [s for s in occ.skills if s in base and s not in NON_ALLOCATABLE]
-    if occ_skills and occ_points_remaining > 0:
-        per = occ_points_remaining // len(occ_skills)
-        for s in occ_skills:
-            base[s] = base.get(s, 0) + per
-
-    for k in list(base):
-        if k != "克苏鲁神话":
-            base[k] = min(90, max(0, base[k]))
-    base["克苏鲁神话"] = 0
-    rs.character.apply_attr_derived_skills(base, attrs)   # 同 _assemble：90 不该砍属性派生的基础值
-
-    system_data = rs.character.compute_derived(attrs, 25)
+    system_data = rs.character.compute_derived(final_attrs, 25)
     system_data["occupation"] = occ.name
     system_data["creditRating"] = cr
     _fill_assets(system_data, cr, rs=rs)
@@ -309,12 +254,100 @@ def _rule_only_fallback(
     return {
         "name": "待命名调查员",
         "age": 25,
-        "base_attributes": attrs,
+        "base_attributes": final_attrs,
         "skills": base,
         "system_data": system_data,
         "backstory": "",
+        "creation": creation,
         "_fallback": True,
     }
+
+
+# --------------------------------------------------------------------------- #
+# 按建卡规则把「掷好的属性 + 年龄 + 职业 + 想要的技能值」落成一张合法卡
+# --------------------------------------------------------------------------- #
+def _rule_build(
+    rs: Ruleset, base_attrs: dict[str, int], age: int, occ: Any, wanted: dict[str, int], cr: int,
+) -> tuple[dict[str, int], dict[str, int], int, dict | None]:
+    """返回 (修正后属性, 技能, 信用评级, 建卡记录)。
+
+    与手动车卡同一套规则：年龄修正（扣点按规则摊派，记进建卡记录）、选择组与「任意 N 项」的勾选、
+    职业点只加本职、兴趣点只加其余、本桌建卡上限。最后用 ``rs.creation.validate_build`` 自检，
+    万一不过就不给建卡记录（前端会按现成卡处理），并记日志——不该发生。
+    """
+    # 教育增强与外貌减值照规则书掷 / 扣；体能扣点自己分：先平摊，扣到底（1）的那项扣不动的部分
+    # 挪给其余几项——直接用 apply_age_modifiers 的平摊，属性低时总额会扣不够，过不了校验
+    final_attrs, _notes = rs.character.apply_age_modifiers(dict(base_attrs), age)
+    band = rs.creation.age_band(age)
+    keys = list(band["deduct_from"])
+    need = rs.creation.required_deduction(age, base_attrs)
+    deductions = {k: 0 for k in keys}
+    while need > 0:
+        room = [k for k in keys if base_attrs[k] - 1 - deductions[k] > 0]
+        share = max(1, need // len(room))
+        for k in room:
+            take = min(share, base_attrs[k] - 1 - deductions[k], need)
+            deductions[k] += take
+            need -= take
+            if need == 0:
+                break
+    deductions = {k: v for k, v in deductions.items() if v}
+    for k in keys:
+        final_attrs[k] = base_attrs[k] - deductions.get(k, 0)
+
+    occ_mod = rs.occupation
+    start = rs.character.build_default_skills(final_attrs)
+    # 能加点的技能（母语、闪避也能在起始值之上加；只有克苏鲁神话锁死，信用评级单算）
+    pickable = [k for k in start if k not in NON_ALLOCATABLE and k != "信用评级"]
+    ranked = sorted(pickable, key=lambda k: -wanted.get(k, -1))   # AI 想加的排前面，其余保持表序
+
+    picks: list[str] = []
+    for gi, g in enumerate(occ.groups):
+        cands = [k for k in ranked if occ_mod.occupation_skill_role(occ, k) == f"group:{gi}"]
+        picks += cands[: g.pick]
+    free = [k for k in ranked if occ_mod.occupation_skill_role(occ, k) == "free" and k not in picks]
+    picks += free[: occ.choices]
+
+    is_occ = lambda k: occ_mod.is_occupation_skill(occ, picks, k)  # noqa: E731
+    occ_points = occ_mod.calc_occupation_points(occ.name, final_attrs)
+    int_points = occ_mod.calc_interest_points(final_attrs)
+    cr = max(occ.credit_min, min(cr, occ.credit_max, occ_points))
+    opts = rs.options
+    cap = lambda k: opts.skill_cap_occupation if is_occ(k) else opts.skill_cap_other  # noqa: E731
+
+    occ_targets = [k for k in pickable if is_occ(k)]
+    occ_delta: dict[str, int] = {}
+    int_delta: dict[str, int] = {}
+    if wanted:
+        for k in pickable:
+            if k not in wanted:
+                continue
+            target = min(wanted[k], max(cap(k), start[k]))
+            d = max(0, target - start[k])
+            if d:
+                (occ_delta if is_occ(k) else int_delta)[k] = d
+    elif occ_targets:
+        # 没有 AI 的意向（兜底）：职业点平摊到本职技能上
+        per = (occ_points - cr) // len(occ_targets)
+        for k in occ_targets:
+            occ_delta[k] = max(0, min(per, max(cap(k), start[k]) - start[k]))
+    occ_delta = _scale_to_budget(occ_delta, max(0, occ_points - cr))
+    int_delta = _scale_to_budget(int_delta, int_points)
+
+    skills = dict(start)
+    for k, d in {**occ_delta, **int_delta}.items():
+        skills[k] = start[k] + d
+    skills["信用评级"] = cr
+
+    creation = {
+        "method": "roll", "base_attributes": dict(base_attrs), "age": age,
+        "age_deductions": deductions, "occupation": occ.name, "occupation_picks": picks,
+    }
+    problems = rs.creation.validate_build(creation, final_attrs, skills)
+    if problems:
+        logger.warning("AI 建卡未通过建卡规则自检，按现成卡返回：%s", "；".join(problems))
+        creation = None
+    return final_attrs, skills, cr, creation
 
 
 # --------------------------------------------------------------------------- #

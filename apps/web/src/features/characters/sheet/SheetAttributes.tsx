@@ -113,7 +113,7 @@ export function SheetAttributes({ sheet }: { sheet: Sheet }) {
 function AgePanel({ sheet }: { sheet: Sheet }) {
   const { state, dispatch } = sheet
   const band = ageBand(state.age)
-  const left = deductLeft(state.age, state.deductions)
+  const left = deductLeft(state.age, state.deductions, baseAttrsOf(state))
   return (
     <div className="cs-age">
       <div>
@@ -121,7 +121,9 @@ function AgePanel({ sheet }: { sheet: Sheet }) {
         <ul>{band.text.map((t) => <li key={t}>{t}</li>)}</ul>
         {state.eduRolls.length > 0 && (
           <p className="cs-hint" style={{ marginTop: 6 }}>
-            教育增强检定：{state.eduRolls.map((r, i) => `第 ${i + 1} 次 D100=${r.roll}${r.gain ? `，超过当前教育，+${r.gain}` : '，未超过'}`).join('；')}
+            教育增强检定：{state.eduRolls[0].roll === 0
+              ? `AI 建卡时已掷过，教育 ${state.eduRolls[0].gain >= 0 ? '+' : ''}${state.eduRolls[0].gain}（换一组属性或改年龄会重掷）`
+              : state.eduRolls.map((r, i) => `第 ${i + 1} 次 D100=${r.roll}${r.gain ? `，超过当前教育，+${r.gain}` : '，未超过'}`).join('；')}
           </p>
         )}
       </div>

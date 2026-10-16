@@ -1,9 +1,21 @@
 // 导入的 Excel 角色卡 / AI 填好的卡 → 人物卡状态。现成卡不按建卡规则约束（见 ImportedCard）。
 import { normalizeWeapon } from '@/components/character/useCocData'
-import { ATTR_KEYS, CREDIT, type Attrs } from './creationRules'
+import { ageBand, ATTR_KEYS, CREDIT, skillStart, type Attrs, type AttrKey, type SpecTable } from './creationRules'
 import type { SheetState, Story } from './useSheet'
 
+/** 后端（AI 建卡）给的建卡记录，与 CreationRecord 同构。 */
+export interface CreationRecordData {
+  method: 'roll' | 'buy' | 'quick'
+  base_attributes: Record<string, number>
+  age: number
+  age_deductions?: Record<string, number>
+  occupation: string
+  occupation_picks?: string[]
+  quick_boosts?: string[]
+}
+
 export interface ImportedCharacterData {
+  creation?: CreationRecordData | null
   name?: string
   age?: number
   base_attributes?: Record<string, number>
@@ -18,6 +30,44 @@ export interface ImportedCharacterData {
     creditRating?: number
     luck?: number
     occupation?: string
+  }
+}
+
+/**
+ * AI 按建卡规则建好的卡（带建卡记录）：载成一次正常的掷骰车卡——属性、年龄扣点、本职勾选、
+ * 加点都摆在人物卡上，清单照常检查，玩家改哪儿都按规则算。不带记录的仍按现成卡处理。
+ */
+export function applyBuilt(
+  s: SheetState, data: ImportedCharacterData, table: Record<string, number>, specs: SpecTable,
+): SheetState {
+  const rec = data.creation
+  if (!rec || rec.method !== 'roll') return applyImported(s, data)
+  const base = rec.base_attributes as Attrs
+  const final = { ...base, ...(data.base_attributes ?? {}) } as Attrs
+  const band = ageBand(rec.age)
+  const raises: Record<string, number> = {}
+  for (const [name, value] of Object.entries(data.skills ?? {})) {
+    if (name === CREDIT) continue
+    const spent = value - skillStart(name, final, table, specs)
+    if (spent > 0) raises[name] = spent
+  }
+  const withStory = applyImported({ ...s, imported: null }, { ...data, base_attributes: undefined })
+  return {
+    ...withStory,
+    method: 'roll',
+    rollSets: [base, ...s.rollSets.slice(0, 2)],
+    setIdx: 0,
+    age: rec.age,
+    deductions: (rec.age_deductions ?? {}) as Partial<Record<AttrKey, number>>,
+    // 教育增强已由后端掷过：记成一次「已掷」的结果（roll=0），界面据此说明而不是重掷
+    eduRolls: band.eduChecks ? [{ roll: 0, gain: final.EDU - base.EDU, after: final.EDU }] : [],
+    occName: rec.occupation,
+    picks: rec.occupation_picks ?? [],
+    raises,
+    credit: data.skills?.[CREDIT] ?? data.system_data?.creditRating ?? 0,
+    quickValues: {},
+    quickBoosts: [],
+    imported: null,
   }
 }
 

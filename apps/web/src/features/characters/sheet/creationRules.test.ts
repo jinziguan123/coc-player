@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ageBand, applyAge, canPick, checkBuild, DEFAULT_RULES, deductLeft, occupationPoints, pointUsage,
+  ageBand, applyAge, canPick, checkBuild, DEFAULT_RULES, deductLeft, occupationPoints, pointUsage, requiredDeduction,
   skillRole, skillStart, type Attrs, type BuildState, type Occupation,
 } from './creationRules'
 
@@ -73,7 +73,7 @@ describe('年龄修正', () => {
   it('40 岁起：教育增强 2 次、体能扣 5 自己分配、外貌 −5、移动力 −1', () => {
     const band = ageBand(45)
     expect([band.eduChecks, band.deduct, band.app, band.mov]).toEqual([2, 5, 5, 1])
-    expect(deductLeft(45, { STR: 5 })).toBe(0)
+    expect(deductLeft(45, { STR: 5 }, BASE)).toBe(0)
     const a = applyAge(BASE, 45, { STR: 5 }, [])
     expect([a.STR, a.APP]).toEqual([45, 55])
   })
@@ -81,6 +81,12 @@ describe('年龄修正', () => {
   it('少年：力量/体型合计扣 5、教育 −5', () => {
     const a = applyAge(BASE, 17, { SIZ: 5 }, [])
     expect([a.SIZ, a.EDU]).toEqual([55, 65])
+  })
+
+  it('属性扣不动时以能扣的为准（每项最多扣到 1）', () => {
+    const weak = { ...BASE, STR: 20, CON: 25, DEX: 30 }   // 三项最多能扣 19+24+29 = 72 < 80
+    expect(requiredDeduction(85, weak)).toBe(72)
+    expect(deductLeft(85, { STR: 19, CON: 24, DEX: 29 }, weak)).toBe(0)
   })
 
   it('年龄扣点没分配完要报', () => {

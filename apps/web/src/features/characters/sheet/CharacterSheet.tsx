@@ -11,7 +11,7 @@ import { CircleHelp } from 'lucide-react'
 import { api } from '@/api/client'
 import { deriveAssets, RuleModuleContext } from '@/components/character/useCocData'
 import { useModuleStore } from '@/stores/moduleStore'
-import { createCharacter } from '@/features/characters/api'
+import { createCharacter, type Character } from '@/features/characters/api'
 import { buildCharacterPayload } from '@/features/characters/characterPayload'
 import { creationRecord, CREDIT, type Method } from './creationRules'
 import { DRAFT_KEY, STORY_FIELDS, useSheet, type SheetState } from './useSheet'
@@ -45,12 +45,16 @@ function Card({ id, title, en, extra, children }: { id: string; title: string; e
   )
 }
 
-export function CharacterSheet({ initial, onCreated, onCancel }: {
+export function CharacterSheet({ initial, onCreated, onCancel, cancelLabel = '返回列表', saveDraft = true }: {
   initial?: SheetState
-  onCreated: () => void
+  /** 建好之后：交回新卡（大厅据此直接放进预览等待入座） */
+  onCreated: (character: Character) => void
   onCancel: () => void
+  cancelLabel?: string
+  /** 角色页才存草稿；大厅里嵌的那张不存，免得覆盖角色页没建完的卡 */
+  saveDraft?: boolean
 }) {
-  const sheet = useSheet(initial)
+  const sheet = useSheet(initial, { saveDraft })
   const { state, dispatch, occupations, categories, attrs, check, occ, savedAt } = sheet
   const { modules, fetchModules } = useModuleStore()
   const [occOpen, setOccOpen] = useState(false)
@@ -103,16 +107,16 @@ export function CharacterSheet({ initial, onCreated, onCancel }: {
       const hist = state.moduleHistory.filter((h) => h.module.trim() || h.experience.trim())
       if (hist.length) sd.moduleHistory = hist
       const backstory = STORY_FIELDS.filter(([k]) => state.story[k]).map(([k, label]) => `【${label}】${state.story[k]}`).join('\n')
-      await createCharacter({
+      const created = await createCharacter({
         ...buildCharacterPayload({
           name: state.name, moduleId: state.moduleId, age: state.age, baseAttributes: attrs, skills: finalSkills(),
           backstory, systemData: sd, equipmentText: state.equipText, weapons: state.weapons,
         }),
         creation: state.imported ? null : creationRecord(sheet.build),
       })
-      localStorage.removeItem(DRAFT_KEY)
+      if (saveDraft) localStorage.removeItem(DRAFT_KEY)
       toast.success(`调查员「${state.name}」创建成功`)
-      onCreated()
+      onCreated(created)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '创建失败')
     } finally {
@@ -154,7 +158,7 @@ export function CharacterSheet({ initial, onCreated, onCancel }: {
         </div>
         <button className="btn-secondary btn-sm inline-flex items-center gap-1" onClick={startTour}><CircleHelp size={13} aria-hidden /> 引导</button>
         <span className="cs-grow" />
-        {savedAt && <span className="cs-hint">草稿已自动保存</span>}
+        {saveDraft && savedAt && <span className="cs-hint">草稿已自动保存</span>}
       </div>
 
       <div className="cs">
@@ -187,7 +191,7 @@ export function CharacterSheet({ initial, onCreated, onCancel }: {
             {blocked && check.problems[0] && (
               <button className="btn-secondary btn-sm" onClick={() => jumpTo(check.problems[0].area === 'occ' || check.problems[0].area === 'skill' ? 'cs-skills' : 'cs-attr')}>去处理</button>
             )}
-            <button className="btn-secondary btn-sm" onClick={onCancel}>返回列表</button>
+            <button className="btn-secondary btn-sm" onClick={onCancel}>{cancelLabel}</button>
             <button className="btn-primary btn-sm" disabled={blocked || creating} onClick={() => void create()}>
               {creating ? '创建中…' : '创建调查员'}
             </button>

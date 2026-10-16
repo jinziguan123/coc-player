@@ -257,3 +257,28 @@ def test_api_occupations_expose_groups_and_creation_rules(client):
     assert "取悦" not in bartender["skills"]
     rules = client.get("/api/rules/coc/creation-rules").json()
     assert rules["skill_cap_occupation"] == 90 and rules["quick_attrs"] == [40, 50, 50, 50, 60, 60, 70, 80]
+
+
+# ── AI 建卡走同一套规则 ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("age", [17, 25, 45, 85])
+@pytest.mark.parametrize("occ_name", ["酒保", "会计师", "文物学家(原作向)", "医生"])
+def test_ai_rule_build_passes_validation(age, occ_name):
+    from app.services import ai_character_service as ai
+
+    rs = ruleset_for("coc", {"skill_cap_other": 50})
+    occ = rs.occupation.get_occupation(occ_name) or rs.occupation.occupations()[0]
+    weak = {"STR": 20, "CON": 25, "SIZ": 50, "DEX": 30, "APP": 50, "INT": 60, "POW": 50, "EDU": 60}
+    for attrs in (dict(BASE), weak):
+        wanted = {"侦查": 80, "潜行": 70, "取悦": 60, "神秘学": 55, "说服": 90}
+        final_attrs, skills, cr, rec = ai._rule_build(rs, attrs, age, occ, wanted, 99)
+        assert rec is not None
+        assert rs.creation.validate_build(rec, final_attrs, skills) == []
+        assert occ.credit_min <= cr <= occ.credit_max
+
+
+def test_required_deduction_floors_at_one():
+    weak = dict(BASE, STR=20, CON=25, DEX=30)
+    assert C.required_deduction(85, weak) == 19 + 24 + 29
+    assert C.required_deduction(45, weak) == 5

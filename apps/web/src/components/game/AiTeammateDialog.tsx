@@ -62,6 +62,8 @@ export function AiTeammateDialog({ open, moduleId, guidance, forPlayer = false, 
         name: spec.name, module_id: moduleId, rule_system: (spec.rule_system as string) || 'coc',
         age: spec.age ?? 25, base_attributes: spec.base_attributes,
         skills: spec.skills, system_data: spec.system_data, backstory: spec.backstory ?? '',
+        // 建卡记录随卡提交：后端按建卡规则再校验一遍（AI 建卡与手动车卡同一套规则）
+        creation: spec.creation ?? null,
       })
       setDraft(created)
       setPhase('review')

@@ -79,8 +79,6 @@ export function RoomLobbyPage() {
   const [busy, setBusy] = useState(false)
   /** 「快速创建角色卡」对话框：复用角色页的编辑弹窗，从一张空白草稿开始。 */
   const [quickCreateOpen, setQuickCreateOpen] = useState(false)
-  const [quickDraft, setQuickDraft] = useState<Character | null>(null)
-  const [quickCreating, setQuickCreating] = useState(false)
   /** 同一个对话框，为「我自己这一席」打开：生成的是玩家调查员，确认后走认领。 */
   const [genSelf, setGenSelf] = useState(false)
   const [panelChar, setPanelChar] = useState<Character | null>(null)
@@ -469,37 +467,10 @@ export function RoomLobbyPage() {
       }
     : null
 
-  /** 快速创建：草稿由页面在点击时创建（不在弹窗 effect 里发请求，StrictMode 会双跑）。 */
-  const openQuickCreate = async () => {
-    if (!room) return
-    setQuickDraft(null)
-    setQuickCreateOpen(true)
-    setQuickCreating(true)
-    try {
-      // 固定落在本机角色库；连主机时新卡作为「本机角色」参与候选，入座时再同步副本。
-      const created = await localApi.post<Character>('/characters', {
-        name: '新调查员',
-        module_id: getServerUrl() ? null : room.module_id,
-        rule_system: 'coc',
-        base_attributes: {},
-        skills: {},
-        system_data: {},
-        backstory: '',
-      })
-      setQuickDraft(created)
-    } catch (e) {
-      setQuickCreateOpen(false)
-      toast.error(e instanceof Error ? e.message : '创建角色草稿失败')
-    } finally {
-      setQuickCreating(false)
-    }
-  }
+  /** 快速创建：弹窗里建卡，点「创建」才落库（见 QuickCharacterCreateDialog）。 */
+  const openQuickCreate = () => { if (room) setQuickCreateOpen(true) }
 
-  const closeQuickCreate = () => {
-    setQuickCreateOpen(false)
-    setQuickDraft(null)
-    setQuickCreating(false)
-  }
+  const closeQuickCreate = () => setQuickCreateOpen(false)
 
   /** 快速创建的卡保存后：刷新候选池，并直接放进右侧预览等待入座。 */
   const handleQuickCreated = async (characterId: string) => {
@@ -560,7 +531,7 @@ export function RoomLobbyPage() {
                 setPreview({ char, source })
               }}
               onGenerate={() => setGenSelf(true)}
-              onQuickCreate={() => void openQuickCreate()}
+              onQuickCreate={openQuickCreate}
               onClaimKp={() => void claimKp()}
               onCancelChange={() => setChangingChar(false)}
             />
@@ -953,12 +924,11 @@ export function RoomLobbyPage() {
         </aside>
       )}
 
-      {/* 快速创建：先落空白草稿，再复用角色页的编辑弹窗；保存后直接进入右侧预览。 */}
+      {/* 快速创建：弹窗里的一页式人物卡（默认快速车卡）；建好后直接进入右侧预览。 */}
       {quickCreateOpen && room && (
         <QuickCharacterCreateDialog
           open
-          draft={quickDraft}
-          creating={quickCreating}
+          moduleId={getServerUrl() ? null : room.module_id}
           onClose={closeQuickCreate}
           onCreated={(characterId) => void handleQuickCreated(characterId)}
         />

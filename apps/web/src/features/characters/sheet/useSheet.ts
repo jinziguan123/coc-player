@@ -10,7 +10,7 @@ import { ruleQuery, useSpecializations } from '@/components/character/useCocData
 import type { CharWeapon } from '@/components/character/useCocData'
 import type { AssetsInfo, ModuleExperience, Mythos, Relation } from '@/components/character/CharacterExtraEditors'
 import {
-  ageBand, ATTR_KEYS, checkBuild, CREDIT, DEFAULT_RULES, finalAttrs, isOccSkill, rollAttrSet, rollEduChecks,
+  ageBand, ATTR_KEYS, checkBuild, CREDIT, deductLeft, DEFAULT_RULES, finalAttrs, isOccSkill, rollAttrSet, rollEduChecks,
   rollLuck, skillStart,
   type Attrs, type AttrKey, type BuildState, type CreationRules, type EduRoll, type Method, type Occupation, type SpecTable,
 } from './creationRules'
@@ -81,11 +81,11 @@ const EMPTY_STORY: Story = {
 }
 const BUY_START: Attrs = { STR: 50, CON: 60, SIZ: 60, DEX: 60, APP: 50, INT: 70, POW: 60, EDU: 50 }
 
-export function freshSheet(): SheetState {
+export function freshSheet(method: Method = 'roll'): SheetState {
   const rollSets = [rollAttrSet(), rollAttrSet(), rollAttrSet()]
   const s: SheetState = {
     name: '', moduleId: '', gender: '', residence: '', birthplace: '',
-    method: 'roll', age: 25, rollSets, setIdx: 0, buy: { ...BUY_START }, quick: {},
+    method, age: 25, rollSets, setIdx: 0, buy: { ...BUY_START }, quick: {},
     deductions: {}, eduRolls: [], luck: rollLuck(25),
     occName: null, picks: [], raises: {}, credit: 0, quickValues: {}, quickBoosts: [], extraSkills: [],
     imported: null, story: { ...EMPTY_STORY },
@@ -148,12 +148,13 @@ export function sheetReducer(s: SheetState, a: SheetAction): SheetState {
       return reroll({ ...s, age: a.age, deductions: {}, luck: young !== s.age <= 19 ? rollLuck(a.age) : s.luck })
     }
     case 'deduct': {
-      const band = ageBand(s.age)
+      // 每次 ±5；不超过还需分配的量，也不把属性扣到 1 以下
+      const base = baseAttrsOf(s)
       const cur = s.deductions[a.key] ?? 0
-      const used = band.deductFrom.reduce((t, k) => t + (s.deductions[k] ?? 0), 0)
-      const next = Math.max(0, cur + a.delta)
-      if (a.delta > 0 && used >= band.deduct) return s
-      return { ...s, deductions: { ...s.deductions, [a.key]: Math.min(next, cur + band.deduct - used) } }
+      const left = deductLeft(s.age, s.deductions, base)
+      const room = Math.max(0, (base[a.key] ?? 0) - 1 - cur)
+      const next = a.delta > 0 ? cur + Math.min(a.delta, left, room) : Math.max(0, cur + a.delta)
+      return next === cur ? s : { ...s, deductions: { ...s.deductions, [a.key]: next } }
     }
     case 'occupation':
       return { ...s, occName: a.occ.name, picks: [], quickValues: {}, credit: a.occ.credit_min }
@@ -193,7 +194,7 @@ export function readDraft(): { savedAt: string; state: SheetState } | null {
 }
 
 /** 页面要的全部数据与派生结果。 */
-export function useSheet(initial?: SheetState) {
+export function useSheet(initial?: SheetState, { saveDraft = true }: { saveDraft?: boolean } = {}) {
   const [state, dispatch] = useReducer(sheetReducer, initial ?? null, (init) => init ?? freshSheet())
   const moduleId = state.moduleId || null
   const [occupations, setOccupations] = useState<Occupation[]>([])
@@ -215,6 +216,7 @@ export function useSheet(initial?: SheetState) {
   // 草稿：每次改动 600ms 后存一次
   const [savedAt, setSavedAt] = useState<string | null>(null)
   useEffect(() => {
+    if (!saveDraft) return
     const t = setTimeout(() => {
       try {
         const at = new Date().toISOString()
@@ -223,7 +225,7 @@ export function useSheet(initial?: SheetState) {
       } catch { /* 存不下就算了，不打断建卡 */ }
     }, 600)
     return () => clearTimeout(t)
-  }, [state])
+  }, [state, saveDraft])
 
   const occ = occupations.find((o) => o.name === state.occName) ?? null
   const build: BuildState = useMemo(() => {

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
 import { hasGuidance, useModuleStore, type CharacterGuidance } from '@/stores/moduleStore'
 import { generateCharacter } from '@/features/characters/api'
-import { applyImported, type ImportedCharacterData } from './importCard'
+import { applyBuilt, applyImported, type ImportedCharacterData } from './importCard'
 import type { useSheet } from './useSheet'
 
 type Sheet = ReturnType<typeof useSheet>
@@ -66,10 +66,11 @@ export function SheetIdentity({ sheet, onPickOccupation }: { sheet: Sheet; onPic
 
 /** 现成卡：Excel 导入、AI 按模组生成。两者都要先选模组（导入要按模组的规则表解析）。 */
 function ImportTools({ sheet }: { sheet: Sheet }) {
-  const { state, dispatch } = sheet
+  const { state, dispatch, table, specs } = sheet
   const [busy, setBusy] = useState<'' | 'excel' | 'ai'>('')
   const [hint, setHint] = useState('')
   const load = (data: ImportedCharacterData) => dispatch({ type: 'load', state: applyImported(state, data) })
+  const loadBuilt = (data: ImportedCharacterData) => dispatch({ type: 'load', state: applyBuilt(state, data, table, specs) })
 
   const importExcel = async (file: File) => {
     if (!state.moduleId) { toast.error('请先选择模组'); return }
@@ -90,7 +91,7 @@ function ImportTools({ sheet }: { sheet: Sheet }) {
     setBusy('ai')
     try {
       const data = await generateCharacter<ImportedCharacterData & { _fallback?: boolean }>({ module_id: state.moduleId, hint: hint.trim() })
-      load(data)
+      loadBuilt(data)
       if (data._fallback) toast.warning('AI 暂时不可用，已用规则生成一张草稿，请检查后调整')
       else toast.success(`AI 已填好「${data.name ?? '角色'}」，请检查后创建`)
     } catch (e) {

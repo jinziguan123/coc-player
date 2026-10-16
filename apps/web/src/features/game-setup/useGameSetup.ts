@@ -156,6 +156,7 @@ export function useGameSetup() {
         skills: draft.skills,
         system_data: draft.system_data,
         backstory: draft.backstory ?? '',
+        creation: draft.creation ?? null,   // 后端按建卡规则再校验
       })
       setHeroes((current) => [created, ...current])
       assignSeat(index, created.id)

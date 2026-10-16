@@ -87,6 +87,13 @@ def age_band(age: int) -> dict:
     return {"edu_checks": 4, "deduct_from": ("STR", "CON", "DEX"), "deduct": 80, "app": 25, "edu_penalty": 0}
 
 
+def required_deduction(age: int, base: dict[str, int]) -> int:
+    """该年龄要扣的体能总额。每项最多扣到 1：几项都扣到底还不够时，以能扣的为准。"""
+    band = age_band(age)
+    room = sum(max(0, base.get(k, 0) - ch._ATTR_FLOOR) for k in band["deduct_from"])
+    return min(band["deduct"], room)
+
+
 def _check_base_attributes(method: str, base: dict[str, int]) -> list[str]:
     errors: list[str] = []
     missing = [k for k in ATTR_KEYS if k not in base]
@@ -118,10 +125,14 @@ def _check_age(rec: CreationRecord, final: dict[str, int]) -> list[str]:
         errors.append(f"{rec.age} 岁不能从 {'、'.join(stray)} 扣点")
     if any(v < 0 for v in ded.values()):
         errors.append("年龄扣点不能为负")
-    if sum(ded.values()) != band["deduct"]:
-        errors.append(f"{rec.age} 岁要从 {'、'.join(band['deduct_from']) or '属性'} 合计扣 {band['deduct']} 点，"
-                      f"现在分配了 {sum(ded.values())} 点")
     base = rec.base_attributes
+    for k, v in ded.items():
+        if k in base and v > base[k] - ch._ATTR_FLOOR:
+            errors.append(f"{k} 最多扣到 {ch._ATTR_FLOOR}，不能扣 {v} 点")
+    need = required_deduction(rec.age, base)
+    if sum(ded.values()) != need:
+        errors.append(f"{rec.age} 岁要从 {'、'.join(band['deduct_from']) or '属性'} 合计扣 {need} 点，"
+                      f"现在分配了 {sum(ded.values())} 点")
     for k in ATTR_KEYS:
         if k == "EDU":
             continue
@@ -247,7 +258,7 @@ COMPONENT = Component(
         __name__,
         bound=("validate_build", "skill_start"),
         plain=(
-            "CreationRecord", "age_band", "POINT_BUY_TOTAL", "QUICK_ATTRS", "QUICK_SKILLS",
+            "CreationRecord", "age_band", "required_deduction", "POINT_BUY_TOTAL", "QUICK_ATTRS", "QUICK_SKILLS",
             "QUICK_BOOSTS", "QUICK_BOOST",
         ),
     )},

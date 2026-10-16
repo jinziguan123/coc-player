@@ -109,9 +109,16 @@ export function rollEduChecks(edu: number, times: number): EduRoll[] {
   return out
 }
 
-export function deductLeft(age: number, deductions: Partial<Record<AttrKey, number>>): number {
+/** 该年龄要扣的体能总额。每项最多扣到 1：几项都扣到底还不够时，以能扣的为准（与后端 required_deduction 同口径）。 */
+export function requiredDeduction(age: number, base: Partial<Attrs>): number {
   const band = ageBand(age)
-  return band.deduct - band.deductFrom.reduce((s, k) => s + (deductions[k] ?? 0), 0)
+  const room = band.deductFrom.reduce((s, k) => s + Math.max(0, (base[k] ?? 0) - 1), 0)
+  return Math.min(band.deduct, room)
+}
+
+export function deductLeft(age: number, deductions: Partial<Record<AttrKey, number>>, base: Partial<Attrs>): number {
+  const band = ageBand(age)
+  return requiredDeduction(age, base) - band.deductFrom.reduce((s, k) => s + (deductions[k] ?? 0), 0)
 }
 
 /** 年龄修正后的属性：扣点、外貌减值、少年教育 −5，教育取增强检定的结果。 */
@@ -246,7 +253,7 @@ export function checkBuild(
     if (used > rules.point_buy_total) P('attr', `点数购买超出 ${used - rules.point_buy_total} 点`)
     else if (used < rules.point_buy_total) W('attr', `点数购买还剩 ${rules.point_buy_total - used} 点`)
   }
-  const left = deductLeft(s.age, s.deductions)
+  const left = deductLeft(s.age, s.deductions, s.baseAttrs)
   if (left > 0) P('age', `年龄扣点还差 ${left} 点没分配`)
   if (left < 0) P('age', `年龄扣点多分配了 ${-left} 点`)
 
