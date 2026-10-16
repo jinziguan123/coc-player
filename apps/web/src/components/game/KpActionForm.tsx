@@ -81,6 +81,43 @@ function ActorSelect({
   )
 }
 
+/**
+ * 封闭清单（场景 / 手书 / 配乐氛围）的下拉：看到的是名字，提交的是 id。
+ *
+ * 这几样从前是可输入的候选框，候选项把 id 摆在前面、名字作旁注——KP 要么自己敲
+ * 「scene_3」「handout_2」这种内部编号，要么在一排编号里找名字。它们本来就是模组里
+ * 有限的几项，没有临场乱填的余地，直接按名字挑就对了。
+ */
+function NamedSelect({
+  label, value, items, onChange, empty,
+}: {
+  label: string
+  value: string
+  items: Array<{ id: string; name: string }>
+  onChange: (value: string) => void
+  /** 一项都没有时显示的话（替代一个空下拉） */
+  empty: string
+}) {
+  if (!items.length) {
+    return <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{empty}</span>
+  }
+  // 参谋「采纳到写作台」可能填进来的是名字而不是 id：清单里认不出就原样挂一项，别显示成空
+  const shown = value && !items.some((i) => i.id === value) ? [...items, { id: value, name: value }] : items
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger className="min-w-48 flex-1 text-xs" aria-label={label}>
+        <SelectValue placeholder={`选择${label}`} />
+      </SelectTrigger>
+      <SelectContent>
+        {shown.map((item) => <SelectItem key={item.id} value={item.id}>{item.name || item.id}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/** 配乐氛围：名字是给人看的中文，提交的仍是氛围键 */
+const MOOD_ITEMS = KP_MOOD_OPTIONS.map((o) => ({ id: o.value, name: o.hint }))
+
 function DiceAdjustment({
   label, bonus, penalty, onChange,
 }: { label: string; bonus: string; penalty: string; onChange: (bonus: string, penalty: string) => void }) {
@@ -251,10 +288,10 @@ export function KpActionForm({
         <KpInput name="success_loss" placeholder="成功损失，如 0" fields={fields} onChange={setField} /><KpInput name="failure_loss" placeholder="失败损失，如 1d6" fields={fields} onChange={setField} />
         <KpInput name="reason" placeholder="因何而检（玩家可见，空=用恐怖源）" fields={fields} onChange={setField} />
       </>}
-      {action === 'scene_change' && <KpInput name="scene_id" placeholder="场景 ID 或名称" options={catalogs.scenes} fields={fields} onChange={setField} />}
+      {action === 'scene_change' && <NamedSelect label="场景" value={fields.scene_id || ''} items={workspace?.catalogs.scenes || []} onChange={(v) => setField('scene_id', v)} empty="本模组没有可切换的场景" />}
       {(action === 'set_flag' || action === 'clear_flag') && <KpInput name="flag" placeholder="剧情标志" fields={fields} onChange={setField} />}
-      {action === 'set_mood' && <KpInput name="mood" placeholder="氛围，auto=回到场景默认" options={KP_MOOD_OPTIONS} fields={fields} onChange={setField} />}
-      {action === 'handout' && <><GiScrollUnfurled size={16} /><KpInput name="id" placeholder="手书 ID" options={catalogs.handouts} fields={fields} onChange={setField} /></>}
+      {action === 'set_mood' && <NamedSelect label="配乐氛围" value={fields.mood || ''} items={MOOD_ITEMS} onChange={(v) => setField('mood', v)} empty="" />}
+      {action === 'handout' && <><GiScrollUnfurled size={16} /><NamedSelect label="手书" value={fields.id || ''} items={workspace?.catalogs.handouts || []} onChange={(v) => setField('id', v)} empty="本模组没有手书" /></>}
       {action === 'hp_change' && <><KpInput name="target" placeholder="角色名" fields={fields} onChange={setField} /><KpInput name="delta" placeholder="变化值，如 -3 或 2" fields={fields} onChange={setField} /><KpInput name="reason" placeholder="原因（可选）" fields={fields} onChange={setField} /></>}
       {action === 'start_combat' && <>
         <Swords size={16} />
@@ -292,13 +329,13 @@ export function KpActionForm({
       {/* 解锁地点：此前只有「绕着写一句旁白去碰关键词匹配」这一条路，碰不碰得上全看措辞 */}
       {action === 'unlock_place' && <>
         <GiPadlock size={16} />
-        <KpInput name="scene_id" placeholder="要对玩家公开的地点" options={catalogs.scenes} fields={fields} onChange={setField} />
+        <NamedSelect label="要对玩家公开的地点" value={fields.scene_id || ''} items={workspace?.catalogs.scenes || []} onChange={(v) => setField('scene_id', v)} empty="本模组没有地点" />
       </>}
       {/* 移动角色：玩家自己走要过封路与连通性的闸，KP 挪人是裁定结果，不走那条链 */}
       {action === 'move_actor' && <>
         <GiFootTrip size={16} />
         <KpInput name="character_id" placeholder="移动谁" options={catalogs.characters} fields={fields} onChange={setField} />
-        <KpInput name="scene_id" placeholder="挪到哪里" options={catalogs.scenes} fields={fields} onChange={setField} />
+        <NamedSelect label="目的地" value={fields.scene_id || ''} items={workspace?.catalogs.scenes || []} onChange={(v) => setField('scene_id', v)} empty="本模组没有地点" />
       </>}
     </>
   )
