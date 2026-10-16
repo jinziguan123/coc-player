@@ -1,0 +1,150 @@
+/* 一页式人物卡（features/characters/sheet）。只用主题变量，暗色与羊皮纸主题都能用。 */
+
+.cs { display: flex; min-height: 0; flex: 1; gap: 0; }
+/* relative：让里面绝对定位的东西（如下拉框隐藏的原生 select）以本列为包含块，否则会撑出外层滚动条 */
+.cs-main { position: relative; flex: 1; min-width: 0; overflow: auto; padding: 0 20px 0 0; scroll-behavior: smooth; }
+.cs-rail { position: relative; width: 270px; flex: none; border-left: 1px solid var(--color-border); overflow: auto; padding-left: 16px; }
+
+.cs-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.cs-seg { display: inline-flex; border: 1px solid var(--color-border-strong); }
+.cs-seg button { padding: 6px 13px; font-size: 13px; letter-spacing: .06em; color: var(--color-text-secondary); border-right: 1px solid var(--color-border-strong); transition: background .15s, color .15s; }
+.cs-seg button:last-child { border-right: 0; }
+.cs-seg button[aria-pressed='true'] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 700; }
+
+/* 区块 */
+.cs-card { position: relative; border: 1px solid var(--color-border); background: var(--color-bg-card); margin-bottom: 16px; scroll-margin-top: 8px; transition: border-color .3s, box-shadow .3s; }
+.cs-card::before, .cs-card::after { content: ''; position: absolute; width: 11px; height: 11px; border: solid var(--color-brass-dim, var(--color-border-strong)); pointer-events: none; }
+.cs-card::before { top: 4px; left: 4px; border-width: 1px 0 0 1px; }
+.cs-card::after { bottom: 4px; right: 4px; border-width: 0 1px 1px 0; }
+.cs-card.is-flash { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }
+.cs-card-h { display: flex; align-items: center; gap: 10px; padding: 12px 16px 8px; }
+.cs-card-h h2 { font-family: var(--font-title); font-size: 16px; letter-spacing: .18em; color: var(--color-text-accent); }
+.cs-card-h .en { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--color-text-secondary); }
+.cs-card-b { padding: 2px 16px 16px; }
+.cs-grow { flex: 1; }
+.cs-hint { font-size: 12.5px; line-height: 1.7; color: var(--color-text-secondary); }
+.cs-hint b { color: var(--color-text-primary); font-weight: 600; }
+.cs-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 2px 8px; border: 1px solid var(--color-border-strong); color: var(--color-text-secondary); white-space: nowrap; }
+.cs-pill.ok { color: var(--color-verdigris, var(--color-success)); border-color: currentColor; }
+.cs-pill.bad { color: var(--color-danger); border-color: currentColor; }
+.cs-pill.house { color: var(--color-verdigris, var(--color-success)); }
+
+/* 基础信息 */
+.cs-info { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 12px; }
+.cs-info label { display: block; font-size: 11.5px; letter-spacing: .1em; color: var(--color-text-secondary); margin-bottom: 4px; }
+.cs-wide { grid-column: span 2; }
+.cs-occ-btn { display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left; }
+
+/* 属性 */
+.cs-attrs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.cs-attr { position: relative; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--color-border-strong); background: var(--color-bg-secondary); transition: border-color .2s, background .2s; }
+.cs-attr-nm b { display: block; font-size: 14px; letter-spacing: .08em; }
+.cs-attr-nm small { font-size: 10px; letter-spacing: .1em; color: var(--color-text-secondary); }
+.cs-attr-v { margin-left: auto; font-family: var(--font-display); font-size: 26px; line-height: 1; color: var(--color-text-accent); font-feature-settings: 'tnum'; }
+.cs-attr-v input { width: 48px; background: transparent; border: 0; border-bottom: 1px dashed var(--color-border-strong); text-align: right; font: inherit; color: inherit; outline: none; }
+.cs-attr-fr { display: flex; flex-direction: column; text-align: right; font-size: 12px; line-height: 1.35; color: var(--color-text-secondary); font-family: var(--font-display); min-width: 22px; }
+.cs-attr-delta { position: absolute; top: 3px; left: 54px; font-size: 11px; font-family: var(--font-display); }
+.cs-attr-delta.neg { color: var(--color-danger); }
+.cs-attr-delta.pos { color: var(--color-verdigris, var(--color-success)); }
+.cs-attr.is-target { border-style: dashed; border-color: var(--color-accent); cursor: pointer; }
+.cs-attr.is-target:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.cs-attr.is-rolled { animation: csRoll .45s cubic-bezier(.2, .8, .2, 1); }
+@keyframes csRoll { from { transform: rotateX(70deg); opacity: .2; } to { transform: none; opacity: 1; } }
+.cs-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.cs-set { padding: 4px 10px; font-size: 12px; border: 1px solid var(--color-border-strong); color: var(--color-text-secondary); }
+.cs-set[aria-pressed='true'] { border-color: var(--color-accent); color: var(--color-text-accent); }
+.cs-chip { min-width: 40px; padding: 6px 10px; font-family: var(--font-display); font-size: 17px; border: 1px solid var(--color-brass-dim, var(--color-border-strong)); color: var(--color-text-accent); transition: background .15s; }
+.cs-chip[aria-pressed='true'] { background: var(--color-accent); color: var(--color-on-accent); }
+.cs-chip:disabled { opacity: .25; cursor: default; }
+
+/* 年龄 */
+.cs-age { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--color-border-strong); }
+.cs-age ul { list-style: none; padding: 0; margin: 4px 0 0; }
+.cs-age li { position: relative; padding-left: 14px; font-size: 12.5px; line-height: 1.85; }
+.cs-age li::before { content: ''; position: absolute; left: 0; top: 11px; width: 6px; height: 1px; background: var(--color-accent); }
+.cs-deduct { display: flex; gap: 8px; }
+.cs-deduct > div { flex: 1; border: 1px solid var(--color-border-strong); padding: 6px; text-align: center; }
+.cs-deduct b { display: block; font-size: 11.5px; font-weight: 600; color: var(--color-text-secondary); }
+.cs-deduct .num { display: block; font-family: var(--font-display); font-size: 20px; color: var(--color-danger); margin: 2px 0; }
+.cs-deduct .num.ok { color: var(--color-verdigris, var(--color-success)); }
+.cs-step { display: inline-flex; border: 1px solid var(--color-border-strong); }
+.cs-step button { width: 26px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-secondary); }
+.cs-step button:hover:not(:disabled) { color: var(--color-text-accent); }
+.cs-step button:disabled { opacity: .3; }
+
+/* 技能 */
+.cs-pts { display: flex; gap: 10px; margin-bottom: 10px; }
+.cs-pt { flex: 1; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--color-border-strong); }
+.cs-pt-l { font-size: 12px; letter-spacing: .1em; color: var(--color-text-secondary); }
+.cs-pt-big { font-family: var(--font-display); font-size: 26px; line-height: 1; color: var(--color-text-accent); }
+.cs-pt-big.over { color: var(--color-danger); }
+.cs-bar { flex: 1; height: 4px; background: var(--color-border); position: relative; overflow: hidden; }
+.cs-bar i { position: absolute; inset: 0 auto 0 0; background: var(--color-accent); transition: width .3s; }
+.cs-req { border: 1px solid color-mix(in srgb, var(--color-verdigris, var(--color-success)) 50%, transparent); background: color-mix(in srgb, var(--color-verdigris, var(--color-success)) 8%, transparent); padding: 8px 12px; margin-bottom: 10px; font-size: 12.5px; line-height: 1.8; }
+.cs-req .grp { display: inline-flex; margin-right: 8px; }
+.cs-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+.cs-filters button { padding: 4px 10px; font-size: 12.5px; border: 1px solid var(--color-border-strong); color: var(--color-text-secondary); }
+.cs-filters button[aria-pressed='true'] { border-color: var(--color-accent); color: var(--color-text-accent); }
+.cs-sk { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.cs-sk th { position: sticky; top: 0; z-index: 1; background: var(--color-bg-card); font-size: 11px; font-weight: 600; letter-spacing: .12em; color: var(--color-text-secondary); text-align: center; padding: 6px 4px; border-bottom: 1px solid var(--color-border-strong); }
+.cs-sk th.l, .cs-sk td.l { text-align: left; }
+.cs-sk td { padding: 4px; border-bottom: 1px solid var(--color-border); text-align: center; }
+.cs-sk tr.is-occ td.l { color: var(--color-text-accent); }
+.cs-tag { margin-left: 6px; font-size: 10.5px; padding: 0 5px; border: 1px solid var(--color-border-strong); color: var(--color-text-secondary); white-space: nowrap; }
+.cs-tag.free { color: var(--color-verdigris, var(--color-success)); }
+.cs-num { width: 54px; padding: 3px 6px; text-align: right; font-family: var(--font-display); font-size: 15px; background: var(--color-input-bg, var(--color-bg-secondary)); border: 1px solid var(--color-border-strong); color: var(--color-text-primary); outline: none; }
+.cs-num:focus { border-color: var(--color-accent); }
+.cs-num:disabled { opacity: .3; }
+.cs-tot { font-family: var(--font-display); font-size: 18px; }
+.cs-tot.over { color: var(--color-danger); }
+.cs-fr { font-family: var(--font-display); color: var(--color-text-secondary); }
+.cs-ck { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--color-border-strong); vertical-align: middle; color: var(--color-on-accent); }
+.cs-ck[aria-checked='true'] { background: var(--color-accent); border-color: var(--color-accent); }
+.cs-ck.is-fixed { background: var(--color-brass-dim, var(--color-border-strong)); border-color: transparent; cursor: default; }
+.cs-ck:disabled:not(.is-fixed) { opacity: .25; cursor: default; }
+
+/* 职业弹窗 */
+.cs-occ-dlg { display: flex; height: min(70vh, 620px); }
+.cs-occ-cats { width: 140px; flex: none; overflow: auto; border-right: 1px solid var(--color-border); }
+.cs-occ-cats button { display: block; width: 100%; text-align: left; padding: 8px 14px; font-size: 13.5px; color: var(--color-text-secondary); }
+.cs-occ-cats button[aria-pressed='true'] { color: var(--color-text-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.cs-occ-list { flex: 1; overflow: auto; padding: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; align-content: start; }
+.cs-occ { border: 1px solid var(--color-border-strong); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; transition: border-color .15s; }
+.cs-occ:hover, .cs-occ[aria-current='true'] { border-color: var(--color-accent); }
+.cs-occ h3 { display: flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 700; letter-spacing: .06em; }
+.cs-occ .sk { font-size: 12.5px; line-height: 1.7; color: var(--color-text-secondary); }
+.cs-occ .sk em { font-style: normal; color: var(--color-verdigris, var(--color-success)); }
+
+/* 背景 */
+.cs-story { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.cs-story textarea { width: 100%; min-height: 56px; resize: vertical; }
+.cs-story .key { border-color: var(--color-accent); }
+
+/* 右栏 */
+.cs-derived { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 14px; }
+.cs-dv { border: 1px solid var(--color-border-strong); padding: 6px 2px; text-align: center; }
+.cs-dv .num { display: block; font-family: var(--font-display); font-size: 21px; color: var(--color-text-accent); }
+.cs-dv small { font-size: 10.5px; letter-spacing: .1em; color: var(--color-text-secondary); }
+.cs-rail h4 { font-family: var(--font-title); font-size: 12.5px; letter-spacing: .2em; color: var(--color-text-accent); margin: 4px 0 8px; }
+.cs-chk { display: flex; gap: 9px; width: 100%; text-align: left; padding: 6px 0; font-size: 13px; }
+.cs-chk .dot { width: 16px; height: 16px; flex: none; margin-top: 2px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--color-border-strong); transition: background .25s, border-color .25s; color: var(--color-bg-primary); }
+.cs-chk.done .dot { background: var(--color-verdigris, var(--color-success)); border-color: transparent; }
+.cs-chk.bad .dot { border-color: var(--color-danger); }
+.cs-chk small { display: block; font-size: 11.5px; line-height: 1.5; color: var(--color-text-secondary); margin-top: 2px; }
+.cs-chk.bad small { color: var(--color-danger); }
+.cs-rail-sec { padding: 12px 0; border-top: 1px solid var(--color-border); }
+
+/* 底栏 */
+.cs-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 10px 0; margin-top: 8px; background: linear-gradient(0deg, var(--color-bg-primary) 70%, transparent); }
+.cs-foot .msg { font-size: 12.5px; color: var(--color-text-secondary); }
+.cs-foot .msg.bad { color: var(--color-danger); }
+
+@media (max-width: 1100px) {
+  .cs { flex-direction: column; }
+  .cs-rail { width: auto; border-left: 0; padding-left: 0; }
+  .cs-info { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cs-age, .cs-story { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cs-attr.is-rolled { animation: none; }
+}

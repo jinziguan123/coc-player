@@ -111,28 +111,6 @@ export function useWeapons(module?: string | null) {
   return data
 }
 
-export interface OccupationDef {
-  name: string
-  credit_min: number
-  credit_max: number
-  skill_formula: string
-  skills: string[]
-  choices: number
-  category?: string
-}
-
-/** 职业表与大类顺序（这一桌的村规 + 当前模组）。模组一换就重取：模组可以带专属职业。 */
-export function useOccupations(moduleId: string | null) {
-  const [occupations, setOccupations] = useState<OccupationDef[]>([])
-  const [categories, setCategories] = useState<string[]>([])
-  useEffect(() => {
-    const q = ruleQuery(moduleId)
-    api.get<OccupationDef[]>(`/rules/coc/occupations${q}`).then(setOccupations).catch(() => {})
-    api.get<string[]>(`/rules/coc/occupation-categories${q}`).then(setCategories).catch(() => {})
-  }, [moduleId])
-  return { occupations, categories }
-}
-
 /** 建卡预览的派生值：先用本地镜像即时出数，再取后端按本桌规则算的权威值覆盖。
  *  本地镜像只认规则书原文；开了 Pulp 英雄生命值等变体时，后端的数才是对的。 */
 export function useDerivedStats(
