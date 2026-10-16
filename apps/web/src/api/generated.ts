@@ -3617,7 +3617,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "narration" | "dialogue" | "dice_check" | "opposed_check" | "generic_roll" | "san_check" | "scene_change" | "set_flag" | "clear_flag" | "handout" | "hp_change" | "start_combat" | "end_combat" | "unlock_place" | "move_actor" | "set_battle_map" | "set_token" | "set_mood";
+            action: "narration" | "dialogue" | "dice_check" | "opposed_check" | "generic_roll" | "san_check" | "scene_change" | "set_flag" | "clear_flag" | "handout" | "hp_change" | "start_combat" | "end_combat" | "unlock_place" | "move_actor" | "set_battle_map" | "set_token" | "set_mood" | "start_chase" | "chase_round" | "end_chase";
             /** Payload */
             payload?: {
                 [key: string]: unknown;

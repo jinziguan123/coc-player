@@ -8,12 +8,14 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    chase_service,
     combat_service,
     dice_runtime,
     human_kp_service,
     illustration_service,
     kp_actions,
     navigation_service,
+    rule_options_service,
     session_service,
     turn_context,
     turn_effects,
@@ -235,7 +237,83 @@ async def execute_human_kp_action(
             str(payload.get("figure") or "").strip(),
         )
 
+    if action == "start_chase":
+        return _exec_start_chase(
+            db, session_id, game_session, module, [player_char, *teammates], payload,
+        )
+
+    if action == "chase_round":
+        hazard = payload.get("hazard")
+        if isinstance(hazard, dict) and str(hazard.get("skill") or "").strip():
+            hazard = {
+                "who": "pursuer" if hazard.get("who") == "pursuer" else "quarry",
+                "skill": str(hazard["skill"]).strip(),
+                "difficulty": hazard.get("difficulty") if hazard.get("difficulty") in ("normal", "hard", "extreme") else "normal",
+            }
+        else:
+            hazard = None
+        # 真人 KP 模式不调 AI 叙述（agent=None）：这一轮怎么描写，KP 自己写
+        chunks = await chase_service.resolve_chase_round(db, session_id, {"hazard": hazard})
+        return chunks, "追逐推进了一轮"
+
+    if action == "end_chase":
+        outcome = str(payload.get("outcome") or "manual")
+        return chase_service.end_chase(db, session_id, outcome), "追逐已结束"
+
     raise ValueError(f"不支持的 KP 动作：{action}")
+
+
+def _exec_start_chase(
+    db: Session, session_id: str, game_session: GameSession, module: Module,
+    party: list[Character], payload: dict,
+) -> tuple[list[str], str]:
+    """真人 KP 发起追逐：逃方从在座调查员里选，追方取模组 NPC（按名字或 id）或临场起名。
+
+    与 AI KP 的 start_chase 工具同一套状态机（chase_service），只是参数由 KP 在表单里定：
+    比拼技能、甩脱 / 被追上的距离、起始距离。战斗中或已在追逐时不能再开。
+    """
+    if chase_service.get_chase(game_session):
+        raise ValueError("已经在追逐中了")
+    if combat_service.get_combat(game_session):
+        raise ValueError("战斗中不能同时开追逐，先结束战斗")
+
+    quarry_id = str(payload.get("quarry") or "").strip()
+    quarry_char = next((c for c in party if c.id == quarry_id), None) if quarry_id else party[0]
+    if quarry_char is None:
+        raise ValueError("逃方必须是在座的调查员")
+
+    name = str(payload.get("pursuer") or "").strip()
+    if not name:
+        raise ValueError("请指定追方")
+    spec = next((n for n in (module.npcs or []) if name in (n.get("name"), n.get("id"))), None)
+    pursuer = chase_service._pursuer_from_npc(
+        spec or {"name": name, "attributes": {"DEX": 50, "CON": 50, "SIZ": 50}, "skills": {"运动": 45}},
+        rule_options_service.ruleset_by_id(db, session_id),
+    )
+    mov = _int(payload.get("pursuer_mov"))
+    if mov is not None:
+        pursuer["mov"] = max(1, mov)
+
+    escape_at = _int(payload.get("escape_at"), 5)
+    caught_at = _int(payload.get("caught_at"), -3)
+    start_gap = _int(payload.get("start_gap"), 0)
+    if not caught_at < start_gap < escape_at:
+        raise ValueError("起始距离要落在「被追上」与「甩脱」之间")
+
+    skill = str(payload.get("skill") or "运动").strip() or "运动"
+    trigger = str(payload.get("trigger") or "").strip() or f"{pursuer['name']}追了上来——"
+    _state, chunks = chase_service.start_chase(
+        db, session_id, chase_service._quarry_from_char(quarry_char), pursuer,
+        skill=skill, escape_at=escape_at, caught_at=caught_at, trigger=trigger, start_gap=start_gap,
+    )
+    return chunks, f"追逐开始：{quarry_char.name} 逃，{pursuer['name']} 追"
+
+
+def _int(value, default: int | None = None) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def _exec_set_battle_map(

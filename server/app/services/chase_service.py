@@ -79,10 +79,10 @@ def _pursuer_from_npc(npc: dict, rs: Ruleset | None = None) -> dict:
 
 def start_chase(db: Session, session_id: str, quarry: dict, pursuer: dict,
                 *, skill: str = "运动", escape_at: int = 5, caught_at: int = -3,
-                trigger: str = "") -> tuple[dict, list[str]]:
-    """建立追逐态：gap 从 0 起，玩家逃、pursuer 追。返回 (state, chunks)。"""
+                trigger: str = "", start_gap: int = 0) -> tuple[dict, list[str]]:
+    """建立追逐态：gap 从 start_gap 起（缺省 0），玩家逃、pursuer 追。返回 (state, chunks)。"""
     state = {
-        "active": True, "round": 0, "gap": 0, "skill": skill,
+        "active": True, "round": 0, "gap": start_gap, "skill": skill,
         "escape_at": escape_at, "caught_at": caught_at,
         "quarry": quarry, "pursuer": pursuer, "trigger": trigger,
     }
@@ -91,9 +91,14 @@ def start_chase(db: Session, session_id: str, quarry: dict, pursuer: dict,
 
 
 def _meta(state: dict) -> dict:
+    """广播给全桌的追逐态。比拼技能与双方 MOV 是桌面公开信息（谁快谁慢大家都看得见），
+    技能**数值**不放——那是 NPC 的数据，玩家不该从界面上读到。"""
+    q, p = state["quarry"], state["pursuer"]
     return {"round": state["round"], "gap": state["gap"],
             "escape_at": state["escape_at"], "caught_at": state["caught_at"],
-            "quarry": state["quarry"]["name"], "pursuer": state["pursuer"]["name"]}
+            "quarry": q["name"], "pursuer": p["name"],
+            "skill": state.get("skill") or "运动",
+            "quarry_mov": q.get("mov"), "pursuer_mov": p.get("mov")}
 
 
 async def resolve_chase_round(db: Session, session_id: str, action: dict,
@@ -117,6 +122,10 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
     line = (f"{q['name']} {res['quarry_check'].description} / "
             f"{p['name']} {res['pursuer_check'].description} → 距离 {'+' if res['gap_delta']>=0 else ''}{res['gap_delta']}"
             f"（当前 {state['gap']}）")
+    hz = res.get("hazard")
+    if hz:
+        who = q["name"] if hz["who"] == "quarry" else p["name"]
+        line += f"；障碍：{who} {hz['check'].description}{'' if hz['passed'] else '，受阻'}"
     ev = session_service.add_event(db, session_id, "dice", line, actor_name="追逐")
     chunks.append(_chunk("dice", line, id=ev.id))
 
@@ -138,6 +147,16 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
     return chunks
 
 
+def end_chase(db: Session, session_id: str, outcome: str) -> list[str]:
+    """KP 手动收场：直接判甩脱 / 被追上，或中止（manual）。不在追逐中则报错。"""
+    if outcome not in ("escaped", "caught", "manual"):
+        raise ValueError("结局只能是 甩脱 / 被追上 / 中止")
+    state = get_chase(db.get(GameSession, session_id))
+    if not state:
+        raise ValueError("当前不在追逐中")
+    return _end_chase(db, session_id, state, outcome)
+
+
 def _end_chase(db: Session, session_id: str, state: dict, outcome: str) -> list[str]:
     """结束追逐：产出 chase_result 摘要（复用 KP 折回：_format_combat_result 已识别 escaped/caught），清态。"""
     summary = {"outcome": outcome, "rounds": state["round"],
@@ -150,6 +169,7 @@ def _end_chase(db: Session, session_id: str, state: dict, outcome: str) -> list[
     ws["combat_result"] = summary   # 复用同一折回通道
     session.world_state = ws
     db.commit()
-    label = {"escaped": "追逐结束：成功甩脱追兵。", "caught": "追逐结束：被追上了！"}.get(outcome, "追逐结束。")
+    label = {"escaped": "追逐结束：成功甩脱追兵。", "caught": "追逐结束：被追上了！",
+             "manual": "追逐中止。"}.get(outcome, "追逐结束。")
     ev = session_service.add_event(db, session_id, "system", label, actor_name="追逐")
     return [_chunk("system", label, id=ev.id), _chunk("chase_end", label, metadata=summary)]
