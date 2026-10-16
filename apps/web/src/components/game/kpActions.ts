@@ -77,16 +77,28 @@ export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon
 ]
 
 /**
- * 动作分组：仍是**一个不藏**（见上），只是按「这一下在桌上做的是什么」分成四组，
- * 组间有标签与间隔。十六个同权按钮排成一行时眼睛无处落脚；分组之后找「开战」只需扫
- * 「战斗」那一格。组内顺序沿用 ACTION_CHIPS 的频次排序。
+ * 动作分组：直达的四组排成一行，其余收进「更多」。
+ *
+ * 曾经十六个全部平铺（理由是「多一次下拉就是多一次找」），代价是写作台常年占掉近四成屏高、
+ * 叙事流与战场被挤成一小块。现在按跑团里的实际频次分：说 / 骰 / 场景 / 局势四组直达，
+ * 一局用不了几次的（移动角色、结算 HP、剧情标志、配乐）进「更多」——它们仍可用斜杠命令直达。
+ *
+ * 「局势」组按当前态势换人：没开战时给「开战」，战斗中给「结束战斗」——同一时刻只有一个有意义。
  */
 export const ACTION_GROUPS: Array<{ label: string; ids: KpAction[] }> = [
   { label: '说', ids: ['narration', 'dialogue', 'handout'] },
   { label: '骰', ids: ['dice_check', 'san_check', 'generic_roll', 'opposed_check'] },
-  { label: '场景', ids: ['scene_change', 'unlock_place', 'move_actor', 'set_flag', 'clear_flag', 'set_mood'] },
-  { label: '战斗', ids: ['start_combat', 'hp_change', 'end_combat'] },
+  { label: '场景', ids: ['scene_change', 'unlock_place'] },
+  { label: '局势', ids: ['start_combat', 'end_combat'] },
 ]
+
+/** 收进「更多」的动作 */
+export const ACTION_MORE: KpAction[] = ['move_actor', 'hp_change', 'set_flag', 'clear_flag', 'set_mood']
+
+/** 当前态势下「局势」组里该露哪一个：开战与结束战斗互斥 */
+export function situationActions(ids: KpAction[], inCombat: boolean): KpAction[] {
+  return ids.filter((id) => (id === 'start_combat' ? !inCombat : id === 'end_combat' ? inCombat : true))
+}
 
 /**
  * 斜杠命令：输入框里打 `/` 唤起。

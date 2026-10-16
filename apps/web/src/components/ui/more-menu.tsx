@@ -31,9 +31,12 @@ export interface MoreMenuItem {
   separated?: boolean
 }
 
-export function MoreMenu({ items, label = '更多' }: {
+export function MoreMenu({ items, label = '更多', trigger, triggerClassName = 'btn-secondary btn-xs flex items-center gap-1' }: {
   items: MoreMenuItem[]
   label?: string
+  /** 触发按钮里的内容；缺省是一枚「⋯」图标 */
+  trigger?: ReactNode
+  triggerClassName?: string
 }) {
   const [open, setOpen] = useState(false)
 
@@ -42,12 +45,12 @@ export function MoreMenu({ items, label = '更多' }: {
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
       <PopoverPrimitive.Trigger
-        className="btn-secondary btn-xs flex items-center gap-1"
+        className={triggerClassName}
         aria-haspopup="menu"
         aria-label={label}
         title={label}
       >
-        <MoreHorizontal size={13} aria-hidden="true" />
+        {trigger ?? <MoreHorizontal size={13} aria-hidden="true" />}
       </PopoverPrimitive.Trigger>
 
       <AnimatePresence>

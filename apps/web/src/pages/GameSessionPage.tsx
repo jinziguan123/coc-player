@@ -2206,12 +2206,11 @@ export function GameSessionPage() {
             {hasNewBelow ? '有新内容' : '最新'}
           </button>
         )}
-        {isKp ? (
+        {isKp ? (desk ? null : (
           <div className="chat-input-bar chat-input-bar--kp">
-            用右侧 KP 工作台推进本回合。你是 KP，不占玩家席，所以没有单独的发言框——
-            想跟同桌说句场外的话，写在叙事框的（圆括号）里即可。
+            用下方的 KP 写作台推进本回合；想跟同桌说场外的话，写在（圆括号）里即可。
           </div>
-        ) : (
+        )) : (
         <div className="chat-input-bar">
           <textarea
             ref={inputRef}
@@ -2339,6 +2338,7 @@ export function GameSessionPage() {
             variant="sidebar"
             onCollapse={() => setKpCollapsed(true)}
             hideSituation={desk}
+            inCombat={!!combat}
             aside={desk ? undefined : <KpSceneBrief places={locations} />}
           />
         </aside>
