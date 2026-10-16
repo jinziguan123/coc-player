@@ -84,5 +84,9 @@ export function parseChaseState(value: unknown): ChaseState | null {
     caught_at: value.caught_at,
     quarry: value.quarry,
     pursuer: value.pursuer,
+    // 新后端才带：比拼技能与双方 MOV（旧存档 / 旧后端缺省即不显示）
+    skill: typeof value.skill === 'string' ? value.skill : undefined,
+    quarry_mov: typeof value.quarry_mov === 'number' ? value.quarry_mov : undefined,
+    pursuer_mov: typeof value.pursuer_mov === 'number' ? value.pursuer_mov : undefined,
   }
 }

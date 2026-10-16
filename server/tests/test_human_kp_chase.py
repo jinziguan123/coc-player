@@ -76,6 +76,8 @@ def test_chase_round_moves_gap_and_reports_hazard(tmp_path, monkeypatch):
     assert state["round"] == 1 and state["gap"] == 1
     dice = next(c.as_wire() for c in chunks if c.as_wire().get("type") == "dice")
     assert "障碍" in dice["content"] and "受阻" in dice["content"]
+    # 实时那条也要带 actor：追逐台的逐轮记录按它筛
+    assert dice.get("actor_name") == "追逐"
 
 
 def test_end_chase_manual_and_outcomes(tmp_path):

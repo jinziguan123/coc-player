@@ -11,11 +11,13 @@ const CHIP_BY_ID = new Map(ACTION_CHIPS.map((c) => [c.id, c]))
  * 当前动作的黄铜底是同一个 layoutId，在按钮之间**滑过去**而不是这里灭那里亮。
  * 从「更多」里选中的动作会临时出现在条尾（带同一块黄铜底）——KP 得看得见自己正在用哪个。
  */
-export function KpActionBar({ action, onPick, inCombat = false }: {
+export function KpActionBar({ action, onPick, inCombat = false, inChase = false }: {
   action: KpAction
   onPick: (id: KpAction) => void
   /** 战斗中：「局势」组给「结束战斗」而不是「开战」 */
   inCombat?: boolean
+  /** 追逐中：不再给开战 / 追逐（推进与收场在追逐主台上） */
+  inChase?: boolean
 }) {
   const chip = (id: KpAction) => {
     const c = CHIP_BY_ID.get(id)
@@ -41,14 +43,16 @@ export function KpActionBar({ action, onPick, inCombat = false }: {
 
   return (
     <div className="kp-action-bar" role="toolbar" aria-label="KP 动作">
-      {ACTION_GROUPS.map((group) => (
-        <div key={group.label} className="kp-action-group" role="group" aria-label={group.label}>
-          <span className="kp-action-group-label" aria-hidden>{group.label}</span>
-          <div className="kp-action-group-chips">
-            {situationActions(group.ids, inCombat).map(chip)}
+      {ACTION_GROUPS.map((group) => {
+        const ids = situationActions(group.ids, inCombat, inChase)
+        // 整组都不合时宜（如追逐中的「局势」）就连组名一起不出现
+        return ids.length > 0 && (
+          <div key={group.label} className="kp-action-group" role="group" aria-label={group.label}>
+            <span className="kp-action-group-label" aria-hidden>{group.label}</span>
+            <div className="kp-action-group-chips">{ids.map(chip)}</div>
           </div>
-        </div>
-      ))}
+        )
+      })}
       {fromMore && <div className="kp-action-group-chips">{chip(action)}</div>}
       <MoreMenu
         label="更多 KP 动作"

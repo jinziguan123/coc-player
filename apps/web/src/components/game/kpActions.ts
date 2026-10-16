@@ -8,7 +8,7 @@ import type { ComponentType } from 'react'
 import { BookOpen, Bot, Image, NotebookPen, WandSparkles, type LucideIcon } from 'lucide-react'
 import {
   GiBrain, GiCancel, GiCheckMark, GiCrossedSwords, GiFootTrip, GiHeartPlus, GiMusicalNotes,
-  GiPadlock, GiRollingDices, GiScrollUnfurled, GiSkullCrossedBones, GiTheaterCurtains,
+  GiPadlock, GiRollingDices, GiRun, GiScrollUnfurled, GiSkullCrossedBones, GiTheaterCurtains,
 } from 'react-icons/gi'
 
 export type KpAction =
@@ -28,6 +28,9 @@ export type KpAction =
   | 'unlock_place'
   | 'move_actor'
   | 'set_mood'
+  | 'start_chase'
+  | 'chase_round'
+  | 'end_chase'
 
 export const ACTION_LABELS: Record<KpAction, string> = {
   narration: '发布叙事',
@@ -46,6 +49,9 @@ export const ACTION_LABELS: Record<KpAction, string> = {
   unlock_place: '解锁地点',
   move_actor: '移动角色',
   set_mood: '配乐氛围',
+  start_chase: '发起追逐',
+  chase_round: '推进一轮',
+  end_chase: '结束追逐',
 }
 
 /**
@@ -71,6 +77,7 @@ export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon
   { id: 'hp_change', label: '结算 HP', icon: GiHeartPlus },
   { id: 'start_combat', label: '开战', icon: GiCrossedSwords },
   { id: 'end_combat', label: '结束战斗', icon: GiSkullCrossedBones },
+  { id: 'start_chase', label: '追逐', icon: GiRun },
   { id: 'set_flag', label: '推进标志', icon: GiCheckMark },
   { id: 'clear_flag', label: '解除标志', icon: GiCancel },
   { id: 'set_mood', label: '配乐', icon: GiMusicalNotes },
@@ -89,15 +96,21 @@ export const ACTION_GROUPS: Array<{ label: string; ids: KpAction[] }> = [
   { label: '说', ids: ['narration', 'dialogue', 'handout'] },
   { label: '骰', ids: ['dice_check', 'san_check', 'generic_roll', 'opposed_check'] },
   { label: '场景', ids: ['scene_change', 'unlock_place'] },
-  { label: '局势', ids: ['start_combat', 'end_combat'] },
+  { label: '局势', ids: ['start_combat', 'end_combat', 'start_chase'] },
 ]
 
 /** 收进「更多」的动作 */
 export const ACTION_MORE: KpAction[] = ['move_actor', 'hp_change', 'set_flag', 'clear_flag', 'set_mood']
 
-/** 当前态势下「局势」组里该露哪一个：开战与结束战斗互斥 */
-export function situationActions(ids: KpAction[], inCombat: boolean): KpAction[] {
-  return ids.filter((id) => (id === 'start_combat' ? !inCombat : id === 'end_combat' ? inCombat : true))
+/** 当前态势下「局势」组里该露哪几个：开战与结束战斗互斥；战斗中、追逐中都不能再开追逐
+ *  （追逐的推进与收场在追逐主台上，不进动作条） */
+export function situationActions(ids: KpAction[], inCombat: boolean, inChase = false): KpAction[] {
+  return ids.filter((id) => {
+    if (id === 'start_combat') return !inCombat && !inChase
+    if (id === 'end_combat') return inCombat
+    if (id === 'start_chase') return !inCombat && !inChase
+    return true
+  })
 }
 
 /**
@@ -123,6 +136,7 @@ export const ACTION_COMMANDS: Array<{ cmd: string; action: KpAction; hint: strin
   { cmd: '标志', action: 'set_flag', hint: '推进剧情标志' },
   { cmd: '解除', action: 'clear_flag', hint: '解除剧情标志' },
   { cmd: '配乐', action: 'set_mood', hint: '换当前场景的背景音乐氛围' },
+  { cmd: '追逐', action: 'start_chase', hint: '发起一场追逐' },
 ]
 
 /** 旁白与 NPC 台词是「一整段文字」，输入框得写得下；检定那种一行一格的表单撑开只会空旷。 */

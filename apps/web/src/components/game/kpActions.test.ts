@@ -8,9 +8,10 @@ describe('KP 动作分组', () => {
     expect(new Set(all)).toEqual(new Set(ACTION_CHIPS.map((c) => c.id)))
   })
 
-  it('局势组按态势二选一：没开战给「开战」，战斗中给「结束战斗」', () => {
+  it('局势组按态势取舍：平时给开战与追逐，战斗中只给结束战斗，追逐中两者都不给', () => {
     const ids = ACTION_GROUPS.find((g) => g.label === '局势')!.ids
-    expect(situationActions(ids, false)).toEqual(['start_combat'])
+    expect(situationActions(ids, false)).toEqual(['start_combat', 'start_chase'])
     expect(situationActions(ids, true)).toEqual(['end_combat'])
+    expect(situationActions(ids, false, true)).toEqual([])
   })
 })

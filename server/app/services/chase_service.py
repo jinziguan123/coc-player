@@ -127,7 +127,8 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
         who = q["name"] if hz["who"] == "quarry" else p["name"]
         line += f"；障碍：{who} {hz['check'].description}{'' if hz['passed'] else '，受阻'}"
     ev = session_service.add_event(db, session_id, "dice", line, actor_name="追逐")
-    chunks.append(_chunk("dice", line, id=ev.id))
+    # 实时广播与落库保持同一个 actor：追逐台的逐轮记录按它筛，缺了就只有刷新后才看得到
+    chunks.append(_chunk("dice", line, id=ev.id, actor_name="追逐"))
 
     outcome = rs.chase.check_chase_end(state["gap"], state["escape_at"], state["caught_at"])
     if outcome:

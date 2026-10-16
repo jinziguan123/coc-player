@@ -11,6 +11,9 @@ export interface ChaseState {
   caught_at: number
   quarry: string    // 逃方
   pursuer: string   // 追方
+  skill?: string        // 比拼技能（缺省「运动」）
+  quarry_mov?: number
+  pursuer_mov?: number
 }
 
 export function ChasePanel({ chase, sessionId }: { chase: ChaseState; sessionId: string }) {
