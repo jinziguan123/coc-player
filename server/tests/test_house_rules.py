@@ -54,7 +54,7 @@ def test_manifest_lists_configurable_components_with_schema():
     panel = [c for c in m["components"] if c["group"]]
     assert [c["id"] for c in panel] == [
         "coc7.check", "coc7.luck-spend", "coc7.luck-reroll",
-        "coc7.wound", "coc7.pulp-hp", "coc7.bleeding", "coc7.sanity", "coc7.growth",
+        "coc7.wound", "coc7.pulp-hp", "coc7.bleeding", "coc7.sanity", "coc7.growth", "coc7.creation",
     ]
     check = panel[0]["config_schema"]["properties"]
     assert check["critical_max"]["minimum"] == 1 and check["critical_max"]["maximum"] == 20

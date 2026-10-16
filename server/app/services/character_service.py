@@ -11,14 +11,28 @@ def roll_attribute_sets(rule_system: str, count: int = 3) -> list[dict[str, int]
 
 def create_character(db: Session, data: dict) -> Character:
     rule_system = data["rule_system"]
-    # 按这一桌的村规建卡：房主改过的技能表（新增技能、起始值）要体现在新卡上
-    character_rules = rule_options_service.village_ruleset(db, rule_system).character
+    # 按这一桌的村规建卡：房主改过的技能表（新增技能、起始值）、建卡上限要体现在新卡上
+    rs = rule_options_service.village_ruleset(db, rule_system)
+    character_rules = rs.character
 
     computed = character_rules.create_character(data)
 
     ok, errors = character_rules.validate_character(computed)
     if not ok:
         raise ValueError(f"角色数据校验失败: {', '.join(errors)}")
+
+    creation = data.get("creation")
+    if creation:
+        if not rs.has("creation"):
+            raise ValueError("本规则系统没有建卡规则，不能按建卡记录校验")
+        problems = rs.creation.validate_build(
+            creation, computed["base_attributes"], computed["skills"],
+        )
+        if problems:
+            raise ValueError("不符合建卡规则：" + "；".join(problems))
+        computed["system_data"]["creation"] = rs.creation.CreationRecord.model_validate(
+            creation,
+        ).model_dump()
 
     character = Character(
         name=data["name"],

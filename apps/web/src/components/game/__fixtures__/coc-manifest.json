@@ -40,6 +40,39 @@
       "key": "name",
       "component": "coc7.occupation",
       "row_schema": {
+        "$defs": {
+          "OccupationGroupRow": {
+            "properties": {
+              "label": {
+                "description": "如「一项社交技能」",
+                "minLength": 1,
+                "title": "名称",
+                "type": "string"
+              },
+              "pick": {
+                "default": 1,
+                "maximum": 10,
+                "minimum": 1,
+                "title": "选几项",
+                "type": "integer"
+              },
+              "options": {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "可选技能",
+                "type": "array"
+              }
+            },
+            "required": [
+              "label",
+              "options"
+            ],
+            "title": "OccupationGroupRow",
+            "type": "object"
+          }
+        },
         "properties": {
           "name": {
             "minLength": 1,
@@ -74,17 +107,27 @@
             "type": "string"
           },
           "skills": {
+            "description": "写基名（如「格斗」）表示该类任一专精都算",
             "items": {
               "type": "string"
             },
-            "title": "本职技能",
+            "title": "固定本职技能",
+            "type": "array"
+          },
+          "groups": {
+            "description": "如「一项社交技能」：从几项里选若干项算作本职",
+            "items": {
+              "$ref": "#/$defs/OccupationGroupRow"
+            },
+            "title": "选择组",
             "type": "array"
           },
           "choices": {
             "default": 0,
+            "description": "规则书的「任意 N 项个人或时代特长」",
             "maximum": 10,
             "minimum": 0,
-            "title": "可自选技能数",
+            "title": "任意其他技能数",
             "type": "integer"
           }
         },
@@ -812,6 +855,43 @@
           }
         },
         "title": "GrowthConfig",
+        "type": "object"
+      }
+    },
+    {
+      "id": "coc7.creation",
+      "title": "建卡",
+      "description": "",
+      "group": "建卡",
+      "toggle": null,
+      "tag": "",
+      "source": "official",
+      "requires": [
+        "coc7.character",
+        "coc7.occupation"
+      ],
+      "conflicts": [],
+      "config_schema": {
+        "description": "coc7.creation：建卡技能上限。",
+        "properties": {
+          "skill_cap_occupation": {
+            "default": 90,
+            "description": "建卡加点最多加到多少；起始值本就更高的（如母语=教育）不算违规，只是不能再加",
+            "maximum": 99,
+            "minimum": 1,
+            "title": "本职技能建卡上限",
+            "type": "integer"
+          },
+          "skill_cap_other": {
+            "default": 90,
+            "description": "常见房规是本职 75、其他 50",
+            "maximum": 99,
+            "minimum": 1,
+            "title": "其他技能建卡上限",
+            "type": "integer"
+          }
+        },
+        "title": "CreationConfig",
         "type": "object"
       }
     }

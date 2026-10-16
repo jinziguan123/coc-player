@@ -66,11 +66,28 @@ def get_occupations(rs: Ruleset = Depends(_rules)):
             "credit_max": o.credit_max,
             "skill_formula": o.skill_formula,
             "skills": o.skills,
+            "groups": [{"label": g.label, "pick": g.pick, "options": g.options} for g in o.groups],
             "choices": o.choices,
             "category": o.category,
         }
         for o in occ.occupations()
     ]
+
+
+@router.get("/rules/{rule_system}/creation-rules")
+def get_creation_rules(rs: Ruleset = Depends(_rules)):
+    """建卡界面要的规则常量：本桌的技能上限、点数购买总额、快速车卡的定值。"""
+    c = _slot(rs, "creation", "建卡规则")
+    opts = rs.options
+    return {
+        "skill_cap_occupation": opts.skill_cap_occupation,
+        "skill_cap_other": opts.skill_cap_other,
+        "point_buy_total": c.POINT_BUY_TOTAL,
+        "quick_attrs": list(c.QUICK_ATTRS),
+        "quick_skills": list(c.QUICK_SKILLS),
+        "quick_boosts": c.QUICK_BOOSTS,
+        "quick_boost": c.QUICK_BOOST,
+    }
 
 
 @router.get("/rules/{rule_system}/occupation-categories")
@@ -398,9 +415,19 @@ def delete_character(character_id: str, db: Session = Depends(get_db)):
 def update_character(
     character_id: str, data: CharacterUpdate, db: Session = Depends(get_db)
 ):
-    char = character_service.update_character(
-        db, character_id, data.model_dump(exclude_unset=True)
-    )
-    if not char:
+    updates = data.model_dump(exclude_unset=True)
+    current = character_service.get_character(db, character_id)
+    if not current:
         raise HTTPException(404, "角色不存在")
+    if updates.get("base_attributes") is not None or updates.get("skills") is not None:
+        # 编辑不受建卡规则约束（团中成长过的卡本就超出建卡点数），但基本范围要守住
+        rs = rule_options_service.village_ruleset(db, current.rule_system)
+        if rs.has("character"):
+            ok, errors = rs.character.validate_character({
+                "base_attributes": updates.get("base_attributes") or current.base_attributes or {},
+                "skills": updates.get("skills") or current.skills or {},
+            })
+            if not ok:
+                raise HTTPException(400, "角色数据校验失败：" + "，".join(errors))
+    char = character_service.update_character(db, character_id, updates)
     return char

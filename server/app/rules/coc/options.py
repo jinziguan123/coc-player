@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from app.rules.coc.components.bleeding import BleedingConfig
 from app.rules.coc.components.check import CheckConfig
+from app.rules.coc.components.creation import CreationConfig
 from app.rules.coc.components.growth import GrowthConfig
 from app.rules.coc.components.luck_reroll import LuckRerollConfig
 from app.rules.coc.components.luck_spend import LuckSpendConfig
@@ -26,7 +27,7 @@ from app.rules.config import parse_lenient
 
 class CocRuleOptions(
     CheckConfig, LuckSpendConfig, LuckRerollConfig, WoundConfig, PulpHpConfig, BleedingConfig,
-    SanityConfig, GrowthConfig,
+    SanityConfig, GrowthConfig, CreationConfig,
 ):
     """一局（或一个模组）生效的完整村规：各组件参数的合成。
 

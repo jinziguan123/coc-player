@@ -12,6 +12,7 @@ from app.rules.coc.components import (
     chase,
     check,
     combat,
+    creation,
     dice,
     equipment,
     growth,
@@ -32,7 +33,7 @@ OFFICIAL_COMPONENTS = (
     dice, character, occupation, equipment,
     check, luck, luck_spend, luck_reroll,
     wound, pulp_hp, bleeding, combat, positioning, chase,
-    sanity, madness, growth,
+    sanity, madness, growth, creation,
 )
 
 

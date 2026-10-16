@@ -401,6 +401,12 @@ def create_character(data: dict, options: RuleConfig | None = None) -> dict:
 
 
 def validate_character(character_data: dict) -> tuple[bool, list[str]]:
+    """任何角色卡都要满足的基本范围（导入的老卡、团中成长过的卡也一样）。
+
+    建卡规则（点数、上限、职业）不在这里——那由 ``rs.creation.validate_build`` 按建卡记录校验，
+    只管新建的卡。这里曾按 15–90 卡属性，可年龄修正能把教育推到 99、把体能压到 15 以下，
+    高龄或高教育的合法新卡反被拒。
+    """
     errors = []
     attrs = character_data.get("base_attributes", {})
     required = ["STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU"]
@@ -409,8 +415,11 @@ def validate_character(character_data: dict) -> tuple[bool, list[str]]:
         val = attrs.get(attr)
         if val is None:
             errors.append(f"缺少属性: {attr}")
-        elif not (15 <= val <= 90):
-            errors.append(f"{attr} 值 {val} 超出合理范围 (15-90)")
+        elif not (_ATTR_FLOOR <= val <= 99):
+            errors.append(f"{attr} 值 {val} 超出范围 ({_ATTR_FLOOR}-99)")
+    for name, val in (character_data.get("skills") or {}).items():
+        if not isinstance(val, int) or not 0 <= val <= 99:
+            errors.append(f"技能 {name} 值 {val} 超出范围 (0-99)")
 
     return (len(errors) == 0, errors)
 

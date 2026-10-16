@@ -22,6 +22,9 @@ class CharacterCreate(BaseModel):
     skills: dict[str, int] = {}
     system_data: dict = {}
     backstory: str = ""
+    # 建卡记录（见 app/rules/coc/components/creation.py 的 CreationRecord）。
+    # 带了就按建卡规则严格校验并随卡保存；不带的是导入卡、复制卡等，只做基本范围检查。
+    creation: dict | None = None
 
 
 class CharacterRead(BaseModel):

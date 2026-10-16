@@ -999,6 +999,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rules/{rule_system}/creation-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Creation Rules
+         * @description 建卡界面要的规则常量：本桌的技能上限、点数购买总额、快速车卡的定值。
+         */
+        get: operations["get_creation_rules_api_rules__rule_system__creation_rules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/rules/{rule_system}/derived": {
         parameters: {
             query?: never;
@@ -3101,6 +3121,10 @@ export interface components {
             base_attributes: {
                 [key: string]: number;
             };
+            /** Creation */
+            creation?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Is Player
              * @default true
@@ -6376,6 +6400,39 @@ export interface operations {
         };
     };
     get_character_schema_api_rules__rule_system__character_schema_get: {
+        parameters: {
+            query?: {
+                module_id?: string | null;
+            };
+            header?: never;
+            path: {
+                rule_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_creation_rules_api_rules__rule_system__creation_rules_get: {
         parameters: {
             query?: {
                 module_id?: string | null;
