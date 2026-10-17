@@ -140,4 +140,6 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 验证：后端 2540 passed / 11 skipped、ruff 通过。
 - TeamAgent 输出新增 verb/depends_on；TeamIntent 解析中文/英文动词别名，互斥矩阵覆盖 open/block/lock/take/give/attack/protect 等；依赖按拓扑排序，缺失/成环依赖整支丢弃。
 - 验证更新：后端 2546 passed / 11 skipped、ruff 通过。
+- 新增 `intent_ledger`：target 带跨回合 version 与 locked/open/closed/blocked/taken 状态；队友动作提交前检查 open 遇 locked、enter 遇 blocked 等前置，成功后更新账本。
+- 验证更新：后端 2550 passed / 11 skipped、ruff 通过（建卡随机用例首轮偶发失败，单独重跑通过）。
 - 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。已覆盖：旧 [SAY]/分头路径 NPC 边界、分头工具循环、ContextBundle、队友 relevance gate/重复冲突兜底、agent_trace 落表与 KP 面板。后续可继续做语义级冲突裁决和跨 Agent 的完整调度器。

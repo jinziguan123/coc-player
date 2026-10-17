@@ -21,6 +21,7 @@ from app.models.session import GameSession
 from app.services import (
     agent_runtime,
     intent as team_intent,
+    intent_ledger,
     agent_trace,
     dice_runtime,
     narration_protocol,
@@ -127,7 +128,9 @@ def _parse_team_decision(raw) -> dict | None:
         "action": action,
         "content": str(data.get("content") or "").strip(),
         "skill": str(data.get("skill") or "").strip(),   # 仅 action=check 时有意义
-        "target": str(data.get("target") or "").strip(),  # 仅 action=travel 时有意义
+        "target": str(data.get("target") or "").strip(),
+        "verb": str(data.get("verb") or "").strip(),
+        "depends_on": data.get("depends_on") or [],
     }
 
 
@@ -295,6 +298,7 @@ async def _run_team_turn(
     )
     events = session_service.get_session_events(db, session_id)
     snapshot_seq = max((getattr(e, "sequence_num", 0) or 0) for e in events) if events else 0
+    snapshot_world = dict(game_session.world_state or {})
     relevant = _select_relevant_teammates(events, game_session, player_char, roster)
     if len(relevant) < len(roster):
         logger.info(
@@ -356,6 +360,16 @@ async def _run_team_turn(
                 teammate.name, action, session_id,
             )
             return
+        target = str(decision.get("target") or "").strip()
+        verb = str(decision.get("verb") or "").strip().lower()
+        if target and verb:
+            current_ws = game_session.world_state or {}
+            if not intent_ledger.allows(current_ws, target, verb):
+                logger.info(
+                    "队友意图对象状态不满足：%s 对 %s 执行 %s，丢弃 session=%s",
+                    teammate.name, target, verb, session_id,
+                )
+                return
         # 队友「前往」：显式移动，确定性切换其所在场景（仅限已知地点），落一条「前往」事件。
         # 队友的移动由此动作触发，KP 不再从其台词臆测搬人；分头分组据 party_locations 归并。
         if action == "travel":
@@ -422,6 +436,13 @@ async def _run_team_turn(
             db, session_id, event_type, content,
             actor_id=teammate.id, actor_name=teammate.name,
         )
+        if target and verb:
+            _apply_world_memory(
+                db, game_session,
+                lambda ws: intent_ledger.record(
+                    ws, target, teammate.id, verb, ev.sequence_num,
+                ),
+            )
         # speak 用 npc_dialogue 走前端气泡渲染；act/assist/check 走通用 action 渲染
         chunk_type = "npc_dialogue" if event_type == "dialogue" else "action"
         yield _make_chunk(
@@ -548,12 +569,13 @@ async def _run_team_turn(
                     committed_actors.add(teammate.name)
                 else:
                     decision["observes_seq"] = snapshot_seq
-                    team_intents.append((
-                        teammate, decision,
-                        team_intent.from_decision(teammate, decision, snapshot_seq),
-                    ))
+                    parsed_intent = team_intent.from_decision(
+                        teammate, decision, snapshot_seq, world_state=snapshot_world,
+                    )
+                    decision["_target_version"] = parsed_intent.target_version
+                    team_intents.append((teammate, decision, parsed_intent))
 
-    resolved = team_intent.resolve_team_intents(team_intents, committed_actors)
+    resolved = team_intent.resolve_team_intents(team_intents, committed_actors, world_state=snapshot_world)
     if len(resolved) < len(team_intents):
         logger.info(
             "队友意图冲突：%d 条同目标动作被裁决丢弃 session=%s",

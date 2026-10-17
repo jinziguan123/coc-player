@@ -96,6 +96,53 @@ def test_team_turn_runs_once_per_teammate(db_factory, monkeypatch):
     assert sum('"npc_dialogue"' in c for c in chunks) == 2
 
 
+def test_team_depends_on_commits_prerequisite_first(db_factory, monkeypatch):
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    a, b = teammates
+
+    async def fake_decide(self, messages):
+        if self.character_id == a.id:
+            return '{"action":"act","content":"我打开门。","target":"门","verb":"open"}'
+        return (
+            '{"action":"act","content":"我跟着走进去。","target":"门","verb":"enter",'
+            '"depends_on":["阿尔法"]}'
+        )
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert [e.actor_id for e in actions] == [a.id, b.id]
+
+
+def test_team_action_blocked_by_previous_locked_state(db_factory, monkeypatch):
+    """上一轮门已锁：本轮队友再执行 open 会被对象状态前置检查拦下。"""
+    from app.services import intent_ledger
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    session.world_state = intent_ledger.record({}, "门", "npc", "lock", 1)
+    db.commit()
+
+    async def fake_decide(self, messages):
+        return '{"action":"act","content":"我推门进去。","target":"门","verb":"open"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert actions == []
+
+
 def test_team_intent_resolver_drops_same_target_conflict(db_factory, monkeypatch):
     """两个队友同时改同一扇门：后完成者按目标冲突丢弃，只落一条行动。"""
     db = db_factory()
@@ -630,21 +677,31 @@ def test_parse_team_decision():
         "content": "查看",
         "skill": "",
         "target": "",
+        "verb": "",
+        "depends_on": [],
     }
     assert chat_service._parse_team_decision("前缀 {\"action\":\"speak\",\"content\":\"嗨\"} 后缀") == {
         "action": "speak",
         "content": "嗨",
         "skill": "",
         "target": "",
+        "verb": "",
+        "depends_on": [],
     }
     # check 行动带 skill
     assert chat_service._parse_team_decision(
         '{"action":"check","content":"我辨认铭文","skill":"考古学"}'
-    ) == {"action": "check", "content": "我辨认铭文", "skill": "考古学", "target": ""}
+    ) == {
+        "action": "check", "content": "我辨认铭文", "skill": "考古学", "target": "",
+        "verb": "", "depends_on": [],
+    }
     # travel 行动带 target
     assert chat_service._parse_team_decision(
         '{"action":"travel","content":"我去图书馆","target":"中央图书馆"}'
-    ) == {"action": "travel", "content": "我去图书馆", "skill": "", "target": "中央图书馆"}
+    ) == {
+        "action": "travel", "content": "我去图书馆", "skill": "", "target": "中央图书馆",
+        "verb": "", "depends_on": [],
+    }
     assert chat_service._parse_team_decision("坏数据") is None
     assert chat_service._parse_team_decision('{"action":"unknown","content":"x"}') is None
 

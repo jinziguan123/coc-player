@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from app.services import intent_ledger
+
 logger = logging.getLogger(__name__)
 
 _SCOPED_ACTIONS = frozenset({"act", "assist", "check"})
@@ -55,6 +57,7 @@ class TeamIntent:
     verb: str
     depends_on: tuple[str, ...]
     observes_seq: int
+    target_version: int = 0
 
 
 def _as_dep_list(value) -> tuple[str, ...]:
@@ -75,16 +78,18 @@ def _norm_verb(value) -> str:
     return _VERB_ALIASES.get(raw, raw)
 
 
-def from_decision(character, decision: dict, observes_seq: int) -> TeamIntent:
+def from_decision(character, decision: dict, observes_seq: int, world_state=None) -> TeamIntent:
+    target = str(decision.get("target") or "").strip()
     return TeamIntent(
         actor_id=character.id,
         actor_name=character.name,
         action=str(decision.get("action") or ""),
         content=str(decision.get("content") or ""),
-        target=str(decision.get("target") or "").strip(),
+        target=target,
         verb=_norm_verb(decision.get("verb")),
         depends_on=_as_dep_list(decision.get("depends_on")),
         observes_seq=observes_seq,
+        target_version=intent_ledger.version(world_state or {}, target),
     )
 
 
@@ -157,11 +162,25 @@ def _order_dependencies(accepted, committed_actors: set[str]):
 def resolve_team_intents(
     intents: list[tuple[object, dict, TeamIntent]],
     committed_actors: set[str] | None = None,
+    world_state: dict | None = None,
 ):
-    """先做同目标语义冲突过滤，再做 depends_on 拓扑排序；返回可提交顺序。"""
+    """同目标互斥 -> depends_on 拓扑 -> 对象状态前置检查；返回可提交顺序。"""
     accepted = _filter_conflicts(intents)
     committed = set(committed_actors or ())
     ordered = _order_dependencies(accepted, committed)
+    if world_state is not None:
+        allowed = []
+        for item in ordered:
+            intent = item[2]
+            if intent.target and not intent_ledger.allows(world_state, intent.target, intent.verb):
+                logger.info(
+                    "队友意图前置不满足：%s 对 %s 执行 %s，对象当前状态=%s，丢弃",
+                    intent.actor_name, intent.target, intent.verb,
+                    intent_ledger.state(world_state, intent.target),
+                )
+                continue
+            allowed.append(item)
+        ordered = allowed
     if len(ordered) < len(intents):
         logger.info(
             "队友意图裁决：%d 条提交 / %d 条原始（冲突或依赖缺失）",
