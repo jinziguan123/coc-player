@@ -531,6 +531,26 @@ def test_say_tool_refuses_to_voice_player_or_teammate(db_factory):
     assert rn.chunks and result[3] == [(0, npc_identity.UNKNOWN_LABEL, "欢迎光临。")]
 
 
+def test_say_tool_rejects_named_npc_in_production(db_factory):
+    """生产 LLM 路径下，有名 NPC 必须走 npc_act，不允许 KP 用 say 代言。"""
+    db = db_factory()
+    session_id, session, module, hero = _seed_say(db_factory) if False else (None, None, None, None)
+    # 独立起手，避免复用 fixture 误建两份
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    module.npcs = [{"id": "npc_knott", "name": "史蒂芬·诺特先生"}]
+    db.commit()
+    result = ["", "", [], [], []]
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], llm=object(), result=result,
+    )
+    outcome = asyncio.run(execute(ToolCall(
+        id="1", name="say", arguments={"who": "史蒂芬·诺特先生", "text": "欢迎光临。"},
+    )))
+    assert "npc_act" in outcome.result_text
+    assert not outcome.chunks
+
+
 def test_say_tool_uses_real_name_once_players_have_heard_it(db_factory):
     """KP 在叙事里点过名之后，气泡就该改口叫真名。"""
     db, session_id, session, module, hero = _seed_say(db_factory)
@@ -889,8 +909,10 @@ def test_正文SAY气泡与say工具同一口径遮名(db_factory):
                "[SAY: who=田间潜随者（莎布·尼古拉丝化身）]回来……[/SAY]")],
     ])
     result = ["", "", [], [], []]
+    # 这条用例验的是「遮名口径一致」，不是 say 的生产守卫；执行器传 llm=None 走确定性
+    # 旧出口，避免与「有名 NPC 必须 npc_act」的生产守卫混在一起。
     execute = chat_service._build_kp_tool_executor(
-        db, sid, session, module, hero, [], llm, result,
+        db, sid, session, module, hero, [], None, result,
     )
     chunks = asyncio.run(_drain(chat_service._run_kp_agent_loop(
         llm, [{"role": "system", "content": "KP"}], result, execute,
@@ -1059,8 +1081,59 @@ def test_kp_turn_loop_keeps_sanity_guard(db_factory, monkeypatch):
     assert any(e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check" for e in evs)
 
 
-def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
-    """分头模式与主路径一致仍走旧的逐组生成，开关开启也不进 loop。"""
+def test_split_global_tool_is_deferred_to_coordinator(db_factory):
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    result = ["", "", [], [], []]
+    intents = []
+    from app.services.execution_scope import ExecutionScope
+
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], None, result,
+        scope=ExecutionScope(
+            group_id="书房", scene_id="scene_a", actor_ids=(hero.id,),
+            is_primary_group=True, split_mode=True,
+        ),
+        coordinator_intents=intents,
+    )
+    out = asyncio.run(execute(ToolCall(
+        id="1", name="scene_change", arguments={"scene_id": "scene_b"},
+    )))
+    assert out.suspend is True
+    assert intents and intents[0].kind == "scene_change"
+    assert session.current_scene_id == "scene_a"
+
+
+def test_split_narrations_tool_loop_runs_each_group(db_factory, monkeypatch):
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    groups = [
+        {"label": "书房", "scene_id": "scene_a", "members": ["伊芙琳"]},
+        {"label": "地下室", "scene_id": "scene_b", "members": ["伊芙琳"]},
+    ]
+    seen = []
+
+    async def fake_loop(llm, messages, result, execute, **kw):
+        seen.append(kw.get("group_label"))
+        result[0] = f"{kw.get('group_label')}叙事。"
+        if False:
+            yield ""
+
+    async def fake_validate(*a, **k):
+        return None
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", fake_loop)
+    monkeypatch.setattr(chat_service, "_validate_and_patch_narration", fake_validate)
+
+    asyncio.run(chat_service._run_split_narrations_tool_loop(
+        db, session_id, session, module, hero, [], [], object(), True,
+        [], groups,
+    ))
+    assert seen == ["书房", "地下室"]
+
+
+def test_kp_turn_split_mode_uses_tool_loop(db_factory, monkeypatch):
+    """分头模式与主路径一致：开关开启时逐组走工具循环，而不是旧的合并文本路径。"""
     llm = _FakeToolLLM([[_text("不该被用到。")]])
     _kp_turn_runtime(monkeypatch, db_factory, llm, True)
     groups = [
@@ -1070,10 +1143,15 @@ def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
     monkeypatch.setattr(chat_service, "_location_groups", lambda *a, **k: groups)
     called = {}
 
-    async def _fake_split(*a, **k):
-        called["split"] = True
+    async def _fake_loop(*a, **k):
+        called["tool_loop"] = True
+
+    async def _legacy(*a, **k):
+        called["legacy"] = True
         return ""
-    monkeypatch.setattr(chat_service, "_run_split_narrations", _fake_split)
+
+    monkeypatch.setattr(chat_service, "_run_split_narrations_tool_loop", _fake_loop)
+    monkeypatch.setattr(chat_service, "_run_split_narrations", _legacy)
 
     db = db_factory()
     session_id, session, module, hero = _seed(db)
@@ -1081,7 +1159,8 @@ def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
         db, session_id, session, module, hero, [], "续写", split_aware=True,
     ))
 
-    assert called.get("split") is True
+    assert called.get("tool_loop") is True
+    assert "legacy" not in called
     assert llm.calls == []
 
 # ── DeepSeek 思考模式：本轮历史里的 assistant 消息折成 user ─────────────────────

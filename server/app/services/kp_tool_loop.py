@@ -36,6 +36,7 @@ from app.services import (
     module_rag_service,
     narration_protocol,
     npc_identity,
+    npc_runtime,
     rule_options_service,
     rulebook_service,
     session_service,
@@ -45,8 +46,18 @@ from app.services import (
     turn_effects,
 )
 from app.services.event_protocol import make_chunk as _make_chunk
+from app.services.execution_scope import COORDINATED_TOOLS, CoordinatorIntent
 
 logger = logging.getLogger(__name__)
+
+
+def _npc_guard(db, session_id, game_session, module, llm, player_char):
+    if llm is None:
+        return None
+    return npc_runtime.NpcDialogueGuard(
+        npc_runtime.NpcRuntime(db, session_id, game_session, module, llm, player_char)
+    )
+
 
 DICE_CHECK_RE = command_protocol.DICE_CHECK_RE
 OPPOSED_CHECK_RE = command_protocol.OPPOSED_CHECK_RE
@@ -280,12 +291,30 @@ def _step_note(tool_calls: list[ToolCall]) -> str:
     return _STEP_NOTE_DEFAULT
 
 
+def _named_npc_names(module, game_session) -> set[str]:
+    """有名 NPC 的名字/内部 id：这些人的台词必须交给 NpcRuntime，不允许 KP 用 say 代言。"""
+    names: set[str] = set()
+    for npc in (module.npcs or []):
+        for key in ("id", "name"):
+            value = str(npc.get(key) or "").strip()
+            if value:
+                names.add(value)
+    improvised = (game_session.world_state or {}).get("improvised_npcs") or {}
+    for name, entry in improvised.items():
+        if isinstance(entry, dict) and (entry.get("card") or {}).get("id"):
+            names.add(str(name).strip())
+    return names
+
+
 def _build_kp_tool_executor(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     player_char: Character, teammates: list[Character] | None, llm,
     result: list,
     pre_gen_seq: int | None = None,
     ruleset=None,
+    dice_scope: list[Character] | None = None,
+    scope=None,
+    coordinator_intents: list | None = None,
 ):
     """构建 loop 路径的工具执行器：把注册表工具名分发到上面的共用执行函数（不复制逻辑）。
 
@@ -313,6 +342,7 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome("参数缺失：skill 为必填。请带上技能名重试，或直接继续叙述。")
         chunks, descs, pending = await _exec_dice_check(
             db, session_id, game_session, module, kv, player_char, teammates,
+            scope=dice_scope,
         )
         if pending:
             return kp_tools.ToolOutcome(
@@ -339,7 +369,7 @@ def _build_kp_tool_executor(
     async def _h_san_check(name, kv):
         chunks, descs, pending = await _exec_san_check(
             db, session_id, game_session, kv, player_char, teammates,
-            pre_gen_seq=pre_gen_seq,
+            scope=dice_scope, pre_gen_seq=pre_gen_seq,
         )
         if pending:
             return kp_tools.ToolOutcome(
@@ -396,6 +426,15 @@ def _build_kp_tool_executor(
                 f"拒绝：{who} 是玩家或队友角色，你不能替他们说话或行动。"
                 "玩家与队友的言行只能由他们本人给出；你只叙述 NPC 与环境，把选择权留给他们。"
             )
+        # 有名 NPC 走 NpcRuntime：KP 的上下文里有 truth/线索/导演计划，直接代言
+        # 很容易把这些只有 KP 知道的东西混进 NPC 嘴里。llm=None 的确定性测试环境
+        # 保留旧 say 出口，生产调用一律拒绝并引导改用 npc_act。
+        if llm is not None and who in _named_npc_names(module, game_session):
+            return kp_tools.ToolOutcome(
+                f"拒绝：{who} 是有名 NPC，不能用 say() 替其代言。请改用 "
+                f"npc_act(npc_id=<{who} 的 id>, trigger=...)，由 NPC 人格代理"
+                "基于自己的记忆与知识边界生成台词。"
+            )
         chunks = _exec_say(
             result, module, who, text,
             masker=npc_identity.build_masker(db, session_id, module),
@@ -430,6 +469,7 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome("参数缺失：npc_id 与 trigger 均为必填。")
         chunks, response = await _exec_npc_act(
             db, session_id, game_session, module, llm, player_char, npc_id, trigger,
+            target=kv.get("target", ""), verb=kv.get("verb", ""),
         )
         return kp_tools.ToolOutcome(
             f"该 NPC 已行动/开口（台词已直接展示给玩家，续写时不要复述）：{response}", chunks=chunks,
@@ -556,6 +596,19 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome(
                 f"工具 {name} 暂无 loop 行为（内部错误），请直接继续叙述。"
             )
+        # 分头场景：会改全局状态的工具不在组内直接执行，交给回合协调器统一裁定。
+        if scope is not None and scope.split_mode and name in COORDINATED_TOOLS:
+            if coordinator_intents is None:
+                return kp_tools.ToolOutcome(
+                    f"工具 {name} 需要回合协调器，但当前组没有协调器通道；本轮不要切场景/开战。"
+                )
+            coordinator_intents.append(CoordinatorIntent(
+                kind=name, scope=scope, args=dict(kv),
+            ))
+            return kp_tools.ToolOutcome(
+                f"已把 {name} 提交给回合协调器，等待统一裁定；本轮这一组不要再执行场景/战斗切换。",
+                suspend=True,
+            )
         try:
             return await handler(name, kv)
         except Exception:
@@ -616,6 +669,7 @@ async def _run_kp_agent_loop(
     event_order: list | None = None,
     masker_factory: Callable[[], npc_identity.NameMasker] | None = None,
     usage_probe: dict | None = None,
+    npc_guard=None,
 ) -> AsyncIterator[str]:
     """KP agent loop：与 _stream_narration_filtered 并列的新路径（use_tool_calls 开启时用）。
 
@@ -688,6 +742,7 @@ async def _run_kp_agent_loop(
                 shown_dialogues=shown_dialogues,
                 prior_narration=result[0],
                 masker=_step_masker(),
+                npc_guard=npc_guard,
             ):
                 yield chunk
         except BaseException:
@@ -791,6 +846,7 @@ async def _run_kp_agent_loop(
                 shown_dialogues=shown_dialogues,
                 prior_narration=result[0],
                 masker=_step_masker(),
+                npc_guard=npc_guard,
             ):
                 yield chunk
         except BaseException:
@@ -1180,6 +1236,9 @@ async def _handle_rule_lookup(
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
             masker=npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             yield chunk
     finally:
@@ -1242,6 +1301,9 @@ async def _handle_module_lookup(
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
             masker=npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             yield chunk
     finally:
@@ -1298,6 +1360,9 @@ async def _handle_recall_history(
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
             masker=npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             yield chunk
     finally:

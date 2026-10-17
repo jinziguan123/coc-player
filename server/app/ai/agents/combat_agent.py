@@ -63,6 +63,8 @@ class CombatAgent(BaseAgent):
             + f"你是【{npc['name']}】(id={npc['id']})，性格/动机：{npc.get('personality') or '（未知）'}。\n"
             + f"你的武器：{npc.get('weapon') or '徒手格斗'}。\n【战斗态】\n{_state_brief(state)}"
         )
+        if npc.get("memory"):
+            user += "\n【你记得的事】\n" + str(npc["memory"])
         try:
             raw = await self.llm.complete(
                 [{"role": "system", "content": _DECIDE_SYS}, {"role": "user", "content": user}],

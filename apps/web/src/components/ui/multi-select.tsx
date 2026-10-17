@@ -14,6 +14,8 @@ interface MultiSelectProps {
   placeholder: string
   'aria-label': string
   className?: string
+  /** 没有候选项时显示的说明；默认「暂无可选」 */
+  emptyLabel?: string
 }
 
 export function MultiSelect({
@@ -23,6 +25,7 @@ export function MultiSelect({
   placeholder,
   className,
   'aria-label': ariaLabel,
+  emptyLabel,
 }: MultiSelectProps) {
   const selectedOptions = options.filter((option) => value.includes(option.value))
   const summary = selectedOptions.length === 0
@@ -59,7 +62,7 @@ export function MultiSelect({
           }}
           disabled={options.length === 0}
         >
-          <span className="min-w-0 flex-1 truncate">{options.length ? summary : '暂无可选 NPC'}</span>
+          <span className="min-w-0 flex-1 truncate">{options.length ? summary : emptyLabel ?? '暂无可选'}</span>
           <ChevronDown size={12} className="ml-2 shrink-0 opacity-60" aria-hidden="true" />
         </button>
       </PopoverPrimitive.Trigger>

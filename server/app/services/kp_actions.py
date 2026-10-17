@@ -6,14 +6,10 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.ai.agents.npc_agent import NPCAgent
-from app.ai.context import build_npc_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import (
-    illustration_service, npc_identity, session_service, turn_context, world_memory,
-)
+from app.services import illustration_service, npc_identity, session_service, turn_context
 from app.services.event_protocol import make_chunk as _make_chunk
 
 _attach_npc_portrait = illustration_service._attach_npc_portrait
@@ -25,51 +21,13 @@ _scene_title = turn_context._scene_title
 async def _exec_npc_act(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     llm, player_char: Character, npc_id: str, trigger: str,
+    target: str = "", verb: str = "",
 ) -> tuple[list[str], str]:
-    """触发 NPC 人格代理行动/开口，台词落库并广播。返回 (chunks, NPC 台词)。"""
-    events = session_service.get_session_events(db, session_id)
-    npc_messages = build_npc_context(
-        npc_id, game_session, module, events, trigger_context=trigger,
-    )
-
-    npc_def = None
-    for n in (module.npcs or []):
-        if n.get("id") == npc_id:
-            npc_def = n
-            break
-    npc_name = npc_def["name"] if npc_def else npc_id
-
-    npc_agent = NPCAgent(llm, npc_id)
-    npc_response = await npc_agent.respond(npc_messages)
-
-    # 气泡上的说话人也是玩家可见面：玩家还没认出这东西时，不能替 KP 报出真名。
-    # 把这句台词本身算进判据——NPC 自报家门（「我叫香澄澪」）那一刻就该改口，
-    # 否则会出现「不明存在：我叫香澄澪」这种自己打自己脸的气泡。
-    npc_name = npc_identity.build_masker(db, session_id, module)(
-        npc_name, extra_prose=npc_response,
-    )
-
-    ev = session_service.add_event(
-        db, session_id, "dialogue", npc_response,
-        actor_id=npc_id, actor_name=npc_name,
-        visibility=[npc_id, player_char.id],
-    )
-    # 立绘钩子：缓存命中会直接写进事件 metadata → 随对话 chunk 一并带上（气泡即时出头像）
-    _attach_npc_portrait(db, session_id, module, ev)
-    portrait = (ev.metadata_ or {}).get("portrait")
-    chunks = [_make_chunk(
-        "dialogue", npc_response, actor_name=npc_name,
-        event_id=ev.id, actor_id=npc_id,
-        metadata={"portrait": portrait} if portrait else None,
-    )]
-    # 世界记忆钩子 b：NPC 被触发行动后记入其互动史（trigger 原文截断，不调 LLM）
-    _apply_world_memory(
-        db, game_session,
-        lambda ws: world_memory.record_npc_interaction(
-            ws, npc_id, ev.sequence_num, f"受场景触发而行动/开口：{trigger}",
-        ),
-    )
-    return chunks, npc_response
+    """兼容入口：统一委托给 NpcRuntime，避免又一条平行 NPC 路径。"""
+    from app.services.npc_runtime import NpcRuntime
+    return await NpcRuntime(
+        db, session_id, game_session, module, llm, player_char,
+    ).reply(npc_id, trigger, target=target, verb=verb)
 
 
 def _exec_start_chase(
@@ -93,10 +51,13 @@ def _exec_start_chase(
 async def _exec_start_combat(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     player_char: Character, teammates: list[Character] | None, llm,
-    enemies_str: str, trigger: str,
+    enemies_str: str, trigger: str, participant_ids: list[str] | None = None,
 ) -> list[str]:
-    """start_combat 工具：按敌方名字解析模组 NPC，把玩家方（主角+队友）与敌方切入战斗态，
-    自动推进到第一个真人回合。返回广播 chunks。名字匹配不到的敌方按临场杂兵建（默认属性）。"""
+    """start_combat 工具：按敌方名字解析模组 NPC，把选中的调查员与敌方切入战斗态。
+
+    participant_ids 为空＝旧行为（主角+全部队友）；真人 KP 可只选一部分人入战，
+    其余席位留在场外，不会被拉进先攻序。名字匹配不到的敌方按临场杂兵建（默认属性）。
+    """
     from app.ai.agents.combat_agent import CombatAgent
     from app.services import combat_service
 
@@ -109,7 +70,19 @@ async def _exec_start_combat(
         enemies.append(dict(spec) if spec else {"name": nm, "attributes": {"DEX": 50, "CON": 50, "SIZ": 50},
                                                 "skills": {"格斗(斗殴)": 45, "闪避": 25}, "weapon": "徒手格斗"})
     party = [player_char] + list(teammates or [])
+    wanted = [str(ref).strip() for ref in (participant_ids or []) if str(ref).strip()]
+    if wanted:
+        known = {str(member.id) for member in party}
+        unknown = [ref for ref in wanted if ref not in known]
+        if unknown:
+            raise ValueError("参战角色不在当前队伍里")
+        party = [member for member in party if str(member.id) in set(wanted)]
+        if not party:
+            raise ValueError("至少选择一名参战调查员")
     human_ids = session_service.human_character_ids(db, session_id) or {player_char.id}
+    if wanted:
+        selected_ids = {str(member.id) for member in party}
+        human_ids = {str(item) for item in human_ids if str(item) in selected_ids}
     scene_hint = _scene_title(module, game_session.current_scene_id)
     # 遭遇配图卡先落先播（战斗态 chunks 紧随其后）：卡先出、图异步补挂，不阻塞开战
     illust_chunks = _maybe_encounter_illustration(db, session_id, module, enemies)

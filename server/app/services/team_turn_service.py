@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from difflib import SequenceMatcher
 import re
 import time
 from collections.abc import AsyncIterator
@@ -18,6 +19,10 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    agent_runtime,
+    intent as team_intent,
+    intent_ledger,
+    agent_trace,
     dice_runtime,
     narration_protocol,
     rule_options_service,
@@ -67,6 +72,10 @@ def _matcher_npcs(
 
 
 
+#: 单个队友的决策墙钟上限。超时者按 silent 处理，绝不让一个慢请求拖住整轮。
+TEAM_AGENT_TIMEOUT_SECONDS = 20.0
+
+
 async def _stream_narration_filtered(
     kp: KPAgent, messages: list[dict], result: list,
     npcs: list[dict] | None = None,
@@ -75,12 +84,13 @@ async def _stream_narration_filtered(
     shown_dialogues: list[str] | None = None,
     prior_narration: str = "",
     masker=None,
+    npc_guard=None,
 ) -> AsyncIterator[str]:
     """旧路径入口：KPAgent 流式生成 + 台词过滤（核心逻辑在 _filter_narration_stream）。"""
     async for chunk in _filter_narration_stream(
         kp.narrate(messages), result, npcs=npcs, group_label=group_label,
         party_names=party_names, shown_dialogues=shown_dialogues,
-        prior_narration=prior_narration, masker=masker,
+        prior_narration=prior_narration, masker=masker, npc_guard=npc_guard,
     ):
         yield chunk
 
@@ -118,7 +128,9 @@ def _parse_team_decision(raw) -> dict | None:
         "action": action,
         "content": str(data.get("content") or "").strip(),
         "skill": str(data.get("skill") or "").strip(),   # 仅 action=check 时有意义
-        "target": str(data.get("target") or "").strip(),  # 仅 action=travel 时有意义
+        "target": str(data.get("target") or "").strip(),
+        "verb": str(data.get("verb") or "").strip(),
+        "depends_on": data.get("depends_on") or [],
     }
 
 
@@ -168,6 +180,90 @@ def _normalize_team_content(content: str, character_name: str, action: str) -> s
     return "我" + rest
 
 
+def _select_relevant_teammates(
+    events, game_session, player_char, teammates,
+) -> list:
+    """队友相关性门控：玩家明确点名时，别让分处两地的未点名队友也跑主模型。
+
+    规则刻意保守：
+    - 玩家最近一句没有点名任何队友 → 全部保留（不猜“这轮没他的事”）；
+    - 玩家点名了 A → 保留 A、与玩家同场景的队友，以及分头场景里本轮仍有新事件的队友；
+    - 一个都留不下（数据异常）→ 回退全体，宁可多跑也不让队伍突然沉默。
+    """
+    player_events = [
+        e for e in events or []
+        if getattr(e, "actor_id", None) == player_char.id
+        and getattr(e, "event_type", None) in ("action", "dialogue")
+        and str(getattr(e, "content", "") or "").strip()
+    ]
+    if not player_events:
+        return list(teammates)
+    last = player_events[-1]
+    last_text = str(getattr(last, "content", "") or "")
+    mentioned = [t for t in teammates if t.name and t.name in last_text]
+    if not mentioned:
+        return list(teammates)
+    player_scene = (
+        session_service.get_char_location(game_session, player_char.id)
+        or game_session.current_scene_id
+    )
+    last_seq = getattr(last, "sequence_num", 0) or 0
+    selected = []
+    for teammate in teammates:
+        if teammate in mentioned:
+            selected.append(teammate)
+            continue
+        scene = (
+            session_service.get_char_location(game_session, teammate.id)
+            or game_session.current_scene_id
+        )
+        if scene and player_scene and scene == player_scene:
+            selected.append(teammate)
+            continue
+        has_new_scene_event = any(
+            (getattr(e, "sequence_num", 0) or 0) > last_seq
+            and (getattr(e, "metadata_", None) or {}).get("scene_id") == scene
+            for e in events
+        )
+        if has_new_scene_event:
+            selected.append(teammate)
+    return selected or list(teammates)
+
+
+def _team_conflict_key(action: str, content: str) -> tuple[str, str] | None:
+    if action not in ("speak", "act", "assist"):
+        return None
+    text = "".join(str(content or "").split())
+    if not text:
+        return None
+    return action, text
+
+
+def _is_duplicate_team_action(
+    action: str, content: str, seen: list[tuple[str, str]],
+) -> bool:
+    """并发完成顺序下的重复/冲突检测：同一类动作、语义高度重合的后者让位。
+
+    这不是语义审核，而是确定性的「两个人同时说了同一句话 / 做了同一个动作」兜底。
+    阈值刻意高：0.86 以下的不同台词照常保留。
+    """
+    key = _team_conflict_key(action, content)
+    if key is None:
+        return False
+    act, text = key
+    # 短句（「小心」「跟上」）本来就会撞，不算冲突；只拦成段的重复台词/动作。
+    if len(text) < 8:
+        seen.append(key)
+        return False
+    for prev_act, prev_text in seen:
+        if prev_act != act:
+            continue
+        if SequenceMatcher(None, prev_text, text).ratio() >= 0.86:
+            return True
+    seen.append(key)
+    return False
+
+
 async def _run_team_turn(
     db: Session,
     session_id: str,
@@ -177,13 +273,13 @@ async def _run_team_turn(
     teammates: list[Character],
     llm,
     blind_results: list[str] | None = None,
-    team_guidance: str = "",
 ) -> AsyncIterator[str]:
     """玩家输入后的一轮 AI 队友自动响应。
 
     每个队友只决策一次；决策**并发执行**（同一份事件快照，N 次串行调用变 1 次墙钟时间——
-    代价是同轮队友互相看不到彼此这轮刚说的话，撞话题的偶发风险换整体延迟），结果按席位
-    顺序写入事件流。本函数只由 ``run_chat_generation`` / ``run_travel_generation`` 调用，
+    代价是同轮队友互相看不到彼此这轮刚说的话，撞话题的偶发风险换整体延迟），谁先完成
+    谁先提交，不再等最慢的一个。整轮墙钟上限 ``TEAM_AGENT_TIMEOUT_SECONDS``，超时者按
+    silent 处理。本函数只由 ``run_chat_generation`` / ``run_travel_generation`` 调用，
     不会自触发，故不存在递归链式生成。
 
     分头判定：队友所在场景 ≠ 主队锚点场景（主角所在）即视为「分头独处」，据此让
@@ -201,6 +297,17 @@ async def _run_team_turn(
         or game_session.current_scene_id
     )
     events = session_service.get_session_events(db, session_id)
+    snapshot_seq = max((getattr(e, "sequence_num", 0) or 0) for e in events) if events else 0
+    snapshot_world = dict(game_session.world_state or {})
+    relevant = _select_relevant_teammates(events, game_session, player_char, roster)
+    if len(relevant) < len(roster):
+        logger.info(
+            "队友相关性门控：本轮只跑 %d/%d 人 session=%s",
+            len(relevant), len(roster), session_id,
+        )
+    roster = relevant[:MAX_TEAMMATES_PER_TURN]
+    if not roster:
+        return
 
     async def _decide(teammate: Character) -> str | None:
         tm_scene = (
@@ -211,32 +318,65 @@ async def _run_team_turn(
         messages = build_team_context(
             teammate, game_session, module, events, player_char,
             all_teammates=teammates, separated=separated,
-            team_guidance=team_guidance,
         )
+        bundle = agent_runtime.ContextBundle.from_messages(
+            messages, budget_tokens=12000, visibility=(teammate.id,),
+        ).fit()
+        trace = agent_trace.start(session_id, "team", db=db, char_id=teammate.id)
         t0 = time.monotonic()
         try:
-            raw = await TeamAgent(llm, teammate.id).decide(messages)
+            raw = await TeamAgent(llm, teammate.id).decide(bundle.for_model())
         except asyncio.CancelledError:
+            agent_trace.finish(trace, outcome="cancelled", provider=llm)
             raise
         except Exception:
+            agent_trace.finish(trace, outcome="error", provider=llm)
             logger.exception("队友决策失败: char=%s", teammate.id)
             return None
         logger.info(
             "耗时|队友决策 %.1fs char=%s(%s)",
             time.monotonic() - t0, teammate.name, teammate.id,
         )
+        agent_trace.finish(trace, provider=llm)
         return raw
 
-    raws = await asyncio.gather(*(_decide(t) for t in roster))
-    for teammate, raw in zip(roster, raws):
-        if raw is None:
-            continue
-        decision = _parse_team_decision(raw)
+    seen_actions: list[tuple[str, str]] = []
+    team_intents: list[tuple] = []
+    committed_actors: set[str] = set()
+
+    async def _commit(teammate: Character, raw: str | None = None, decision: dict | None = None):
+        if decision is None:
+            if raw is None:
+                return
+            decision = _parse_team_decision(raw)
         if not decision:
-            continue  # 解析失败：hold，不重试不递归
+            return  # 解析失败：hold，不重试不递归
         action = decision["action"]
         content = _normalize_team_content(decision["content"], teammate.name, action)
         decision["content"] = content
+        if _is_duplicate_team_action(action, content, seen_actions):
+            logger.info(
+                "队友并发冲突：%s 的 %s 与已提交动作重合，按 silent 处理 session=%s",
+                teammate.name, action, session_id,
+            )
+            return
+        target = str(decision.get("target") or "").strip()
+        verb = str(decision.get("verb") or "").strip().lower()
+        if target and verb:
+            current_ws = game_session.world_state or {}
+            expected_version = decision.get("_target_version")
+            current_version = intent_ledger.version(current_ws, target)
+            if expected_version is not None and current_version != expected_version:
+                logger.info(
+                    "队友意图基于旧对象版本：%s target=%s v%s->v%s session=%s",
+                    teammate.name, target, expected_version, current_version, session_id,
+                )
+            if not intent_ledger.allows(current_ws, target, verb):
+                logger.info(
+                    "队友意图对象状态不满足：%s 对 %s 执行 %s，丢弃 session=%s",
+                    teammate.name, target, verb, session_id,
+                )
+                return
         # 队友「前往」：显式移动，确定性切换其所在场景（仅限已知地点），落一条「前往」事件。
         # 队友的移动由此动作触发，KP 不再从其台词臆测搬人；分头分组据 party_locations 归并。
         if action == "travel":
@@ -269,7 +409,7 @@ async def _run_team_turn(
                     lambda ws, _tid=teammate.id, _q=ev.sequence_num, _s=f"前往了{label}":
                         world_memory.record_team_deed(ws, _tid, _q, _s),
                 )
-            continue
+            return
         # 队友「留守」：队伍要走而他不走。位置默认跟随（无记录者由 get_char_location 回落到
         # 当前场景），所以留下必须显式说出来——把当前所在写成他自己的记录，并给事件盖上
         # stay 标记，主角随后移动时据此跳过他（session_service.stayed_char_ids）。
@@ -295,14 +435,21 @@ async def _run_team_turn(
                 lambda ws, _tid=teammate.id, _q=ev.sequence_num, _s=f"留在了{label}":
                     world_memory.record_team_deed(ws, _tid, _q, _s),
             )
-            continue
+            return
         if action == "silent" or not content:
-            continue
+            return
         event_type = TEAM_ACTION_EVENT[action]
         ev = session_service.add_event(
             db, session_id, event_type, content,
             actor_id=teammate.id, actor_name=teammate.name,
         )
+        if target and verb:
+            _apply_world_memory(
+                db, game_session,
+                lambda ws: intent_ledger.record(
+                    ws, target, teammate.id, verb, ev.sequence_num,
+                ),
+            )
         # speak 用 npc_dialogue 走前端气泡渲染；act/assist/check 走通用 action 渲染
         chunk_type = "npc_dialogue" if event_type == "dialogue" else "action"
         yield _make_chunk(
@@ -380,3 +527,74 @@ async def _run_team_turn(
                             f"被 {teammate.name} 用{skill}{verdict}",
                         ),
                     )
+
+    async def _decide_pair(teammate: Character):
+        return teammate, await _decide(teammate)
+
+    owners = {
+        asyncio.create_task(_decide_pair(t)): t
+        for t in roster
+    }
+    if owners:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + TEAM_AGENT_TIMEOUT_SECONDS
+        pending = set(owners)
+        while pending:
+            remaining = max(0.0, deadline - loop.time())
+            done, still = await asyncio.wait(
+                pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                for task in still:
+                    task.cancel()
+                logger.warning(
+                    "队友回合超时 %.0fs，未完成的队友按 silent 处理: session=%s",
+                    TEAM_AGENT_TIMEOUT_SECONDS, session_id,
+                )
+                break
+            pending = still
+            for task in done:
+                teammate = owners[task]
+                try:
+                    _teammate, raw = task.result()
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    logger.exception("队友决策失败: char=%s", teammate.id)
+                    continue
+                if raw is None:
+                    continue
+                decision = _parse_team_decision(raw)
+                if not decision:
+                    continue
+                action = decision.get("action")
+                # 台词/沉默保持完成即提交；会改世界的动作先攒着，等本轮决策齐了做确定性冲突裁决。
+                if action in ("speak", "silent"):
+                    async for chunk in _commit(teammate, decision=decision):
+                        yield chunk
+                    committed_actors.add(teammate.id)
+                    committed_actors.add(teammate.name)
+                else:
+                    decision["observes_seq"] = snapshot_seq
+                    parsed_intent = team_intent.from_decision(
+                        teammate, decision, snapshot_seq, world_state=snapshot_world,
+                        module=module, session=game_session,
+                    )
+                    decision["_target_version"] = parsed_intent.target_version
+                    team_intents.append((teammate, decision, parsed_intent))
+
+    resolved = team_intent.resolve_team_intents(team_intents, committed_actors, world_state=snapshot_world)
+    dropped = len(team_intents) - len(resolved)
+    if dropped:
+        logger.info(
+            "队友意图冲突：%d 条同目标/依赖动作被裁决丢弃 session=%s",
+            dropped, session_id,
+        )
+        trace = agent_trace.start(
+            session_id, "intent", db=db,
+            total=len(team_intents), committed=len(resolved), dropped=dropped,
+        )
+        agent_trace.finish(trace, outcome="conflict")
+    for teammate, decision, _intent in resolved:
+        async for chunk in _commit(teammate, decision=decision):
+            yield chunk

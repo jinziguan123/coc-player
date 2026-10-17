@@ -79,7 +79,7 @@ export function parseChaseState(value: unknown): ChaseState | null {
   if (typeof value.round !== 'number' || typeof value.gap !== 'number') return null
   if (typeof value.escape_at !== 'number' || typeof value.caught_at !== 'number') return null
   if (typeof value.quarry !== 'string' || typeof value.pursuer !== 'string') return null
-  return {
+  const parsed: ChaseState = {
     round: value.round,
     gap: value.gap,
     escape_at: value.escape_at,
@@ -91,4 +91,14 @@ export function parseChaseState(value: unknown): ChaseState | null {
     quarry_mov: typeof value.quarry_mov === 'number' ? value.quarry_mov : undefined,
     pursuer_mov: typeof value.pursuer_mov === 'number' ? value.pursuer_mov : undefined,
   }
+  // 群体追逐名单：只有新后端 / 多目标追逐才带，旧态不凭空补
+  if (Array.isArray(value.quarries)) {
+    const names = value.quarries.filter((item): item is string => typeof item === 'string')
+    if (names.length) parsed.quarries = names
+  }
+  if (Array.isArray(value.pursuers)) {
+    const names = value.pursuers.filter((item): item is string => typeof item === 'string')
+    if (names.length) parsed.pursuers = names
+  }
+  return parsed
 }

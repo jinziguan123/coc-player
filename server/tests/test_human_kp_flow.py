@@ -160,6 +160,21 @@ def _start_combat(db, session, module):
     return combat_service.get_combat(db.get(GameSession, session.id))
 
 
+def test_start_combat_can_limit_party(db_factory):
+    db = db_factory()
+    module, hero, mate, session = _seed(db, with_ai_mate=True)
+
+    _run(db, session, module, "start_combat", {
+        "enemies": "守门人",
+        "participants": f"character:{hero.id}",
+    })
+    db.expire_all()
+    state = combat_service.get_combat(db.get(GameSession, session.id))
+    names = [p["name"] for p in state["initiative"]]
+    assert "调查员" in names
+    assert "AI 队友" not in names
+
+
 def test_hp_change_on_npc_combatant_and_kill_ends_combat(db_factory):
     db = db_factory()
     module, _hero, _mate, session = _seed(db)

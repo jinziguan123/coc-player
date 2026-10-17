@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module
+from app.models.intent_history import IntentHistory
 from app.rules.coc.components import combat as coc_combat
 from app.services import combat_service
 from app.rules import ruleset_for
@@ -775,6 +776,10 @@ def test_key_npc_uses_agent_decision(db_factory):
     assert agent.narrated is False                            # 暂停时不叙述（叙述归 resolve_reaction）
     db.refresh(hero)
     assert hero.system_data["hitPoints"]["current"] == 11     # 暂停期间未结算伤害
+    history = db.query(IntentHistory).filter(IntentHistory.session_id == sid).all()
+    assert history and history[-1].source == "combat"
+    assert history[-1].target == f"char:{hero.id}"
+    assert history[-1].verb == "attack"
 
 
 def test_drive_npcs_pauses_when_npc_attacks_human(db_factory):

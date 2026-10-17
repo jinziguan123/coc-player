@@ -532,15 +532,12 @@ def test_leaked_dialogue_party_name_never_extracted():
     assert new_narr == narr and not marks
 
 
-def test_leaked_dialogue_known_npc_name_extracted_without_shape_signal():
-    """署名是本局 NPC → 强信号，不需要（身份）标注或重复前缀也抽。
-
-    这是实际最常见的漏写形态（闇暗山存档 44 条全长这样）；只认形状的旧门槛对它命中 0 次。
-    """
+def test_leaked_dialogue_known_npc_name_is_dropped_not_extracted():
+    """署名是本局 NPC → 旧同步兜底不能把它交给 KP 落库；宁可丢句，也不代言。"""
     narr = "他低头看了看掌心。\n\n香澄澪：“这座山，以前是有人住的。”\n\n风从窗洞钻进来。"
     new_narr, marks = chat_service._extract_leaked_dialogue(
         narr, [], party_names=set(), npc_names={"香澄澪"})
-    assert marks == [(marks[0][0], "香澄澪", "这座山，以前是有人住的。")]
+    assert marks == []
     assert "香澄澪：" not in new_narr and "以前是有人住的" not in new_narr
     assert "风从窗洞钻进来" in new_narr
 
@@ -555,9 +552,9 @@ def test_leaked_dialogue_narration_fragment_never_mistaken_for_speaker():
 
 def test_leaked_dialogue_keeps_nested_inner_quotes_whole():
     """台词里嵌 『…』 时整句抽出，不在内层引号处截断、也不给旁白留残渣。"""
-    narr = "香澄澪：“石板上刻着『愿献，祈愈』。我想了十年。”"
+    narr = "香澄澪（学生）：“石板上刻着『愿献，祈愈』。我想了十年。”"
     new_narr, marks = chat_service._extract_leaked_dialogue(
-        narr, [], party_names=set(), npc_names={"香澄澪"})
+        narr, [], party_names=set(), npc_names=set())
     assert marks[0][2] == "石板上刻着『愿献，祈愈』。我想了十年。"
     assert new_narr.strip() == ""
 

@@ -27,12 +27,15 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    agent_runtime,
+    agent_trace,
     character_chronicle,
     chat_event_writer,
     command_protocol,
     dice_runtime,
     event_protocol,
     event_recall,
+    execution_scope,
     generation_housekeeping,
     generation_lifecycle,
     human_kp_actions,
@@ -42,6 +45,7 @@ from app.services import (
     kp_tool_loop,
     narration_protocol,
     npc_identity,
+    npc_runtime,
     planned_effects,
     combat_service,
     rule_options_service,
@@ -57,6 +61,17 @@ from app.services.event_protocol import luck_offer_event_id
 from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
+
+
+def _npc_dialogue_guard(db, session_id, game_session, module, llm, player_char):
+    """旧文本路径 / 分头路径的 NPC 守卫；无 LLM 的确定性测试环境不启用。"""
+    if llm is None:
+        return None
+    runtime = npc_runtime.NpcRuntime(
+        db, session_id, game_session, module, llm, player_char,
+    )
+    return npc_runtime.NpcDialogueGuard(runtime)
+
 
 # 兼容既有调用与测试；协议的单一事实来源位于 command_protocol。
 DICE_CHECK_RE = command_protocol.DICE_CHECK_RE
@@ -520,6 +535,9 @@ async def _run_generation(
                 event_order=event_order,
                 masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
                 usage_probe=usage_probe,
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
@@ -552,6 +570,9 @@ async def _run_generation(
                 kp, messages, result, npcs=matcher_npcs, party_names=party_names,
                 shown_dialogues=shown_dialogues,
                 masker=npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
@@ -740,6 +761,9 @@ async def _run_split_narrations(
             async for chunk in _stream_narration_filtered(
                 kp, messages, result, npcs=matcher_npcs, group_label=label,
                 masker=npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
                 **stream_kwargs,
             ):
                 room_hub.broadcast(session_id, chunk)
@@ -765,6 +789,195 @@ async def _run_split_narrations(
         # 只有这个标记能让「谁该跟着检定」落回发出指令的那一组（见 _group_scope_resolver）。
         combined.append(f"[GROUP: scene={label}]\n{result[1]}")
     return "\n".join(combined)
+
+
+async def _apply_coordinator_intents(
+    db, session_id, game_session, module, player_char, teammates, llm, intents,
+) -> None:
+    """统一执行分头组提交的全局工具；同类只接受第一条，其余明确拒绝。"""
+    if not intents:
+        return
+    seen: set[tuple[str, str]] = set()
+    for intent in intents:
+        key = (
+            intent.kind,
+            str(intent.args.get("scene_id") or intent.args.get("enemies") or intent.args.get("pursuer") or ""),
+        )
+        if key in seen:
+            room_hub.broadcast(session_id, _make_chunk(
+                "system",
+                f"本回合已有一个 {intent.kind} 请求被协调器接受，重复请求已忽略。",
+            ))
+            continue
+        seen.add(key)
+        if intent.kind == "scene_change":
+            if not intent.scope.contains(player_char.id):
+                room_hub.broadcast(session_id, _make_chunk(
+                    "system", "分头组不能直接移动主队；场景切换请求已由协调器拒绝。",
+                ))
+                continue
+            scope_names = set(intent.scope.actor_ids)
+            scope_mates = [t for t in (teammates or []) if t.id in scope_names]
+            chunks, _sid, note = await _exec_scene_change(
+                db, session_id, game_session, module,
+                intent.args.get("scene_id", ""), player_char, scope_mates,
+            )
+            for chunk in chunks:
+                room_hub.broadcast(session_id, chunk)
+            if note:
+                room_hub.broadcast(session_id, _make_chunk("system", note))
+        elif intent.kind == "start_combat":
+            chunks = await _exec_start_combat(
+                db, session_id, game_session, module, player_char, teammates, llm,
+                intent.args.get("enemies", ""), intent.args.get("trigger", ""),
+                participant_ids=list(intent.scope.actor_ids),
+            )
+            for chunk in chunks:
+                room_hub.broadcast(session_id, chunk)
+        elif intent.kind == "start_chase":
+            if not intent.scope.contains(player_char.id):
+                room_hub.broadcast(session_id, _make_chunk(
+                    "system", "分头组不能直接发起追逐；追逐请求已由协调器拒绝。",
+                ))
+                continue
+            chunks = _exec_start_chase(
+                db, session_id, module, player_char,
+                intent.args.get("pursuer", ""), intent.args.get("trigger", ""),
+            )
+            for chunk in chunks:
+                room_hub.broadcast(session_id, chunk)
+
+
+async def _run_split_narrations_tool_loop(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module,
+    player_char: Character,
+    events: list,
+    teammates: list[Character] | None,
+    llm,
+    rules_enabled: bool,
+    matcher_npcs: list[dict],
+    groups: list[dict],
+    plan: turn_planner.TurnPlan | None = None,
+    blind_message: dict | None = None,
+    rule_excerpts: list[dict] | None = None,
+    location_guard: str = "",
+    group_prompts: dict[str, str] | None = None,
+    default_prompt: str | None = None,
+) -> None:
+    """分头行动的工具循环版：每组一套聚焦上下文，工具即时执行并广播。
+
+    与旧分头路径的分工：
+    - 组内骰子候选域由 dice_scope 限定，不会把别组的人拉进群检；
+    - 组内 NPC/场景工具仍直接作用于会话状态（与旧路径统一指令处理器一致）；
+    - 叙事、检定、场景切换都在 loop 内完成，不再把文本拼回去走第二次
+      _process_commands，否则检定会重复结算。
+    """
+    _tag_turn_events_by_group(db, _current_turn_events(events), groups)
+    plan_message = turn_planner.build_turn_plan_message(plan) if plan is not None else None
+    module_rag_enabled = bool(events) and getattr(module, "rag_status", "") == "ready"
+    party_ids = {player_char.id} | {t.id for t in (teammates or [])}
+    shown_dialogues = _shown_turn_dialogues(events, party_ids)
+    turn_inputs = _shown_turn_context(events, party_ids)
+    party_names = {player_char.name} | {t.name for t in (teammates or [])}
+    rs = rule_options_service.ruleset(db, game_session)
+    exclude: set[str] = set()
+    if not rules_enabled:
+        exclude.add("rule_lookup")
+    if not module_rag_enabled:
+        exclude.add("module_lookup")
+    tools = kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools)
+    pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
+    by_name = {player_char.name: player_char}
+    by_name.update({t.name: t for t in (teammates or [])})
+    coordinator_intents: list = []
+
+    for grp in groups:
+        label = grp["label"]
+        members = "、".join(grp["members"])
+        char_scope = [by_name[n] for n in (grp.get("members") or []) if n in by_name]
+        scope = execution_scope.ExecutionScope(
+            group_id=label,
+            scene_id=str(grp.get("scene_id") or game_session.current_scene_id or ""),
+            actor_ids=tuple(c.id for c in char_scope),
+            is_primary_group=player_char.id in {c.id for c in char_scope},
+            split_mode=True,
+        )
+        messages = build_kp_context(
+            game_session, module, player_char, events, teammates=teammates,
+            rules_lookup_enabled=rules_enabled, viewer_scene_id=grp.get("scene_id"),
+            module_excerpts=_module_excerpts_for_context(
+                db, module, game_session, events, party_ids,
+                scene_id=grp.get("scene_id"),
+            ),
+            module_lookup_enabled=module_rag_enabled,
+            rule_excerpts=rule_excerpts,
+            recall_enabled=event_recall.is_enabled(game_session),
+            scene_groups=groups,
+            rule_options_block=rule_options_service.context_block(db, game_session),
+        )
+        if plan_message is not None:
+            messages.append(plan_message)
+        if blind_message is not None:
+            messages.append(blind_message)
+        if location_guard and player_char.name in (grp.get("members") or []):
+            messages.append({"role": "system", "content": location_guard})
+        if group_prompts and label in group_prompts:
+            user_content = group_prompts[label]
+        else:
+            prompt = default_prompt or SPLIT_FOCUS_PROMPT
+            user_content = prompt.format(label=label, members=members)
+        messages.append({"role": "user", "content": user_content})
+
+        result = ["", "", [], [], []]
+        base_seq = session_service.get_next_sequence_num(db, session_id) - 1
+        event_order: list = []
+        execute = _build_kp_tool_executor(
+            db, session_id, game_session, module, player_char, teammates, llm, result,
+            pre_gen_seq=pre_gen_seq, ruleset=rs, dice_scope=char_scope,
+            scope=scope, coordinator_intents=coordinator_intents,
+        )
+        try:
+            async for chunk in _run_kp_agent_loop(
+                llm, messages, result, execute,
+                tools=tools, npcs=matcher_npcs, group_label=label, plan=plan,
+                party_names=party_names, shown_dialogues=shown_dialogues,
+                event_order=event_order,
+                masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
+            ):
+                meta = dict(getattr(chunk, "metadata", None) or {})
+                if meta.get("group") != label:
+                    meta["group"] = label
+                    chunk = chunk.model_copy(update={"metadata": meta})
+                room_hub.broadcast(session_id, chunk)
+        except BaseException:
+            _persist_narration(db, session_id, result, event_order, llm=llm)
+            _reorder_turn_events(db, session_id, event_order, base_seq)
+            raise
+        await _validate_and_patch_narration(
+            llm, plan, result, seen_context=_recent_seen_text(events),
+            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            settled_checks=_settled_checks_context(events),
+            party_names=party_names,
+            location_context=(
+                location_guard if player_char.name in (grp.get("members") or []) else ""
+            ),
+        )
+        _persist_narration(db, session_id, result, event_order, llm=llm)
+        _reorder_turn_events(db, session_id, event_order, base_seq)
+        _record_npc_say_memory(
+            db, session_id, game_session, module, result[2], grp["members"],
+        )
+
+    await _apply_coordinator_intents(
+        db, session_id, game_session, module, player_char, teammates, llm,
+        coordinator_intents,
+    )
 
 
 async def _run_split_generation(
@@ -796,18 +1009,27 @@ async def _run_split_generation(
     """
     # 生成前基线序号：供确定性 SAN 守卫判断本轮 KP 是否已自行掷过 SAN（幂等）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
-    combined = await _run_split_narrations(
-        db, session_id, game_session, module, player_char, events, teammates,
-        kp, llm, rules_enabled, matcher_npcs, groups,
-        plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
-        location_guard=location_guard,
-    )
+    if _tool_loop_active(llm):
+        # 工具循环分头：每组即时执行工具，不再把文本拼回去走统一指令处理。
+        await _run_split_narrations_tool_loop(
+            db, session_id, game_session, module, player_char, events, teammates,
+            llm, rules_enabled, matcher_npcs, groups,
+            plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
+            location_guard=location_guard,
+        )
+    else:
+        combined = await _run_split_narrations(
+            db, session_id, game_session, module, player_char, events, teammates,
+            kp, llm, rules_enabled, matcher_npcs, groups,
+            plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
+            location_guard=location_guard,
+        )
 
-    async for chunk in _process_commands(
-        db, session_id, combined, module, player_char, game_session, llm,
-        teammates=teammates, scene_groups=groups, pre_gen_seq=pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
+        async for chunk in _process_commands(
+            db, session_id, combined, module, player_char, game_session, llm,
+            teammates=teammates, scene_groups=groups, pre_gen_seq=pre_gen_seq,
+        ):
+            room_hub.broadcast(session_id, chunk)
 
     async for chunk in _ensure_planned_combat(
         db, session_id, game_session, module, player_char, teammates, llm, plan,
@@ -891,56 +1113,6 @@ def _looks_like_combat_declaration(text: str) -> bool:
     return bool(_COMBAT_DECLARATION_RE.search(text or ""))
 
 
-def _team_guidance_from_plan(plan: turn_planner.TurnPlan | None) -> str:
-    """从 plan.direction 派生给 AI 队友的软指引（目前只用 spotlight——把戏份让给冷场玩家）。
-
-    只影响队友「优先照顾谁」，不授权队友替人决定/代言；无 plan 或无 spotlight 则为空串。
-    """
-    if plan is None or not plan.direction.spotlight:
-        return ""
-    return (
-        "本轮请把互动机会和话头多留给："
-        + "、".join(plan.direction.spotlight)
-        + "（他们最近戏份偏少）。你仍然只能决定自己的言行，不得替他们做决定或代言。"
-    )
-
-
-#: 队友这一轮产出了这些类型的事件，就说明裁定前提变了，必须重新规划。
-#: dialogue（对白）**不在其中**——这是本判据的全部要点，理由见下。
-_PREMISE_CHANGING_EVENT_TYPES = frozenset(
-    ("action", "dice", "system", "combat", "scene_change"),
-)
-
-
-def _team_turn_changed_premises(events: list, ai_teammates: list, pre_seq: int) -> bool:
-    """队友这一轮是否改变了裁定前提——决定要不要再跑一次 planner。
-
-    planner 裁定的是**玩家这一轮宣言**该怎么判（要不要检定、什么难度、给什么线索）。队友
-    只是接了句话时，这些前提一个都没变，重新裁定一遍纯属浪费——实测那一次要 46 秒，占整个
-    回合的 44%（两个队友分别说了「背面也写了字？让我看看」和「便签背面写了什么？」，
-    planner 于是对着一模一样的前提把「扯下便签」重判了一遍）。
-
-    但队友真动手就不一样了：他挪了位置、开了箱子、掷了骰、触发了机制点，玩家动作的判定
-    前提就真的变了，必须重规划。
-
-    判错的代价不对称：漏判（该重规划却跳过）会让 KP 拿着过时的裁定叙事；多判只是慢几十秒。
-    所以这里**从宽认定「变了」**——除对白外的任何新事件都算，拿不准就重规划。
-    """
-    if not ai_teammates:
-        return False
-    mate_ids = {t.id for t in ai_teammates}
-    mate_names = {(t.name or "").strip() for t in ai_teammates if (t.name or "").strip()}
-    for e in events:
-        if (e.sequence_num or 0) <= pre_seq:
-            continue                                  # 队友开口前就有的，不算
-        by_mate = (getattr(e, "actor_id", None) in mate_ids
-                   or (getattr(e, "actor_name", "") or "").strip() in mate_names)
-        # 系统事件（掷骰、入库、场景切换）不带队友署名，但同样是队友行动的产物 → 一律算。
-        if e.event_type in _PREMISE_CHANGING_EVENT_TYPES and (by_mate or e.event_type != "action"):
-            return True
-    return False
-
-
 def _stashed_check_request(turn: list, actor_id: str | None) -> str:
     """本轮暂存的技能检定申请（技能页点出来的那种）→ 技能名；没有则空串。
 
@@ -975,7 +1147,7 @@ def _failure_notice(exc: BaseException) -> str:
 
 
 async def run_chat_generation(session_id: str) -> None:
-    # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 → 二次 planner →
+    # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → 队友 → planner →
     # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
     # 都要有耗时，否则「为什么这么慢」只能靠猜。t_turn 给出总时长做对账。
     openai_compat.reset_endpoint_health()   # 见 run_regenerate_generation 里的同一行
@@ -1020,47 +1192,87 @@ async def run_chat_generation(session_id: str) -> None:
             if e.event_type in ("action", "dialogue") and e.actor_id == acting.id and (e.content or "").strip()
         )
 
-        # planner 前移：在队友回合之前先跑一次裁定计划，作为本回合的共享契约——队友据
-        # plan.direction 派生的导演提示行动（如把话头递给冷场玩家），KP 叙事时再以队友实际
-        # 行动 + plan 为准。plan 是「裁定意图」不是「剧本」，队友行动后语义不变；开场不跑。
-        # 结构化副任务走快模型（get_fast_llm，未配置时即主模型）。
-        pre_events = session_service.get_session_events(db, session_id)
+        # 玩家本轮明确从技能页申请的检定：先确定性处理，不必等 planner。
+        # 这一轮如果还有玩家的台词/行动，队友仍要接话，由 _run_kp_turn 负责在检定提示后跑队友。
+        stashed_check = _stashed_check_request(turn, acting.id)
+        if (
+            stashed_check and player_text
+            and not _looks_like_combat_declaration(player_text)
+        ):
+            await _run_kp_turn(
+                db, session_id, game_session, module, player_char, party_others,
+                CHECK_REQUEST_PROMPT.format(
+                    actor=acting.name, skill=stashed_check, intent=player_text,
+                ),
+                requested_check=(acting, stashed_check),
+                focus_member=acting.name,
+                split_aware=True,
+                then_team_turn=ai_teammates,
+            )
+            return
+
+        # 玩家输入后：先跑一轮 AI 队友自动响应（仅 AI 席、仅一轮、不自触发），再交 KP 收束。
+        # 队友暗骰（心理学等）的真实结果收集到 team_blind，注入本回合 KP 上下文而不落库/广播。
+        team_blind: list[str] = []
+        if ai_teammates:
+            t_team = time.monotonic(); u_team = usage_tracker.snapshot()
+            async for chunk in _run_team_turn(
+                # 队友走**主模型**：他们的产出是直接摆在玩家面前的台词与行动，和 KP 叙事一样
+                # 吃文笔与分寸感，不是 planner 那种「产结构、玩家看不到」的副任务。快模型
+                # （通常关思考、档次也更低）演出来明显发木，同桌感立刻塌掉。慢一点也认。
+                db, session_id, game_session, module, player_char, ai_teammates, get_llm(),
+                blind_results=team_blind,
+            ):
+                room_hub.broadcast(session_id, chunk)
+            logger.info(
+                "耗时|队友回合 %.1fs（%d 人，%s）session=%s",
+                time.monotonic() - t_team, len(ai_teammates),
+                usage_tracker.fmt(usage_tracker.delta(u_team)), session_id,
+            )
+
+        events = session_service.get_session_events(db, session_id)
+
+        # planner 放在队友行动之后：队友不再读 plan，也不再被 KP 的导演计划牵引；
+        # 这里只对「最终会发生什么」做一次 KP 裁定，而不是先判、再让队友改、再重判。
+        # 结构化的副任务走快模型；没有事件（开场）不跑。
         plan = None
         fast_llm = get_fast_llm()
-        if pre_events:
+        if events:
             room_hub.broadcast(session_id, _make_chunk("housekeeping", "守秘人正在判读局势…"))
             t_plan = time.monotonic(); u_plan = usage_tracker.snapshot()
             rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
             plan_messages = turn_planner.build_turn_plan_messages(
-                game_session, module, player_char, pre_events,
+                game_session, module, player_char, events,
                 teammates=party_others, rules_lookup_enabled=rules_enabled,
-                rule_excerpts=_rule_excerpts_for_planner(db, module, pre_events, game_session),
+                rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
                 rule_options_block=rule_options_service.context_block(db, game_session),
             )
-            plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
+            trace = agent_trace.start(session_id, "planner", db=db)
+            plan_messages = agent_runtime.ContextBundle.from_messages(
+                plan_messages, budget_tokens=16000,
+            ).fit().for_model()
+            try:
+                plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
+            except Exception:
+                agent_trace.finish(trace, outcome="error", provider=fast_llm)
+                raise
+            agent_trace.finish(trace, provider=fast_llm)
             planned_effects.enforce_plan_item_locations(
                 plan, module, game_session.current_scene_id,
             )
             logger.info(
-                "耗时|planner %.1fs（%s）session=%s",
+                "耗时|planner（队友后） %.1fs（%s）session=%s",
                 time.monotonic() - t_plan, usage_tracker.fmt(usage_tracker.delta(u_plan)), session_id,
             )
-            # 世界记忆钩子 a：本轮裁定要揭示线索 → 写入线索台账（前移后在此统一记账）
             if plan is not None:
                 _record_clue_ledger_from_plan(
-                    db, game_session, plan, pre_events, player_char, party_others,
+                    db, game_session, plan, events, player_char, party_others,
                     module=module,
                 )
                 _settle_plan_ending(db, session_id, game_session, module, plan)
 
-        # 玩家明确申请检定 → 直接走确定性检定裁定（避免被 KP 当叙事顺过去），不走常规叙事。
-        # 战斗宣言不走此路。
-        #
-        # 技能页点出来的申请带 check_request 元数据，**优先据此确定性取技能名**：那是玩家点
-        # 明白了的，不该再让 planner 从「（申请「侦查」检定）」这行文本里认一遍——认漏了这次
-        # 申请就被当成普通叙事顺过去，玩家点的那一下等于没发生。planner 的
-        # player_check_request 仍作为「玩家直接打字申请」的兜底。
-        stashed_check = _stashed_check_request(turn, acting.id)
+        # 玩家直接打字申请检定：planner 从自由文本里识别出来后，仍走确定性检定裁定。
+        # 此时队友已经行动过，所以不再重复跑队友；战斗宣言不走此路。
         requested_skill = (stashed_check or (plan.player_check_request if plan else "")).strip()
         if (
             requested_skill and player_text
@@ -1075,71 +1287,12 @@ async def run_chat_generation(session_id: str) -> None:
                 requested_check=(acting, requested_skill),
                 focus_member=acting.name,
                 split_aware=True,
-                # 暂存式申请：这一轮里还有玩家的台词与行动，队友得像常规回合那样接话——
-                # 否则「说一句 + 顺手查一下」会让队友从申请一路哑到投骰结果之后（这条路和
-                # 投骰续写都不跑队友回合）。打字申请的老路径维持原样，不跑队友。
-                then_team_turn=ai_teammates if stashed_check else None,
+                then_team_turn=None,
             )
             return
 
-        # 玩家输入后：先跑一轮 AI 队友自动响应（仅 AI 席、仅一轮、不自触发），再交 KP 收束。
-        # 队友暗骰（心理学等）的真实结果收集到 team_blind，注入本回合 KP 上下文而不落库/广播。
-        team_blind: list[str] = []
-        # 记下队友开口前的进度线，之后据此只看「队友这一轮新产生的事件」。
-        pre_seq = max((e.sequence_num or 0 for e in pre_events), default=0)
-        if ai_teammates:
-            t_team = time.monotonic(); u_team = usage_tracker.snapshot()
-            async for chunk in _run_team_turn(
-                # 队友走**主模型**：他们的产出是直接摆在玩家面前的台词与行动，和 KP 叙事一样
-                # 吃文笔与分寸感，不是 planner 那种「产结构、玩家看不到」的副任务。快模型
-                # （通常关思考、档次也更低）演出来明显发木，同桌感立刻塌掉。慢一点也认。
-                db, session_id, game_session, module, player_char, ai_teammates, get_llm(),
-                blind_results=team_blind,
-                team_guidance=_team_guidance_from_plan(plan),
-            ):
-                room_hub.broadcast(session_id, chunk)
-            logger.info(
-                "耗时|队友回合 %.1fs（%d 人，%s）session=%s",
-                time.monotonic() - t_team, len(ai_teammates),
-                usage_tracker.fmt(usage_tracker.delta(u_team)), session_id,
-            )
-
-        events = session_service.get_session_events(db, session_id)
-        # 队友行动可能补充真实移动、恐怖见闻或新的行动事实；回合起点的 plan 只用于
-        # 队友导演提示，不能继续作为最终副作用裁定。重新规划后的结果才交给 KP 与守卫。
         generation_plan = plan
-        if ai_teammates and _team_turn_changed_premises(events, ai_teammates, pre_seq):
-            t_post = time.monotonic(); u_post = usage_tracker.snapshot()
-            db.refresh(game_session)
-            post_rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
-            post_plan_messages = turn_planner.build_turn_plan_messages(
-                game_session, module, player_char, events,
-                teammates=party_others,
-                rules_lookup_enabled=post_rules_enabled,
-                rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
-                rule_options_block=rule_options_service.context_block(db, game_session),
-            )
-            post_plan = await turn_planner.run_turn_planner(fast_llm, post_plan_messages)
-            # 有 AI 队友的局，planner 一个回合要跑**两次**（队友行动会改变裁定前提）。
-            # 这是队友局比单人局明显慢的主因之一，必须单独计时才看得见。
-            logger.info(
-                "耗时|二次 planner %.1fs（%s）session=%s",
-                time.monotonic() - t_post, usage_tracker.fmt(usage_tracker.delta(u_post)), session_id,
-            )
-            if post_plan is not None:
-                generation_plan = post_plan
-                planned_effects.enforce_plan_item_locations(
-                    generation_plan, module, game_session.current_scene_id,
-                )
-                _record_clue_ledger_from_plan(
-                    db, game_session, generation_plan, events, player_char, party_others,
-                    module=module,
-                )
-                _settle_plan_ending(db, session_id, game_session, module, generation_plan)
-        elif ai_teammates:
-            logger.info(
-                "耗时|二次 planner 已跳过（队友本轮只有对白）session=%s", session_id,
-            )
+
         t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
         await _run_generation(
             db, session_id, game_session, module, player_char, events,
@@ -1380,6 +1533,9 @@ async def _run_kp_turn_tool_loop(
             party_names=party_names,
             event_order=event_order,
             masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_dialogue_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             if hold:
                 held.append(chunk)
@@ -1458,13 +1614,23 @@ async def _run_kp_turn(
             scene_groups, focus_member, user_prompt, requested_check,
         )
         group_prompts = {focus_label: user_prompt} if focus_label else None
-        commands_text = await _run_split_narrations(
-            db, session_id, game_session, module, player_char, events, party_others,
-            kp, llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
-            scene_groups, location_guard=location_guard,
-            group_prompts=group_prompts,
-            default_prompt=SPLIT_FOCUS_PROMPT,
-        )
+        if _tool_loop_active(llm):
+            await _run_split_narrations_tool_loop(
+                db, session_id, game_session, module, player_char, events, party_others,
+                llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
+                scene_groups, location_guard=location_guard,
+                group_prompts=group_prompts,
+                default_prompt=SPLIT_FOCUS_PROMPT,
+            )
+            commands_text = ""
+        else:
+            commands_text = await _run_split_narrations(
+                db, session_id, game_session, module, player_char, events, party_others,
+                kp, llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
+                scene_groups, location_guard=location_guard,
+                group_prompts=group_prompts,
+                default_prompt=SPLIT_FOCUS_PROMPT,
+            )
     else:
         module_rag_enabled = getattr(module, "rag_status", "") == "ready"
         party_ids = {player_char.id} | {t.id for t in (party_others or [])}
@@ -1505,6 +1671,9 @@ async def _run_kp_turn(
                 async for chunk in _stream_narration_filtered(
                     kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
                     masker=npc_identity.build_masker(db, session_id, module),
+                    npc_guard=_npc_dialogue_guard(
+                        db, session_id, game_session, module, llm, player_char,
+                    ),
                 ):
                     if hold:
                         held.append(chunk)
@@ -2353,6 +2522,9 @@ async def _run_epilogue_generation(session_id: str) -> None:
             async for chunk in _stream_narration_filtered(
                 kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
                 masker=npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, kp, player_char,
+                ),
             ):
                 room_hub.broadcast(session_id, chunk)
         except asyncio.CancelledError:

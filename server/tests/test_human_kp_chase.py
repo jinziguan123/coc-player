@@ -61,6 +61,27 @@ def test_start_chase_rejects_bad_setup(tmp_path):
         _act(db, session, module, "start_chase", {"pursuer": "守门人"})
 
 
+def test_start_chase_accepts_prefixed_refs_and_multiple_pursuers(tmp_path):
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+
+    chunks, result = _act(db, session, module, "start_chase", {
+        "quarries": f"character:{hero.id}",
+        "pursuers": "guard,守门人,猎犬",
+        "skill": "运动",
+    })
+
+    state = chase_service.get_chase(db.get(GameSession, session.id))
+    assert [item["name"] for item in state["quarries"]] == ["调查员"]
+    assert [item["name"] for item in state["pursuers"]] == ["守门人", "猎犬"]
+    # 代表追兵从两名里按 MOV 取最快，而不是只认第一个
+    assert state["pursuer"]["name"] in ("守门人", "猎犬")
+    wire = next(c.as_wire() for c in chunks if c.as_wire().get("type") == "chase_start")
+    assert wire["metadata"]["quarries"] == ["调查员"]
+    assert wire["metadata"]["pursuers"] == ["守门人", "猎犬"]
+    assert "调查员" in result and "猎犬" in result
+
+
 def test_chase_round_moves_gap_and_reports_hazard(tmp_path, monkeypatch):
     db = _db(tmp_path)()
     module, _hero, session = _seed(db)

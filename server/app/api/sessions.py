@@ -10,6 +10,7 @@ from app.api.deps import (
     player_token,
     require_session_actor,
     require_session_host,
+    require_session_kp,
     require_session_manager,
     require_session_ooc_actor,
     require_session_token_actor,
@@ -66,6 +67,16 @@ def _player_world_state(ws: dict | None) -> dict:
     elif ending:
         out["ending_reached"] = ending
     return out
+
+
+def _require_kp_or_host(db: Session, session_id: str, token: str | None):
+    """诊断接口：房主或真人 KP 席可读；AI KP 会话由房主读。"""
+    try:
+        return require_session_host(db, session_id, token)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        return require_session_kp(db, session_id, token)
 
 
 def _owns_kp_seat(session, token: str | None) -> bool:
@@ -808,6 +819,40 @@ def cancel_end_module_vote(
         raise HTTPException(403, str(e)) from e
     room_hub.broadcast(session_id, _make_chunk("end_vote", metadata={"end_vote": vote}))
     return {"vote": vote}
+
+
+@router.get("/{session_id}/intent-history")
+def get_intent_history(
+    session_id: str,
+    limit: int = Query(100, ge=1, le=200),
+    source: str = Query("", max_length=16),
+    actor: str = Query("", max_length=128),
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """KP 面板的 NPC/战斗动作意图历史；仅房主可见，可按来源/角色筛选。"""
+    _require_kp_or_host(db, session_id, token)
+    from app.services import world_intent
+
+    return {
+        "items": world_intent.list_for_session(
+            db, session_id, limit=limit, source=source, actor=actor,
+        )
+    }
+
+
+@router.get("/{session_id}/agent-traces")
+def get_agent_traces(
+    session_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """KP 面板的 Agent 调用轨迹；仅房主可见。"""
+    _require_kp_or_host(db, session_id, token)
+    from app.services.agent_trace import list_for_session
+
+    return {"items": list_for_session(db, session_id, limit=limit)}
 
 
 @router.get("/{session_id}/events")

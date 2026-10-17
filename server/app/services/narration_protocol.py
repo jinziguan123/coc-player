@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 
+from app.services.event_protocol import make_chunk
 from app.services.narration_scanner import NarrationScanner, looks_like_speech
 from app.services.narration_speakers import (
     is_party_speaker,
@@ -26,6 +28,8 @@ _is_party_speaker = is_party_speaker
 _strip_speaker_prefix = strip_speaker_prefix
 _narr_quote_span = narr_quote_span
 _looks_like_speech = looks_like_speech
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "filter_narration_stream",
@@ -44,6 +48,7 @@ async def filter_narration_stream(
     shown_dialogues: list[str] | None = None,
     prior_narration: str = "",
     masker: Callable[..., str] | None = None,
+    npc_guard=None,
 ) -> AsyncIterator[str]:
     """流式输出 KP 旁白，并把 NPC 台词抽成对话气泡。
 
@@ -78,6 +83,67 @@ async def filter_narration_stream(
     玩家还没认出来的 NPC 显示「陌生人」「不明存在」之类，与 say() 工具那条出口同一口径。
     不给则照旧署规范名。
     """
+    def _update_marks(old_shown: str, old_text: str, new_shown: str, new_text: str) -> None:
+        marks = result[3] if len(result) > 3 else []
+        for i in range(len(marks) - 1, -1, -1):
+            off, shown, text = marks[i]
+            if shown == old_shown and text == old_text:
+                marks[i] = (off, new_shown, new_text)
+                break
+        extracted = result[2]
+        for i in range(len(extracted) - 1, -1, -1):
+            shown, text = extracted[i]
+            if shown == old_shown and text == old_text:
+                extracted[i] = (new_shown, new_text)
+                break
+
+    def _drop_marks(old_shown: str, old_text: str) -> None:
+        marks = result[3] if len(result) > 3 else []
+        for i in range(len(marks) - 1, -1, -1):
+            _off, shown, text = marks[i]
+            if shown == old_shown and text == old_text:
+                del marks[i]
+                break
+        extracted = result[2]
+        for i in range(len(extracted) - 1, -1, -1):
+            shown, text = extracted[i]
+            if shown == old_shown and text == old_text:
+                del extracted[i]
+                break
+
+    async def _emit(chunk):
+        meta = dict(chunk.metadata or {})
+        speaker = meta.pop("_speaker", None)
+        clean_meta = meta or None
+        if npc_guard is not None and chunk.type == "npc_dialogue" and speaker:
+            npc_id = npc_guard.named_id(speaker)
+            if npc_id:
+                try:
+                    rewritten = await npc_guard.rewrite(speaker, chunk.content)
+                except Exception:
+                    logger.exception("旧 SAY 路径 NPC 改写失败，丢弃该句: speaker=%s", speaker)
+                    _drop_marks(chunk.actor_name or "", chunk.content)
+                    return
+                if not rewritten:
+                    _drop_marks(chunk.actor_name or "", chunk.content)
+                    return
+                shown, line = rewritten
+                _update_marks(chunk.actor_name or "", chunk.content, shown, line)
+                cleaned = make_chunk(
+                    "npc_dialogue", line, actor_name=shown, metadata=clean_meta,
+                )
+                yield cleaned
+                return
+        if clean_meta != (chunk.metadata or None):
+            cleaned = make_chunk(
+                chunk.type, chunk.content, actor_name=chunk.actor_name,
+                metadata=clean_meta, event_id=chunk.id, actor_id=chunk.actor_id,
+                seq=chunk.seq,
+            )
+            yield cleaned
+            return
+        yield chunk
+
     scanner = NarrationScanner(
         result, npcs=npcs, group_label=group_label, guess_speakers=guess_speakers,
         party_names=party_names, shown_dialogues=shown_dialogues,
@@ -101,22 +167,26 @@ async def filter_narration_stream(
         for ch in token:
             used += 1
             for chunk in scanner.feed(ch):
-                yield chunk
+                async for out in _emit(chunk):
+                    yield out
             if scanner.terminated:
                 break
         consumed.append(token[:used])   # 未终止时 used == len(token)，即整块
 
         if scanner.terminated:
             for chunk in scanner.flush_on_terminate():
-                yield chunk
+                async for out in _emit(chunk):
+                    yield out
             break
 
         # token 边界：把已成段或过长的旁白切出去，让前端尽早看到字
         for chunk in scanner.flush_boundaries():
-            yield chunk
+            async for out in _emit(chunk):
+                yield out
 
     if not scanner.terminated:
         for chunk in scanner.finish():
-            yield chunk
+            async for out in _emit(chunk):
+                yield out
 
     scanner.write_result("".join(consumed))

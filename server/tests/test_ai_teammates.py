@@ -96,6 +96,181 @@ def test_team_turn_runs_once_per_teammate(db_factory, monkeypatch):
     assert sum('"npc_dialogue"' in c for c in chunks) == 2
 
 
+def test_team_dependency_on_lock_drops_stale_enter(db_factory, monkeypatch):
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    a, b = teammates
+
+    async def fake_decide(self, messages):
+        if self.character_id == a.id:
+            return '{"action":"act","content":"我把门反锁。","target":"门","verb":"lock"}'
+        return (
+            '{"action":"act","content":"我推门进去。","target":"门","verb":"enter",'
+            '"depends_on":["阿尔法"]}'
+        )
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert [e.actor_id for e in actions] == [a.id]
+
+
+def test_team_depends_on_commits_prerequisite_first(db_factory, monkeypatch):
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    a, b = teammates
+
+    async def fake_decide(self, messages):
+        if self.character_id == a.id:
+            return '{"action":"act","content":"我打开门。","target":"门","verb":"open"}'
+        return (
+            '{"action":"act","content":"我跟着走进去。","target":"门","verb":"enter",'
+            '"depends_on":["阿尔法"]}'
+        )
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert [e.actor_id for e in actions] == [a.id, b.id]
+
+
+def test_team_action_blocked_by_previous_locked_state(db_factory, monkeypatch):
+    """上一轮门已锁：本轮队友再执行 open 会被对象状态前置检查拦下。"""
+    from app.services import intent_ledger
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    session.world_state = intent_ledger.record({}, "门", "npc", "lock", 1)
+    db.commit()
+
+    async def fake_decide(self, messages):
+        return '{"action":"act","content":"我推门进去。","target":"门","verb":"open"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert actions == []
+
+
+def test_team_intent_resolver_drops_same_target_conflict(db_factory, monkeypatch):
+    """两个队友同时改同一扇门：后完成者按目标冲突丢弃，只落一条行动。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+
+    async def fake_decide(self, messages):
+        if self.character_id == teammates[0].id:
+            return '{"action":"act","content":"我推开那扇门查看里面。","target":"门"}'
+        return '{"action":"act","content":"我伸手把门反锁，不让任何人进出。","target":"门"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert len(actions) == 1
+
+
+def test_team_conflict_guard_suppresses_duplicate_long_action(db_factory, monkeypatch):
+    """两个队友并发给出几乎相同的长台词时，只保留先提交的一条，后一条按 silent 处理。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    line = "我觉得这扇门后面有东西，先别急着推开，等我检查一下门缝。"
+
+    async def fake_decide(self, messages):
+        return '{"action":"speak","content":"%s"}' % line
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    dialogues = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "dialogue" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert len(dialogues) == 1
+
+
+def test_team_relevance_gate_skips_unaddressed_separated_member(db_factory, monkeypatch):
+    """玩家明确点名 A 时，分处另一场景、且本场景没有新事件的 B 不再白跑一次主模型。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    module.scenes = [
+        {"id": "scene_a", "title": "书房", "keywords": []},
+        {"id": "scene_b", "title": "地下室", "keywords": []},
+    ]
+    session.current_scene_id = "scene_a"
+    db.commit()
+    session_service.set_char_location(db, session.id, hero.id, "scene_a")
+    session_service.set_char_location(db, session.id, teammates[0].id, "scene_a")
+    session_service.set_char_location(db, session.id, teammates[1].id, "scene_b")
+    session_service.add_event(
+        db, session.id, "dialogue", "阿尔法，你来看看这页。",
+        actor_id=hero.id, actor_name=hero.name,
+        metadata={"scene_id": "scene_a"},
+    )
+    called = []
+
+    async def fake_decide(self, messages):
+        called.append(self.character_id)
+        return '{"action":"speak","content":"我看看。"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    assert called == [teammates[0].id]
+
+
+def test_team_turn_times_out_slowest_member(db_factory, monkeypatch):
+    """一个队友卡住时，整轮按上限收束，不让慢请求拖住所有队友与 KP。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    slow = teammates[1]
+
+    async def fake_decide(self, messages):
+        if self.character_id == slow.id:
+            await asyncio.sleep(1.0)
+            return '{"action":"speak","content":"我会晚一点。"}'
+        return '{"action":"speak","content":"我先说。"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    monkeypatch.setattr(team_turn_service, "TEAM_AGENT_TIMEOUT_SECONDS", 0.05)
+
+    async def run():
+        started = asyncio.get_running_loop().time()
+        chunks = await _collect(chat_service._run_team_turn(
+            db, session.id, session, module, hero, teammates, llm=None,
+        ))
+        return chunks, asyncio.get_running_loop().time() - started
+
+    chunks, elapsed = asyncio.run(run())
+    assert elapsed < 0.8
+    assert sum('"npc_dialogue"' in c for c in chunks) == 1
+    dialogues = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "dialogue" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert len(dialogues) == 1
+
+
 def test_team_turn_normalizes_self_reference_to_first_person(db_factory, monkeypatch):
     """队友输出明显的自称第三人称时，事件与私有记忆统一保存为第一人称。"""
     db = db_factory()
@@ -526,21 +701,31 @@ def test_parse_team_decision():
         "content": "查看",
         "skill": "",
         "target": "",
+        "verb": "",
+        "depends_on": [],
     }
     assert chat_service._parse_team_decision("前缀 {\"action\":\"speak\",\"content\":\"嗨\"} 后缀") == {
         "action": "speak",
         "content": "嗨",
         "skill": "",
         "target": "",
+        "verb": "",
+        "depends_on": [],
     }
     # check 行动带 skill
     assert chat_service._parse_team_decision(
         '{"action":"check","content":"我辨认铭文","skill":"考古学"}'
-    ) == {"action": "check", "content": "我辨认铭文", "skill": "考古学", "target": ""}
+    ) == {
+        "action": "check", "content": "我辨认铭文", "skill": "考古学", "target": "",
+        "verb": "", "depends_on": [],
+    }
     # travel 行动带 target
     assert chat_service._parse_team_decision(
         '{"action":"travel","content":"我去图书馆","target":"中央图书馆"}'
-    ) == {"action": "travel", "content": "我去图书馆", "skill": "", "target": "中央图书馆"}
+    ) == {
+        "action": "travel", "content": "我去图书馆", "skill": "", "target": "中央图书馆",
+        "verb": "", "depends_on": [],
+    }
     assert chat_service._parse_team_decision("坏数据") is None
     assert chat_service._parse_team_decision('{"action":"unknown","content":"x"}') is None
 

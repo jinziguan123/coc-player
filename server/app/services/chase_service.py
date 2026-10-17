@@ -77,14 +77,43 @@ def _pursuer_from_npc(npc: dict, rs: Ruleset | None = None) -> dict:
             "skills": npc.get("skills") or {}, "base_attributes": attrs, "system_data": {}}
 
 
+def _mov(item: dict) -> int:
+    """MOV 缺省 8（与 _quarry_from_char / _pursuer_from_npc 一致）。"""
+    value = item.get("mov")
+    return int(value) if isinstance(value, (int, float)) and value > 0 else 8
+
+
+def _lead_quarry(quarries: list[dict]) -> dict:
+    """群体追逐的代表：最慢的逃者。距离轨只画一条，必须按最不利的人算。"""
+    return min(quarries, key=_mov)
+
+
+def _lead_pursuer(pursuers: list[dict]) -> dict:
+    """群体追逐的代表：最快的追兵。"""
+    return max(pursuers, key=_mov)
+
+
 def start_chase(db: Session, session_id: str, quarry: dict, pursuer: dict,
                 *, skill: str = "运动", escape_at: int = 5, caught_at: int = -3,
-                trigger: str = "", start_gap: int = 0) -> tuple[dict, list[str]]:
-    """建立追逐态：gap 从 start_gap 起（缺省 0），玩家逃、pursuer 追。返回 (state, chunks)。"""
+                trigger: str = "", start_gap: int = 0,
+                quarries: list[dict] | None = None,
+                pursuers: list[dict] | None = None) -> tuple[dict, list[str]]:
+    """建立追逐态：gap 从 start_gap 起（缺省 0），逃方对追方。返回 (state, chunks)。
+
+    兼容单目标旧调用；真人 KP 可一次带入多名逃者 / 追兵。距离轨仍只有一条：
+    用最慢逃者与最快追兵作代表，其余人记在 state 的 quarries / pursuers 里供 UI 展示。
+    """
+    qs = [item for item in (quarries or [quarry]) if isinstance(item, dict) and item]
+    ps = [item for item in (pursuers or [pursuer]) if isinstance(item, dict) and item]
+    if not qs:
+        raise ValueError("至少需要一名逃方")
+    if not ps:
+        raise ValueError("至少需要一名追方")
     state = {
         "active": True, "round": 0, "gap": start_gap, "skill": skill,
         "escape_at": escape_at, "caught_at": caught_at,
-        "quarry": quarry, "pursuer": pursuer, "trigger": trigger,
+        "quarry": _lead_quarry(qs), "pursuer": _lead_pursuer(ps),
+        "quarries": qs, "pursuers": ps, "trigger": trigger,
     }
     _save(db, session_id, state)
     return state, [_chunk("chase_start", trigger or "追逐开始！", metadata=_meta(state))]
@@ -94,9 +123,13 @@ def _meta(state: dict) -> dict:
     """广播给全桌的追逐态。比拼技能与双方 MOV 是桌面公开信息（谁快谁慢大家都看得见），
     技能**数值**不放——那是 NPC 的数据，玩家不该从界面上读到。"""
     q, p = state["quarry"], state["pursuer"]
+    quarries = state.get("quarries") or [q]
+    pursuers = state.get("pursuers") or [p]
     return {"round": state["round"], "gap": state["gap"],
             "escape_at": state["escape_at"], "caught_at": state["caught_at"],
             "quarry": q["name"], "pursuer": p["name"],
+            "quarries": [item.get("name") for item in quarries],
+            "pursuers": [item.get("name") for item in pursuers],
             "skill": state.get("skill") or "运动",
             "quarry_mov": q.get("mov"), "pursuer_mov": p.get("mov")}
 
@@ -109,6 +142,9 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
     if not state:
         raise ValueError("当前不在追逐中")
     q, p = state["quarry"], state["pursuer"]
+    quarries = state.get("quarries") or [q]
+    pursuers = state.get("pursuers") or [p]
+    group = len(quarries) > 1 or len(pursuers) > 1
     rs = rule_options_service.ruleset(db, session)
     res = rs.chase.resolve_chase_round(
         _char_data(q), _char_data(p), skill=state["skill"],
@@ -119,12 +155,14 @@ async def resolve_chase_round(db: Session, session_id: str, action: dict,
     state["gap"] += res["gap_delta"]
 
     chunks: list[str] = []
-    line = (f"{q['name']} {res['quarry_check'].description} / "
-            f"{p['name']} {res['pursuer_check'].description} → 距离 {'+' if res['gap_delta']>=0 else ''}{res['gap_delta']}"
+    q_label = "、".join(str(item.get("name") or "逃方") for item in quarries) if group else q["name"]
+    p_label = "、".join(str(item.get("name") or "追兵") for item in pursuers) if group else p["name"]
+    line = (f"{q_label} {res['quarry_check'].description} / "
+            f"{p_label} {res['pursuer_check'].description} → 距离 {'+' if res['gap_delta']>=0 else ''}{res['gap_delta']}"
             f"（当前 {state['gap']}）")
     hz = res.get("hazard")
     if hz:
-        who = q["name"] if hz["who"] == "quarry" else p["name"]
+        who = ("逃方" if group else q["name"]) if hz["who"] == "quarry" else ("追方" if group else p["name"])
         line += f"；障碍：{who} {hz['check'].description}{'' if hz['passed'] else '，受阻'}"
     ev = session_service.add_event(db, session_id, "dice", line, actor_name="追逐")
     # 实时广播与落库保持同一个 actor：追逐台的逐轮记录按它筛，缺了就只有刷新后才看得到

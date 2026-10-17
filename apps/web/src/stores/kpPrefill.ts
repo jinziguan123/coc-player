@@ -24,6 +24,10 @@ interface KpPrefillState {
    *  待办台在写作台里，同样是两棵组件树——借这个 store 把「该重拉了」递过去。 */
   deskTick: number
   bumpDesk: () => void
+  /** KP 动作完成信号：动作可能起/停战斗、追逐，页面据此重拉 /sync 权威快照。
+   *  实时广播会更新 HUD，但断线/事件丢失时不能只靠那一条 chase_start 才亮。 */
+  syncTick: number
+  bumpSync: () => void
 }
 
 export const useKpPrefill = create<KpPrefillState>((set) => ({
@@ -34,4 +38,6 @@ export const useKpPrefill = create<KpPrefillState>((set) => ({
   consume: () => set({ request: null }),
   deskTick: 0,
   bumpDesk: () => set((s) => ({ deskTick: s.deskTick + 1 })),
+  syncTick: 0,
+  bumpSync: () => set((s) => ({ syncTick: s.syncTick + 1 })),
 }))

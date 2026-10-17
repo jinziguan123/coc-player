@@ -9,8 +9,11 @@ export interface ChaseState {
   gap: number
   escape_at: number
   caught_at: number
-  quarry: string    // 逃方
-  pursuer: string   // 追方
+  quarry: string    // 代表逃方（多人时最慢的那位）
+  pursuer: string   // 代表追方（多人时最快的那位）
+  /** 群体追逐的完整名单；旧后端 / 单人追逐不带 */
+  quarries?: string[]
+  pursuers?: string[]
   skill?: string        // 比拼技能（缺省「运动」）
   quarry_mov?: number
   pursuer_mov?: number
@@ -48,8 +51,12 @@ export function ChasePanel({ chase, sessionId }: { chase: ChaseState; sessionId:
 
       {/* 距离轨：追方在追赶侧（危险），逃方在领先侧（脱身）。 */}
       <div className="flex items-center justify-between text-[10px] mb-1">
-        <span className="truncate" style={{ color: 'var(--color-danger)' }}>{chase.pursuer}</span>
-        <span className="truncate" style={{ color: 'var(--color-accent)' }}>{chase.quarry}</span>
+        <span className="truncate" title={(chase.pursuers?.length ? chase.pursuers : [chase.pursuer]).join('、')} style={{ color: 'var(--color-danger)' }}>
+          {(chase.pursuers?.length ? chase.pursuers : [chase.pursuer]).join('、')}
+        </span>
+        <span className="truncate" title={(chase.quarries?.length ? chase.quarries : [chase.quarry]).join('、')} style={{ color: 'var(--color-accent)' }}>
+          {(chase.quarries?.length ? chase.quarries : [chase.quarry]).join('、')}
+        </span>
       </div>
       <div className="relative h-2 rounded-full" style={{ background: 'var(--color-input-bg)' }}>
         {/* 已拉开距离的填充（从追赶侧起） */}

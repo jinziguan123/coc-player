@@ -51,4 +51,16 @@ describe('实时状态解析', () => {
     expect(parseChaseState(value)).toEqual(value)
     expect(parseChaseState({ round: 1, gap: 2 })).toBeNull()
   })
+
+  it('群体追逐带上完整名单；没有名单时不给旧态补字段', () => {
+    const value = {
+      round: 2, gap: 3, escape_at: 6, caught_at: -2,
+      quarry: '调查员', pursuer: '猎犬',
+      quarries: ['调查员', '记者'], pursuers: ['猎犬', '守门人'],
+    }
+    expect(parseChaseState(value)?.quarries).toEqual(['调查员', '记者'])
+    expect(parseChaseState(value)?.pursuers).toEqual(['猎犬', '守门人'])
+    const single = parseChaseState({ round: 1, gap: 0, escape_at: 5, caught_at: -3, quarry: '甲', pursuer: '乙' })
+    expect('quarries' in (single ?? {})).toBe(false)
+  })
 })
