@@ -47,6 +47,9 @@ def test_npc_reply_records_target_state(tmp_path, monkeypatch):
     asyncio.run(runtime.reply("butler", "玩家要进门", target="门", verb="lock"))
     from app.services import intent_ledger
     assert intent_ledger.state(runtime.game_session.world_state or {}, "门") == "locked"
+    history = (runtime.game_session.world_state or {}).get("intent_history") or []
+    assert history and history[-1]["source"] == "npc"
+    assert history[-1]["verb"] == "lock"
 
 
 def test_npc_runtime_times_out_and_traces(tmp_path, monkeypatch, caplog):

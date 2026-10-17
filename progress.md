@@ -149,4 +149,7 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 验证更新：后端 2556 passed / 11 skipped、ruff 通过；前端 523 vitest / build 通过。
 - object_registry 改为精确匹配，避免「门」误命中「门厅」；npc_act 增加可选 target/verb，NPC 物理动作成功后可写入 intent_ledger，纯对话不污染状态。
 - 验证更新：后端 2557 passed / 11 skipped、ruff 通过。
+- 新增 WorldIntent：NPC 对话/动作与战斗动作统一记录 actor/source/action/target/verb/observes_seq 到 world_state.intent_history（最多 100 条）。
+- 战斗 intent target 用 char:<id>/npc:<id> 稳定前缀；NPC 物理动作继续同步 intent_ledger。
+- 验证更新：后端 2560 passed / 11 skipped、ruff 通过。
 - 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。已覆盖：旧 [SAY]/分头路径 NPC 边界、分头工具循环、ContextBundle、队友 relevance gate/重复冲突兜底、agent_trace 落表与 KP 面板。后续可继续做语义级冲突裁决和跨 Agent 的完整调度器。

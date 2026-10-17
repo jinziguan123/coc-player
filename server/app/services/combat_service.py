@@ -20,7 +20,7 @@ from app.models.combat_state import CombatState
 from app.models.session import GameSession
 from app.rules import Ruleset, ruleset_for
 from app.ai.provider import model_meta
-from app.services import agent_trace, character_service, npc_state, rule_options_service, session_service, world_memory
+from app.services import agent_trace, character_service, npc_state, rule_options_service, session_service, world_intent, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
@@ -1253,6 +1253,9 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             action = _validate_npc_action(state, actor, raw_action, rs=rs)
         if action is None:
             action = rs.combat.heuristic_npc_action(state, actor)
+        world_intent.record(
+            db, session_id, world_intent.from_combat(actor, action, state),
+        )
         atype = action.get("type") or action.get("action")
         # 方格：NPC 想攻击但目标够不着（近战不相邻/超射程/无视线）→ 本回合改为走位接近。
         if atype == "attack" and state.get("grid") and actor.get("pos"):

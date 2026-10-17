@@ -18,7 +18,7 @@ from app.ai.context import build_npc_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import agent_runtime, agent_trace, illustration_service, intent_ledger, npc_identity, npc_state, object_registry, session_service, turn_context, world_memory
+from app.services import agent_runtime, agent_trace, illustration_service, intent_ledger, npc_identity, npc_state, object_registry, session_service, turn_context, world_intent, world_memory
 from app.services.event_protocol import make_chunk as _make_chunk
 
 _attach_npc_portrait = illustration_service._attach_npc_portrait
@@ -125,6 +125,13 @@ class NpcRuntime:
                     ws, canonical, npc_id, verb, event.sequence_num,
                 ),
             )
+        world_intent.record(
+            self.db, self.session_id,
+            world_intent.from_npc(
+                actor_id=npc_id, actor_name=shown_name, target=canonical,
+                verb=verb, content=line, observes_seq=event.sequence_num,
+            ),
+        )
         return chunks, line
 
 

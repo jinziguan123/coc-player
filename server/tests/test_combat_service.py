@@ -775,6 +775,11 @@ def test_key_npc_uses_agent_decision(db_factory):
     assert agent.narrated is False                            # 暂停时不叙述（叙述归 resolve_reaction）
     db.refresh(hero)
     assert hero.system_data["hitPoints"]["current"] == 11     # 暂停期间未结算伤害
+    sess = db.get(GameSession, sid)
+    history = (sess.world_state or {}).get("intent_history") or []
+    assert history and history[-1]["source"] == "combat"
+    assert history[-1]["target"] == f"char:{hero.id}"
+    assert history[-1]["verb"] == "attack"
 
 
 def test_drive_npcs_pauses_when_npc_attacks_human(db_factory):
