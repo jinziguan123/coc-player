@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Send } from 'lucide-react'
 import { GiCrossedSwords, GiSkullCrossedBones } from 'react-icons/gi'
@@ -12,21 +12,39 @@ import type { CombatLogEntry } from './combat/types'
  * 打起来之后 KP 的眼睛在棋盘上，要的只有三样：刚结算了什么、补一句描写、必要时收场。
  * 切场景、手书、解锁地点这类叙事动作这时用不上，摊在下面只是把战场往上挤——
  * 它们收进「更多动作」（展开回完整写作台），打完自动回来。
+ *
+ * text / onTextChange 是给观局台账页的「回复」用的：账页在右页，底条横贯全宽，
+ * 分属两棵组件树。受控时由页面持有草稿，账页只需往草稿里写一句抬头。
  */
-export function KpCombatStrip({ sessionId, log, onExpand }: {
+export function KpCombatStrip({ sessionId, log, onExpand, text: controlledText, onTextChange, focusToken, hideLog = false }: {
   sessionId: string
   log: CombatLogEntry[]
   onExpand: () => void
+  text?: string
+  onTextChange?: (value: string) => void
+  focusToken?: number
+  /** 观局台的结算已经在账页里，底条只留输入，不再重复三条旧日志 */
+  hideLog?: boolean
 }) {
-  const [text, setText] = useState('')
+  const [localText, setLocalText] = useState('')
   const [busy, setBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const text = controlledText !== undefined ? controlledText : localText
+  const setText = (value: string) => {
+    if (onTextChange) onTextChange(value)
+    else setLocalText(value)
+  }
   const recent = log.slice(-3).reverse()
+
+  useEffect(() => {
+    if (focusToken) inputRef.current?.focus()
+  }, [focusToken])
 
   const post = async (action: 'narration' | 'end_combat', payload: Record<string, unknown>, ok: string) => {
     if (busy) return false
     setBusy(true)
     try {
-      await api.post(`/sessions/${sessionId}/kp/action`, { action, payload })
+      await api.post('/sessions/' + sessionId + '/kp/action', { action, payload })
       toast.success(ok)
       return true
     } catch (e) {
@@ -43,15 +61,16 @@ export function KpCombatStrip({ sessionId, log, onExpand }: {
   }
 
   return (
-    <div className="kp-combat-strip">
-      <div className="kp-combat-strip-log" aria-label="最近结算">
+    <div className={hideLog ? 'kp-combat-strip kp-combat-strip--compact' : 'kp-combat-strip'}>
+      {!hideLog && <div className="kp-combat-strip-log" aria-label="最近结算">
         <span className="kp-combat-strip-label"><GiCrossedSwords aria-hidden /> 最近结算</span>
         {recent.length
           ? recent.map((e) => <div key={e.id} className="kp-combat-strip-row" title={e.content}>{e.content}</div>)
           : <div className="kp-combat-strip-row kp-combat-strip-row--idle">还没有结算</div>}
-      </div>
+      </div>}
       <div className="kp-combat-strip-input">
         <input
+          ref={inputRef}
           className="input"
           value={text}
           onChange={(e) => setText(e.target.value)}

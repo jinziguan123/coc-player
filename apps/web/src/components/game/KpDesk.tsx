@@ -9,7 +9,7 @@
  *
  * 数据只经 KP 鉴权的 /kp/desk 读出，不走房间广播——暗投结果在这里，不能进玩家可见路径。
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronRight, Pencil, Undo2, X } from 'lucide-react'
 import { GiCancel, GiRollingDices } from 'react-icons/gi'
@@ -17,24 +17,7 @@ import { api } from '@/api/client'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useKpPrefill } from '@/stores/kpPrefill'
 import { ACTION_LABELS, type KpAction } from './kpActions'
-
-interface PendingCheck {
-  id: string
-  kind: string
-  skill: string
-  difficulty: string
-  actor_name: string
-  reason: string
-  group: boolean
-}
-
-interface CheckRequest {
-  id: string
-  actor_id: string
-  actor_name: string
-  skill: string
-  intent: string
-}
+import { useKpDesk, type KpDeskPendingCheck } from './useKpDesk'
 
 interface LedgerEvent {
   id: string
@@ -49,12 +32,6 @@ interface LedgerEntry {
   action: string
   result: string
   events: LedgerEvent[]
-}
-
-interface Desk {
-  pending_checks: PendingCheck[]
-  check_requests: CheckRequest[]
-  ledger: LedgerEntry[]
 }
 
 const DIFFICULTY: Record<string, string> = { normal: '普通', hard: '困难', extreme: '极难' }
@@ -82,19 +59,13 @@ export function KpDesk({ sessionId, tick, lastResult, onClearResult, onAdopt }: 
   onAdopt: (action: KpAction, fields: Record<string, string | undefined>) => void
 }) {
   const roomTick = useKpPrefill((s) => s.deskTick)
-  const [desk, setDesk] = useState<Desk | null>(null)
   const [ledgerOpen, setLedgerOpen] = useState(false)
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
   const [busy, setBusy] = useState('')
   const [reload, setReload] = useState(0)
+  // 与观局台账页共用一个取数口；tick 由面板动作、房间事件和本地重试共同推进。
+  const desk = useKpDesk(sessionId, tick + roomTick + reload)
 
-  useEffect(() => {
-    let alive = true
-    void api.get<Desk>(`/sessions/${sessionId}/kp/desk`)
-      .then((d) => { if (alive) setDesk(d) })
-      .catch(() => { /* 待办台拉不到不挡写作台 */ })
-    return () => { alive = false }
-  }, [sessionId, tick, roomTick, reload])
 
   const act = async (key: string, action: string, payload: Record<string, unknown>, ok: string) => {
     if (busy) return false
@@ -112,7 +83,7 @@ export function KpDesk({ sessionId, tick, lastResult, onClearResult, onAdopt }: 
     }
   }
 
-  const proxyRoll = async (check: PendingCheck) => {
+  const proxyRoll = async (check: KpDeskPendingCheck) => {
     if (busy) return
     setBusy(`roll:${check.id}`)
     try {
@@ -128,7 +99,7 @@ export function KpDesk({ sessionId, tick, lastResult, onClearResult, onAdopt }: 
 
   const pending = desk?.pending_checks || []
   const requests = desk?.check_requests || []
-  const ledger = desk?.ledger || []
+  const ledger = (desk?.ledger || []) as LedgerEntry[]
   if (!lastResult && !pending.length && !requests.length && !ledger.length) return null
 
   return (

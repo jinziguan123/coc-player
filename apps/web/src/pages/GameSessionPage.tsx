@@ -55,11 +55,12 @@ import { loadHandledSuggestions, markSuggestionHandled } from '../lib/travelSugg
 import { SessionStyleModal } from '../components/game/SessionStyleModal'
 import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntry, type CombatResultView } from '../components/game/CombatStage'
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
-import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
-import { KpPartyMonitor } from '../components/game/KpPartyMonitor'
-import { KpCombatStrip } from '../components/game/KpCombatStrip'
-import { KpEnemyControl } from '../components/game/KpEnemyControl'
+import { KpConsoleDock } from '../components/game/KpConsoleDock'
+import { KpCombatSpread } from '../components/game/KpCombatSpread'
+import { KpDeskRail } from '../components/game/KpDeskRail'
+import { useKpCombatActions } from '../components/game/useKpCombatActions'
+import { useMinWidth } from '@/lib/useMinWidth'
 import { KpChaseStage } from '../components/game/KpChaseStage'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
@@ -533,6 +534,8 @@ export function GameSessionPage() {
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
+  // 观局台是「左先攻梯 + 中棋盘 + 右账页」三栏；窄于此仍走原战术台。
+  const spreadViewport = useMinWidth(1280)
   // —— 真人 KP 值班台：主台在「叙事 / 战术」间切换 ——
   // 原型里开战即切战术台（KP 不该在打起来之后还要自己去按一下），之后仍可手动切回叙事看流。
   const [kpStage, setKpStage] = useState<'narrative' | 'tactical'>('narrative')
@@ -544,6 +547,8 @@ export function GameSessionPage() {
   useEffect(() => { if (!combat) setKpFullDesk(false) }, [combat])
   // KP 席由 kpStage 决定沉浸战场；玩家席沿用 battleLayout 偏好。
   const immersiveOn = !!combat && (isKp ? kpStage === 'tactical' : battleLayout === 'immersive') && wideViewport
+  // 真人 KP 的观局台：战斗中、战术主台、宽屏三者同时成立时启用。追逐台与玩家席走原布局。
+  const kpSpreadOn = isKp && !!combat && immersiveOn && spreadViewport && !chase
   // 聊天侧栏折叠：折叠后战场更大；期间到达的新消息计入未读徽标（展开即清）。
   const [chatCollapsed, setChatCollapsed] = useState(false)
   // KP 控制台侧栏折叠：跨会话记住偏好（KP 常年开着，玩家看不到这一栏）
@@ -638,6 +643,11 @@ export function GameSessionPage() {
       api.get(`/sessions/${sessionId}`).then((s) => setCurrentSession(s as never)).catch(() => {})
     }, 400)
   }, [sessionId, setCurrentSession])
+
+  const kpActions = useKpCombatActions({
+    combat, party: kpParty, setKpFullDesk, setKpCollapsed,
+    onRefresh: () => { setRefreshTick((tick) => tick + 1); setKpVitalsTick((tick) => tick + 1); refetchSession() },
+  })
 
   // 沙盘/已知地点刷新（节流）：新地点可能因为一条旁白/一句对话/一张系统卡刚刚解锁，
   // 不必等整轮 done 才重拉 /locations；合并 400ms 内的连续日志事件，只发一次。
@@ -1545,34 +1555,32 @@ export function GameSessionPage() {
       <div className="gsl-stage flex flex-1 min-h-0 gap-4">
       {/* 值班台监控列：真人 KP 席 + 宽视口时左侧常驻全队体征与信号（对应原型 /lab/kp 的左列）。
           玩家与窄屏不渲染——窄屏下体征仍由坞内态势列提供。 */}
-      {desk && (
-        <aside className="kp-desk-rail" aria-label="值班台监控">
-          <section className="kp-desk-section">
-            <KpPartyMonitor party={kpParty} onPrefill={(a, f) => useKpPrefill.getState().ask(a, f)} />
-          </section>
-          <section className="kp-desk-section">
-            <div className="kp-desk-label">信号</div>
-            <div className="flex flex-col gap-1">
-              <div className={`kp-signal ${kpPendingCount ? 'kp-signal--alert' : ''}`}>
-                <span className="kp-dot" />
-                {kpPendingCount ? `${kpPendingCount} 人还没交这一回合` : '本回合没有待办'}
-              </div>
-              <div className={`kp-signal ${combat ? 'kp-signal--alert' : ''}`}>
-                <span className="kp-dot" />
-                {combat ? `战斗中 · 轮到 ${kpTurnName || '—'}` : '未开战'}
-              </div>
-              {kpSanDanger && (
-                <div className="kp-signal kp-signal--alert">
-                  <span className="kp-dot" />有人理智濒临崩溃
-                </div>
-              )}
-            </div>
-          </section>
-        </aside>
+      {desk && !kpSpreadOn && (
+        <KpDeskRail
+          party={kpParty}
+          pendingCount={kpPendingCount}
+          inCombat={!!combat}
+          turnName={kpTurnName || ''}
+          sanDanger={kpSanDanger}
+        />
       )}
+      {/* 观局台：真人 KP 战斗轮的「对开双页」——左先攻梯、中棋盘、右桌边记录。
+          账页把发言/场外/骰果/机械结算折进同一条时间轴，KP 不必再切回叙事看聊天。 */}
+      {kpSpreadOn && combat && (
+        <KpCombatSpread
+          sessionId={currentSession.id} combat={combat} messages={messages} combatLogSince={combatLogSince}
+          party={kpParty} myCharId={myCharId} pendingReaction={pendingReaction} log={combatLog}
+          result={combatResult} myWeapons={myWeapons} battleMap={battleMap} turnState={currentSession.turn_state}
+          sanDanger={kpSanDanger} onCheck={kpActions.openCheck} onReply={kpActions.reply}
+          onOpenWriter={() => { setKpCollapsed(false); setKpFullDesk(true) }} onChanged={kpActions.refresh}
+          onLocateActor={kpActions.locate} locate={kpActions.locateRequest}
+          onToggleLayout={() => setKpStage('narrative')}
+        />
+      )}
+
       {/* 沉浸战斗布局：战斗激活时战场占左侧约 2/3（棋盘居中放大、参战卡环绕、动作区钉底），
           聊天整列收成右侧栏（组件不动、仅收窄），完全可用；战斗结束自动回到单列。 */}
-      {immersiveOn && combat && (
+      {!kpSpreadOn && immersiveOn && combat && (
         <div className="battle-stage-pane flex-1 min-w-0 flex flex-col min-h-0">
           <CombatStage
             combat={combat} myCharId={myCharId} sessionId={currentSession.id}
@@ -2370,33 +2378,14 @@ export function GameSessionPage() {
       )}
       </div>
 
-      {/* KP 控制台：**底部坞**，横贯整个舞台宽度。
-          曾经是右侧一条窄栏，代价是叙事输入框只有不到 300px——而写旁白是 KP 最高频的产出，
-          在那么窄的框里写一段话很难受。挪到底部之后输入框有上千像素，监控列也能在它左边
-          铺开，与舞台上下分工：上面是这一局的样子，下面是你要做的事。
-          值班台形态下监控列与场景速查已上主台，坞里只留写作台（hideSituation）。 */}
-      {/* 战术模式：写作台只剩一条（最近结算 + 一行描写 + 收场），把高度还给战场；
-          「更多动作」展开回完整写作台，打完自动收回 */}
-      {isKp && combat && <KpEnemyControl sessionId={currentSession.id} combat={combat} />}
-      {isKp && !kpCollapsed && desk && immersiveOn && !kpFullDesk && (
-        <aside className="kp-console-dock kp-console-dock--strip flex-shrink-0">
-          <KpCombatStrip sessionId={currentSession.id} log={combatLog} onExpand={() => setKpFullDesk(true)} />
-        </aside>
-      )}
-      {isKp && !kpCollapsed && !(desk && immersiveOn && !kpFullDesk) && (
-        <aside className={`kp-console-dock flex-shrink-0${desk ? ' kp-console-dock--lean' : ''}`}>
-          <HumanKpPanel
-            sessionId={currentSession.id}
-            turnReady={turnState?.ready === true}
-            variant="sidebar"
-            onCollapse={() => (desk && immersiveOn ? setKpFullDesk(false) : setKpCollapsed(true))}
-            hideSituation={desk}
-            inCombat={!!combat}
-            inChase={!!chase}
-            aside={desk ? undefined : <KpSceneBrief places={locations} />}
-          />
-        </aside>
-      )}
+      <KpConsoleDock
+        isKp={isKp} combat={combat} sessionId={currentSession.id} combatLog={combatLog}
+        kpCollapsed={kpCollapsed} kpFullDesk={kpFullDesk} desk={desk} immersiveOn={immersiveOn}
+        inChase={!!chase} turnReady={turnState?.ready === true} locations={locations}
+        stripText={kpActions.draft} stripFocusToken={kpActions.focusToken}
+        hideStripLog={kpSpreadOn} onStripTextChange={kpActions.setDraft} onExpandStrip={() => setKpFullDesk(true)}
+        onCloseFullDesk={() => setKpFullDesk(false)} onCollapseConsole={() => setKpCollapsed(true)}
+      />
     </div>
   )
 }

@@ -533,7 +533,7 @@ export function CombatStage({ combat, myCharId, sessionId, pendingReaction, log,
 
   // B6 折叠战斗日志抽屉。
   const logDrawer = log.length > 0 && (
-        <div className="mt-2 pt-2 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
+        <div className="combat-log-drawer mt-2 pt-2 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
           <button
             onClick={() => setLogOpen((v) => !v)}
             className="flex items-center gap-1.5 text-xs w-full"

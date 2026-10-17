@@ -7372,3 +7372,685 @@ select.input option {
 .rules-books { flex: 1; min-height: 0; overflow: auto; padding-bottom: 6rem; }
 .rules-readonly { max-width: 56rem; margin-bottom: 1rem; padding: 0.6rem 0.85rem; border: 1px solid var(--color-border-strong); border-left: 3px solid var(--color-verdigris, var(--color-accent)); font-size: 0.8125rem; color: var(--color-text-secondary); }
 .rules-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+
+/* =========================================================================
+   真人 KP 战斗观局台（对开双页）
+   左：先攻梯兼队况；中：棋盘（CombatStage 沉浸布局，去掉内部先攻列与行动栏）；
+   中缝：本场轮次；右：桌边账页（聊天 + 场外 + 骰果 + 机械结算 + 待办）。
+   ========================================================================= */
+
+.kp-spread {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.kp-spread-board {
+  min-width: 0;
+  min-height: 0;
+}
+/* 先攻梯已经在外层左缘，棋盘内部不再重复一列 */
+.kp-spread-board .combat-rail { display: none; }
+/* 账页接替了战斗日志抽屉与待办台；抽屉在观局台里是重复信息 */
+.kp-spread-board .combat-log-drawer { display: none; }
+/* 给棋盘多留一点宽，右列只保留焦点面板/换轮廓需要的最小宽度 */
+.kp-spread-board .combat-actions { width: clamp(10.5rem, 15vw, 13.5rem); }
+
+/* ---------------------------------------------------------------- 中缝 */
+.kp-spread-gutter {
+  width: 42px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 12px;
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-bg-primary) 32%, transparent), transparent 35%, transparent 65%, color-mix(in srgb, var(--color-bg-primary) 32%, transparent));
+  box-shadow: inset 10px 0 16px -14px color-mix(in srgb, var(--color-bg-primary) 90%, transparent),
+              inset -10px 0 16px -14px color-mix(in srgb, var(--color-bg-primary) 90%, transparent);
+}
+.kp-spread-gutter-label {
+  writing-mode: vertical-rl;
+  font-size: 9px;
+  letter-spacing: 0.34em;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+.kp-spread-gutter-no {
+  font-family: var(--font-display, var(--font-title));
+  font-size: 19px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--color-text-accent);
+}
+.kp-spread-gutter-sub {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-spread-gutter-rule {
+  flex: 1;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--color-border-strong) 15%, var(--color-border-strong) 85%, transparent);
+}
+.kp-spread-gutter-hint {
+  writing-mode: vertical-rl;
+  font-size: 8px;
+  letter-spacing: 0.3em;
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------- 左缘：先攻梯 */
+.kp-roster {
+  width: 238px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 10px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-bg-secondary) 66%, transparent), transparent 72%);
+}
+.kp-roster-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kp-roster-head-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.kp-roster-kicker {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--color-text-accent);
+}
+.kp-roster-turn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+.kp-roster-turn b { color: var(--color-text-primary); font-weight: 600; }
+.kp-roster-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kp-roster-row {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 7px 7px 7px 6px;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  background: transparent;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.kp-roster-row:hover { background: var(--color-bg-tertiary); }
+.kp-roster-row[data-state="active"] {
+  border-color: var(--color-border);
+  border-left-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 78%, transparent);
+}
+.kp-roster-row[data-state="passed"] { opacity: 0.55; }
+.kp-roster-row[data-state="out"] { opacity: 0.4; }
+.kp-roster-no {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-display, var(--font-title));
+  font-size: 11.5px;
+  line-height: 1;
+}
+.kp-roster-row[data-side="enemy"] .kp-roster-no {
+  color: var(--combat-foe);
+  border-color: color-mix(in srgb, var(--combat-foe) 52%, transparent);
+}
+.kp-roster-row[data-side="ally"] .kp-roster-no {
+  color: var(--color-verdigris);
+  border-color: color-mix(in srgb, var(--color-verdigris) 42%, transparent);
+}
+.kp-roster-row[data-state="active"] .kp-roster-no {
+  color: var(--color-text-accent);
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-primary));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+.kp-roster-row[data-state="next"] .kp-roster-no { border-style: dashed; }
+.kp-roster-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kp-roster-name-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.kp-roster-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-game);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.kp-roster-tag {
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  font-size: 8px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-roster-tag--enemy { color: var(--combat-foe); border-color: color-mix(in srgb, var(--combat-foe) 38%, transparent); }
+.kp-roster-tag--ally { color: var(--color-verdigris); border-color: color-mix(in srgb, var(--color-verdigris) 36%, transparent); }
+.kp-roster-tag--danger { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 42%, transparent); }
+.kp-roster-now {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-text-accent);
+  font-size: 8px;
+  line-height: 1.5;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.kp-roster-next {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-roster-vitals { display: flex; gap: 6px; align-items: flex-end; }
+.kp-roster-vital {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kp-roster-vital-label { display: flex; align-items: baseline; justify-content: space-between; gap: 2px; }
+.kp-roster-vital-label em {
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--color-text-secondary);
+}
+.kp-roster-vital-label b {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 400;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+.kp-roster-vital i {
+  display: block;
+  height: 3px;
+  background: var(--color-danger);
+  opacity: 0.75;
+}
+.kp-roster-vital--san i { background: var(--color-verdigris); }
+.kp-roster-vital-note {
+  flex: 1;
+  align-self: center;
+  font-size: 9px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-roster-conditions { display: flex; flex-wrap: wrap; gap: 3px; }
+.kp-roster-condition {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 3px;
+  border: 1px solid var(--color-border);
+  font-size: 8px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+.kp-roster-signals { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.kp-roster-signal {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border);
+  font-size: 9.5px;
+  color: var(--color-text-secondary);
+}
+.kp-roster-signal--alert {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+  color: var(--color-text-accent);
+}
+.kp-roster-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; animation: kp-desk-pulse 1.8s ease-in-out infinite; }
+.kp-roster-hint {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+  font-size: 9px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------- 右页：桌边账页 */
+.kp-ledger {
+  position: relative;
+  width: 386px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--color-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-bg-secondary) 64%, transparent), transparent 46%),
+    var(--color-bg-secondary);
+}
+.kp-ledger-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px 8px;
+}
+.kp-ledger-head-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.kp-ledger-title {
+  font-family: var(--font-title);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--color-text-primary);
+}
+.kp-ledger-sub { font-size: 10px; line-height: 1.5; color: var(--color-text-secondary); }
+.kp-ledger-live {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: var(--color-text-secondary);
+  opacity: 0.85;
+}
+.kp-ledger-live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-verdigris);
+  flex: none;
+  animation: kp-desk-pulse 2.4s ease-in-out infinite;
+}
+.kp-ledger-tally {
+  margin-left: auto;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-ledger-tally b { font-weight: 400; color: var(--color-text-accent); }
+.kp-ledger-filters {
+  flex: none;
+  display: flex;
+  gap: 3px;
+  padding: 0 12px 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border);
+  scrollbar-width: none;
+}
+.kp-ledger-filters::-webkit-scrollbar { display: none; }
+.kp-ledger-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 23px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.kp-ledger-chip b {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+.kp-ledger-chip:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
+.kp-ledger-chip.is-on {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-tertiary);
+}
+.kp-ledger-chip.is-on b { color: var(--color-text-accent); }
+
+.kp-ledger-todo {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 10px 6px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 36%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+.kp-ledger-todo-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--color-text-accent);
+}
+.kp-ledger-todo-head b { margin-left: auto; font-family: var(--font-mono); font-weight: 400; }
+.kp-ledger-todo-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+}
+.kp-ledger-todo-text { min-width: 0; flex: 1; }
+.kp-ledger-todo-text b { color: var(--color-text-primary); font-weight: 600; }
+.kp-ledger-todo-text em { font-style: normal; color: var(--color-text-secondary); opacity: 0.8; }
+.kp-ledger-act {
+  flex: none;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.kp-ledger-act:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+.kp-ledger-act--primary {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-text-accent);
+}
+.kp-ledger-act--quiet { border-color: transparent; }
+.kp-ledger-act:disabled { opacity: 0.5; cursor: default; }
+
+.kp-ledger-scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 14px 12px;
+  scroll-behavior: smooth;
+}
+.kp-ledger-scroll::-webkit-scrollbar { width: 5px; }
+.kp-ledger-scroll::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+.kp-ledger-roundbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 0 6px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+.kp-ledger-round-no { font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; color: var(--color-text-accent); }
+.kp-ledger-round-state { font-size: 9px; color: var(--color-text-secondary); }
+.kp-ledger-round-count { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--color-text-secondary); }
+.kp-ledger-entry {
+  display: flex;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+}
+.kp-ledger-entry.is-pending { background: color-mix(in srgb, var(--color-accent) 4%, transparent); }
+.kp-ledger-badge {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-display, var(--font-title));
+  font-size: 10.5px;
+  line-height: 1;
+}
+.kp-ledger-badge--player { color: color-mix(in srgb, var(--combat-friend) 78%, var(--color-text-primary)); border-color: color-mix(in srgb, var(--combat-friend) 42%, transparent); }
+.kp-ledger-badge--enemy { color: var(--combat-foe); border-color: color-mix(in srgb, var(--combat-foe) 48%, transparent); }
+.kp-ledger-badge--ally { color: var(--color-verdigris); border-color: color-mix(in srgb, var(--color-verdigris) 42%, transparent); }
+.kp-ledger-badge--roll,
+.kp-ledger-badge--kp { border-style: dashed; color: var(--color-text-secondary); }
+.kp-ledger-entry-body { flex: 1; min-width: 0; }
+.kp-ledger-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 22px;
+}
+.kp-ledger-who {
+  font-family: var(--font-game);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.kp-ledger-role { font-size: 9px; color: var(--color-text-secondary); }
+.kp-ledger-time { font-family: var(--font-mono); font-size: 8.5px; color: var(--color-text-secondary); }
+.kp-ledger-stamp {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--color-border);
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.kp-ledger-stamp--hot {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-text-accent);
+}
+.kp-ledger-stamp--roll { border-color: color-mix(in srgb, var(--color-success) 42%, transparent); color: var(--color-success); }
+.kp-ledger-stamp--muted { border-color: var(--color-border); color: var(--color-text-secondary); }
+.kp-ledger-prose {
+  margin: 4px 0 0;
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1.85;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.kp-ledger-speech {
+  margin: 4px 0 0;
+  padding-left: 9px;
+  border-left: 1px solid var(--color-border-strong);
+  font-family: var(--font-game);
+  font-size: 13px;
+  line-height: 1.72;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.kp-ledger-action {
+  margin: 4px 0 0;
+  font-family: var(--font-game);
+  font-size: 12.5px;
+  line-height: 1.72;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.kp-ledger-ooc {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  opacity: 0.9;
+}
+.kp-ledger-card {
+  margin-top: 4px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-left: 2px solid color-mix(in srgb, var(--color-success) 55%, transparent);
+  background: color-mix(in srgb, var(--color-bg-primary) 34%, transparent);
+}
+.kp-ledger-card--mech { border-left-color: var(--color-border-strong); }
+.kp-ledger-entry.is-check .kp-ledger-card { border-left-color: var(--color-accent); }
+.kp-ledger-card-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+.kp-ledger-card-head b { margin-left: auto; font-weight: 400; color: var(--color-success); }
+.kp-ledger-card-body {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.75;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.kp-ledger-card-note {
+  margin: 6px 0 0;
+  padding-top: 5px;
+  border-top: 1px dashed var(--color-border);
+  font-size: 9.5px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+.kp-ledger-acts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.kp-ledger-empty {
+  padding: 20px 10px;
+  border: 1px dashed var(--color-border);
+  margin-top: 8px;
+  font-size: 10.5px;
+  line-height: 1.8;
+  color: var(--color-text-secondary);
+}
+.kp-ledger-tail {
+  padding: 12px 2px 4px;
+  font-size: 9px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  opacity: 0.65;
+}
+.kp-ledger-new {
+  position: absolute;
+  right: 16px;
+  bottom: 38px;
+  z-index: 4;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-accent);
+  font-size: 10px;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--color-bg-primary) 55%, transparent);
+}
+.kp-ledger-new:hover { border-color: var(--color-accent-hover); color: var(--color-accent-hover); }
+.kp-ledger-foot {
+  flex: none;
+  height: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-top: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-primary) 26%, transparent);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-secondary);
+}
+
+/* 观局台只在宽屏启用；到 1440 以下先让账页窄一档，再把行动列收起，棋盘优先 */
+@media (max-width: 1530px) {
+  .kp-ledger { width: 360px; }
+  .kp-roster { width: 224px; }
+  .kp-spread-gutter { width: 38px; }
+}
+@media (max-width: 1390px) {
+  .kp-ledger { width: 340px; }
+  .kp-roster { width: 212px; }
+  .kp-spread-board .combat-actions { display: none; }
+}
+
+/* CombatStage 的容器查询在窄中段会把行动面板折到棋盘下方；观局台的中段虽然只有
+   800 多像素，但高度更宝贵——强制保持「棋盘 | 行动面板」横排，棋盘优先吃高度。 */
+.kp-spread-board .combat-mid { flex-direction: row; }
+.kp-spread-board .combat-board { order: 2; }
+.kp-spread-board .combat-actions { order: 3; width: clamp(10.5rem, 15vw, 13.5rem); }
+
+/* 观局台的棋盘页不再保留行动面板：KP 的裁定入口在右页账页与底部敌方控制条，
+   棋盘优先吃满整页；「换轮廓」等玩家侧细节不在这一屏的首要任务里。 */
+.kp-spread-board .combat-actions { display: none; }
+
+/* 观局台里的战棋轮廓：换轮廓仍由 KP 点，结果随战斗广播同步全桌。
+   左缘行只在悬停/键盘聚焦时露出小按钮，轮廓面板浮在棋盘上。 */
+.kp-spread { position: relative; }
+.kp-roster-item { position: relative; }
+.kp-roster-figure {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+.kp-roster-item:hover .kp-roster-figure,
+.kp-roster-figure:focus-visible { opacity: 1; }
+.kp-roster-figure:hover { color: var(--color-text-accent); border-color: var(--color-accent); }
+.kp-figure-pop {
+  position: absolute;
+  left: 250px;
+  top: 54px;
+  z-index: 30;
+  width: 280px;
+  box-shadow: 0 16px 40px -14px color-mix(in srgb, var(--color-bg-primary) 75%, transparent);
+}
+.kp-figure-pop .combat-figpick { margin-top: 0; }
