@@ -38,7 +38,6 @@ interface KpCombatSpreadProps {
   onChanged: () => void
   onLocateActor: (name: string) => void
   locate?: { name: string; nonce: number } | null
-  onToggleLayout: () => void
 }
 
 function pendingCheckCount(turnState?: Record<string, unknown> | null): number {
@@ -55,7 +54,7 @@ function pendingCheckCount(turnState?: Record<string, unknown> | null): number {
 export function KpCombatSpread({
   sessionId, combat, messages, combatLogSince, party, myCharId,
   pendingReaction, log, result, myWeapons, battleMap, turnState, sanDanger,
-  onCheck, onReply, onOpenWriter, onChanged, onLocateActor, locate, onToggleLayout,
+  onCheck, onReply, onOpenWriter, onChanged, onLocateActor, locate,
 }: KpCombatSpreadProps) {
   const [figureFor, setFigureFor] = useState<Combatant | null>(null)
 
@@ -92,7 +91,6 @@ export function KpCombatSpread({
           battleMap={battleMap}
           canSetToken
           layout="immersive"
-          onToggleLayout={onToggleLayout}
         />
       </div>
       {/* 轮次尺目前只标注本场当前轮：聊天消息侧还没有逐条的 round 元数据，
@@ -106,13 +104,6 @@ export function KpCombatSpread({
           />
         </div>
       )}
-      <div className="kp-spread-gutter" aria-hidden="true">
-        <span className="kp-spread-gutter-label">本 场 记 录</span>
-        <span className="kp-spread-gutter-no">{'R' + String(combat.round).padStart(2, '0')}</span>
-        <span className="kp-spread-gutter-sub">{'第 ' + combat.round + ' 轮'}</span>
-        <span className="kp-spread-gutter-rule" />
-        <span className="kp-spread-gutter-hint">桌边</span>
-      </div>
       <KpCombatLedger
         sessionId={sessionId}
         messages={messages}

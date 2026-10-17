@@ -65,7 +65,7 @@ import { KpChaseStage } from '../components/game/KpChaseStage'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
 import { Modal, ModalPresence } from '../components/ui/modal'
-import { GiReturnArrow, GiScrollUnfurled, GiTreasureMap, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiRun, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
+import { GiReturnArrow, GiScrollUnfurled, GiTreasureMap, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
@@ -536,17 +536,14 @@ export function GameSessionPage() {
   }, [])
   // 观局台是「左先攻梯 + 中棋盘 + 右账页」三栏；窄于此仍走原战术台。
   const spreadViewport = useMinWidth(1280)
-  // —— 真人 KP 值班台：主台在「叙事 / 战术」间切换 ——
-  // 原型里开战即切战术台（KP 不该在打起来之后还要自己去按一下），之后仍可手动切回叙事看流。
-  const [kpStage, setKpStage] = useState<'narrative' | 'tactical'>('narrative')
-  // 开追逐同理：主台切到追逐台（依赖取「有没有」而不是追逐态本身，免得每轮都把 KP 拽回去）
-  const chaseOn = !!chase
-  useEffect(() => { if (combat || chaseOn) setKpStage('tactical') }, [combat, chaseOn])
+  // —— 真人 KP 值班台：主台跟着局面走，不再手动切「叙事 / 战术」——
+  // 战斗中就是观局台（右页桌边记录已含发言、场外与结算，用不着切回叙事看流），
+  // 追逐中就是追逐台，其余时候是叙事流。少一个开关，也少一种「切错了没看到」。
   // 战术模式下 KP 临时展开完整写作台；每场战斗开始时收回成底条
   const [kpFullDesk, setKpFullDesk] = useState(false)
   useEffect(() => { if (!combat) setKpFullDesk(false) }, [combat])
-  // KP 席由 kpStage 决定沉浸战场；玩家席沿用 battleLayout 偏好。
-  const immersiveOn = !!combat && (isKp ? kpStage === 'tactical' : battleLayout === 'immersive') && wideViewport
+  // KP 席战斗中恒为沉浸战场；玩家席沿用 battleLayout 偏好。
+  const immersiveOn = !!combat && (isKp || battleLayout === 'immersive') && wideViewport
   // 真人 KP 的观局台：战斗中、战术主台、宽屏三者同时成立时启用。追逐台与玩家席走原布局。
   const kpSpreadOn = isKp && !!combat && immersiveOn && spreadViewport && !chase
   // 聊天侧栏折叠：折叠后战场更大；期间到达的新消息计入未读徽标（展开即清）。
@@ -1361,7 +1358,7 @@ export function GameSessionPage() {
   // 玩家席与窄视口维持原布局——监控与场景速查仍由坞内的态势列提供。
   const desk = isKp && wideViewport
   // 追逐台：值班台 + 追逐中 + 主台在「追逐」档
-  const kpChaseOn = desk && !!chase && kpStage === 'tactical'
+  const kpChaseOn = desk && !!chase
 
   return (
     <div className="game-session-layout flex flex-col h-full">
@@ -1418,27 +1415,6 @@ export function GameSessionPage() {
               <span className="kp-locus" title="当前场景">
                 场景 <b>{currentSceneName || '—'}</b>
                 {combat && <> · 战斗 第 <b>{combat.round}</b> 轮</>}
-              </span>
-              <span className="kp-modes" role="group" aria-label="主台模式">
-                <button
-                  type="button"
-                  className={`kp-mode ${kpStage === 'narrative' ? 'kp-mode--on' : ''}`}
-                  onClick={() => setKpStage('narrative')}
-                  aria-pressed={kpStage === 'narrative'}
-                >
-                  <GiQuillInk size={13} /> 叙事
-                </button>
-                <button
-                  type="button"
-                  className={`kp-mode ${kpStage === 'tactical' ? 'kp-mode--on' : ''}`}
-                  onClick={() => setKpStage('tactical')}
-                  disabled={!combat && !chase}
-                  aria-pressed={kpStage === 'tactical'}
-                  style={!combat && !chase ? { opacity: 0.4 } : undefined}
-                  title={chase ? '整段主台切到追逐台' : combat ? '整段主台切到战术棋盘' : '开战或开追逐后才能进'}
-                >
-                  {chase ? <><GiRun size={13} /> 追逐</> : <><GiCrossedSwords size={13} /> 战术</>}
-                </button>
               </span>
             </>
           )}
@@ -1574,7 +1550,6 @@ export function GameSessionPage() {
           sanDanger={kpSanDanger} onCheck={kpActions.openCheck} onReply={kpActions.reply}
           onOpenWriter={() => { setKpCollapsed(false); setKpFullDesk(true) }} onChanged={kpActions.refresh}
           onLocateActor={kpActions.locate} locate={kpActions.locateRequest}
-          onToggleLayout={() => setKpStage('narrative')}
         />
       )}
 
@@ -1587,7 +1562,7 @@ export function GameSessionPage() {
             pendingReaction={pendingReaction} log={combatLog} result={combatResult}
             myWeapons={myWeapons} battleMap={battleMap} canSetToken={isKp}
             layout="immersive"
-            onToggleLayout={() => (isKp ? setKpStage('narrative') : setBattleLayout('classic'))}
+            onToggleLayout={isKp ? undefined : () => setBattleLayout('classic')}
           />
         </div>
       )}
@@ -2143,7 +2118,7 @@ export function GameSessionPage() {
             battleMap={battleMap}
             canSetToken={isKp}
             layout="inline"
-            onToggleLayout={wideViewport ? () => (isKp ? setKpStage('tactical') : setBattleLayout('immersive')) : undefined}
+            onToggleLayout={wideViewport && !isKp ? () => setBattleLayout('immersive') : undefined}
           />
         )}
         {chase && !desk && (

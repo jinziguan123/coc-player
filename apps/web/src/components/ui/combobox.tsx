@@ -58,7 +58,10 @@ export function Combobox({
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen} modal={false}>
       <PopoverPrimitive.Anchor asChild>
-        <div ref={anchorRef} className={`relative min-w-0 flex-1 ${className}`}>
+        <div ref={anchorRef} className={`min-w-0 flex-1 ${className}`}>
+          {/* 展开钮按输入框定位，而不是按外层：外层在 flex 行里会被同排更高的元素（如多行
+              台词框）拉伸，top:50% 跟着外层走，箭头就掉到输入框下面去了 */}
+          <div className="relative">
           <input
             id={id}
             type="text"
@@ -88,6 +91,7 @@ export function Combobox({
               <ChevronDown size={14} aria-hidden="true" />
             </button>
           )}
+          </div>
         </div>
       </PopoverPrimitive.Anchor>
 
