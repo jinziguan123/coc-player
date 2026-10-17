@@ -810,6 +810,20 @@ def cancel_end_module_vote(
     return {"vote": vote}
 
 
+@router.get("/{session_id}/intent-history")
+def get_intent_history(
+    session_id: str,
+    limit: int = Query(100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """KP 面板的 NPC/战斗动作意图历史；仅房主可见。"""
+    session = require_session_host(db, session_id, token)
+    from app.services import world_intent
+
+    return {"items": world_intent.list_history(session.world_state, limit=limit)}
+
+
 @router.get("/{session_id}/agent-traces")
 def get_agent_traces(
     session_id: str,

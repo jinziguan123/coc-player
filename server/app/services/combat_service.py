@@ -1253,9 +1253,16 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             action = _validate_npc_action(state, actor, raw_action, rs=rs)
         if action is None:
             action = rs.combat.heuristic_npc_action(state, actor)
-        world_intent.record(
-            db, session_id, world_intent.from_combat(actor, action, state),
+        sess = db.get(GameSession, session_id)
+        intent = world_intent.from_combat(
+            actor, action, state, world_state=(sess.world_state if sess else None) or {},
         )
+        if not intent.precondition_ok:
+            logger.warning(
+                "战斗动作前置不满足（仍交战斗引擎裁决）: actor=%s target=%s",
+                actor.get("id"), intent.target,
+            )
+        world_intent.record(db, session_id, intent)
         atype = action.get("type") or action.get("action")
         # 方格：NPC 想攻击但目标够不着（近战不相邻/超射程/无视线）→ 本回合改为走位接近。
         if atype == "attack" and state.get("grid") and actor.get("pos"):

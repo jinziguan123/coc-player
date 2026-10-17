@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.models.session import GameSession
+from app.services import intent_ledger
 
 HISTORY_KEY = "intent_history"
 _HISTORY_LIMIT = 100
@@ -28,6 +29,8 @@ class WorldIntent:
     verb: str
     content: str
     observes_seq: int
+    target_version: int = 0
+    precondition_ok: bool = True
 
 
 def from_npc(
@@ -41,7 +44,19 @@ def from_npc(
     )
 
 
-def from_combat(actor: dict, action: dict, state: dict) -> WorldIntent:
+def _combat_target_alive(state: dict, target_id: str) -> bool:
+    if not target_id:
+        return True
+    for p in state.get("initiative") or []:
+        if str(p.get("id") or "") != target_id:
+            continue
+        return p.get("status") not in ("dead", "unconscious") and int(p.get("hp") or 0) > 0
+    return False
+
+
+def from_combat(
+    actor: dict, action: dict, state: dict, world_state: dict | None = None,
+) -> WorldIntent:
     target_id = str(action.get("target_id") or "").strip()
     verb = str(action.get("action") or action.get("type") or "").strip()
     if target_id.startswith("npc_"):
@@ -59,6 +74,8 @@ def from_combat(actor: dict, action: dict, state: dict) -> WorldIntent:
         verb=verb,
         content=str(action.get("weapon") or ""),
         observes_seq=int(state.get("round") or 0),
+        target_version=intent_ledger.version(world_state or {}, target_key),
+        precondition_ok=_combat_target_alive(state, target_id),
     )
 
 
@@ -74,6 +91,8 @@ def record_state(world_state: dict, intent: WorldIntent) -> dict:
         "verb": intent.verb,
         "content": intent.content,
         "observes_seq": intent.observes_seq,
+        "target_version": intent.target_version,
+        "precondition_ok": intent.precondition_ok,
     })
     ws[HISTORY_KEY] = history[-_HISTORY_LIMIT:]
     return ws
@@ -94,3 +113,8 @@ def record(db: Session, session_id: str, intent: WorldIntent) -> None:
             db.rollback()
         except Exception:
             pass
+
+
+def list_history(world_state: dict | None, limit: int = 100) -> list[dict]:
+    items = list((world_state or {}).get(HISTORY_KEY) or [])
+    return list(reversed(items[-max(1, min(int(limit), 200)):]))
