@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { GiScrollUnfurled } from 'react-icons/gi'
 import { api } from '../../api/client'
 
@@ -50,23 +51,26 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
   const [filterSource, setFilterSource] = useState('')
   const [filterActor, setFilterActor] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const loadTraces = useCallback(() => {
     setLoading(true)
+    setError('')
     api.get<{ items: TraceItem[] }>(`/sessions/${sessionId}/agent-traces?limit=50`)
       .then((data) => setItems(data.items || []))
-      .catch(() => setItems([]))
+      .catch((e) => { setItems([]); setError(e instanceof Error ? e.message : '读取失败') })
       .finally(() => setLoading(false))
   }, [sessionId])
 
   const loadIntents = useCallback(() => {
     setLoading(true)
+    setError('')
     const params = new URLSearchParams({ limit: '50' })
     if (filterSource) params.set('source', filterSource)
     if (filterActor.trim()) params.set('actor', filterActor.trim())
     api.get<{ items: IntentItem[] }>('/sessions/' + sessionId + '/intent-history?' + params.toString())
       .then((data) => setIntents(data.items || []))
-      .catch(() => setIntents([]))
+      .catch((e) => { setIntents([]); setError(e instanceof Error ? e.message : '读取失败') })
       .finally(() => setLoading(false))
   }, [filterActor, filterSource, sessionId])
 
@@ -79,7 +83,14 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
     if (open) load()
   }, [open, load])
 
-  return (
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  const panel = (
     <>
       <button
         type="button"
@@ -93,7 +104,9 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
       </button>
       {open && (
         <div
-          className="fixed right-4 bottom-36 z-40 w-[min(620px,94vw)] max-h-[64vh] overflow-auto rounded border p-3 shadow-lg"
+          role="dialog"
+          aria-label="运行轨迹"
+          className="fixed right-4 bottom-36 z-50 w-[min(620px,94vw)] max-h-[64vh] overflow-auto rounded border p-3 shadow-lg"
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
         >
           <div className="flex items-center justify-between gap-3 mb-2">
@@ -127,6 +140,9 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
 
           {tab === 'traces' && (
             <>
+              {error && (
+                <div className="text-xs mb-2" style={{ color: 'var(--color-danger)' }}>{error}</div>
+              )}
               {!items.length && !loading && (
                 <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   还没有调用记录。下一轮生成后会出现。
@@ -156,6 +172,9 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
 
           {tab === 'intents' && (
             <>
+              {error && (
+                <div className="text-xs mb-2" style={{ color: 'var(--color-danger)' }}>{error}</div>
+              )}
               <div className="flex items-center gap-2 mb-2">
                 <select
                   className="btn-xs rounded border px-2"
@@ -209,4 +228,7 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
       )}
     </>
   )
+
+  if (typeof document === 'undefined') return null
+  return createPortal(panel, document.body)
 }

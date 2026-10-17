@@ -10,6 +10,7 @@ from app.api.deps import (
     player_token,
     require_session_actor,
     require_session_host,
+    require_session_kp,
     require_session_manager,
     require_session_ooc_actor,
     require_session_token_actor,
@@ -66,6 +67,16 @@ def _player_world_state(ws: dict | None) -> dict:
     elif ending:
         out["ending_reached"] = ending
     return out
+
+
+def _require_kp_or_host(db: Session, session_id: str, token: str | None):
+    """诊断接口：房主或真人 KP 席可读；AI KP 会话由房主读。"""
+    try:
+        return require_session_host(db, session_id, token)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        return require_session_kp(db, session_id, token)
 
 
 def _owns_kp_seat(session, token: str | None) -> bool:
@@ -820,7 +831,7 @@ def get_intent_history(
     token: str | None = Depends(player_token),
 ):
     """KP 面板的 NPC/战斗动作意图历史；仅房主可见，可按来源/角色筛选。"""
-    require_session_host(db, session_id, token)
+    _require_kp_or_host(db, session_id, token)
     from app.services import world_intent
 
     return {
@@ -838,7 +849,7 @@ def get_agent_traces(
     token: str | None = Depends(player_token),
 ):
     """KP 面板的 Agent 调用轨迹；仅房主可见。"""
-    require_session_host(db, session_id, token)
+    _require_kp_or_host(db, session_id, token)
     from app.services.agent_trace import list_for_session
 
     return {"items": list_for_session(db, session_id, limit=limit)}
