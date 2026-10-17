@@ -542,6 +542,7 @@ export function GameSessionPage() {
   // 追逐中就是追逐台，其余时候是叙事流。少一个开关，也少一种「切错了没看到」。
   // 战术模式下 KP 临时展开完整写作台；每场战斗开始时收回成底条
   const [kpFullDesk, setKpFullDesk] = useState(false)
+  const [showTrace, setShowTrace] = useState(false)   // KP 运行轨迹抽屉（入口在顶栏「更多」）
   useEffect(() => { if (!combat) setKpFullDesk(false) }, [combat])
   // KP 席战斗中恒为沉浸战场；玩家席沿用 battleLayout 偏好。
   const immersiveOn = !!combat && (isKp || battleLayout === 'immersive') && wideViewport
@@ -1506,6 +1507,10 @@ export function GameSessionPage() {
                   ? [{ label: '本局风格', icon: <GiQuillInk size={13} />, onClick: () => setShowStyle(true),
                        title: '文风与画风：几档预设或自己写一段，留空则跟随模组', separated: !myCharId }]
                   : []),
+                ...(isKp
+                  ? [{ label: '运行轨迹', icon: <GiScrollUnfurled size={13} />, onClick: () => setShowTrace(true),
+                       title: '每次 AI 调用的耗时与用量、NPC / 战斗的动作意图', separated: true }]
+                  : []),
                 ...(!isKp
                   ? [{ label: '重看导览', icon: <HelpCircle size={13} />, onClick: runGameTour,
                        title: '界面上每个地方是干什么的', separated: true }]
@@ -2359,7 +2364,7 @@ export function GameSessionPage() {
       )}
       </div>
 
-      {isKp && <AgentTracePanel sessionId={currentSession.id} />}
+      {isKp && <AgentTracePanel sessionId={currentSession.id} open={showTrace} onClose={() => setShowTrace(false)} />}
       <KpConsoleDock
         isKp={isKp} combat={combat} sessionId={currentSession.id} combatLog={combatLog}
         kpCollapsed={kpCollapsed} kpFullDesk={kpFullDesk} desk={desk} immersiveOn={immersiveOn}
