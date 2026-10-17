@@ -578,6 +578,7 @@ async def _run_team_turn(
                     decision["observes_seq"] = snapshot_seq
                     parsed_intent = team_intent.from_decision(
                         teammate, decision, snapshot_seq, world_state=snapshot_world,
+                        module=module, session=game_session,
                     )
                     decision["_target_version"] = parsed_intent.target_version
                     team_intents.append((teammate, decision, parsed_intent))

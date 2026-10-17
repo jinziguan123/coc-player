@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.services import intent_ledger
+from app.services import intent_ledger, object_registry
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +78,17 @@ def _norm_verb(value) -> str:
     return _VERB_ALIASES.get(raw, raw)
 
 
-def from_decision(character, decision: dict, observes_seq: int, world_state=None) -> TeamIntent:
+def from_decision(
+    character, decision: dict, observes_seq: int, world_state=None,
+    module=None, session=None,
+) -> TeamIntent:
     raw_target = str(decision.get("target") or "").strip()
-    target = intent_ledger.resolve_target(world_state or {}, raw_target) if raw_target else ""
+    if raw_target and module is not None and session is not None:
+        target = object_registry.resolve(module, session, raw_target)
+    elif raw_target:
+        target = intent_ledger.resolve_target(world_state or {}, raw_target)
+    else:
+        target = ""
     return TeamIntent(
         actor_id=character.id,
         actor_name=character.name,
