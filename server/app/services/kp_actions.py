@@ -93,10 +93,13 @@ def _exec_start_chase(
 async def _exec_start_combat(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     player_char: Character, teammates: list[Character] | None, llm,
-    enemies_str: str, trigger: str,
+    enemies_str: str, trigger: str, participant_ids: list[str] | None = None,
 ) -> list[str]:
-    """start_combat 工具：按敌方名字解析模组 NPC，把玩家方（主角+队友）与敌方切入战斗态，
-    自动推进到第一个真人回合。返回广播 chunks。名字匹配不到的敌方按临场杂兵建（默认属性）。"""
+    """start_combat 工具：按敌方名字解析模组 NPC，把选中的调查员与敌方切入战斗态。
+
+    participant_ids 为空＝旧行为（主角+全部队友）；真人 KP 可只选一部分人入战，
+    其余席位留在场外，不会被拉进先攻序。名字匹配不到的敌方按临场杂兵建（默认属性）。
+    """
     from app.ai.agents.combat_agent import CombatAgent
     from app.services import combat_service
 
@@ -109,7 +112,19 @@ async def _exec_start_combat(
         enemies.append(dict(spec) if spec else {"name": nm, "attributes": {"DEX": 50, "CON": 50, "SIZ": 50},
                                                 "skills": {"格斗(斗殴)": 45, "闪避": 25}, "weapon": "徒手格斗"})
     party = [player_char] + list(teammates or [])
+    wanted = [str(ref).strip() for ref in (participant_ids or []) if str(ref).strip()]
+    if wanted:
+        known = {str(member.id) for member in party}
+        unknown = [ref for ref in wanted if ref not in known]
+        if unknown:
+            raise ValueError("参战角色不在当前队伍里")
+        party = [member for member in party if str(member.id) in set(wanted)]
+        if not party:
+            raise ValueError("至少选择一名参战调查员")
     human_ids = session_service.human_character_ids(db, session_id) or {player_char.id}
+    if wanted:
+        selected_ids = {str(member.id) for member in party}
+        human_ids = {str(item) for item in human_ids if str(item) in selected_ids}
     scene_hint = _scene_title(module, game_session.current_scene_id)
     # 遭遇配图卡先落先播（战斗态 chunks 紧随其后）：卡先出、图异步补挂，不阻塞开战
     illust_chunks = _maybe_encounter_illustration(db, session_id, module, enemies)

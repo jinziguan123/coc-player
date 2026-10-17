@@ -7821,3 +7821,24 @@ select.input option {
 .kp-enemy-control + .kp-console-dock { margin-top: 0 !important; }
 .kp-enemy-control + .kp-console-dock .kp-combat-strip,
 .kp-enemy-control + .kp-console-dock .kp-console { border-top-left-radius: 0; border-top-right-radius: 0; }
+
+/* KP 写作台表单：所有单行输入与下拉统一高度。此前原生 input（约 34px）、
+   Select（h-9）与 MultiSelect（h-9）混在一条横排里，视觉上高低不齐。 */
+.kp-console-dock input.input { height: 2.25rem; }
+.kp-form-label {
+  flex-shrink: 0;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+/* 开战 / 追逐的配置区：两行等宽字段，窄屏自动折行 */
+.kp-chase-start {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 100%;
+}
+.kp-chase-start .input { height: 2.25rem; }
+/* 追逐主台的障碍输入也统一到 36px，与写作台表单同高。 */
+.kp-chase .input { height: 2.25rem; }

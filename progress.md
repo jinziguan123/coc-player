@@ -92,3 +92,11 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 作战底条改为受控草稿，账页「回复」预填「（回 某人：）」并走场外；观局台隐藏底条重复的最近结算，保留整宽输入与结束战斗。
 - 左缘行悬停保留「换战棋轮廓」，仍走 set_token 同步全桌；观局台隐藏棋盘内部行动面板与战斗日志抽屉。
 - 验证：前端 typecheck、74 个测试文件 517 项、Vite 生产构建通过；真实真人 KP 会话浏览器验收 1600×1000 / 1440×900、无横向溢出、筛选与回复预填正常。
+
+## 2026-10-17 真人 KP 开战 / 追逐配置修复与控件统一
+
+- 开战表单新增「参战调查员」多选：不点选＝全队，点选后只把选中的角色拉入先攻序，其余席位留在场外。后端 `start_combat` 同步过滤 party 与 `human_ids`，并兼容旧的 `character:<id>` 引用。
+- 追逐支持多名逃者与多名追兵：表单统一成同一套 MultiSelect（模组 NPC + 临场追兵输入），后端 state 同时保存 `quarries` / `pursuers`，广播与玩家追逐面板显示完整名单。距离轨仍只有一条，由最慢逃者与最快追兵代表全组判定（界面上明示）。
+- 修复「选中在座调查员却开不了追逐」：旧表单提交 `character:<id>`，后端按裸 id 比对失败；现在前后端都去前缀，并兼容 `quarry`/`quarries`、`pursuer`/`pursuers` 与列表/逗号串。
+- 统一 KP 工作台控件：console dock 内的单行 input 固定 36px，与 Select / MultiSelect 同高；追逐表单改为两行等宽字段，数字框统一 112px；新增 `KpStartCombatForm`、`KpStartChaseForm`，不再在 `KpActionForm` 里拼大小不一的裸控件；`KpChaseStage` 的障碍输入也统一高度。
+- 验证：后端 2528 passed / 11 skipped、ruff 通过；前端 77 个测试文件 523 项、typecheck、Vite build、oxlint 0 errors；真实 KP 会话浏览器验收开战/追逐表单（截获请求确认 payload，未写库），所有单行控件高度一致、无横向溢出。

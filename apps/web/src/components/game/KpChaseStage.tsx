@@ -32,6 +32,9 @@ export function KpChaseStage({ chase, sessionId, rounds }: {
   const [hzSkill, setHzSkill] = useState('')
   const [difficulty, setDifficulty] = useState<'normal' | 'hard' | 'extreme'>('normal')
 
+  const quarryNames = chase.quarries?.length ? chase.quarries : [chase.quarry]
+  const pursuerNames = chase.pursuers?.length ? chase.pursuers : [chase.pursuer]
+  const group = quarryNames.length > 1 || pursuerNames.length > 1
   const lo = chase.caught_at
   const hi = chase.escape_at
   const span = Math.max(1, hi - lo)
@@ -65,8 +68,10 @@ export function KpChaseStage({ chase, sessionId, rounds }: {
         <header className="kp-chase-head">
           <GiRun aria-hidden />
           <b>追逐 · 第 {chase.round} 轮</b>
-          <span>{chase.quarry}（逃）←→ {chase.pursuer}（追）· 比拼「{chase.skill || '运动'}」</span>
-          <span className="kp-chase-rule">甩脱 ≥{hi} · 被追上 ≤{lo}</span>
+          <span>{quarryNames.join('、')}（逃）←→ {pursuerNames.join('、')}（追）· 比拼「{chase.skill || '运动'}」</span>
+          <span className="kp-chase-rule">
+            {group ? '群体 · 按最慢逃者 / 最快追兵代表全组 · ' : ''}甩脱 ≥{hi} · 被追上 ≤{lo}
+          </span>
         </header>
 
         <div className="kp-chase-track" aria-label={`当前距离 ${chase.gap}`}>
@@ -78,7 +83,7 @@ export function KpChaseStage({ chase, sessionId, rounds }: {
             </div>
           ))}
           {/* 追方棋子钉在「被追上」那一端；逃方棋子随距离滑动 */}
-          <span className="kp-chase-token kp-chase-token--pursuer" style={{ left: `${pos(lo)}%` }} title={chase.pursuer}>
+          <span className="kp-chase-token kp-chase-token--pursuer" style={{ left: `${pos(lo)}%` }} title={pursuerNames.join('、')}>
             <GiCrossedSwords aria-hidden />
           </span>
           <m.span
@@ -86,7 +91,7 @@ export function KpChaseStage({ chase, sessionId, rounds }: {
             initial={false}
             animate={{ left: `${pos(chase.gap)}%` }}
             transition={spring.pop}
-            title={chase.quarry}
+            title={quarryNames.join('、')}
           >
             <GiRun aria-hidden />
           </m.span>
@@ -100,9 +105,15 @@ export function KpChaseStage({ chase, sessionId, rounds }: {
         </div>
 
         <div className="kp-chase-vs">
-          <div><b>{chase.quarry} · 逃</b>{chase.quarry_mov != null && <>MOV {chase.quarry_mov}</>}</div>
+          <div title={quarryNames.join('、')}>
+            <b>{quarryNames.join('、')} · 逃</b>
+            {chase.quarry_mov != null && <>{group ? '代表 ' : ''}MOV {chase.quarry_mov}</>}
+          </div>
           <span>VS</span>
-          <div><b>{chase.pursuer} · 追</b>{chase.pursuer_mov != null && <>MOV {chase.pursuer_mov}</>}</div>
+          <div title={pursuerNames.join('、')}>
+            <b>{pursuerNames.join('、')} · 追</b>
+            {chase.pursuer_mov != null && <>{group ? '代表 ' : ''}MOV {chase.pursuer_mov}</>}
+          </div>
         </div>
 
         <div className="kp-chase-round">

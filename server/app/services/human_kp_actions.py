@@ -215,9 +215,14 @@ async def execute_human_kp_action(
         enemies = str(payload.get("enemies") or "").strip()
         if not enemies:
             raise ValueError("至少指定一个敌人")
+        participants = [
+            ref.removeprefix("character:").removeprefix("char:")
+            for ref in _csv(payload.get("participants"))
+        ]
         chunks = await _exec_start_combat(
             db, session_id, game_session, module, player_char, teammates,
             None, enemies, str(payload.get("trigger") or "真人 KP 发起战斗"),
+            participant_ids=participants or None,
         )
         return chunks, "已切入结构化战斗"
 
@@ -477,32 +482,61 @@ def _exec_start_chase(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     party: list[Character], payload: dict,
 ) -> tuple[list[str], str]:
-    """真人 KP 发起追逐：逃方从在座调查员里选，追方取模组 NPC（按名字或 id）或临场起名。
+    """真人 KP 发起追逐：逃方从在座调查员里多选，追方可多选模组 NPC，也接受临场起名。
 
-    与 AI KP 的 start_chase 工具同一套状态机（chase_service），只是参数由 KP 在表单里定：
-    比拼技能、甩脱 / 被追上的距离、起始距离。战斗中或已在追逐时不能再开。
+    距离轨仍只有一条：多人追逐时由**最慢的逃者**与**最快的追兵**代表全组判定，
+    其余人记进 state.quarries / state.pursuers，供追逐台展示名单。
+    战斗中或已在追逐时不能再开。
     """
     if chase_service.get_chase(game_session):
         raise ValueError("已经在追逐中了")
     if combat_service.get_combat(game_session):
         raise ValueError("战斗中不能同时开追逐，先结束战斗")
 
-    quarry_id = str(payload.get("quarry") or "").strip()
-    quarry_char = next((c for c in party if c.id == quarry_id), None) if quarry_id else party[0]
-    if quarry_char is None:
+    quarry_refs = _csv(payload.get("quarries")) or _csv(payload.get("quarry"))
+    if quarry_refs:
+        quarries: list[Character] = []
+        for ref in quarry_refs:
+            key = ref.removeprefix("character:").removeprefix("char:")
+            hit = next((c for c in party if c.id == key or c.name == key), None)
+            if hit is None:
+                raise ValueError("逃方必须是在座的调查员")
+            if hit not in quarries:
+                quarries.append(hit)
+    else:
+        # 不点选＝全队逃跑；与开战表单「不点选＝全员参战」保持同一口径。
+        quarries = list(party)
+    if not quarries:
         raise ValueError("逃方必须是在座的调查员")
 
-    name = str(payload.get("pursuer") or "").strip()
-    if not name:
+    pursuer_refs = _csv(payload.get("pursuers")) or _csv(payload.get("pursuer"))
+    pursuer_refs += _csv(payload.get("pursuer_extra"))
+    if not pursuer_refs:
         raise ValueError("请指定追方")
-    spec = next((n for n in (module.npcs or []) if name in (n.get("name"), n.get("id"))), None)
-    pursuer = chase_service._pursuer_from_npc(
-        spec or {"name": name, "attributes": {"DEX": 50, "CON": 50, "SIZ": 50}, "skills": {"运动": 45}},
-        rule_options_service.ruleset_by_id(db, session_id),
-    )
-    mov = _int(payload.get("pursuer_mov"))
-    if mov is not None:
-        pursuer["mov"] = max(1, mov)
+    rule_rs = rule_options_service.ruleset_by_id(db, session_id)
+    pursuers: list[dict] = []
+    seen: set[str] = set()
+    mov_override = _int(payload.get("pursuer_mov"))
+    for ref in pursuer_refs:
+        key = ref.removeprefix("npc:").removeprefix("character:")
+        spec = next(
+            (n for n in (module.npcs or []) if key in (n.get("name"), n.get("id"))),
+            None,
+        )
+        pursuer = chase_service._pursuer_from_npc(
+            spec or {"name": key, "attributes": {"DEX": 50, "CON": 50, "SIZ": 50},
+                     "skills": {"运动": 45}},
+            rule_rs,
+        )
+        name = str(pursuer.get("name") or key)
+        if name in seen:
+            continue
+        if mov_override is not None:
+            pursuer["mov"] = max(1, mov_override)
+        pursuers.append(pursuer)
+        seen.add(name)
+    if not pursuers:
+        raise ValueError("请指定追方")
 
     escape_at = _int(payload.get("escape_at"), 5)
     caught_at = _int(payload.get("caught_at"), -3)
@@ -511,12 +545,25 @@ def _exec_start_chase(
         raise ValueError("起始距离要落在「被追上」与「甩脱」之间")
 
     skill = str(payload.get("skill") or "运动").strip() or "运动"
-    trigger = str(payload.get("trigger") or "").strip() or f"{pursuer['name']}追了上来——"
+    quarry_names = "、".join(c.name for c in quarries)
+    pursuer_names = "、".join(str(p.get("name") or "追兵") for p in pursuers)
+    trigger = str(payload.get("trigger") or "").strip() or f"{pursuer_names}追了上来——"
     _state, chunks = chase_service.start_chase(
-        db, session_id, chase_service._quarry_from_char(quarry_char), pursuer,
-        skill=skill, escape_at=escape_at, caught_at=caught_at, trigger=trigger, start_gap=start_gap,
+        db, session_id, chase_service._quarry_from_char(quarries[0]), pursuers[0],
+        skill=skill, escape_at=escape_at, caught_at=caught_at, trigger=trigger,
+        start_gap=start_gap,
+        quarries=[chase_service._quarry_from_char(c) for c in quarries],
+        pursuers=pursuers,
     )
-    return chunks, f"追逐开始：{quarry_char.name} 逃，{pursuer['name']} 追"
+    return chunks, f"追逐开始：{quarry_names} 逃，{pursuer_names} 追"
+
+
+def _csv(value) -> list[str]:
+    """把逗号 / 顿号分隔的字符串或列表整理成去空列表。"""
+    if value is None:
+        return []
+    raw = value if isinstance(value, (list, tuple)) else re.split(r"[,，、]", str(value))
+    return [str(item).strip() for item in raw if str(item).strip()]
 
 
 def _int(value, default: int | None = None) -> int | None:

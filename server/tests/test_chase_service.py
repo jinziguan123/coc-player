@@ -50,6 +50,34 @@ def test_quarry_wins_round_opens_gap(db_factory, monkeypatch):
     assert st["gap"] == 1 and st["round"] == 1
 
 
+def test_group_chase_keeps_all_names_and_uses_slowest_fastest(db_factory):
+    db = db_factory()
+    sid, hero = _seed(db)
+    other = Character(name="记者", rule_system="coc", is_player=True,
+                      base_attributes={"DEX": 50}, skills={"运动": 55},
+                      system_data={"move": 6})
+    db.add(other); db.commit()
+
+    q1 = chase_service._quarry_from_char(hero)
+    q2 = chase_service._quarry_from_char(other)
+    p1 = chase_service._pursuer_from_npc({"name": "慢追兵", "attributes": {"DEX": 45},
+                                          "skills": {"运动": 45}, "mov": 7})
+    p2 = chase_service._pursuer_from_npc({"name": "快追兵", "attributes": {"DEX": 70},
+                                          "skills": {"运动": 65}, "mov": 9})
+    _state, chunks = chase_service.start_chase(
+        db, sid, q1, p1, quarries=[q1, q2], pursuers=[p1, p2],
+    )
+    st = chase_service.get_chase(db.get(GameSession, sid))
+    assert [item["name"] for item in st["quarries"]] == ["伊芙琳", "记者"]
+    assert [item["name"] for item in st["pursuers"]] == ["慢追兵", "快追兵"]
+    # 慢逃者（记者 MOV 6）与快追兵（MOV 9）代表全组进距离轨
+    assert st["quarry"]["name"] == "记者"
+    assert st["pursuer"]["name"] == "快追兵"
+    wire = next(c.as_wire() for c in chunks if c.as_wire().get("type") == "chase_start")
+    assert wire["metadata"]["quarries"] == ["伊芙琳", "记者"]
+    assert wire["metadata"]["pursuers"] == ["慢追兵", "快追兵"]
+
+
 def test_escape_folds_result(db_factory, monkeypatch):
     db = db_factory()
     sid, hero = _seed(db)
