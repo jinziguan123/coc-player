@@ -161,6 +161,11 @@ RESERVE_FOR_TOOLS = 12000
 MAX_SYSTEM_TOKENS = 30000
 MAX_SUMMARY_TOKENS = 2000
 MIN_RECENT_EVENTS = 10
+#: 队友 / NPC 自己的事件窗口上限：条数只是粗筛，单条长旁白不能把上下文撑爆。
+TEAM_EVENT_TOKEN_CAP = 12000
+NPC_EVENT_TOKEN_CAP = 8000
+MIN_AGENT_EVENTS = 6
+
 # 被动注入的模组原文摘录：单块截断（摘录段计入 MAX_SYSTEM_TOKENS 预算）。系统预算放宽后
 # 可给更完整的原文片段，从 400 提到 600 字。
 MODULE_EXCERPT_MAX_CHARS = 600
@@ -1794,6 +1799,26 @@ def build_kp_context(
 
 
 
+def _fit_agent_events(events: list[EventLog], max_tokens: int) -> list[EventLog]:
+    """从最近往回保留事件，直到达到该 Agent 的事件 token 上限；至少留 MIN_AGENT_EVENTS 条。
+
+    KP 有完整的分段预算与滚动摘要；队友/NPC 没有自己的摘要器，但也不该被一条超长旁白
+    挤掉全部上下文。这个裁剪只作用于事件区，不改系统提示和私人记忆。
+    """
+    if not events:
+        return []
+    kept: list[EventLog] = []
+    total = 0
+    for event in reversed(events):
+        cost = _estimate_tokens((event.actor_name or "") + (event.content or ""))
+        if kept and total + cost > max_tokens and len(kept) >= MIN_AGENT_EVENTS:
+            break
+        kept.append(event)
+        total += cost
+    kept.reverse()
+    return kept
+
+
 def build_npc_context(
     npc_id: str,
     session: GameSession,
@@ -1854,10 +1879,11 @@ def build_npc_context(
         return ev_scene == npc_scene
 
     visible_events = [ev for ev in events if _npc_can_see(ev)]
+    visible_events = _fit_agent_events(visible_events[-20:], NPC_EVENT_TOKEN_CAP)
 
     messages = [{"role": "system", "content": system_content}]
     player_cid = session.player_character_id
-    messages.extend(_events_to_messages(visible_events[-20:], primary_char_id=player_cid))
+    messages.extend(_events_to_messages(visible_events, primary_char_id=player_cid))
 
     if trigger_context:
         messages.append({
@@ -1876,7 +1902,6 @@ def build_team_context(
     player_char: Character,
     all_teammates: list[Character] | None = None,
     separated: bool = False,
-    team_guidance: str = "",
 ) -> list[dict]:
     """构建单个 AI 队友的决策上下文：场景 + 队伍 + 最近事件。
 
@@ -1884,8 +1909,8 @@ def build_team_context(
     本场景」的指引（没人替他推动剧情，全靠自己）；同处一地时仍是「补位与响应、宁缺毋滥」，
     避免抢戏。
 
-    ``team_guidance``：本轮导演对队友的软指引（由 planner 的 direction 派生，如「把话头
-    多递给某冷场玩家」）。空则不注入；非空时作为一条 system 提示追加，队友决策仍自主。
+    队友的决策只依赖自己的角色卡、位置、队伍、私人记忆与最近公开事件；KP 的 TurnPlan
+    不进入这里，避免队友回合被 KP 的裁定/导演计划牵着走。
     """
     flags = _active_flags(session)
     scenes = [_resolve_state(s, flags) for s in (module.scenes or [])]
@@ -1942,15 +1967,11 @@ def build_team_context(
     # 30 条：给队友多一点连续剧情记忆（digest 每行很短，成本可控），
     # 减少「只看见眼前三句话」式的失忆反应。
     digest = _format_recent_events_digest(
-        events[-30:], self_char_id=teammate.id,
+        _fit_agent_events(events[-30:], TEAM_EVENT_TOKEN_CAP),
+        self_char_id=teammate.id,
     )
 
     messages = [{"role": "system", "content": system_content}]
-    if team_guidance.strip():
-        messages.append({
-            "role": "system",
-            "content": "【本轮导演提示】" + team_guidance.strip(),
-        })
     messages.append({
         "role": "user",
         "content": (

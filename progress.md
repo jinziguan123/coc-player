@@ -114,3 +114,11 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 羊皮纸下把追逐主台改成浅纸底 + 极淡行线的追迹纸，补页框内高光与柔和纸面阴影；距离轨加浅色纸带、节点纸面阴影，当前节点改用暗红描边替代金色辉光。
 - 逃方 / 追方棋子改为浅蓝 / 浅红纸片配深墨图标；VS 卡、逐轮记录、本轮障碍输入与分段按钮统一到纸面 token。暗色主题保持原样，所有覆盖限定在 `:root[data-theme="parchment"]`。
 - 验证：1600×1000 真实追逐态羊皮纸截图检查标题、距离轨、卡面、棋子与逐轮记录对比度；前端 typecheck、523 项测试、Vite build、oxlint 通过。
+
+## 2026-10-17 Agent 运行时解耦（refactor/agent-runtime）
+
+- 分支 `refactor/agent-runtime`：把 AI 队友从 KP 的裁定计划里解耦。队友上下文不再注入 `TurnPlan.direction` / `team_guidance`；队友行动后不再跑二次 planner。主回合只保留一次 KP planner，队友决策只依赖公开场景、自身人设、私有记忆与最近事件。
+- 队友并发改为**完成即提交**：不再等 `asyncio.gather` 收齐所有队友才发第一个气泡；整轮设 `TEAM_AGENT_TIMEOUT_SECONDS=20`，慢请求按 silent 处理，避免一个队友拖住 KP。事件按完成顺序落库，测试覆盖超时收束。
+- 统一 NPC 对话出口：新增 `NpcRuntime`（人设 + 私有记忆 + NPC 可见事件 + 统一落库/广播/互动史），`npc_act` 委托给它；生产 LLM 路径下 `say` 拒绝有名 NPC，提示改用 `npc_act`，避免 KP 的 truth/线索/计划污染 NPC 台词。工具说明同步更新。
+- 队友/NPC 事件窗口加 token 上限：队友 12k、NPC 8k，至少保留 6 条；不再只按 30/20 条粗筛，长旁白不会把上下文撑爆。
+- 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。尚未覆盖：通用 Actor 抽象、分头行动的工具循环、战斗/幕后 NPC 全面统一、Agent 级 trace。

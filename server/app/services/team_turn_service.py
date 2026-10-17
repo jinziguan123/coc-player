@@ -67,6 +67,10 @@ def _matcher_npcs(
 
 
 
+#: 单个队友的决策墙钟上限。超时者按 silent 处理，绝不让一个慢请求拖住整轮。
+TEAM_AGENT_TIMEOUT_SECONDS = 20.0
+
+
 async def _stream_narration_filtered(
     kp: KPAgent, messages: list[dict], result: list,
     npcs: list[dict] | None = None,
@@ -177,13 +181,13 @@ async def _run_team_turn(
     teammates: list[Character],
     llm,
     blind_results: list[str] | None = None,
-    team_guidance: str = "",
 ) -> AsyncIterator[str]:
     """玩家输入后的一轮 AI 队友自动响应。
 
     每个队友只决策一次；决策**并发执行**（同一份事件快照，N 次串行调用变 1 次墙钟时间——
-    代价是同轮队友互相看不到彼此这轮刚说的话，撞话题的偶发风险换整体延迟），结果按席位
-    顺序写入事件流。本函数只由 ``run_chat_generation`` / ``run_travel_generation`` 调用，
+    代价是同轮队友互相看不到彼此这轮刚说的话，撞话题的偶发风险换整体延迟），谁先完成
+    谁先提交，不再等最慢的一个。整轮墙钟上限 ``TEAM_AGENT_TIMEOUT_SECONDS``，超时者按
+    silent 处理。本函数只由 ``run_chat_generation`` / ``run_travel_generation`` 调用，
     不会自触发，故不存在递归链式生成。
 
     分头判定：队友所在场景 ≠ 主队锚点场景（主角所在）即视为「分头独处」，据此让
@@ -211,7 +215,6 @@ async def _run_team_turn(
         messages = build_team_context(
             teammate, game_session, module, events, player_char,
             all_teammates=teammates, separated=separated,
-            team_guidance=team_guidance,
         )
         t0 = time.monotonic()
         try:
@@ -227,13 +230,12 @@ async def _run_team_turn(
         )
         return raw
 
-    raws = await asyncio.gather(*(_decide(t) for t in roster))
-    for teammate, raw in zip(roster, raws):
+    async def _commit(teammate: Character, raw: str):
         if raw is None:
-            continue
+            return
         decision = _parse_team_decision(raw)
         if not decision:
-            continue  # 解析失败：hold，不重试不递归
+            return  # 解析失败：hold，不重试不递归
         action = decision["action"]
         content = _normalize_team_content(decision["content"], teammate.name, action)
         decision["content"] = content
@@ -269,7 +271,7 @@ async def _run_team_turn(
                     lambda ws, _tid=teammate.id, _q=ev.sequence_num, _s=f"前往了{label}":
                         world_memory.record_team_deed(ws, _tid, _q, _s),
                 )
-            continue
+            return
         # 队友「留守」：队伍要走而他不走。位置默认跟随（无记录者由 get_char_location 回落到
         # 当前场景），所以留下必须显式说出来——把当前所在写成他自己的记录，并给事件盖上
         # stay 标记，主角随后移动时据此跳过他（session_service.stayed_char_ids）。
@@ -295,9 +297,9 @@ async def _run_team_turn(
                 lambda ws, _tid=teammate.id, _q=ev.sequence_num, _s=f"留在了{label}":
                     world_memory.record_team_deed(ws, _tid, _q, _s),
             )
-            continue
+            return
         if action == "silent" or not content:
-            continue
+            return
         event_type = TEAM_ACTION_EVENT[action]
         ev = session_service.add_event(
             db, session_id, event_type, content,
@@ -380,3 +382,42 @@ async def _run_team_turn(
                             f"被 {teammate.name} 用{skill}{verdict}",
                         ),
                     )
+
+    async def _decide_pair(teammate: Character):
+        return teammate, await _decide(teammate)
+
+    owners = {
+        asyncio.create_task(_decide_pair(t)): t
+        for t in roster
+    }
+    if owners:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + TEAM_AGENT_TIMEOUT_SECONDS
+        pending = set(owners)
+        while pending:
+            remaining = max(0.0, deadline - loop.time())
+            done, still = await asyncio.wait(
+                pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                for task in still:
+                    task.cancel()
+                logger.warning(
+                    "队友回合超时 %.0fs，未完成的队友按 silent 处理: session=%s",
+                    TEAM_AGENT_TIMEOUT_SECONDS, session_id,
+                )
+                break
+            pending = still
+            for task in done:
+                teammate = owners[task]
+                try:
+                    _teammate, raw = task.result()
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    logger.exception("队友决策失败: char=%s", teammate.id)
+                    continue
+                if raw is None:
+                    continue
+                async for chunk in _commit(teammate, raw):
+                    yield chunk

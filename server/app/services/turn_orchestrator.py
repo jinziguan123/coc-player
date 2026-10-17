@@ -891,56 +891,6 @@ def _looks_like_combat_declaration(text: str) -> bool:
     return bool(_COMBAT_DECLARATION_RE.search(text or ""))
 
 
-def _team_guidance_from_plan(plan: turn_planner.TurnPlan | None) -> str:
-    """从 plan.direction 派生给 AI 队友的软指引（目前只用 spotlight——把戏份让给冷场玩家）。
-
-    只影响队友「优先照顾谁」，不授权队友替人决定/代言；无 plan 或无 spotlight 则为空串。
-    """
-    if plan is None or not plan.direction.spotlight:
-        return ""
-    return (
-        "本轮请把互动机会和话头多留给："
-        + "、".join(plan.direction.spotlight)
-        + "（他们最近戏份偏少）。你仍然只能决定自己的言行，不得替他们做决定或代言。"
-    )
-
-
-#: 队友这一轮产出了这些类型的事件，就说明裁定前提变了，必须重新规划。
-#: dialogue（对白）**不在其中**——这是本判据的全部要点，理由见下。
-_PREMISE_CHANGING_EVENT_TYPES = frozenset(
-    ("action", "dice", "system", "combat", "scene_change"),
-)
-
-
-def _team_turn_changed_premises(events: list, ai_teammates: list, pre_seq: int) -> bool:
-    """队友这一轮是否改变了裁定前提——决定要不要再跑一次 planner。
-
-    planner 裁定的是**玩家这一轮宣言**该怎么判（要不要检定、什么难度、给什么线索）。队友
-    只是接了句话时，这些前提一个都没变，重新裁定一遍纯属浪费——实测那一次要 46 秒，占整个
-    回合的 44%（两个队友分别说了「背面也写了字？让我看看」和「便签背面写了什么？」，
-    planner 于是对着一模一样的前提把「扯下便签」重判了一遍）。
-
-    但队友真动手就不一样了：他挪了位置、开了箱子、掷了骰、触发了机制点，玩家动作的判定
-    前提就真的变了，必须重规划。
-
-    判错的代价不对称：漏判（该重规划却跳过）会让 KP 拿着过时的裁定叙事；多判只是慢几十秒。
-    所以这里**从宽认定「变了」**——除对白外的任何新事件都算，拿不准就重规划。
-    """
-    if not ai_teammates:
-        return False
-    mate_ids = {t.id for t in ai_teammates}
-    mate_names = {(t.name or "").strip() for t in ai_teammates if (t.name or "").strip()}
-    for e in events:
-        if (e.sequence_num or 0) <= pre_seq:
-            continue                                  # 队友开口前就有的，不算
-        by_mate = (getattr(e, "actor_id", None) in mate_ids
-                   or (getattr(e, "actor_name", "") or "").strip() in mate_names)
-        # 系统事件（掷骰、入库、场景切换）不带队友署名，但同样是队友行动的产物 → 一律算。
-        if e.event_type in _PREMISE_CHANGING_EVENT_TYPES and (by_mate or e.event_type != "action"):
-            return True
-    return False
-
-
 def _stashed_check_request(turn: list, actor_id: str | None) -> str:
     """本轮暂存的技能检定申请（技能页点出来的那种）→ 技能名；没有则空串。
 
@@ -975,7 +925,7 @@ def _failure_notice(exc: BaseException) -> str:
 
 
 async def run_chat_generation(session_id: str) -> None:
-    # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 → 二次 planner →
+    # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 →
     # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
     # 都要有耗时，否则「为什么这么慢」只能靠猜。t_turn 给出总时长做对账。
     openai_compat.reset_endpoint_health()   # 见 run_regenerate_generation 里的同一行
@@ -1085,8 +1035,6 @@ async def run_chat_generation(session_id: str) -> None:
         # 玩家输入后：先跑一轮 AI 队友自动响应（仅 AI 席、仅一轮、不自触发），再交 KP 收束。
         # 队友暗骰（心理学等）的真实结果收集到 team_blind，注入本回合 KP 上下文而不落库/广播。
         team_blind: list[str] = []
-        # 记下队友开口前的进度线，之后据此只看「队友这一轮新产生的事件」。
-        pre_seq = max((e.sequence_num or 0 for e in pre_events), default=0)
         if ai_teammates:
             t_team = time.monotonic(); u_team = usage_tracker.snapshot()
             async for chunk in _run_team_turn(
@@ -1095,7 +1043,6 @@ async def run_chat_generation(session_id: str) -> None:
                 # （通常关思考、档次也更低）演出来明显发木，同桌感立刻塌掉。慢一点也认。
                 db, session_id, game_session, module, player_char, ai_teammates, get_llm(),
                 blind_results=team_blind,
-                team_guidance=_team_guidance_from_plan(plan),
             ):
                 room_hub.broadcast(session_id, chunk)
             logger.info(
@@ -1105,41 +1052,11 @@ async def run_chat_generation(session_id: str) -> None:
             )
 
         events = session_service.get_session_events(db, session_id)
-        # 队友行动可能补充真实移动、恐怖见闻或新的行动事实；回合起点的 plan 只用于
-        # 队友导演提示，不能继续作为最终副作用裁定。重新规划后的结果才交给 KP 与守卫。
+        # 队友行动后不重跑 planner：队友的决策与 KP 的裁定计划已经解耦。KP 拿到的是
+        # 回合起点计划 + 队友实际发生的事件；需要按新事实补裁的确定性守卫在 _run_generation
+        # 之后照常执行。原「队友一动手就跑二次 planner」实测占掉近半回合时间。
         generation_plan = plan
-        if ai_teammates and _team_turn_changed_premises(events, ai_teammates, pre_seq):
-            t_post = time.monotonic(); u_post = usage_tracker.snapshot()
-            db.refresh(game_session)
-            post_rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
-            post_plan_messages = turn_planner.build_turn_plan_messages(
-                game_session, module, player_char, events,
-                teammates=party_others,
-                rules_lookup_enabled=post_rules_enabled,
-                rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
-                rule_options_block=rule_options_service.context_block(db, game_session),
-            )
-            post_plan = await turn_planner.run_turn_planner(fast_llm, post_plan_messages)
-            # 有 AI 队友的局，planner 一个回合要跑**两次**（队友行动会改变裁定前提）。
-            # 这是队友局比单人局明显慢的主因之一，必须单独计时才看得见。
-            logger.info(
-                "耗时|二次 planner %.1fs（%s）session=%s",
-                time.monotonic() - t_post, usage_tracker.fmt(usage_tracker.delta(u_post)), session_id,
-            )
-            if post_plan is not None:
-                generation_plan = post_plan
-                planned_effects.enforce_plan_item_locations(
-                    generation_plan, module, game_session.current_scene_id,
-                )
-                _record_clue_ledger_from_plan(
-                    db, game_session, generation_plan, events, player_char, party_others,
-                    module=module,
-                )
-                _settle_plan_ending(db, session_id, game_session, module, generation_plan)
-        elif ai_teammates:
-            logger.info(
-                "耗时|二次 planner 已跳过（队友本轮只有对白）session=%s", session_id,
-            )
+
         t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
         await _run_generation(
             db, session_id, game_session, module, player_char, events,

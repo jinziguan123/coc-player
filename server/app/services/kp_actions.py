@@ -6,14 +6,10 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.ai.agents.npc_agent import NPCAgent
-from app.ai.context import build_npc_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import (
-    illustration_service, npc_identity, session_service, turn_context, world_memory,
-)
+from app.services import illustration_service, npc_identity, session_service, turn_context
 from app.services.event_protocol import make_chunk as _make_chunk
 
 _attach_npc_portrait = illustration_service._attach_npc_portrait
@@ -26,50 +22,11 @@ async def _exec_npc_act(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     llm, player_char: Character, npc_id: str, trigger: str,
 ) -> tuple[list[str], str]:
-    """触发 NPC 人格代理行动/开口，台词落库并广播。返回 (chunks, NPC 台词)。"""
-    events = session_service.get_session_events(db, session_id)
-    npc_messages = build_npc_context(
-        npc_id, game_session, module, events, trigger_context=trigger,
-    )
-
-    npc_def = None
-    for n in (module.npcs or []):
-        if n.get("id") == npc_id:
-            npc_def = n
-            break
-    npc_name = npc_def["name"] if npc_def else npc_id
-
-    npc_agent = NPCAgent(llm, npc_id)
-    npc_response = await npc_agent.respond(npc_messages)
-
-    # 气泡上的说话人也是玩家可见面：玩家还没认出这东西时，不能替 KP 报出真名。
-    # 把这句台词本身算进判据——NPC 自报家门（「我叫香澄澪」）那一刻就该改口，
-    # 否则会出现「不明存在：我叫香澄澪」这种自己打自己脸的气泡。
-    npc_name = npc_identity.build_masker(db, session_id, module)(
-        npc_name, extra_prose=npc_response,
-    )
-
-    ev = session_service.add_event(
-        db, session_id, "dialogue", npc_response,
-        actor_id=npc_id, actor_name=npc_name,
-        visibility=[npc_id, player_char.id],
-    )
-    # 立绘钩子：缓存命中会直接写进事件 metadata → 随对话 chunk 一并带上（气泡即时出头像）
-    _attach_npc_portrait(db, session_id, module, ev)
-    portrait = (ev.metadata_ or {}).get("portrait")
-    chunks = [_make_chunk(
-        "dialogue", npc_response, actor_name=npc_name,
-        event_id=ev.id, actor_id=npc_id,
-        metadata={"portrait": portrait} if portrait else None,
-    )]
-    # 世界记忆钩子 b：NPC 被触发行动后记入其互动史（trigger 原文截断，不调 LLM）
-    _apply_world_memory(
-        db, game_session,
-        lambda ws: world_memory.record_npc_interaction(
-            ws, npc_id, ev.sequence_num, f"受场景触发而行动/开口：{trigger}",
-        ),
-    )
-    return chunks, npc_response
+    """兼容入口：统一委托给 NpcRuntime，避免又一条平行 NPC 路径。"""
+    from app.services.npc_runtime import NpcRuntime
+    return await NpcRuntime(
+        db, session_id, game_session, module, llm, player_char,
+    ).reply(npc_id, trigger)
 
 
 def _exec_start_chase(

@@ -280,6 +280,21 @@ def _step_note(tool_calls: list[ToolCall]) -> str:
     return _STEP_NOTE_DEFAULT
 
 
+def _named_npc_names(module, game_session) -> set[str]:
+    """有名 NPC 的名字/内部 id：这些人的台词必须交给 NpcRuntime，不允许 KP 用 say 代言。"""
+    names: set[str] = set()
+    for npc in (module.npcs or []):
+        for key in ("id", "name"):
+            value = str(npc.get(key) or "").strip()
+            if value:
+                names.add(value)
+    improvised = (game_session.world_state or {}).get("improvised_npcs") or {}
+    for name, entry in improvised.items():
+        if isinstance(entry, dict) and (entry.get("card") or {}).get("id"):
+            names.add(str(name).strip())
+    return names
+
+
 def _build_kp_tool_executor(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     player_char: Character, teammates: list[Character] | None, llm,
@@ -395,6 +410,15 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome(
                 f"拒绝：{who} 是玩家或队友角色，你不能替他们说话或行动。"
                 "玩家与队友的言行只能由他们本人给出；你只叙述 NPC 与环境，把选择权留给他们。"
+            )
+        # 有名 NPC 走 NpcRuntime：KP 的上下文里有 truth/线索/导演计划，直接代言
+        # 很容易把这些只有 KP 知道的东西混进 NPC 嘴里。llm=None 的确定性测试环境
+        # 保留旧 say 出口，生产调用一律拒绝并引导改用 npc_act。
+        if llm is not None and who in _named_npc_names(module, game_session):
+            return kp_tools.ToolOutcome(
+                f"拒绝：{who} 是有名 NPC，不能用 say() 替其代言。请改用 "
+                f"npc_act(npc_id=<{who} 的 id>, trigger=...)，由 NPC 人格代理"
+                "基于自己的记忆与知识边界生成台词。"
             )
         chunks = _exec_say(
             result, module, who, text,

@@ -96,6 +96,38 @@ def test_team_turn_runs_once_per_teammate(db_factory, monkeypatch):
     assert sum('"npc_dialogue"' in c for c in chunks) == 2
 
 
+def test_team_turn_times_out_slowest_member(db_factory, monkeypatch):
+    """一个队友卡住时，整轮按上限收束，不让慢请求拖住所有队友与 KP。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    slow = teammates[1]
+
+    async def fake_decide(self, messages):
+        if self.character_id == slow.id:
+            await asyncio.sleep(1.0)
+            return '{"action":"speak","content":"我会晚一点。"}'
+        return '{"action":"speak","content":"我先说。"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    monkeypatch.setattr(team_turn_service, "TEAM_AGENT_TIMEOUT_SECONDS", 0.05)
+
+    async def run():
+        started = asyncio.get_running_loop().time()
+        chunks = await _collect(chat_service._run_team_turn(
+            db, session.id, session, module, hero, teammates, llm=None,
+        ))
+        return chunks, asyncio.get_running_loop().time() - started
+
+    chunks, elapsed = asyncio.run(run())
+    assert elapsed < 0.8
+    assert sum('"npc_dialogue"' in c for c in chunks) == 1
+    dialogues = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "dialogue" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert len(dialogues) == 1
+
+
 def test_team_turn_normalizes_self_reference_to_first_person(db_factory, monkeypatch):
     """队友输出明显的自称第三人称时，事件与私有记忆统一保存为第一人称。"""
     db = db_factory()

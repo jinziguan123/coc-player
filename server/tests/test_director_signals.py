@@ -1,4 +1,4 @@
-"""导演信号（节奏经营）纯函数单测，以及 direction 注入到 planner/team 上下文的接线测试。
+"""导演信号（节奏经营）纯函数单测，以及 direction 注入 planner 的接线测试。
 
 信号是确定性启发式，全部不调 LLM。
 """
@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 from app.ai import director_signals as ds
 from app.ai import turn_planner
-from app.ai.context import build_team_context
 from app.ai.turn_planner import DirectionPolicy, TurnPlan
 from app.models import Base, Character, GameSession, Module  # noqa: F401
 
@@ -119,7 +118,7 @@ class TestSignalsRender:
         assert "艾玛" in sig.to_prompt()
 
 
-# ── 接线：direction 进 planner 渲染 / team_guidance 进队友上下文 ──
+# ── 接线：direction 进 planner 渲染 ──
 
 
 class TestDirectionCoercion:
@@ -233,37 +232,6 @@ class TestWiring:
         assert "导演笔记" in msg["content"]
         assert "艾玛" in msg["content"]
 
-    def test_team_context注入导演提示(self):
-        module = Module(
-            title="t", rule_system="coc",
-            scenes=[{"id": "hall", "name": "门厅", "description": "x"}],
-            npcs=[], clues=[], triggers=[],
-        )
-        session = GameSession(
-            module_id="m", current_scene_id="hall", world_state={}, status="active",
-        )
-        emma = Character(name="艾玛", rule_system="coc", base_attributes={}, skills={})
-        henry = Character(name="亨利", rule_system="coc", base_attributes={}, skills={})
-        msgs = build_team_context(
-            emma, session, module, [], henry, all_teammates=[emma],
-            team_guidance="本轮把话头多留给：亨利",
-        )
-        joined = "\n".join(m["content"] for m in msgs)
-        assert "导演提示" in joined and "亨利" in joined
-
-    def test_team_context空指引不注入(self):
-        module = Module(
-            title="t", rule_system="coc",
-            scenes=[{"id": "hall", "name": "门厅", "description": "x"}],
-            npcs=[], clues=[], triggers=[],
-        )
-        session = GameSession(
-            module_id="m", current_scene_id="hall", world_state={}, status="active",
-        )
-        emma = Character(name="艾玛", rule_system="coc", base_attributes={}, skills={})
-        henry = Character(name="亨利", rule_system="coc", base_attributes={}, skills={})
-        msgs = build_team_context(emma, session, module, [], henry, all_teammates=[emma])
-        assert not any("导演提示" in m["content"] for m in msgs)
 
 
 # ── 临场龙套：建议收编 ──

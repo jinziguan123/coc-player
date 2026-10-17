@@ -40,33 +40,33 @@ def test_场景表说明未抵达场景的描述是给KP的笔记():
     assert "底稿" in head or "笔记" in head
 
 
-def test_say工具限定台词只出自说话人自己知道的事():
+def test_say只给没有正式NPC卡的临场龙套():
+    """有名 NPC 一律交给 NpcRuntime；say 只保留给环境龙套，避免 KP 用全局视角代言。"""
     d = TOOLS_BY_NAME["say"].description
-    assert "知道" in d
-    # 点名底稿的几个来源，否则模型只会理解成「别剧透线索」
-    assert "场景列表" in d and "幕后真相" in d
+    assert "临场龙套" in d
+    assert "npc_act" in d
+    assert "有名" in d
 
 
-def test_say工具要求同一NPC前后说法自洽():
-    """事故的另一半：不是说得太多，是先说不知道、被追问后又知道了。"""
+def test_npc_act声明自己的记忆与知识边界():
+    """NPC Agent 的上下文来自 build_npc_context，不读 KP 的 TurnPlan/truth/线索台账。"""
+    d = TOOLS_BY_NAME["npc_act"].description
+    assert "私有记忆" in d or "记忆" in d
+    assert "知识范围" in d or "知识边界" in d
+    assert "人格代理" in d or "NpcRuntime" in d
+
+
+def test_say拒绝有名NPC并引导npc_act():
+    """API 层也说明了不得用 say 替有名 NPC 代言，提示词不是唯一防线。"""
     d = TOOLS_BY_NAME["say"].description
-    assert "自洽" in d or "一致" in d
-    assert "不知道" in d
-
-
-def test_say工具不把约束写成一律装傻():
-    """反向保护：矫枉过正会让 NPC 见问就推说不知道，线索链直接断掉。
-
-    约束里必须同时交代「本就该知道的事要直说」，否则模型会滑向另一个极端。
-    """
-    d = TOOLS_BY_NAME["say"].description
-    assert "该知道" in d
+    assert "不要用 say" in d or "不要用 say()" in d
+    assert "秘密" in d or "线索" in d
 
 
 def test_npc_act走的是隔离上下文这一分工仍在():
     """两条路径的分工是这套防线的前提：say 由 KP 代写（全局视角），
     npc_act 交给 NPC 人格代理（build_npc_context，只有自己那份）。"""
     assert TOOLS_BY_NAME["npc_act"].kind == "npc"
-    assert "人格代理" in TOOLS_BY_NAME["npc_act"].description
+    assert "NpcRuntime" in TOOLS_BY_NAME["npc_act"].description or "人格代理" in TOOLS_BY_NAME["npc_act"].description
     # npc_act 早就写明了「知识范围」，say 迟至此次才补上，别再让它掉队
     assert "知识范围" in TOOLS_BY_NAME["npc_act"].description

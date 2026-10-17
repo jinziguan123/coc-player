@@ -531,6 +531,26 @@ def test_say_tool_refuses_to_voice_player_or_teammate(db_factory):
     assert rn.chunks and result[3] == [(0, npc_identity.UNKNOWN_LABEL, "欢迎光临。")]
 
 
+def test_say_tool_rejects_named_npc_in_production(db_factory):
+    """生产 LLM 路径下，有名 NPC 必须走 npc_act，不允许 KP 用 say 代言。"""
+    db = db_factory()
+    session_id, session, module, hero = _seed_say(db_factory) if False else (None, None, None, None)
+    # 独立起手，避免复用 fixture 误建两份
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    module.npcs = [{"id": "npc_knott", "name": "史蒂芬·诺特先生"}]
+    db.commit()
+    result = ["", "", [], [], []]
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], llm=object(), result=result,
+    )
+    outcome = asyncio.run(execute(ToolCall(
+        id="1", name="say", arguments={"who": "史蒂芬·诺特先生", "text": "欢迎光临。"},
+    )))
+    assert "npc_act" in outcome.result_text
+    assert not outcome.chunks
+
+
 def test_say_tool_uses_real_name_once_players_have_heard_it(db_factory):
     """KP 在叙事里点过名之后，气泡就该改口叫真名。"""
     db, session_id, session, module, hero = _seed_say(db_factory)
@@ -889,8 +909,10 @@ def test_正文SAY气泡与say工具同一口径遮名(db_factory):
                "[SAY: who=田间潜随者（莎布·尼古拉丝化身）]回来……[/SAY]")],
     ])
     result = ["", "", [], [], []]
+    # 这条用例验的是「遮名口径一致」，不是 say 的生产守卫；执行器传 llm=None 走确定性
+    # 旧出口，避免与「有名 NPC 必须 npc_act」的生产守卫混在一起。
     execute = chat_service._build_kp_tool_executor(
-        db, sid, session, module, hero, [], llm, result,
+        db, sid, session, module, hero, [], None, result,
     )
     chunks = asyncio.run(_drain(chat_service._run_kp_agent_loop(
         llm, [{"role": "system", "content": "KP"}], result, execute,
