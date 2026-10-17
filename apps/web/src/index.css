@@ -7842,3 +7842,83 @@ select.input option {
 .kp-chase-start .input { height: 2.25rem; }
 /* 追逐主台的障碍输入也统一到 36px，与写作台表单同高。 */
 .kp-chase .input { height: 2.25rem; }
+
+/* ===== 追逐台 · 羊皮纸主题 =====
+   暗色主题的追逐台像一块夜航雷达；羊皮纸主题不能继续铺那张深绿径向渐变，
+   否则深褐正文会直接沉进底色。这里改成一张铺开的追迹纸：浅纸底 + 极淡的行线，
+   距离轨压在纸面上，棋子用浅色纸片 + 深色墨边，保证两种主题下都读得清。 */
+:root[data-theme="parchment"] .kp-chase-main {
+  border-color: var(--color-border-strong);
+  background:
+    repeating-linear-gradient(0deg, transparent, transparent 27px,
+      rgba(139, 37, 0, 0.025) 27px, rgba(139, 37, 0, 0.025) 28px),
+    radial-gradient(ellipse 90% 80% at 50% 38%, #f8f0df 0%, var(--color-bg-primary) 58%, var(--color-bg-secondary) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42), 0 3px 12px rgba(90, 60, 20, 0.06);
+}
+:root[data-theme="parchment"] .kp-chase-head {
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
+}
+:root[data-theme="parchment"] .kp-chase-head > svg { color: var(--color-accent); }
+:root[data-theme="parchment"] .kp-chase-rule { background: rgba(255, 255, 255, 0.32); }
+:root[data-theme="parchment"] .kp-chase-track::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  right: -0.75rem;
+  top: 2.7rem;
+  height: 3.2rem;
+  border-top: 1px solid rgba(139, 37, 0, 0.12);
+  border-bottom: 1px solid rgba(139, 37, 0, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(139, 37, 0, 0.025));
+  pointer-events: none;
+}
+:root[data-theme="parchment"] .kp-chase-rail {
+  height: 3px;
+  border-radius: 2px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+:root[data-theme="parchment"] .kp-chase-node {
+  box-shadow: 0 1px 2px rgba(90, 60, 20, 0.16);
+}
+:root[data-theme="parchment"] .kp-chase-node--caught {
+  background: color-mix(in srgb, var(--color-danger-deep) 22%, var(--color-bg-secondary));
+}
+:root[data-theme="parchment"] .kp-chase-node--escape {
+  background: color-mix(in srgb, var(--color-verdigris) 14%, var(--color-bg-secondary));
+}
+:root[data-theme="parchment"] .kp-chase-node--here {
+  box-shadow: 0 0 0 3px rgba(139, 37, 0, 0.12), 0 2px 6px rgba(90, 60, 20, 0.2);
+}
+:root[data-theme="parchment"] .kp-chase-label { color: var(--color-text-primary); }
+:root[data-theme="parchment"] .kp-chase-token { box-shadow: 0 3px 8px rgba(90, 60, 20, 0.16); }
+:root[data-theme="parchment"] .kp-chase-token--quarry {
+  background: #e7eef3;
+  border-color: var(--combat-friend);
+  color: var(--combat-friend);
+}
+:root[data-theme="parchment"] .kp-chase-token--pursuer {
+  background: #f3e2e1;
+  border-color: var(--combat-foe);
+  color: var(--combat-foe);
+}
+:root[data-theme="parchment"] .kp-chase-gap b {
+  color: var(--color-accent);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+:root[data-theme="parchment"] .kp-chase-gap span { color: var(--color-text-secondary); }
+:root[data-theme="parchment"] .kp-chase-vs > div {
+  background: rgba(255, 255, 255, 0.34);
+  border-color: var(--color-border-strong);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+:root[data-theme="parchment"] .kp-chase-vs > span { color: var(--color-accent); }
+:root[data-theme="parchment"] .kp-chase-field .input {
+  background: rgba(255, 255, 255, 0.38);
+  border-color: var(--color-border-strong);
+}
+:root[data-theme="parchment"] .kp-chase-log {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.16));
+  border-color: var(--color-border-strong);
+}
+:root[data-theme="parchment"] .kp-chase-log-row b { color: var(--color-accent); }
