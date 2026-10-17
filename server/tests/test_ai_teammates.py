@@ -96,6 +96,27 @@ def test_team_turn_runs_once_per_teammate(db_factory, monkeypatch):
     assert sum('"npc_dialogue"' in c for c in chunks) == 2
 
 
+def test_team_intent_resolver_drops_same_target_conflict(db_factory, monkeypatch):
+    """两个队友同时改同一扇门：后完成者按目标冲突丢弃，只落一条行动。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+
+    async def fake_decide(self, messages):
+        if self.character_id == teammates[0].id:
+            return '{"action":"act","content":"我推开那扇门查看里面。","target":"门"}'
+        return '{"action":"act","content":"我伸手把门反锁，不让任何人进出。","target":"门"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert len(actions) == 1
+
+
 def test_team_conflict_guard_suppresses_duplicate_long_action(db_factory, monkeypatch):
     """两个队友并发给出几乎相同的长台词时，只保留先提交的一条，后一条按 silent 处理。"""
     db = db_factory()

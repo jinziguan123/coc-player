@@ -135,4 +135,7 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - P0 收尾：有名 NPC 漏写进旁白的署名台词不再被旧同步兜底抽成 KP 台词，直接丢弃；`ContextBundle.fit` 真正按预算裁最旧消息；`NpcState` 按 active flags 解析当前形态。
 - trace 覆盖 planner/backstage/combat，增加会话级 800 条保留裁剪与房主接口授权测试；分头工具事件补分组 metadata 与事件重排。
 - 验证更新：后端 2538 passed / 11 skipped、ruff 通过。
+- 新增 ExecutionScope：分头组声明 group/scene/actor 边界；scene_change/start_combat/start_chase 不再在组内直接执行，改为 CoordinatorIntent，由回合协调器统一接受/拒绝（重复请求提示忽略，非主队组拒绝切场景/追逐）。
+- 新增 TeamIntent/resolve_team_intents：队友决策带 observes_seq 与 target；act/assist/check 对同一 target 的并发写只保留先提交者，speak/silent 仍完成即提交；TeamAgent 输出格式补充 target 语义。
+- 验证：后端 2540 passed / 11 skipped、ruff 通过。
 - 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。已覆盖：旧 [SAY]/分头路径 NPC 边界、分头工具循环、ContextBundle、队友 relevance gate/重复冲突兜底、agent_trace 落表与 KP 面板。后续可继续做语义级冲突裁决和跨 Agent 的完整调度器。

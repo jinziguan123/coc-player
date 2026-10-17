@@ -20,6 +20,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
     agent_runtime,
+    intent as team_intent,
     agent_trace,
     dice_runtime,
     narration_protocol,
@@ -293,6 +294,7 @@ async def _run_team_turn(
         or game_session.current_scene_id
     )
     events = session_service.get_session_events(db, session_id)
+    snapshot_seq = max((getattr(e, "sequence_num", 0) or 0) for e in events) if events else 0
     relevant = _select_relevant_teammates(events, game_session, player_char, roster)
     if len(relevant) < len(roster):
         logger.info(
@@ -335,11 +337,13 @@ async def _run_team_turn(
         return raw
 
     seen_actions: list[tuple[str, str]] = []
+    team_intents: list[tuple] = []
 
-    async def _commit(teammate: Character, raw: str):
-        if raw is None:
-            return
-        decision = _parse_team_decision(raw)
+    async def _commit(teammate: Character, raw: str | None = None, decision: dict | None = None):
+        if decision is None:
+            if raw is None:
+                return
+            decision = _parse_team_decision(raw)
         if not decision:
             return  # 解析失败：hold，不重试不递归
         action = decision["action"]
@@ -531,5 +535,27 @@ async def _run_team_turn(
                     continue
                 if raw is None:
                     continue
-                async for chunk in _commit(teammate, raw):
-                    yield chunk
+                decision = _parse_team_decision(raw)
+                if not decision:
+                    continue
+                action = decision.get("action")
+                # 台词/沉默保持完成即提交；会改世界的动作先攒着，等本轮决策齐了做确定性冲突裁决。
+                if action in ("speak", "silent"):
+                    async for chunk in _commit(teammate, decision=decision):
+                        yield chunk
+                else:
+                    decision["observes_seq"] = snapshot_seq
+                    team_intents.append((
+                        teammate, decision,
+                        team_intent.from_decision(teammate, decision, snapshot_seq),
+                    ))
+
+    resolved = team_intent.resolve_team_intents(team_intents)
+    if len(resolved) < len(team_intents):
+        logger.info(
+            "队友意图冲突：%d 条同目标动作被裁决丢弃 session=%s",
+            len(team_intents) - len(resolved), session_id,
+        )
+    for teammate, decision, _intent in resolved:
+        async for chunk in _commit(teammate, decision=decision):
+            yield chunk

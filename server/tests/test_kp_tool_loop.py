@@ -1081,6 +1081,29 @@ def test_kp_turn_loop_keeps_sanity_guard(db_factory, monkeypatch):
     assert any(e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check" for e in evs)
 
 
+def test_split_global_tool_is_deferred_to_coordinator(db_factory):
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    result = ["", "", [], [], []]
+    intents = []
+    from app.services.execution_scope import ExecutionScope
+
+    execute = chat_service._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], None, result,
+        scope=ExecutionScope(
+            group_id="书房", scene_id="scene_a", actor_ids=(hero.id,),
+            is_primary_group=True, split_mode=True,
+        ),
+        coordinator_intents=intents,
+    )
+    out = asyncio.run(execute(ToolCall(
+        id="1", name="scene_change", arguments={"scene_id": "scene_b"},
+    )))
+    assert out.suspend is True
+    assert intents and intents[0].kind == "scene_change"
+    assert session.current_scene_id == "scene_a"
+
+
 def test_split_narrations_tool_loop_runs_each_group(db_factory, monkeypatch):
     db = db_factory()
     session_id, session, module, hero = _seed(db)

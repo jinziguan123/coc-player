@@ -35,6 +35,7 @@ from app.services import (
     dice_runtime,
     event_protocol,
     event_recall,
+    execution_scope,
     generation_housekeeping,
     generation_lifecycle,
     human_kp_actions,
@@ -790,6 +791,63 @@ async def _run_split_narrations(
     return "\n".join(combined)
 
 
+async def _apply_coordinator_intents(
+    db, session_id, game_session, module, player_char, teammates, llm, intents,
+) -> None:
+    """统一执行分头组提交的全局工具；同类只接受第一条，其余明确拒绝。"""
+    if not intents:
+        return
+    seen: set[tuple[str, str]] = set()
+    for intent in intents:
+        key = (
+            intent.kind,
+            str(intent.args.get("scene_id") or intent.args.get("enemies") or intent.args.get("pursuer") or ""),
+        )
+        if key in seen:
+            room_hub.broadcast(session_id, _make_chunk(
+                "system",
+                f"本回合已有一个 {intent.kind} 请求被协调器接受，重复请求已忽略。",
+            ))
+            continue
+        seen.add(key)
+        if intent.kind == "scene_change":
+            if not intent.scope.contains(player_char.id):
+                room_hub.broadcast(session_id, _make_chunk(
+                    "system", "分头组不能直接移动主队；场景切换请求已由协调器拒绝。",
+                ))
+                continue
+            scope_names = set(intent.scope.actor_ids)
+            scope_mates = [t for t in (teammates or []) if t.id in scope_names]
+            chunks, _sid, note = await _exec_scene_change(
+                db, session_id, game_session, module,
+                intent.args.get("scene_id", ""), player_char, scope_mates,
+            )
+            for chunk in chunks:
+                room_hub.broadcast(session_id, chunk)
+            if note:
+                room_hub.broadcast(session_id, _make_chunk("system", note))
+        elif intent.kind == "start_combat":
+            chunks = await _exec_start_combat(
+                db, session_id, game_session, module, player_char, teammates, llm,
+                intent.args.get("enemies", ""), intent.args.get("trigger", ""),
+                participant_ids=list(intent.scope.actor_ids),
+            )
+            for chunk in chunks:
+                room_hub.broadcast(session_id, chunk)
+        elif intent.kind == "start_chase":
+            if not intent.scope.contains(player_char.id):
+                room_hub.broadcast(session_id, _make_chunk(
+                    "system", "分头组不能直接发起追逐；追逐请求已由协调器拒绝。",
+                ))
+                continue
+            chunks = _exec_start_chase(
+                db, session_id, module, player_char,
+                intent.args.get("pursuer", ""), intent.args.get("trigger", ""),
+            )
+            for chunk in chunks:
+                room_hub.broadcast(session_id, chunk)
+
+
 async def _run_split_narrations_tool_loop(
     db: Session,
     session_id: str,
@@ -834,11 +892,19 @@ async def _run_split_narrations_tool_loop(
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
     by_name = {player_char.name: player_char}
     by_name.update({t.name: t for t in (teammates or [])})
+    coordinator_intents: list = []
 
     for grp in groups:
         label = grp["label"]
         members = "、".join(grp["members"])
         char_scope = [by_name[n] for n in (grp.get("members") or []) if n in by_name]
+        scope = execution_scope.ExecutionScope(
+            group_id=label,
+            scene_id=str(grp.get("scene_id") or game_session.current_scene_id or ""),
+            actor_ids=tuple(c.id for c in char_scope),
+            is_primary_group=player_char.id in {c.id for c in char_scope},
+            split_mode=True,
+        )
         messages = build_kp_context(
             game_session, module, player_char, events, teammates=teammates,
             rules_lookup_enabled=rules_enabled, viewer_scene_id=grp.get("scene_id"),
@@ -871,6 +937,7 @@ async def _run_split_narrations_tool_loop(
         execute = _build_kp_tool_executor(
             db, session_id, game_session, module, player_char, teammates, llm, result,
             pre_gen_seq=pre_gen_seq, ruleset=rs, dice_scope=char_scope,
+            scope=scope, coordinator_intents=coordinator_intents,
         )
         try:
             async for chunk in _run_kp_agent_loop(
@@ -906,6 +973,11 @@ async def _run_split_narrations_tool_loop(
         _record_npc_say_memory(
             db, session_id, game_session, module, result[2], grp["members"],
         )
+
+    await _apply_coordinator_intents(
+        db, session_id, game_session, module, player_char, teammates, llm,
+        coordinator_intents,
+    )
 
 
 async def _run_split_generation(

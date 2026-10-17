@@ -46,6 +46,7 @@ from app.services import (
     turn_effects,
 )
 from app.services.event_protocol import make_chunk as _make_chunk
+from app.services.execution_scope import COORDINATED_TOOLS, CoordinatorIntent
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +313,8 @@ def _build_kp_tool_executor(
     pre_gen_seq: int | None = None,
     ruleset=None,
     dice_scope: list[Character] | None = None,
+    scope=None,
+    coordinator_intents: list | None = None,
 ):
     """构建 loop 路径的工具执行器：把注册表工具名分发到上面的共用执行函数（不复制逻辑）。
 
@@ -591,6 +594,19 @@ def _build_kp_tool_executor(
         if handler is None:
             return kp_tools.ToolOutcome(
                 f"工具 {name} 暂无 loop 行为（内部错误），请直接继续叙述。"
+            )
+        # 分头场景：会改全局状态的工具不在组内直接执行，交给回合协调器统一裁定。
+        if scope is not None and scope.split_mode and name in COORDINATED_TOOLS:
+            if coordinator_intents is None:
+                return kp_tools.ToolOutcome(
+                    f"工具 {name} 需要回合协调器，但当前组没有协调器通道；本轮不要切场景/开战。"
+                )
+            coordinator_intents.append(CoordinatorIntent(
+                kind=name, scope=scope, args=dict(kv),
+            ))
+            return kp_tools.ToolOutcome(
+                f"已把 {name} 提交给回合协调器，等待统一裁定；本轮这一组不要再执行场景/战斗切换。",
+                suspend=True,
             )
         try:
             return await handler(name, kv)

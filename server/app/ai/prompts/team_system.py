@@ -55,7 +55,7 @@ TEAM_SYSTEM_PROMPT = """\
 - 一次只做一个简短反应（一两句话），不要长篇大论，给其他玩家和 KP 留出空间。
 
 ## 输出格式（严格 JSON，不要任何额外文字或解释）
-{{"action":"speak|act|assist|check|travel|stay|silent","content":"你的台词或行动/打算的简短描述；silent 时为空字符串","skill":"仅 action=check 时填，技能名如 考古学；其余留空","target":"仅 action=travel 时填，目的地名；其余留空"}}
+{{"action":"speak|act|assist|check|travel|stay|silent","content":"你的台词或行动/打算的简短描述；silent 时为空字符串","skill":"仅 action=check 时填，技能名如 考古学；其余留空","target":"travel 填目的地名；act/assist/check 若明确指向同一人/物，可填对象名（门、钥匙、管家）；不明确留空"}}
 """
 
 
