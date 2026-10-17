@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.models.intent_history import IntentHistory
 from app.models.session import GameSession
 from app.services import intent_ledger
 
@@ -101,18 +102,57 @@ def record_state(world_state: dict, intent: WorldIntent) -> dict:
 def record(db: Session, session_id: str, intent: WorldIntent) -> None:
     """best-effort 落库；失败不阻塞动作本身。"""
     try:
-        session = db.get(GameSession, session_id)
-        if session is None:
+        if db.get(GameSession, session_id) is None:
             return
-        session.world_state = record_state(session.world_state or {}, intent)
-        db.add(session)
+        db.add(IntentHistory(
+            session_id=session_id,
+            actor_id=intent.actor_id,
+            actor_name=intent.actor_name,
+            source=intent.source,
+            action=intent.action,
+            target=intent.target,
+            verb=intent.verb,
+            content=intent.content,
+            observes_seq=intent.observes_seq,
+            target_version=intent.target_version,
+            precondition_ok=intent.precondition_ok,
+        ))
         db.commit()
-        db.refresh(session)
     except Exception:
         try:
             db.rollback()
         except Exception:
             pass
+
+
+def list_for_session(
+    db: Session, session_id: str, limit: int = 100,
+    source: str = "", actor: str = "",
+) -> list[dict]:
+    """KP 面板用：按来源/角色筛选的最近意图。"""
+    q = db.query(IntentHistory).filter(IntentHistory.session_id == session_id)
+    if source:
+        q = q.filter(IntentHistory.source == source)
+    if actor:
+        needle = f"%{actor.strip()}%"
+        q = q.filter(
+            IntentHistory.actor_name.ilike(needle) | IntentHistory.actor_id.ilike(needle)
+        )
+    rows = q.order_by(IntentHistory.created_at.desc()).limit(
+        max(1, min(int(limit), 200))
+    ).all()
+    return [
+        {
+            "actor_id": row.actor_id, "actor_name": row.actor_name,
+            "source": row.source, "action": row.action, "target": row.target,
+            "verb": row.verb, "content": row.content,
+            "observes_seq": row.observes_seq,
+            "target_version": row.target_version,
+            "precondition_ok": row.precondition_ok,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
 
 
 def list_history(world_state: dict | None, limit: int = 100) -> list[dict]:

@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base, Character, GameSession, Module
 from app.services import session_service
 from app.models.agent_trace import AgentTraceLog
+from app.models.intent_history import IntentHistory
 from app.services import agent_trace
 from app.services.npc_runtime import NpcRuntime
 
@@ -47,9 +48,28 @@ def test_npc_reply_records_target_state(tmp_path, monkeypatch):
     asyncio.run(runtime.reply("butler", "玩家要进门", target="门", verb="lock"))
     from app.services import intent_ledger
     assert intent_ledger.state(runtime.game_session.world_state or {}, "门") == "locked"
-    history = (runtime.game_session.world_state or {}).get("intent_history") or []
-    assert history and history[-1]["source"] == "npc"
-    assert history[-1]["verb"] == "lock"
+    history = db.query(IntentHistory).filter(IntentHistory.session_id == session.id).all()
+    assert history and history[-1].source == "npc"
+    assert history[-1].verb == "lock"
+
+
+def test_intent_history_filters_by_source_and_actor(tmp_path, monkeypatch):
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+
+    async def fake_respond(self, messages):
+        return "我锁上门。"
+
+    monkeypatch.setattr("app.services.npc_runtime.NPCAgent.respond", fake_respond)
+    runtime = NpcRuntime(db, session.id, session, module, llm=object(), player_char=hero)
+    asyncio.run(runtime.reply("butler", "玩家要进门", target="门", verb="lock"))
+    from app.services import world_intent
+
+    npc_only = world_intent.list_for_session(db, session.id, source="npc")
+    assert npc_only and all(i["source"] == "npc" for i in npc_only)
+    assert not world_intent.list_for_session(db, session.id, source="combat")
+    assert world_intent.list_for_session(db, session.id, actor="butler")
+    assert not world_intent.list_for_session(db, session.id, actor="不存在")
 
 
 def test_npc_runtime_times_out_and_traces(tmp_path, monkeypatch, caplog):

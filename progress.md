@@ -155,4 +155,7 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - WorldIntent 增加 target_version/precondition_ok；战斗动作读取目标存活前置与对象版本，前置不满足只记录警告，最终仍由战斗引擎裁决。
 - 新增房主接口 /intent-history 与 KP 面板「动作意图」页签，展示 NPC/战斗动作、target、verb、版本与前置状态。
 - 验证更新：后端 2563 passed / 11 skipped、ruff 通过；前端 523 vitest / build 通过。
+- intent_history 迁到独立表（模型 + Alembic 迁移 c8e0a2b4d6f7，含旧 world_state JSON 回填并清理）；/intent-history 改查表并支持 source/actor 筛选。
+- KP 面板“动作意图”页签增加来源下拉与角色筛选；迁移在空库升级验证通过。
+- 验证更新：后端 2565 passed / 11 skipped、ruff 通过；前端 523 vitest / build 通过。
 - 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。已覆盖：旧 [SAY]/分头路径 NPC 边界、分头工具循环、ContextBundle、队友 relevance gate/重复冲突兜底、agent_trace 落表与 KP 面板。后续可继续做语义级冲突裁决和跨 Agent 的完整调度器。

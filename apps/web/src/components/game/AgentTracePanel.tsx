@@ -47,6 +47,8 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
   const [tab, setTab] = useState<'traces' | 'intents'>('traces')
   const [items, setItems] = useState<TraceItem[]>([])
   const [intents, setIntents] = useState<IntentItem[]>([])
+  const [filterSource, setFilterSource] = useState('')
+  const [filterActor, setFilterActor] = useState('')
   const [loading, setLoading] = useState(false)
 
   const loadTraces = useCallback(() => {
@@ -59,11 +61,14 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
 
   const loadIntents = useCallback(() => {
     setLoading(true)
-    api.get<{ items: IntentItem[] }>(`/sessions/${sessionId}/intent-history?limit=50`)
+    const params = new URLSearchParams({ limit: '50' })
+    if (filterSource) params.set('source', filterSource)
+    if (filterActor.trim()) params.set('actor', filterActor.trim())
+    api.get<{ items: IntentItem[] }>('/sessions/' + sessionId + '/intent-history?' + params.toString())
       .then((data) => setIntents(data.items || []))
       .catch(() => setIntents([]))
       .finally(() => setLoading(false))
-  }, [sessionId])
+  }, [filterActor, filterSource, sessionId])
 
   const load = useCallback(() => {
     if (tab === 'intents') loadIntents()
@@ -151,6 +156,25 @@ export function AgentTracePanel({ sessionId }: { sessionId: string }) {
 
           {tab === 'intents' && (
             <>
+              <div className="flex items-center gap-2 mb-2">
+                <select
+                  className="btn-xs rounded border px-2"
+                  style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+                  value={filterSource}
+                  onChange={(e) => setFilterSource(e.target.value)}
+                >
+                  <option value="">全部来源</option>
+                  <option value="npc">NPC</option>
+                  <option value="combat">战斗</option>
+                </select>
+                <input
+                  className="btn-xs rounded border px-2 min-w-0 flex-1"
+                  style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+                  placeholder="按角色 id / 名字筛选"
+                  value={filterActor}
+                  onChange={(e) => setFilterActor(e.target.value)}
+                />
+              </div>
               {!intents.length && !loading && (
                 <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   还没有动作记录。NPC 或战斗动作后会出现。

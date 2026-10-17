@@ -814,14 +814,20 @@ def cancel_end_module_vote(
 def get_intent_history(
     session_id: str,
     limit: int = Query(100, ge=1, le=200),
+    source: str = Query("", max_length=16),
+    actor: str = Query("", max_length=128),
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    """KP 面板的 NPC/战斗动作意图历史；仅房主可见。"""
-    session = require_session_host(db, session_id, token)
+    """KP 面板的 NPC/战斗动作意图历史；仅房主可见，可按来源/角色筛选。"""
+    require_session_host(db, session_id, token)
     from app.services import world_intent
 
-    return {"items": world_intent.list_history(session.world_state, limit=limit)}
+    return {
+        "items": world_intent.list_for_session(
+            db, session_id, limit=limit, source=source, actor=actor,
+        )
+    }
 
 
 @router.get("/{session_id}/agent-traces")
