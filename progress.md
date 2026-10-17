@@ -126,4 +126,10 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - `NpcRuntime` 增加 30 秒回应超时 `NpcResponseTimeout`，超时不落 NPC 台词、不阻塞 KP 工具循环；新增超时与轨迹测试。
 - 新增 `NpcState` 只读状态视图：对话/战斗共享同一份身份、人设、位置与私有记忆；幕后仍保留独立世界推演模式。
 - 旧 [SAY] / 分头路径接上 `NpcDialogueGuard`：扫描器只把真实说话人放在私有 metadata，过滤器在出站前剥掉；有名 NPC 的显式台词改由 NpcRuntime 生成并按原偏移回写，不再让 KP 的全局上下文直接代言。
-- 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。尚未覆盖：通用 Actor 抽象、分头行动的工具循环、队友 relevance gate/冲突检测；agent_trace 目前只有结构化日志，未落表/未进 UI。
+- 分头行动接入工具循环：每组独立上下文 + `dice_scope` 限定群检候选域，工具即时执行；旧的合并文本 `_process_commands` 只在无工具 Provider 下兜底。
+- 新增 `ContextBundle` 通用上下文对象；NpcRuntime/队友决策先接入，系统提示、消息、预算、可见范围有了统一形状。
+- 队友 relevance gate：玩家点名时，分处异地且本场景无新事件的未点名队友不再白跑主模型；无点名时保持全员。
+- 队友并发冲突兜底：同动作且长文本高度重合的后完成决策按 silent 处理，避免两人同时说同一段话。
+- `agent_trace` 落表：新增 `agent_trace_logs` 表与 Alembic 迁移、`list_for_session`、房主专用 `/agent-traces` 接口；真人 KP 页面增加「调用轨迹」抽屉（Agent/结果/耗时/token）。
+- 验证：后端 2534 passed / 11 skipped、ruff 通过；前端 typecheck、523 项 vitest、Vite build、文件行数检查通过，新面板 oxlint 0 warning。
+- 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。已覆盖：旧 [SAY]/分头路径 NPC 边界、分头工具循环、ContextBundle、队友 relevance gate/重复冲突兜底、agent_trace 落表与 KP 面板。后续可继续做语义级冲突裁决和跨 Agent 的完整调度器。

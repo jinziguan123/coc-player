@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from difflib import SequenceMatcher
 import re
 import time
 from collections.abc import AsyncIterator
@@ -18,6 +19,7 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    agent_runtime,
     agent_trace,
     dice_runtime,
     narration_protocol,
@@ -174,6 +176,90 @@ def _normalize_team_content(content: str, character_name: str, action: str) -> s
     return "我" + rest
 
 
+def _select_relevant_teammates(
+    events, game_session, player_char, teammates,
+) -> list:
+    """队友相关性门控：玩家明确点名时，别让分处两地的未点名队友也跑主模型。
+
+    规则刻意保守：
+    - 玩家最近一句没有点名任何队友 → 全部保留（不猜“这轮没他的事”）；
+    - 玩家点名了 A → 保留 A、与玩家同场景的队友，以及分头场景里本轮仍有新事件的队友；
+    - 一个都留不下（数据异常）→ 回退全体，宁可多跑也不让队伍突然沉默。
+    """
+    player_events = [
+        e for e in events or []
+        if getattr(e, "actor_id", None) == player_char.id
+        and getattr(e, "event_type", None) in ("action", "dialogue")
+        and str(getattr(e, "content", "") or "").strip()
+    ]
+    if not player_events:
+        return list(teammates)
+    last = player_events[-1]
+    last_text = str(getattr(last, "content", "") or "")
+    mentioned = [t for t in teammates if t.name and t.name in last_text]
+    if not mentioned:
+        return list(teammates)
+    player_scene = (
+        session_service.get_char_location(game_session, player_char.id)
+        or game_session.current_scene_id
+    )
+    last_seq = getattr(last, "sequence_num", 0) or 0
+    selected = []
+    for teammate in teammates:
+        if teammate in mentioned:
+            selected.append(teammate)
+            continue
+        scene = (
+            session_service.get_char_location(game_session, teammate.id)
+            or game_session.current_scene_id
+        )
+        if scene and player_scene and scene == player_scene:
+            selected.append(teammate)
+            continue
+        has_new_scene_event = any(
+            (getattr(e, "sequence_num", 0) or 0) > last_seq
+            and (getattr(e, "metadata_", None) or {}).get("scene_id") == scene
+            for e in events
+        )
+        if has_new_scene_event:
+            selected.append(teammate)
+    return selected or list(teammates)
+
+
+def _team_conflict_key(action: str, content: str) -> tuple[str, str] | None:
+    if action not in ("speak", "act", "assist"):
+        return None
+    text = "".join(str(content or "").split())
+    if not text:
+        return None
+    return action, text
+
+
+def _is_duplicate_team_action(
+    action: str, content: str, seen: list[tuple[str, str]],
+) -> bool:
+    """并发完成顺序下的重复/冲突检测：同一类动作、语义高度重合的后者让位。
+
+    这不是语义审核，而是确定性的「两个人同时说了同一句话 / 做了同一个动作」兜底。
+    阈值刻意高：0.86 以下的不同台词照常保留。
+    """
+    key = _team_conflict_key(action, content)
+    if key is None:
+        return False
+    act, text = key
+    # 短句（「小心」「跟上」）本来就会撞，不算冲突；只拦成段的重复台词/动作。
+    if len(text) < 8:
+        seen.append(key)
+        return False
+    for prev_act, prev_text in seen:
+        if prev_act != act:
+            continue
+        if SequenceMatcher(None, prev_text, text).ratio() >= 0.86:
+            return True
+    seen.append(key)
+    return False
+
+
 async def _run_team_turn(
     db: Session,
     session_id: str,
@@ -207,6 +293,15 @@ async def _run_team_turn(
         or game_session.current_scene_id
     )
     events = session_service.get_session_events(db, session_id)
+    relevant = _select_relevant_teammates(events, game_session, player_char, roster)
+    if len(relevant) < len(roster):
+        logger.info(
+            "队友相关性门控：本轮只跑 %d/%d 人 session=%s",
+            len(relevant), len(roster), session_id,
+        )
+    roster = relevant[:MAX_TEAMMATES_PER_TURN]
+    if not roster:
+        return
 
     async def _decide(teammate: Character) -> str | None:
         tm_scene = (
@@ -218,10 +313,13 @@ async def _run_team_turn(
             teammate, game_session, module, events, player_char,
             all_teammates=teammates, separated=separated,
         )
-        trace = agent_trace.start(session_id, "team", char_id=teammate.id)
+        bundle = agent_runtime.ContextBundle.from_messages(
+            messages, budget_tokens=12000, visibility=(teammate.id,),
+        )
+        trace = agent_trace.start(session_id, "team", db=db, char_id=teammate.id)
         t0 = time.monotonic()
         try:
-            raw = await TeamAgent(llm, teammate.id).decide(messages)
+            raw = await TeamAgent(llm, teammate.id).decide(bundle.for_model())
         except asyncio.CancelledError:
             agent_trace.finish(trace, outcome="cancelled", provider=llm)
             raise
@@ -236,6 +334,8 @@ async def _run_team_turn(
         agent_trace.finish(trace, provider=llm)
         return raw
 
+    seen_actions: list[tuple[str, str]] = []
+
     async def _commit(teammate: Character, raw: str):
         if raw is None:
             return
@@ -245,6 +345,12 @@ async def _run_team_turn(
         action = decision["action"]
         content = _normalize_team_content(decision["content"], teammate.name, action)
         decision["content"] = content
+        if _is_duplicate_team_action(action, content, seen_actions):
+            logger.info(
+                "队友并发冲突：%s 的 %s 与已提交动作重合，按 silent 处理 session=%s",
+                teammate.name, action, session_id,
+            )
+            return
         # 队友「前往」：显式移动，确定性切换其所在场景（仅限已知地点），落一条「前往」事件。
         # 队友的移动由此动作触发，KP 不再从其台词臆测搬人；分头分组据 party_locations 归并。
         if action == "travel":

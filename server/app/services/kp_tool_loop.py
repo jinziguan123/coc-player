@@ -311,6 +311,7 @@ def _build_kp_tool_executor(
     result: list,
     pre_gen_seq: int | None = None,
     ruleset=None,
+    dice_scope: list[Character] | None = None,
 ):
     """构建 loop 路径的工具执行器：把注册表工具名分发到上面的共用执行函数（不复制逻辑）。
 
@@ -338,6 +339,7 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome("参数缺失：skill 为必填。请带上技能名重试，或直接继续叙述。")
         chunks, descs, pending = await _exec_dice_check(
             db, session_id, game_session, module, kv, player_char, teammates,
+            scope=dice_scope,
         )
         if pending:
             return kp_tools.ToolOutcome(
@@ -364,7 +366,7 @@ def _build_kp_tool_executor(
     async def _h_san_check(name, kv):
         chunks, descs, pending = await _exec_san_check(
             db, session_id, game_session, kv, player_char, teammates,
-            pre_gen_seq=pre_gen_seq,
+            scope=dice_scope, pre_gen_seq=pre_gen_seq,
         )
         if pending:
             return kp_tools.ToolOutcome(

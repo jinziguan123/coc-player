@@ -1081,8 +1081,36 @@ def test_kp_turn_loop_keeps_sanity_guard(db_factory, monkeypatch):
     assert any(e.event_type == "system" and (e.metadata_ or {}).get("kind") == "san_check" for e in evs)
 
 
-def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
-    """分头模式与主路径一致仍走旧的逐组生成，开关开启也不进 loop。"""
+def test_split_narrations_tool_loop_runs_each_group(db_factory, monkeypatch):
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    groups = [
+        {"label": "书房", "scene_id": "scene_a", "members": ["伊芙琳"]},
+        {"label": "地下室", "scene_id": "scene_b", "members": ["伊芙琳"]},
+    ]
+    seen = []
+
+    async def fake_loop(llm, messages, result, execute, **kw):
+        seen.append(kw.get("group_label"))
+        result[0] = f"{kw.get('group_label')}叙事。"
+        if False:
+            yield ""
+
+    async def fake_validate(*a, **k):
+        return None
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", fake_loop)
+    monkeypatch.setattr(chat_service, "_validate_and_patch_narration", fake_validate)
+
+    asyncio.run(chat_service._run_split_narrations_tool_loop(
+        db, session_id, session, module, hero, [], [], object(), True,
+        [], groups,
+    ))
+    assert seen == ["书房", "地下室"]
+
+
+def test_kp_turn_split_mode_uses_tool_loop(db_factory, monkeypatch):
+    """分头模式与主路径一致：开关开启时逐组走工具循环，而不是旧的合并文本路径。"""
     llm = _FakeToolLLM([[_text("不该被用到。")]])
     _kp_turn_runtime(monkeypatch, db_factory, llm, True)
     groups = [
@@ -1092,10 +1120,15 @@ def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
     monkeypatch.setattr(chat_service, "_location_groups", lambda *a, **k: groups)
     called = {}
 
-    async def _fake_split(*a, **k):
-        called["split"] = True
+    async def _fake_loop(*a, **k):
+        called["tool_loop"] = True
+
+    async def _legacy(*a, **k):
+        called["legacy"] = True
         return ""
-    monkeypatch.setattr(chat_service, "_run_split_narrations", _fake_split)
+
+    monkeypatch.setattr(chat_service, "_run_split_narrations_tool_loop", _fake_loop)
+    monkeypatch.setattr(chat_service, "_run_split_narrations", _legacy)
 
     db = db_factory()
     session_id, session, module, hero = _seed(db)
@@ -1103,7 +1136,8 @@ def test_kp_turn_split_mode_stays_on_legacy_split_path(db_factory, monkeypatch):
         db, session_id, session, module, hero, [], "续写", split_aware=True,
     ))
 
-    assert called.get("split") is True
+    assert called.get("tool_loop") is True
+    assert "legacy" not in called
     assert llm.calls == []
 
 # ── DeepSeek 思考模式：本轮历史里的 assistant 消息折成 user ─────────────────────

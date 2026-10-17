@@ -6,6 +6,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module
 from app.services import session_service
+from app.models.agent_trace import AgentTraceLog
+from app.services import agent_trace
 from app.services.npc_runtime import NpcRuntime
 
 
@@ -74,3 +76,7 @@ def test_npc_runtime_reply_persists_dialogue_and_memory(tmp_path, monkeypatch):
     assert dialogue.actor_id == "butler" and dialogue.content == "欢迎光临。"
     memories = (db.get(GameSession, session.id).world_state or {}).get("npc_memory") or {}
     assert memories.get("butler", {}).get("interactions")
+    traces = db.query(AgentTraceLog).filter(AgentTraceLog.session_id == session.id).all()
+    assert any(t.agent == "npc" and t.outcome == "ok" for t in traces)
+    listed = agent_trace.list_for_session(db, session.id)
+    assert listed and listed[0]["agent"] == "npc"

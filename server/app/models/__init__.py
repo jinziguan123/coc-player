@@ -1,3 +1,4 @@
+from app.models.agent_trace import AgentTraceLog
 from app.models.base import Base
 from app.models.character import Character
 from app.models.chase_state import ChaseState
@@ -14,6 +15,7 @@ from app.models.session_recap import SessionRecap
 from app.models.session_stats import SessionStats
 
 __all__ = [
+    "AgentTraceLog",
     "Base",
     "Character",
     "ChaseState",

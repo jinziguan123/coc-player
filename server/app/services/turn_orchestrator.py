@@ -788,6 +788,115 @@ async def _run_split_narrations(
     return "\n".join(combined)
 
 
+async def _run_split_narrations_tool_loop(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module,
+    player_char: Character,
+    events: list,
+    teammates: list[Character] | None,
+    llm,
+    rules_enabled: bool,
+    matcher_npcs: list[dict],
+    groups: list[dict],
+    plan: turn_planner.TurnPlan | None = None,
+    blind_message: dict | None = None,
+    rule_excerpts: list[dict] | None = None,
+    location_guard: str = "",
+    group_prompts: dict[str, str] | None = None,
+    default_prompt: str | None = None,
+) -> None:
+    """分头行动的工具循环版：每组一套聚焦上下文，工具即时执行并广播。
+
+    与旧分头路径的分工：
+    - 组内骰子候选域由 dice_scope 限定，不会把别组的人拉进群检；
+    - 组内 NPC/场景工具仍直接作用于会话状态（与旧路径统一指令处理器一致）；
+    - 叙事、检定、场景切换都在 loop 内完成，不再把文本拼回去走第二次
+      _process_commands，否则检定会重复结算。
+    """
+    _tag_turn_events_by_group(db, _current_turn_events(events), groups)
+    plan_message = turn_planner.build_turn_plan_message(plan) if plan is not None else None
+    module_rag_enabled = bool(events) and getattr(module, "rag_status", "") == "ready"
+    party_ids = {player_char.id} | {t.id for t in (teammates or [])}
+    shown_dialogues = _shown_turn_dialogues(events, party_ids)
+    turn_inputs = _shown_turn_context(events, party_ids)
+    party_names = {player_char.name} | {t.name for t in (teammates or [])}
+    rs = rule_options_service.ruleset(db, game_session)
+    exclude: set[str] = set()
+    if not rules_enabled:
+        exclude.add("rule_lookup")
+    if not module_rag_enabled:
+        exclude.add("module_lookup")
+    tools = kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools)
+    pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
+    by_name = {player_char.name: player_char}
+    by_name.update({t.name: t for t in (teammates or [])})
+
+    for grp in groups:
+        label = grp["label"]
+        members = "、".join(grp["members"])
+        char_scope = [by_name[n] for n in (grp.get("members") or []) if n in by_name]
+        messages = build_kp_context(
+            game_session, module, player_char, events, teammates=teammates,
+            rules_lookup_enabled=rules_enabled, viewer_scene_id=grp.get("scene_id"),
+            module_excerpts=_module_excerpts_for_context(
+                db, module, game_session, events, party_ids,
+                scene_id=grp.get("scene_id"),
+            ),
+            module_lookup_enabled=module_rag_enabled,
+            rule_excerpts=rule_excerpts,
+            recall_enabled=event_recall.is_enabled(game_session),
+            scene_groups=groups,
+            rule_options_block=rule_options_service.context_block(db, game_session),
+        )
+        if plan_message is not None:
+            messages.append(plan_message)
+        if blind_message is not None:
+            messages.append(blind_message)
+        if location_guard and player_char.name in (grp.get("members") or []):
+            messages.append({"role": "system", "content": location_guard})
+        if group_prompts and label in group_prompts:
+            user_content = group_prompts[label]
+        else:
+            prompt = default_prompt or SPLIT_FOCUS_PROMPT
+            user_content = prompt.format(label=label, members=members)
+        messages.append({"role": "user", "content": user_content})
+
+        result = ["", "", [], [], []]
+        execute = _build_kp_tool_executor(
+            db, session_id, game_session, module, player_char, teammates, llm, result,
+            pre_gen_seq=pre_gen_seq, ruleset=rs, dice_scope=char_scope,
+        )
+        try:
+            async for chunk in _run_kp_agent_loop(
+                llm, messages, result, execute,
+                tools=tools, npcs=matcher_npcs, group_label=label, plan=plan,
+                party_names=party_names, shown_dialogues=shown_dialogues,
+                masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
+            ):
+                room_hub.broadcast(session_id, chunk)
+        except BaseException:
+            _persist_narration(db, session_id, result, llm=llm)
+            raise
+        await _validate_and_patch_narration(
+            llm, plan, result, seen_context=_recent_seen_text(events),
+            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
+            settled_checks=_settled_checks_context(events),
+            party_names=party_names,
+            location_context=(
+                location_guard if player_char.name in (grp.get("members") or []) else ""
+            ),
+        )
+        _persist_narration(db, session_id, result, llm=llm)
+        _record_npc_say_memory(
+            db, session_id, game_session, module, result[2], grp["members"],
+        )
+
+
 async def _run_split_generation(
     db: Session,
     session_id: str,
@@ -817,18 +926,27 @@ async def _run_split_generation(
     """
     # 生成前基线序号：供确定性 SAN 守卫判断本轮 KP 是否已自行掷过 SAN（幂等）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
-    combined = await _run_split_narrations(
-        db, session_id, game_session, module, player_char, events, teammates,
-        kp, llm, rules_enabled, matcher_npcs, groups,
-        plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
-        location_guard=location_guard,
-    )
+    if _tool_loop_active(llm):
+        # 工具循环分头：每组即时执行工具，不再把文本拼回去走统一指令处理。
+        await _run_split_narrations_tool_loop(
+            db, session_id, game_session, module, player_char, events, teammates,
+            llm, rules_enabled, matcher_npcs, groups,
+            plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
+            location_guard=location_guard,
+        )
+    else:
+        combined = await _run_split_narrations(
+            db, session_id, game_session, module, player_char, events, teammates,
+            kp, llm, rules_enabled, matcher_npcs, groups,
+            plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
+            location_guard=location_guard,
+        )
 
-    async for chunk in _process_commands(
-        db, session_id, combined, module, player_char, game_session, llm,
-        teammates=teammates, scene_groups=groups, pre_gen_seq=pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
+        async for chunk in _process_commands(
+            db, session_id, combined, module, player_char, game_session, llm,
+            teammates=teammates, scene_groups=groups, pre_gen_seq=pre_gen_seq,
+        ):
+            room_hub.broadcast(session_id, chunk)
 
     async for chunk in _ensure_planned_combat(
         db, session_id, game_session, module, player_char, teammates, llm, plan,
@@ -1404,13 +1522,23 @@ async def _run_kp_turn(
             scene_groups, focus_member, user_prompt, requested_check,
         )
         group_prompts = {focus_label: user_prompt} if focus_label else None
-        commands_text = await _run_split_narrations(
-            db, session_id, game_session, module, player_char, events, party_others,
-            kp, llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
-            scene_groups, location_guard=location_guard,
-            group_prompts=group_prompts,
-            default_prompt=SPLIT_FOCUS_PROMPT,
-        )
+        if _tool_loop_active(llm):
+            await _run_split_narrations_tool_loop(
+                db, session_id, game_session, module, player_char, events, party_others,
+                llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
+                scene_groups, location_guard=location_guard,
+                group_prompts=group_prompts,
+                default_prompt=SPLIT_FOCUS_PROMPT,
+            )
+            commands_text = ""
+        else:
+            commands_text = await _run_split_narrations(
+                db, session_id, game_session, module, player_char, events, party_others,
+                kp, llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
+                scene_groups, location_guard=location_guard,
+                group_prompts=group_prompts,
+                default_prompt=SPLIT_FOCUS_PROMPT,
+            )
     else:
         module_rag_enabled = getattr(module, "rag_status", "") == "ready"
         party_ids = {player_char.id} | {t.id for t in (party_others or [])}

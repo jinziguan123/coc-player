@@ -96,6 +96,57 @@ def test_team_turn_runs_once_per_teammate(db_factory, monkeypatch):
     assert sum('"npc_dialogue"' in c for c in chunks) == 2
 
 
+def test_team_conflict_guard_suppresses_duplicate_long_action(db_factory, monkeypatch):
+    """两个队友并发给出几乎相同的长台词时，只保留先提交的一条，后一条按 silent 处理。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    line = "我觉得这扇门后面有东西，先别急着推开，等我检查一下门缝。"
+
+    async def fake_decide(self, messages):
+        return '{"action":"speak","content":"%s"}' % line
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    dialogues = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "dialogue" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert len(dialogues) == 1
+
+
+def test_team_relevance_gate_skips_unaddressed_separated_member(db_factory, monkeypatch):
+    """玩家明确点名 A 时，分处另一场景、且本场景没有新事件的 B 不再白跑一次主模型。"""
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    module.scenes = [
+        {"id": "scene_a", "title": "书房", "keywords": []},
+        {"id": "scene_b", "title": "地下室", "keywords": []},
+    ]
+    session.current_scene_id = "scene_a"
+    db.commit()
+    session_service.set_char_location(db, session.id, hero.id, "scene_a")
+    session_service.set_char_location(db, session.id, teammates[0].id, "scene_a")
+    session_service.set_char_location(db, session.id, teammates[1].id, "scene_b")
+    session_service.add_event(
+        db, session.id, "dialogue", "阿尔法，你来看看这页。",
+        actor_id=hero.id, actor_name=hero.name,
+        metadata={"scene_id": "scene_a"},
+    )
+    called = []
+
+    async def fake_decide(self, messages):
+        called.append(self.character_id)
+        return '{"action":"speak","content":"我看看。"}'
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    assert called == [teammates[0].id]
+
+
 def test_team_turn_times_out_slowest_member(db_factory, monkeypatch):
     """一个队友卡住时，整轮按上限收束，不让慢请求拖住所有队友与 KP。"""
     db = db_factory()

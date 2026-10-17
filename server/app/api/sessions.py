@@ -810,6 +810,20 @@ def cancel_end_module_vote(
     return {"vote": vote}
 
 
+@router.get("/{session_id}/agent-traces")
+def get_agent_traces(
+    session_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """KP 面板的 Agent 调用轨迹；仅房主可见。"""
+    require_session_host(db, session_id, token)
+    from app.services.agent_trace import list_for_session
+
+    return {"items": list_for_session(db, session_id, limit=limit)}
+
+
 @router.get("/{session_id}/events")
 def get_events(
     session_id: str,

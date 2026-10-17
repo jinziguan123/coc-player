@@ -57,6 +57,7 @@ import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntr
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpConsoleDock } from '../components/game/KpConsoleDock'
+import { AgentTracePanel } from '../components/game/AgentTracePanel'
 import { KpCombatSpread } from '../components/game/KpCombatSpread'
 import { KpDeskRail } from '../components/game/KpDeskRail'
 import { useKpCombatActions } from '../components/game/useKpCombatActions'
@@ -2358,6 +2359,7 @@ export function GameSessionPage() {
       )}
       </div>
 
+      {isKp && <AgentTracePanel sessionId={currentSession.id} />}
       <KpConsoleDock
         isKp={isKp} combat={combat} sessionId={currentSession.id} combatLog={combatLog}
         kpCollapsed={kpCollapsed} kpFullDesk={kpFullDesk} desk={desk} immersiveOn={immersiveOn}
