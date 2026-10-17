@@ -33,6 +33,29 @@ def _seed(db):
     return module, hero, session
 
 
+def test_npc_runtime_times_out_and_traces(tmp_path, monkeypatch, caplog):
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+
+    async def slow_respond(self, messages):
+        import asyncio
+        await asyncio.sleep(0.2)
+        return "太晚了。"
+
+    monkeypatch.setattr("app.services.npc_runtime.NPCAgent.respond", slow_respond)
+    monkeypatch.setattr("app.services.npc_runtime.NPC_RESPONSE_TIMEOUT_SECONDS", 0.01)
+    runtime = NpcRuntime(db, session.id, session, module, llm=object(), player_char=hero)
+    with caplog.at_level("INFO", logger="agent.trace"):
+        try:
+            asyncio.run(runtime.reply("butler", "玩家推门进来"))
+        except Exception as exc:
+            assert exc.__class__.__name__ == "NpcResponseTimeout"
+        else:
+            raise AssertionError("应当超时")
+    assert "agent_trace" in caplog.text
+    assert "timeout" in caplog.text
+
+
 def test_npc_runtime_reply_persists_dialogue_and_memory(tmp_path, monkeypatch):
     db = _db(tmp_path)()
     module, hero, session = _seed(db)

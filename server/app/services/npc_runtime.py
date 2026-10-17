@@ -8,6 +8,8 @@ world_memory 中的 NPC 互动史。
 """
 from __future__ import annotations
 
+import asyncio
+
 from sqlalchemy.orm import Session
 
 from app.ai.agents.npc_agent import NPCAgent
@@ -15,11 +17,19 @@ from app.ai.context import build_npc_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import illustration_service, npc_identity, session_service, turn_context, world_memory
+from app.services import agent_trace, illustration_service, npc_identity, session_service, turn_context, world_memory
 from app.services.event_protocol import make_chunk as _make_chunk
 
 _attach_npc_portrait = illustration_service._attach_npc_portrait
 _apply_world_memory = turn_context._apply_world_memory
+
+
+#: 单个 NPC 回应的墙钟上限。超时视为本回合没有回应，不阻塞 KP/工具循环。
+NPC_RESPONSE_TIMEOUT_SECONDS = 30.0
+
+
+class NpcResponseTimeout(RuntimeError):
+    """NPC 代理超时；调用方可以继续叙事，而不是无限等这一句。"""
 
 
 class NpcRuntime:
@@ -47,7 +57,18 @@ class NpcRuntime:
             None,
         )
         true_name = npc_def["name"] if npc_def else npc_id
-        line = await NPCAgent(self.llm, npc_id).respond(messages)
+        trace = agent_trace.start(self.session_id, "npc", npc_id=npc_id)
+        try:
+            line = await asyncio.wait_for(
+                NPCAgent(self.llm, npc_id).respond(messages),
+                timeout=NPC_RESPONSE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            agent_trace.finish(trace, outcome="timeout", provider=self.llm)
+            raise NpcResponseTimeout("NPC 回应超时") from exc
+        except Exception:
+            agent_trace.finish(trace, outcome="error", provider=self.llm)
+            raise
         # 玩家还没认出这东西时，气泡不能替他报出真名；这句台词本身也要参与判据，
         # 因为他可能在这一句里自报家门。
         shown_name = npc_identity.build_masker(
@@ -71,4 +92,5 @@ class NpcRuntime:
                 ws, npc_id, event.sequence_num, f"受场景触发而行动/开口：{trigger}",
             ),
         )
+        agent_trace.finish(trace, provider=self.llm)
         return chunks, line

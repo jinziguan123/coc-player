@@ -18,6 +18,7 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    agent_trace,
     dice_runtime,
     narration_protocol,
     rule_options_service,
@@ -216,18 +217,22 @@ async def _run_team_turn(
             teammate, game_session, module, events, player_char,
             all_teammates=teammates, separated=separated,
         )
+        trace = agent_trace.start(session_id, "team", char_id=teammate.id)
         t0 = time.monotonic()
         try:
             raw = await TeamAgent(llm, teammate.id).decide(messages)
         except asyncio.CancelledError:
+            agent_trace.finish(trace, outcome="cancelled", provider=llm)
             raise
         except Exception:
+            agent_trace.finish(trace, outcome="error", provider=llm)
             logger.exception("队友决策失败: char=%s", teammate.id)
             return None
         logger.info(
             "耗时|队友决策 %.1fs char=%s(%s)",
             time.monotonic() - t0, teammate.name, teammate.id,
         )
+        agent_trace.finish(trace, provider=llm)
         return raw
 
     async def _commit(teammate: Character, raw: str):

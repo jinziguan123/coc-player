@@ -122,4 +122,6 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 统一 NPC 对话出口：新增 `NpcRuntime`（人设 + 私有记忆 + NPC 可见事件 + 统一落库/广播/互动史），`npc_act` 委托给它；生产 LLM 路径下 `say` 拒绝有名 NPC，提示改用 `npc_act`，避免 KP 的 truth/线索/计划污染 NPC 台词。工具说明同步更新。
 - 队友/NPC 事件窗口加 token 上限：队友 12k、NPC 8k，至少保留 6 条；不再只按 30/20 条粗筛，长旁白不会把上下文撑爆。
 - 战斗中的关键 NPC 也读取同一份 NPC 私有记忆，避免平时记得的承诺/被看穿在进入战斗后突然失忆；对话/战斗/幕后仍未合并成同一个完整运行时。
-- 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。尚未覆盖：通用 Actor 抽象、分头行动的工具循环、战斗/幕后 NPC 全面统一、Agent 级 trace。
+- 新增 `agent_trace` 结构化日志：NPC / 队友调用记录 session、agent、耗时、token usage、timeout/outcome，先供运维 grep，不新增表。
+- `NpcRuntime` 增加 30 秒回应超时 `NpcResponseTimeout`，超时不落 NPC 台词、不阻塞 KP 工具循环；新增超时与轨迹测试。
+- 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。尚未覆盖：通用 Actor 抽象、分头行动的工具循环、战斗/幕后 NPC 全面统一；agent_trace 目前只有结构化日志，未落表/未进 UI。
