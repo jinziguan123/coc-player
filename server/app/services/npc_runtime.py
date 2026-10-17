@@ -9,6 +9,7 @@ world_memory 中的 NPC 互动史。
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from sqlalchemy.orm import Session
 
@@ -17,7 +18,7 @@ from app.ai.context import build_npc_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import agent_runtime, agent_trace, illustration_service, npc_identity, npc_state, session_service, turn_context, world_memory
+from app.services import agent_runtime, agent_trace, illustration_service, intent_ledger, npc_identity, npc_state, object_registry, session_service, turn_context, world_memory
 from app.services.event_protocol import make_chunk as _make_chunk
 
 _attach_npc_portrait = illustration_service._attach_npc_portrait
@@ -26,6 +27,9 @@ _apply_world_memory = turn_context._apply_world_memory
 
 #: 单个 NPC 回应的墙钟上限。超时视为本回合没有回应，不阻塞 KP/工具循环。
 NPC_RESPONSE_TIMEOUT_SECONDS = 30.0
+
+
+logger = logging.getLogger(__name__)
 
 
 class NpcResponseTimeout(RuntimeError):
@@ -80,8 +84,21 @@ class NpcRuntime:
         agent_trace.finish(trace, provider=self.llm)
         return shown_name, line
 
-    async def reply(self, npc_id: str, trigger: str) -> tuple[list[str], str]:
-        """让 NPC 基于自己的可见上下文回应；台词落库、广播、写互动史。"""
+    async def reply(
+        self, npc_id: str, trigger: str, *, target: str = "", verb: str = "",
+    ) -> tuple[list[str], str]:
+        """让 NPC 基于自己的可见上下文回应；台词落库、广播、写互动史。
+
+        target/verb 给定时，把 NPC 的物理动作也记进对象账本；纯对话留空，不污染状态。
+        """
+        canonical = ""
+        if target and verb:
+            canonical = object_registry.resolve(self.module, self.game_session, target)
+            if not intent_ledger.allows(self.game_session.world_state or {}, canonical, verb):
+                logger.info(
+                    "NPC 意图前置不满足：npc=%s target=%s verb=%s，仅生成台词、不落状态",
+                    npc_id, canonical, verb,
+                )
         shown_name, line = await self.generate(npc_id, trigger)
         event = session_service.add_event(
             self.db, self.session_id, "dialogue", line,
@@ -101,6 +118,13 @@ class NpcRuntime:
                 ws, npc_id, event.sequence_num, f"受场景触发而行动/开口：{trigger}",
             ),
         )
+        if canonical and verb:
+            _apply_world_memory(
+                self.db, self.game_session,
+                lambda ws: intent_ledger.record(
+                    ws, canonical, npc_id, verb, event.sequence_num,
+                ),
+            )
         return chunks, line
 
 

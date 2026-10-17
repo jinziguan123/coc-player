@@ -276,6 +276,8 @@ REGISTRY: tuple[ToolSpec, ...] = (
         parameters=_params({
             "npc_id": {"type": "string", "description": "NPC 的内部 id（见 NPC 列表）"},
             "trigger": {"type": "string", "description": "触发情境（该 NPC 为何此刻行动/开口）"},
+            "target": {"type": "string", "description": "若此次是明确的物理动作，填作用对象（门/钥匙/某人）；纯发言留空"},
+            "verb": {"type": "string", "description": "物理动作短动词 open/block/lock/take/give/attack；纯发言留空"},
         }, ["npc_id", "trigger"]),
         kind="npc",
     ),

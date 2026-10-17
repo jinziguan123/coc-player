@@ -35,6 +35,20 @@ def _seed(db):
     return module, hero, session
 
 
+def test_npc_reply_records_target_state(tmp_path, monkeypatch):
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+
+    async def fake_respond(self, messages):
+        return "我把门锁上了。"
+
+    monkeypatch.setattr("app.services.npc_runtime.NPCAgent.respond", fake_respond)
+    runtime = NpcRuntime(db, session.id, session, module, llm=object(), player_char=hero)
+    asyncio.run(runtime.reply("butler", "玩家要进门", target="门", verb="lock"))
+    from app.services import intent_ledger
+    assert intent_ledger.state(runtime.game_session.world_state or {}, "门") == "locked"
+
+
 def test_npc_runtime_times_out_and_traces(tmp_path, monkeypatch, caplog):
     db = _db(tmp_path)()
     module, hero, session = _seed(db)

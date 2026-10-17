@@ -21,12 +21,13 @@ _scene_title = turn_context._scene_title
 async def _exec_npc_act(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     llm, player_char: Character, npc_id: str, trigger: str,
+    target: str = "", verb: str = "",
 ) -> tuple[list[str], str]:
     """兼容入口：统一委托给 NpcRuntime，避免又一条平行 NPC 路径。"""
     from app.services.npc_runtime import NpcRuntime
     return await NpcRuntime(
         db, session_id, game_session, module, llm, player_char,
-    ).reply(npc_id, trigger)
+    ).reply(npc_id, trigger, target=target, verb=verb)
 
 
 def _exec_start_chase(

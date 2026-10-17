@@ -29,7 +29,7 @@ def _matches(raw: str, candidates) -> bool:
     key = _norm(raw)
     if not key:
         return False
-    return any(key == _norm(c) or key in _norm(c) or _norm(c) in key for c in candidates if c)
+    return any(key == _norm(c) for c in candidates if c)
 
 
 def resolve(module, session, raw: str) -> str:

@@ -469,6 +469,7 @@ def _build_kp_tool_executor(
             return kp_tools.ToolOutcome("参数缺失：npc_id 与 trigger 均为必填。")
         chunks, response = await _exec_npc_act(
             db, session_id, game_session, module, llm, player_char, npc_id, trigger,
+            target=kv.get("target", ""), verb=kv.get("verb", ""),
         )
         return kp_tools.ToolOutcome(
             f"该 NPC 已行动/开口（台词已直接展示给玩家，续写时不要复述）：{response}", chunks=chunks,
