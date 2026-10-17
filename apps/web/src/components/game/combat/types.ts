@@ -49,6 +49,10 @@ export interface CombatState {
   started_seq?: number  // 本场战斗日志起点 seq：日志抽屉只收本场（seq>started_seq）的结算行
   pending_roll?: PendingRoll | null
   grid?: CombatGridInfo | null   // 方格战场
+  /** 真人 KP 打开了「我来操控敌人」 */
+  kp_controls_enemies?: boolean
+  /** 正停在这个敌人的回合上等 KP 下令（参战方 id） */
+  awaiting_kp?: string | null
 }
 
 // 反应提示：NPC 攻击某真人时后端暂停并广播 combat_reaction_prompt 的 metadata。

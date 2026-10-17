@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import player_token, require_session_kp
@@ -16,9 +16,10 @@ from app.schemas.kp import (
     KpPlanRequest,
     KpWorkspaceUpdate,
 )
-from app.services import human_kp_service, session_service
+from app.services import human_kp_desk, human_kp_service, rate_limit, session_service
 from app.services.event_protocol import event_to_chunk, make_chunk as _make_chunk
 from app.services.generation_manager import generation_manager
+from app.services.rate_limit import limiter
 from app.services.room_hub import room_hub
 
 router = APIRouter(prefix="/api/sessions", tags=["human-kp"])
@@ -78,7 +79,9 @@ def update_workspace(
 
 
 @router.post("/{session_id}/kp/advisor/draft")
+@limiter.limit(rate_limit.ADVISOR_LIMIT, exempt_when=rate_limit.exempt_local)
 async def generate_draft(
+    request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
     session_id: str,
     data: KpDraftRequest,
     db: Session = Depends(get_db),
@@ -95,7 +98,9 @@ async def generate_draft(
 
 
 @router.post("/{session_id}/kp/advisor/plan")
+@limiter.limit(rate_limit.ADVISOR_LIMIT, exempt_when=rate_limit.exempt_local)
 async def generate_plan(
+    request: Request,  # noqa: ARG001
     session_id: str,
     data: KpPlanRequest,
     db: Session = Depends(get_db),
@@ -112,7 +117,9 @@ async def generate_plan(
 
 
 @router.get("/{session_id}/kp/lookup")
+@limiter.limit(rate_limit.ADVISOR_LIMIT, exempt_when=rate_limit.exempt_local)
 def lookup(
+    request: Request,  # noqa: ARG001
     session_id: str,
     scope: Literal["rule", "module"] = Query(),
     q: str = Query(min_length=1, max_length=500),
@@ -159,6 +166,40 @@ def publish_image(
         raise HTTPException(400, str(error)) from error
     room_hub.broadcast(session_id, event_to_chunk(event))
     return {"ok": True, "event_id": event.id}
+
+
+@router.get("/{session_id}/kp/desk")
+def get_desk(
+    session_id: str,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """KP 待办台：待投检定、玩家的检定申请、私有台账（含暗投结果）。仅 KP 可读。"""
+    game_session, _module = _kp_context(db, session_id, token)
+    return human_kp_desk.desk_payload(db, session_id, game_session)
+
+
+@router.post("/{session_id}/kp/checks/{check_id}/roll")
+async def proxy_roll(
+    session_id: str,
+    check_id: str,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
+    """KP 替没在场的玩家投一个待投检定：与玩家自己点「投骰」同一条结算链，结果照常公开。
+
+    代投不弹幸运消费——那是玩家本人的决定，人不在就不替他花。
+    """
+    from app.services.turn_orchestrator import run_roll_generation
+
+    _kp_context(db, session_id, token)
+    if generation_manager.is_generating(session_id):
+        raise HTTPException(409, "当前仍有动作处理中，请稍候")
+    if not session_service.get_pending_check(db, session_id, check_id):
+        raise HTTPException(404, "这个检定已经投过或已撤销")
+    room_hub.broadcast(session_id, _make_chunk("generating"))
+    generation_manager.start(session_id, run_roll_generation(session_id, check_id, proxy=True))
+    return {"ok": True}
 
 
 @router.post("/{session_id}/kp/team-turn")

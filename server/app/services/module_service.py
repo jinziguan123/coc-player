@@ -1048,6 +1048,33 @@ def list_modules(db: Session) -> list[Module]:
     return db.query(Module).order_by(Module.created_at.desc()).all()
 
 
+#: 玩家视图里保留的 ``world_setting`` 子键：大厅筛选 / 人数范围 / 车卡年代，以及上传时
+#: 已经对照真相洗过一遍的两段玩家导入（见 ``redact_player_facing``）。其余子键（底图、
+#: 作者给 KP 的备注、随剧本流动的缓存）一概不出——白名单而非黑名单，新键默认不外泄。
+PLAYER_WORLD_SETTING_KEYS = frozenset({
+    "era", "region", "location", "tone", "tags", "difficulty", "player_count",
+    "intro", "player_brief",
+})
+
+#: 守秘人资料：玩家视图里清空。手书在局内经 [HANDOUT] 发放、随消息下发，不从这里取；
+#: 地图走会话的 /locations（按已到访裁剪），也不从这里取。
+_KEEPER_LIST_FIELDS = ("scenes", "npcs", "clues", "map_nodes", "triggers", "handouts", "endings")
+
+
+def player_view(data: dict) -> dict:
+    """把 ``ModuleRead`` 形状的模组裁成玩家可见的一份（形状不变，前端类型照用）。
+
+    给不在房主本机的请求用：客人在大厅看简介、车卡看建议，都只需要这些。
+    """
+    out = dict(data)
+    ws = data.get("world_setting") or {}
+    out["world_setting"] = {k: v for k, v in ws.items() if k in PLAYER_WORLD_SETTING_KEYS}
+    for key in _KEEPER_LIST_FIELDS:
+        out[key] = []
+    out["truth"] = ""
+    return out
+
+
 def delete_module(db: Session, module_id: str) -> bool:
     module = db.get(Module, module_id)
     if not module:

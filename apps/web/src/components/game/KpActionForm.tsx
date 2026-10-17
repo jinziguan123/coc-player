@@ -19,6 +19,7 @@ import {
 import { MultiSelect } from '@/components/ui/multi-select'
 import { KP_MOOD_OPTIONS } from '@/features/game-session/bgm'
 import { KpInput } from './KpInput'
+import { HpChangeForm, MarkSeenForm, NpcActForm, PlaceReasonForm } from './KpExtraForms'
 import { catalogOptions } from './kpCatalogs'
 import type { KpAction } from './kpActions'
 
@@ -34,6 +35,7 @@ interface Workspace {
     scenes: CatalogItem[]
     npcs: CatalogItem[]
     handouts: CatalogItem[]
+    clues?: CatalogItem[]
   }
 }
 
@@ -154,6 +156,7 @@ function BlindToggle({ checked, onChange }: { checked: boolean; onChange: (check
 }
 
 interface Props {
+  sessionId: string
   action: KpAction
   fields: Record<string, string>
   workspace: Workspace | null
@@ -166,7 +169,7 @@ interface Props {
 }
 
 export function KpActionForm({
-  action, fields, workspace, setField, setDiceAdjustment, submit, slash, dictating, toggleDictation,
+  sessionId, action, fields, workspace, setField, setDiceAdjustment, submit, slash, dictating, toggleDictation,
 }: Props) {
   const catalogs = catalogOptions(workspace)
   const defaultActorRef = workspace?.catalogs.characters?.[0]
@@ -180,8 +183,14 @@ export function KpActionForm({
           <textarea
             value={fields.content || ''}
             onChange={(event) => setField('content', event.target.value)}
-            onKeyDown={(event) => { slash.onKeyDown(event) }}
-            placeholder="输入要发布给全桌的旁白；打 / 唤起命令；（圆括号）内为场外，不进故事"
+            onKeyDown={(event) => {
+              if (slash.onKeyDown(event)) return
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                void submit()
+              }
+            }}
+            placeholder="输入要发布给全桌的旁白；打 / 唤起命令；（圆括号）内为场外；Ctrl/Cmd+Enter 发布"
             className="input min-h-16 min-w-0 flex-1 resize-y text-xs"
           />
           <button type="button" onClick={toggleDictation} className="btn-secondary !p-2" title="语音转文字">
@@ -233,6 +242,10 @@ export function KpActionForm({
         <KpInput name="source" placeholder="目标/来源（可选）" fields={fields} onChange={setField} />
         {/* 玩家在投骰按钮旁看到的「因：…」——只写他此刻已经知道的事，别用它剧透 */}
         <KpInput name="reason" placeholder="因何而检（玩家可见）" fields={fields} onChange={setField} />
+        {/* 有奖惩骰才要理由：它会随骰子明细摆给玩家看，免得玩家以为被针对 */}
+        {!!(fields.bonus || fields.penalty) && (
+          <KpInput name="modifier_reason" placeholder="奖惩理由（玩家可见），如 烛光昏暗" fields={fields} onChange={setField} />
+        )}
       </>}
       {action === 'opposed_check' && <>
         <div className="flex w-full flex-wrap items-center gap-2">
@@ -292,7 +305,12 @@ export function KpActionForm({
       {(action === 'set_flag' || action === 'clear_flag') && <KpInput name="flag" placeholder="剧情标志" fields={fields} onChange={setField} />}
       {action === 'set_mood' && <NamedSelect label="配乐氛围" value={fields.mood || ''} items={MOOD_ITEMS} onChange={(v) => setField('mood', v)} empty="" />}
       {action === 'handout' && <><GiScrollUnfurled size={16} /><NamedSelect label="手书" value={fields.id || ''} items={workspace?.catalogs.handouts || []} onChange={(v) => setField('id', v)} empty="本模组没有手书" /></>}
-      {action === 'hp_change' && <><KpInput name="target" placeholder="角色名" fields={fields} onChange={setField} /><KpInput name="delta" placeholder="变化值，如 -3 或 2" fields={fields} onChange={setField} /><KpInput name="reason" placeholder="原因（可选）" fields={fields} onChange={setField} /></>}
+      {action === 'hp_change' && <HpChangeForm sessionId={sessionId} fields={fields} characters={workspace?.catalogs.characters || []} setField={setField} />}
+      {action === 'mark_seen' && <MarkSeenForm fields={fields} clues={workspace?.catalogs.clues || []} setField={setField} />}
+      {action === 'npc_act' && <NpcActForm fields={fields} npcs={workspace?.catalogs.npcs || []} setField={setField} />}
+      {action === 'block_path' && <PlaceReasonForm fields={fields} scenes={workspace?.catalogs.scenes || []} setField={setField} reasonHint="为什么过不去（KP 备忘，可选）" />}
+      {action === 'unblock_path' && <PlaceReasonForm fields={fields} scenes={workspace?.catalogs.scenes || []} setField={setField} />}
+      {action === 'travel_suggest' && <PlaceReasonForm fields={fields} scenes={workspace?.catalogs.scenes || []} setField={setField} reasonHint="缘由（玩家可见，可选）" />}
       {action === 'start_combat' && <>
         <Swords size={16} />
         <MultiSelect

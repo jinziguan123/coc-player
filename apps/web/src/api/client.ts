@@ -1,3 +1,5 @@
+import { LiveGoneError } from '@/lib/liveSession'
+
 /** 主机地址：留空 = 本机后端（开发用 vite 代理 /api；打包客户端用本机 sidecar）；
  *  设值（如 http://192.168.1.5:8000）= 作为客人连到房主后端。 */
 export function getServerUrl(): string {
@@ -239,6 +241,8 @@ export async function* streamSSE(path: string, body?: unknown) {
 
 export async function* connectSSE(path: string, signal?: AbortSignal) {
   const res = await fetch(`${getApiBase()}${path}`, { signal, headers: authHeaders(getApiBase()) })
+  // 403/404 是「再也连不上了」（被踢、被吊销、房间已删），不是网络抖动：单独抛出，重连循环据此停下
+  if (res.status === 403 || res.status === 404) throw new LiveGoneError(res.status)
   if (res.status === 204 || !res.body) return
   if (!res.ok) throw new Error(`SSE error: ${res.status}`)
   yield* parseSSEStream(res)

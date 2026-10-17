@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import uuid
+
 from sqlalchemy.orm import Session
 
 from app.models.character import Character
@@ -11,10 +14,12 @@ from app.services import (
     chase_service,
     combat_service,
     dice_runtime,
+    human_kp_desk,
     human_kp_service,
     illustration_service,
     kp_actions,
     navigation_service,
+    npc_identity,
     rule_options_service,
     session_service,
     turn_context,
@@ -33,6 +38,8 @@ _exec_handout = turn_effects._exec_handout
 _exec_hp_change = turn_effects._exec_hp_change
 _exec_san_check = turn_effects._exec_san_check
 _exec_start_combat = kp_actions._exec_start_combat
+_exec_npc_act = kp_actions._exec_npc_act
+_exec_mark_seen = turn_effects._exec_mark_seen
 
 
 async def execute_human_kp_action(
@@ -96,12 +103,18 @@ async def execute_human_kp_action(
             None,
         )
         actor_id = str(npc.get("id")) if npc and npc.get("id") else None
-        actor_name = str(npc.get("name") or ref) if npc else ref
+        true_name = str(npc.get("name") or ref) if npc else ref
         # 台词里的小括号同样不算台词——「（他其实在说谎）」这种给同桌看的注解，
         # 不该被 NPC 说出口，也不该进上下文当成他真讲过的话。
         line, aside = split_ooc(content)
         if not line:
             raise ValueError("台词内容不能为空——整句都在小括号里的话，用叙事框发场外话")
+        # 气泡上的说话人是玩家可见面，与 AI KP 的 say 同一口径（kp_actions）：玩家还没认出
+        # 这个 NPC 时报对外称呼；这句台词自报家门的那一刻起改口。KP 不在模组里的名字原样用。
+        actor_name = (
+            npc_identity.build_masker(db, session_id, module)(true_name, extra_prose=line)
+            if npc else true_name
+        )
         ev = session_service.add_event(
             db, session_id, "dialogue", line,
             actor_id=actor_id, actor_name=actor_name,
@@ -120,7 +133,10 @@ async def execute_human_kp_action(
             chunks.append(event_to_chunk(session_service.add_event(
                 db, session_id, "ooc", aside, actor_name="KP",
             )))
-        return chunks, "NPC 台词已发布" if not aside else "台词已发布，场外话另发了一条"
+        receipt = "NPC 台词已发布" if not aside else "台词已发布，场外话另发了一条"
+        if actor_name != true_name:
+            receipt += f"（玩家还没认出{true_name}，气泡上显示为「{actor_name}」）"
+        return chunks, receipt
 
     if action == "dice_check":
         kv = {str(k): str(v) for k, v in payload.items() if v is not None}
@@ -129,6 +145,8 @@ async def execute_human_kp_action(
         chunks, descs, pending = await _exec_dice_check(
             db, session_id, game_session, module, kv, player_char, teammates,
         )
+        # 从待办里的玩家申请发起的：发出去就算处理过了
+        human_kp_desk.mark_request_handled(db, game_session, kv.get("request_id", "").strip())
         return chunks, "已发起待投检定" if pending else ("；".join(descs) or "检定已结算")
 
     if action == "opposed_check":
@@ -157,7 +175,9 @@ async def execute_human_kp_action(
         flag = str(payload.get("flag") or "").strip()
         if not flag:
             raise ValueError("剧情标志不能为空")
-        return _exec_flag(db, session_id, game_session, flag, action == "set_flag"), "剧情标志已更新"
+        chunks = _exec_flag(db, session_id, game_session, flag, action == "set_flag")
+        # 标志名只写进 KP 自己的回执，不对玩家播报（见 _exec_flag）
+        return chunks, f"剧情标志已{'置上' if action == 'set_flag' else '清除'}：{flag}（玩家不可见）"
 
     if action == "set_mood":
         chunks, note = turn_effects.exec_set_mood(
@@ -176,16 +196,14 @@ async def execute_human_kp_action(
         )
 
     if action == "hp_change":
-        chunks = await _exec_hp_change(
-            db, session_id, player_char,
-            str(payload.get("target") or ""), str(payload.get("delta") or ""),
-            str(payload.get("reason") or ""), module=module, teammates=teammates,
+        return await _exec_kp_hp_change(
+            db, session_id, game_session, module, player_char, teammates, payload,
         )
-        if not chunks:
-            raise ValueError("HP 目标或变化值无效")
-        return chunks, "HP 已结算"
 
     if action == "san_check":
+        if not str(payload.get("source") or "").strip():
+            # 无名 SAN 每次一把新键：真人 KP 不会「重新生成」，同一轮发两次就是两次恐怖
+            payload = {**payload, "san_key": f"kp:{uuid.uuid4().hex[:12]}"}
         chunks, descs, pending = await _exec_san_check(
             db, session_id, game_session, payload, player_char, teammates,
         )
@@ -260,7 +278,199 @@ async def execute_human_kp_action(
         outcome = str(payload.get("outcome") or "manual")
         return chase_service.end_chase(db, session_id, outcome), "追逐已结束"
 
+    if action == "mark_seen":
+        return _exec_kp_mark_seen(db, session_id, game_session, module, player_char, teammates, payload)
+
+    if action in ("block_path", "unblock_path"):
+        ref = str(payload.get("scene_id") or payload.get("scene") or "").strip()
+        sid = turn_context._resolve_scene_ref(module, ref) if ref else None
+        if not sid:
+            raise ValueError("找不到这个地点")
+        blocked = action == "block_path"
+        turn_effects.set_path_block(
+            db, session_id, game_session, module, sid, str(payload.get("reason") or ""), blocked,
+        )
+        name = _scene_name(module, sid)
+        return [], (f"{name} 已标记为此刻过不去：玩家的「前往」会绕开它" if blocked
+                    else f"{name} 已恢复通行")
+
+    if action == "travel_suggest":
+        ref = str(payload.get("scene_id") or payload.get("scene") or "").strip()
+        if not ref:
+            raise ValueError("请选择要建议前往的地点")
+        chunks, note = turn_effects.travel_suggest_event(
+            db, session_id, game_session, module, ref, str(payload.get("reason") or ""),
+        )
+        if not chunks:
+            raise ValueError(note)
+        return chunks, "已给玩家挂出「要不要去」的建议卡，去不去由他们自己点"
+
+    if action == "npc_act":
+        ref = str(payload.get("npc_id") or "").strip()
+        trigger = str(payload.get("trigger") or "").strip()
+        npc = next(
+            (n for n in (module.npcs or []) if ref and ref in (str(n.get("id") or ""), str(n.get("name") or ""))),
+            None,
+        )
+        if npc is None or not npc.get("id"):
+            raise ValueError("请选择模组里的 NPC（临场 NPC 没有人格档案，用「NPC 台词」手写）")
+        if not trigger:
+            raise ValueError("写一句触发情境：他为什么此刻开口")
+        from app.ai.llm_factory import get_llm
+        chunks, line = await _exec_npc_act(
+            db, session_id, game_session, module, get_llm(), player_char, str(npc["id"]), trigger,
+        )
+        return chunks, f"{npc.get('name') or npc['id']}（AI 代演）：{line}"
+
+    if action == "cancel_check":
+        return human_kp_desk.cancel_pending_check(
+            db, session_id, game_session, module, str(payload.get("check_id") or "").strip(),
+        )
+
+    if action == "dismiss_request":
+        human_kp_desk.mark_request_handled(db, game_session, str(payload.get("request_id") or "").strip())
+        return [], "已从待办里移除这条检定申请"
+
+    if action == "edit_event":
+        return human_kp_desk.edit_event(
+            db, session_id, str(payload.get("event_id") or "").strip(), str(payload.get("content") or ""),
+        )
+
+    if action == "withdraw_event":
+        return human_kp_desk.withdraw_event(db, session_id, str(payload.get("event_id") or "").strip())
+
+    if action == "combat_control":
+        on = str(payload.get("on") or "").strip().lower() in ("1", "true", "on", "yes")
+        state = human_kp_service._private_state(game_session)
+        state["control_enemies"] = on
+        game_session.kp_state = state
+        db.commit()
+        chunks = await combat_service.set_kp_enemy_control(db, session_id, on)
+        return chunks, "敌方回合改由你下令" if on else "敌方回合交回自动行动"
+
+    if action == "combat_npc_act":
+        return await combat_service.kp_command_npc(db, session_id, payload), "敌方行动已结算"
+
     raise ValueError(f"不支持的 KP 动作：{action}")
+
+
+_HP_EXPR = re.compile(r"\d+(d\d+([+-]\d+)?)?", re.IGNORECASE)
+
+
+def _roll_hp_amount(db: Session, session_id: str, text: str) -> tuple[int, str]:
+    """把「变化值」解析成带符号的整数：-3、+2、-1d6+1、1d3。骰式经规则内核掷。
+
+    返回 (变化值, 掷骰说明)。负号=伤害，其余=治疗——与 AI KP 的 hp_change 同一口径。
+    """
+    raw = re.sub(r"\s+", "", str(text or ""))
+    sign = -1 if raw.startswith("-") else 1
+    body = raw.lstrip("+-")
+    if not body or not _HP_EXPR.fullmatch(body):
+        raise ValueError("变化值写整数或骰式，如 -3、+2、-1d6+1")
+    if body.isdigit():
+        amount, note = int(body), ""
+    else:
+        rolled = rule_options_service.ruleset_by_id(db, session_id).dice.roll(body)
+        amount, note = max(0, rolled.total), f"{body.upper()}={rolled.total}"
+    if amount == 0:
+        raise ValueError("变化值为 0，不需要结算")
+    return sign * amount, note
+
+
+async def _exec_kp_hp_change(
+    db: Session, session_id: str, game_session: GameSession, module: Module,
+    player_char: Character, teammates: list[Character], payload: dict,
+) -> tuple[list[str], str]:
+    """真人 KP 结算 HP：目标从下拉里点（character:<id> / combatant:<参战方 id>），不猜名字。
+
+    AI KP 的 hp_change 空目标会落到锚点角色、名字按子串匹配——给模型兜底可以，给真人 KP
+    就是误伤：选漏了一项，血扣在了别人身上。所以这里空目标直接报错。
+    战斗外系统不追踪 NPC 的 HP，NPC 只能在战斗中作为参战方结算。
+    """
+    ref = str(payload.get("target") or "").strip()
+    if not ref:
+        raise ValueError("请选择要结算 HP 的角色")
+    delta, note = _roll_hp_amount(db, session_id, str(payload.get("delta") or ""))
+    reason = str(payload.get("reason") or "").strip()
+    reason = f"{reason}（{note}）" if reason and note else (reason or note)
+    party = [player_char, *teammates]
+    kind, _, ident = ref.partition(":")
+    char = None
+    if kind == "combatant":
+        state = combat_service.get_combat(game_session)
+        if not state:
+            raise ValueError("当前没有进行中的战斗")
+        target = combat_service._find(state, ident)
+        if target is None:
+            raise ValueError("这个参战方不在场上")
+        if not target.get("char_id"):
+            return await _exec_npc_hp_change(db, session_id, state, target, delta, reason)
+        char = next((c for c in party if c.id == target["char_id"]), None)
+    elif kind == "character":
+        char = next((c for c in party if c.id == ident), None)
+    else:
+        char = next((c for c in party if c.name == ref), None)
+    if char is None:
+        raise ValueError("找不到这个角色——请从下拉里选")
+    chunks = await _exec_hp_change(
+        db, session_id, player_char, "", str(delta), reason,
+        module=module, teammates=teammates, target=char,
+    )
+    if not chunks:
+        raise ValueError("HP 结算失败")
+    return chunks, f"{char.name} HP {'-' if delta < 0 else '+'}{abs(delta)}" + (f"（{note}）" if note else "")
+
+
+async def _exec_npc_hp_change(
+    db: Session, session_id: str, state: dict, target: dict, delta: int, reason: str,
+) -> tuple[list[str], str]:
+    """战斗中给 NPC 参战方结算 HP。KP 填的是最终值，不再过护甲。"""
+    rs = rule_options_service.ruleset_by_id(db, session_id)
+    if delta < 0:
+        lines = combat_service.apply_damage(
+            db, state, target, -delta, reason, ignore_armor=True, session_id=session_id,
+        )
+    else:
+        lines = combat_service.apply_heal(db, state, target, delta)
+    chunks = [combat_service._combat_line(db, session_id, line) for line in lines]
+    end = rs.combat.check_combat_end(state.get("initiative") or [])
+    if end:
+        chunks += combat_service._end_combat(db, session_id, state, end)
+    elif state.get("awaiting_kp") == target.get("id") and not rs.combat.is_active(target):
+        # 正等 KP 下令的那个敌人被打倒了：它的回合作废，驱动往下走
+        state["awaiting_kp"] = None
+        drive_chunks, _beats = await combat_service.drive_npcs(db, session_id, state, resume=True)
+        chunks += drive_chunks
+    else:
+        combat_service._save_combat(db, session_id, state)
+        chunks.append(combat_service._combat_state_chunk(state))
+    return chunks, "；".join(lines) or "HP 已结算"
+
+
+def _exec_kp_mark_seen(
+    db: Session, session_id: str, game_session: GameSession, module: Module,
+    player_char: Character, teammates: list[Character], payload: dict,
+) -> tuple[list[str], str]:
+    """把线索 / 场景机制点记进台账。``clues`` 可一次给多条（参谋「候选线索」一键记账）。"""
+    raw = payload.get("clues")
+    clues = [str(c).strip() for c in raw] if isinstance(raw, list) else []
+    if str(payload.get("clue") or "").strip():
+        clues.append(str(payload["clue"]).strip())
+    level = str(payload.get("level") or "direct").strip() or "direct"
+    notes = [
+        _exec_mark_seen(db, session_id, game_session, module, {"clue": cid, "level": level},
+                        player_char, teammates)
+        for cid in dict.fromkeys(c for c in clues if c)
+    ]
+    event = str(payload.get("event") or "").strip()
+    if event:
+        notes.append(_exec_mark_seen(db, session_id, game_session, module, {"event": event},
+                                     player_char, teammates))
+    if not notes:
+        raise ValueError("线索与机制点至少填一个")
+    if not any("已记" in n for n in notes):
+        raise ValueError("".join(notes))
+    return [], "".join(notes)
 
 
 def _exec_start_chase(

@@ -24,6 +24,23 @@ def player_token(
     return x_player_token
 
 
+def is_local_client(request: Request) -> bool:
+    """请求是否来自房主本机界面（判据同 ``require_local_client``）。"""
+    client = request.client.host if request.client else None
+    return net_access.peer_kind(client, request.headers) == "local"
+
+
+def is_keeper_view(
+    request: Request, db: Session, session_id: str, token: str | None,
+) -> bool:
+    """这次读取能不能拿到 KP 专属资料（幕后推演、NPC 记忆、真相等）。
+
+    只有两种人：本机房主（数据本来就在他机器上，藏着也没意义），以及本局真人 KP
+    席位的持有者。已入座的玩家、局域网 / 直连隧道来的客人一律只拿玩家视图。
+    """
+    return is_local_client(request) or session_service.is_kp(db, session_id, token)
+
+
 def require_local_client(request: Request) -> None:
     """只允许房主本机调用：管理本机资产的端点用它把关。
 
@@ -43,8 +60,7 @@ def require_local_client(request: Request) -> None:
     判定走 ``net_access.peer_kind`` 而不是「源 IP 是回环」：内置直连隧道会把远端
     客人的请求以 ``127.0.0.1`` 反代进来，只看 IP 的话他们会原地变成房主。
     """
-    client = request.client.host if request.client else None
-    if net_access.peer_kind(client, request.headers) != "local":
+    if not is_local_client(request):
         raise HTTPException(403, "此操作只能在房主本机进行")
 
 

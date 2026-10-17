@@ -45,9 +45,7 @@ export async function syncCharactersBackFromHost(): Promise<SyncBackResult> {
     return result
   }
 
-  for (const copy of copies) {
-    // 没有血缘的卡是在房主机器上直接建的（不是从本机带过去的），本机没有原件可写。
-    if (!copy.origin_character_id) continue
+  for (const copy of latestCopyPerOrigin(copies)) {
     try {
       await writeBackOne(copy)
       result.synced.push(copy.name)
@@ -56,6 +54,26 @@ export async function syncCharactersBackFromHost(): Promise<SyncBackResult> {
     }
   }
   return result
+}
+
+/**
+ * 每张原件只取最近一局的副本。
+ *
+ * 同一张卡在这位房主处跑过不止一局，就会有多份副本。此前按列表顺序（创建时间倒序）
+ * 逐份覆盖原件，最后写进去的反而是**最旧**那一局——新局的成长与伤势被旧局盖掉。
+ * 「最近」按 updated_at：跑团期间每次扣血、成长都会刷新它；缺字段时退回 created_at。
+ * 没有血缘的卡是在房主机器上直接建的（不是从本机带过去的），本机没有原件可写，直接略过。
+ */
+export function latestCopyPerOrigin(copies: Character[]): Character[] {
+  const stamp = (c: Character) => Date.parse(c.updated_at || c.created_at || '') || 0
+  const best = new Map<string, Character>()
+  for (const copy of copies) {
+    const origin = copy.origin_character_id
+    if (!origin) continue
+    const prev = best.get(origin)
+    if (!prev || stamp(copy) > stamp(prev)) best.set(origin, copy)
+  }
+  return [...best.values()]
 }
 
 async function writeBackOne(copy: Character): Promise<void> {

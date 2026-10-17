@@ -79,7 +79,7 @@ def use_item(
     room_hub.broadcast(session_id, event_to_chunk(ev))
     session_service.set_turn_confirm(db, session_id, actor.id, False)
     room_hub.broadcast(session_id, _make_chunk(
-        "turn_state", metadata=session_service.turn_confirm_state(db, session_id)))
+        "turn_state", metadata=session_service.live_turn_state(db, session_id, token)))
     room_hub.broadcast(session_id, _inv_update_chunk(actor.id))
     return {"ok": True, "used": used}
 

@@ -371,7 +371,10 @@ def test_scene_visual_state_creates_one_variant_card_and_reuses_it(db_factory, m
         assert len(chat_service._maybe_scene_illustration(db, session.id, module, "s1")) == 1
         await _drain_bg_tasks()
         db.refresh(session)
-        assert len(chat_service._exec_flag(db, session.id, session, "flooded", True)) == 2
+        # 只有状态配图卡一张——标志名（flooded）不再作为系统消息播给全桌
+        flag_chunks = chat_service._exec_flag(db, session.id, session, "flooded", True)
+        assert len(flag_chunks) == 1
+        assert "flooded" not in (flag_chunks[0].as_wire().get("content") or "")
         db.refresh(session)
         m2 = db.get(Module, module.id)
         await _drain_bg_tasks()

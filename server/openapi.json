@@ -1679,7 +1679,18 @@
               "set_mood",
               "start_chase",
               "chase_round",
-              "end_chase"
+              "end_chase",
+              "mark_seen",
+              "block_path",
+              "unblock_path",
+              "travel_suggest",
+              "npc_act",
+              "cancel_check",
+              "dismiss_request",
+              "edit_event",
+              "withdraw_event",
+              "combat_control",
+              "combat_npc_act"
             ],
             "title": "Action",
             "type": "string"
@@ -4190,6 +4201,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Get Character",
         "tags": [
           "characters"
@@ -4527,7 +4543,7 @@
     },
     "/api/modules/upload": {
       "post": {
-        "description": "上传模组：同步做文件抽取与格式校验（错误立即可见），解析转后台任务。\n\n返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。\n\n``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，\n以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。",
+        "description": "上传模组：先抽取文件与校验格式（在线程里做，错误立即可见），解析转后台任务。\n\n返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。\n\n``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，\n以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。",
         "operationId": "upload_module_api_modules_upload_post",
         "parameters": [
           {
@@ -6911,6 +6927,7 @@
     },
     "/api/sessions/by-code/{room_code}": {
       "get": {
+        "description": "凭房间码找房间：只回加入所需的最少信息。\n\n拿着房间码的人还没入座，连「能不能读这一局」都没判过，这里不能给完整会话载荷。\n入座之后前端改走 ``GET /sessions/{id}``，那里有正常的读取授权。",
         "operationId": "get_session_by_code_api_sessions_by_code__room_code__get",
         "parameters": [
           {
@@ -8003,7 +8020,7 @@
     },
     "/api/sessions/{session_id}/force-advance": {
       "post": {
-        "description": "房主强制推进：跳过未确认者（掉线/挂机），直接把本回合暂存发言整批交 KP。\n\n掉线豁免虽已让在线玩家能推进，但极端情形（有人挂机不点、或掉线判定滞后）仍可能卡住；\n此端点给房主一个确定性的兜底出口。仅房主/纯本机会话可用。",
+        "description": "房主强制推进：跳过未确认者（掉线/挂机），直接把本回合暂存发言整批交 KP。\n\n掉线豁免虽已让在线玩家能推进，但极端情形（有人挂机不点、或掉线判定滞后）仍可能卡住；\n此端点给房主一个确定性的兜底出口。仅房主、真人 KP 或纯本机会话可用。",
         "operationId": "force_advance_api_sessions__session_id__force_advance_post",
         "parameters": [
           {
@@ -8791,6 +8808,107 @@
           }
         ],
         "summary": "Generate Plan",
+        "tags": [
+          "human-kp"
+        ]
+      }
+    },
+    "/api/sessions/{session_id}/kp/checks/{check_id}/roll": {
+      "post": {
+        "description": "KP 替没在场的玩家投一个待投检定：与玩家自己点「投骰」同一条结算链，结果照常公开。\n\n代投不弹幸运消费——那是玩家本人的决定，人不在就不替他花。",
+        "operationId": "proxy_roll_api_sessions__session_id__kp_checks__check_id__roll_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "check_id",
+            "required": true,
+            "schema": {
+              "title": "Check Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Proxy Roll",
+        "tags": [
+          "human-kp"
+        ]
+      }
+    },
+    "/api/sessions/{session_id}/kp/desk": {
+      "get": {
+        "description": "KP 待办台：待投检定、玩家的检定申请、私有台账（含暗投结果）。仅 KP 可读。",
+        "operationId": "get_desk_api_sessions__session_id__kp_desk_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Get Desk",
         "tags": [
           "human-kp"
         ]
@@ -9695,7 +9813,7 @@
     },
     "/api/sessions/{session_id}/regenerate": {
       "post": {
-        "description": "重新生成最新一轮 KP 叙事：打断卡住的生成 → 回滚上一轮 KP 叙事产物 → 用玩家与队友的既有\n输入（保留已定骰子，不重掷）重跑 KP。\n\n高风险操作（可能明显改变剧情走向），前端须二次确认后才调用；只作用于「最新一轮」——回滚逻辑\n天然只清理事件流尾部的 KP 产物。",
+        "description": "重新生成最新一轮 KP 叙事：打断卡住的生成 → 回滚上一轮 KP 叙事产物 → 用玩家与队友的既有\n输入（保留已定骰子，不重掷）重跑 KP。\n\n高风险操作（可能明显改变剧情走向），前端须二次确认后才调用；只作用于「最新一轮」——回滚逻辑\n天然只清理事件流尾部的 KP 产物。\n\n只有房主能用：它会打断并回滚整桌共享的叙事，不该由任一玩家单方决定。房主不在线时\n放开给在座真人——否则房主掉线后生成一旦卡住，整桌就没人解得开。",
         "operationId": "regenerate_api_sessions__session_id__regenerate_post",
         "parameters": [
           {

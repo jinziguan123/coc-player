@@ -4,7 +4,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { api, connectSSE, getServerUrl } from '../api/client'
-import { runLiveSession } from '@/lib/liveSession'
+import { runLiveSession, type LiveGoneError } from '@/lib/liveSession'
+import { LiveGoneNotice } from '../components/game/LiveGoneNotice'
 import { HistorySearchModal } from '../components/game/HistorySearchModal'
 import { useSceneVisuals } from '@/features/game-session/useSceneVisuals'
 import { useSessionBgm } from '@/features/game-session/useBgm'
@@ -12,6 +13,7 @@ import { BgmControl } from '../components/game/BgmControl'
 import {
   buildPartyByName,
   fmtTime,
+  hostAuthority,
   isSoloTable,
   npcHue,
   resolveActorKind,
@@ -57,6 +59,7 @@ import { HumanKpPanel } from '../components/game/HumanKpPanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpPartyMonitor } from '../components/game/KpPartyMonitor'
 import { KpCombatStrip } from '../components/game/KpCombatStrip'
+import { KpEnemyControl } from '../components/game/KpEnemyControl'
 import { KpChaseStage } from '../components/game/KpChaseStage'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
@@ -161,7 +164,8 @@ function InlineMd({ text }: { text: string }) {
 
 interface EndVoteState {
   open: boolean
-  voters: { character_id: string; name: string; agreed: boolean }[]
+  /** exempt：掉线豁免（不在线、未表态），不计入 total */
+  voters: { character_id: string; name: string; agreed: boolean; exempt?: boolean }[]
   agreed_count: number
   total: number
 }
@@ -210,7 +214,7 @@ export function GameSessionPage() {
   const [showGrowth, setShowGrowth] = useState(false)         // 成长结算弹窗
   const [portraitView, setPortraitView] = useState<string | null>(null)  // NPC 立绘放大查看
 
-  const [showImprov, setShowImprov] = useState(false)         // 临场角色收编（房主专用）
+  const [showImprov, setShowImprov] = useState(false)         // 临场角色收编（在座真人）
   const [showStyle, setShowStyle] = useState(false)           // 本局文风/画风（房主专用）
   // 幸运询价已被拍板过一次 → 卡片收起按钮，防重复提交（后端也已把待决状态消费掉）
   const [luckDecided, setLuckDecided] = useState(false)
@@ -335,9 +339,10 @@ export function GameSessionPage() {
   const typers = useTypers({ seat: myChatSeat?.seat_order, name: myChatSeat?.character_name })
   const { onTyping, onSpoke } = typers
   const notifyTyping = useTypingNotifier(currentSession?.id, true)
-  // 房主 = 我认领的席位是 0 号（房主锚点）；仅房主可收编临场角色
-  const isHost = myPlayerSeat?.seat_order === 0
+  // 房主身份以后端 is_host 为准；房主离线时「重新生成」放开给在座玩家（见 hostAuthority）
+  const { isHost, hostOnline } = hostAuthority(currentSession?.participants)
   const [liveConnected, setLiveConnected] = useState(true)
+  const [liveGone, setLiveGone] = useState<LiveGoneError | null>(null)
 
   // 入场动效：只对「新到达」的消息播放一次淡入/骰子弹入，历史与重连恢复的整批消息绝不逐条弹入。
   // 机制：renderedIds 记录已渲染过的消息 id；首屏（含刷新/重连的 loadHistory 整批）整批视为「已存在」不播入场。
@@ -612,6 +617,9 @@ export function GameSessionPage() {
       const chaseSnap = s.systems.chase
       setChase(chaseSnap?.active ? (chaseSnap as unknown as ChaseState) : null)
       setTurnState(s.systems.turn ?? null)
+      // 结束投票：广播不落库，刷新/断线后只能从快照补回「结束投票 N/M」
+      const vote = s.systems.end_vote
+      setEndVote(vote?.open ? vote : null)
       // 幸运询价：补回那张卡（不补的话刷新一次它就没了，而流程还等着拍板）
       const luck = luckSnapshotFrom(s.systems.luck as Record<string, unknown> | undefined)
       setLuckOffer(luck)
@@ -666,6 +674,7 @@ export function GameSessionPage() {
     if (t === 'turn_state') { setTurnState((chunk.metadata as { confirmed_ids: string[]; total: number; ready: boolean }) || null); return }
     if (t === 'kp_request' || t === 'kp_turn_ready' || t === 'kp_roll_ready') {
       if (isKp && chunk.content) toast.info(chunk.content)
+      if (isKp) useKpPrefill.getState().bumpDesk()  // 申请 / 结算进了 KP 待办台，叫它重拉
       return
     }
     if (t === 'kp_action') return
@@ -700,7 +709,7 @@ export function GameSessionPage() {
     if (t === 'done') {
       endStream(); liveTypeRef.current = ''
       setStreaming(false); setThinking(false); setTailNote(''); setRefreshTick((x) => x + 1)
-      setTurnState(null)  // 新回合开始：确认进度归零
+      setTurnState(null); if (isKp) useKpPrefill.getState().bumpDesk()  // 新回合开始：确认进度归零；KP 待办里的待投检定可能刚被投掉
       setOptimisticPending(new Set())  // done 后 pending_checks 由 refetch 权威刷新，清乐观集
       // 生成结束后从 DB 对齐：用持久化的最终叙述替换流式拼接的内容，
       // 同时兜住「刷新落在生成完成瞬间」时丢失的那段叙述。
@@ -855,6 +864,7 @@ export function GameSessionPage() {
         resync: async () => { await Promise.all([resyncHistory(), resyncState()]) },
         onEvent: handleLiveChunk,
         onDisconnect: () => setLiveConnected(false),  // → 显示「连接中…」，下次 ready 复位
+        onGone: (e) => { if (!cancelled) setLiveGone(e) },  // 被踢 / 房间已删：停止重连，给出去处
         isCancelled: () => cancelled,
         wait: (ms) => new Promise((r) => setTimeout(r, ms)),
         signal: ac.signal,
@@ -1384,6 +1394,17 @@ export function GameSessionPage() {
           {/* 值班条附加物（真人 KP）：场景定位串 + 主台「叙事 / 战术」切换，对应原型顶栏 */}
           {isKp && (
             <>
+              {/* 有人挂机 / 掉线判定滞后时 KP 的兜底：跳过未提交者直接收下本回合 */}
+              {kpPendingCount > 0 && turnState && turnState.confirmed_ids.length > 0 && (
+                <button
+                  type="button"
+                  onClick={forceAdvance}
+                  className="btn-secondary btn-xs"
+                  title={`还有 ${kpPendingCount} 人没交本回合；跳过他们，直接收下已提交的行动`}
+                >
+                  跳过未提交者
+                </button>
+              )}
               <span className="kp-locus" title="当前场景">
                 场景 <b>{currentSceneName || '—'}</b>
                 {combat && <> · 战斗 第 <b>{combat.round}</b> 轮</>}
@@ -1436,7 +1457,7 @@ export function GameSessionPage() {
                 <span
                   className="text-xs inline-flex items-center gap-1.5 px-2 py-0.5 rounded border"
                   style={{ borderColor: 'var(--color-accent)', color: 'var(--color-text-secondary)' }}
-                  title={endVote.voters.map((v) => `${v.name}：${v.agreed ? '已同意' : '待确认'}`).join('\n')}
+                  title={endVote.voters.map((v) => `${v.name}：${v.agreed ? '已同意' : v.exempt ? '不在线（不计入）' : '待确认'}`).join('\n')}
                 >
                   <GiUpgrade size={13} /> 结束投票 {endVote.agreed_count}/{endVote.total}
                   {!endVote.voters.find((v) => v.character_id === myCharId)?.agreed && (
@@ -1483,11 +1504,15 @@ export function GameSessionPage() {
                   ? [{ label: '成长结算', icon: <GiUpgrade size={13} />, onClick: () => setShowGrowth(true),
                        title: '本局成功用过的技能做成长检定（模组结束后可用）' }]
                   : []),
-                ...(isHost
+                // 收编临场角色：后端放行任一在座真人（跟龙套对过戏的往往不是房主）
+                ...(myCharId
                   ? [{ label: '临场角色', icon: <GiCharacter size={13} />, onClick: () => setShowImprov(true),
-                       title: '把 KP 临时添加的出彩龙套收编为正式配角', separated: true },
-                     { label: '本局风格', icon: <GiQuillInk size={13} />, onClick: () => setShowStyle(true),
-                       title: '文风与画风：几档预设或自己写一段，留空则跟随模组' }]
+                       title: '把 KP 临时添加的出彩龙套收编为正式配角', separated: true }]
+                  : []),
+                // 本局风格是整桌共享的观感：仅房主（后端按 manager 授权）
+                ...(isHost
+                  ? [{ label: '本局风格', icon: <GiQuillInk size={13} />, onClick: () => setShowStyle(true),
+                       title: '文风与画风：几档预设或自己写一段，留空则跟随模组', separated: !myCharId }]
                   : []),
                 ...(!isKp
                   ? [{ label: '重看导览', icon: <HelpCircle size={13} />, onClick: runGameTour,
@@ -1705,7 +1730,8 @@ export function GameSessionPage() {
           </Modal>
         )}
         </ModalPresence>
-        {!liveConnected && (
+        {liveGone && <LiveGoneNotice error={liveGone} />}
+        {!liveConnected && !liveGone && (
           <div className="text-center text-xs py-1 mb-1 rounded" style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-tertiary)' }}>
             与房间连接中断，正在重连…
           </div>
@@ -1948,7 +1974,7 @@ export function GameSessionPage() {
                     // 因何而检：KP 给的一句话缘由，跟检定要求同框——否则玩家只看到「请你投个骰」。
                     reason={String(msg.metadata?.reason ?? '').trim()}
                     actionable={mine}
-                    pending={stillPending}
+                    pending={stillPending} cancelled={!!msg.metadata?.cancelled}
                     onRoll={() => submitRoll(checkId)}
                     disabled={streaming}
                     animClass={isFresh(msg) ? 'anim-enter' : ''}
@@ -2181,7 +2207,7 @@ export function GameSessionPage() {
                 </button>
               )}
             </div>
-            {messages.some((m) => m.type === 'narration') ? (
+            {messages.some((m) => m.type === 'narration') ? (isHost || !hostOnline) && (
               <ConfirmDialog
                 title="重新生成最新一轮"
                 description="将删除最新一轮 KP 的叙事（旁白与 NPC 台词），用本轮玩家与队友的既有输入重新生成；已投出的骰子结果会保留、不重掷。此操作会打断当前生成、可能明显改变剧情走向——仅在生成卡住或结果明显有问题时使用。"
@@ -2351,6 +2377,7 @@ export function GameSessionPage() {
           值班台形态下监控列与场景速查已上主台，坞里只留写作台（hideSituation）。 */}
       {/* 战术模式：写作台只剩一条（最近结算 + 一行描写 + 收场），把高度还给战场；
           「更多动作」展开回完整写作台，打完自动收回 */}
+      {isKp && combat && <KpEnemyControl sessionId={currentSession.id} combat={combat} />}
       {isKp && !kpCollapsed && desk && immersiveOn && !kpFullDesk && (
         <aside className="kp-console-dock kp-console-dock--strip flex-shrink-0">
           <KpCombatStrip sessionId={currentSession.id} log={combatLog} onExpand={() => setKpFullDesk(true)} />

@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Re
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import player_token, require_local_client, require_session_kp
+from app.api.deps import is_local_client, player_token, require_local_client, require_session_kp
 from app.database import SessionLocal, get_db
 from app.models.module import Module
 from app.rules import get_system
@@ -456,38 +456,16 @@ async def _run_upload_job(
         _job_update(job_id, status="failed", detail="解析失败，请重试")
 
 
-@router.post("/upload", dependencies=[Depends(require_local_client)])
-async def upload_module(
-    files: list[UploadFile],
-    rule_system: str = "coc",
-    ocr_prepass: bool = False,
-):
-    """上传模组：同步做文件抽取与格式校验（错误立即可见），解析转后台任务。
-
-    返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。
-
-    ``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，
-    以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。
-    """
-    if not files:
-        raise HTTPException(400, "请至少上传一个文件")
-
+def _extract_uploads(
+    uploads: list[tuple[str, str, bytes]], vision: bool, ocr_prepass: bool,
+) -> tuple[list[str], list[tuple[bytes, str]]]:
+    """把上传的文件抽成文字段落与图片（同步、CPU 密集，调用方放线程里跑）。"""
     _IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
-    # 本机有没有一双眼睛——有才从 PDF 抽内嵌图（插图/手稿）一并喂给视觉解析。
-    # 取的是「视觉模型」槽位（未标记则回落主模型），与 parse_module_images 同源：
-    # 两处若不同源，就会出现「抽了图但解析端说不支持」或反过来「能解析却没抽图」。
-    try:
-        from app.ai.llm_factory import get_vision_llm
-        vision = get_vision_llm().supports_vision()
-    except Exception:
-        vision = False
-
+    multi = len(uploads) > 1
     parts: list[str] = []
     images: list[tuple[bytes, str]] = []   # (bytes, mime) —— 图片走多模态视觉解析
-    for f in files:
-        fn = (f.filename or "").lower()
-        ct = f.content_type or ""
-        content = await f.read()
+    for filename, ct, content in uploads:
+        fn = filename.lower()
         if ct.startswith("image/") or fn.endswith(_IMG_EXT):
             images.append((content, ct or "image/png"))
         elif fn.endswith(".pdf") or ct == "application/pdf":
@@ -499,19 +477,50 @@ async def upload_module(
                 keep_page_order=ocr_prepass,
             ) if vision else []
             if text.strip():
-                parts.append(f"=== 文件：{f.filename} ===\n{text}" if len(files) > 1 else text)
+                parts.append(f"=== 文件：{filename} ===\n{text}" if multi else text)
             images.extend(pdf_imgs)
             if not text.strip() and not pdf_imgs:
                 raise HTTPException(
                     422,
-                    f"「{f.filename}」似乎是扫描件（无可提取文字）。请改用含文字层的 PDF，"
+                    f"「{filename}」似乎是扫描件（无可提取文字）。请改用含文字层的 PDF，"
                     "或到设置页把一个支持视觉的配置标记为「视觉模型」后重试（届时会直接识图，"
                     "带团用的主模型不必更换）",
                 )
         else:
-            text = _extract_doc_text(content, f.filename or "")
-            parts.append(f"=== 文件：{f.filename} ===\n{text}" if len(files) > 1 else text)
+            text = _extract_doc_text(content, filename)
+            parts.append(f"=== 文件：{filename} ===\n{text}" if multi else text)
+    return parts, images
 
+
+@router.post("/upload", dependencies=[Depends(require_local_client)])
+async def upload_module(
+    files: list[UploadFile],
+    rule_system: str = "coc",
+    ocr_prepass: bool = False,
+):
+    """上传模组：先抽取文件与校验格式（在线程里做，错误立即可见），解析转后台任务。
+
+    返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。
+
+    ``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，
+    以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。
+    """
+    if not files:
+        raise HTTPException(400, "请至少上传一个文件")
+
+    # 本机有没有一双眼睛——有才从 PDF 抽内嵌图（插图/手稿）一并喂给视觉解析。
+    # 取的是「视觉模型」槽位（未标记则回落主模型），与 parse_module_images 同源：
+    # 两处若不同源，就会出现「抽了图但解析端说不支持」或反过来「能解析却没抽图」。
+    try:
+        from app.ai.llm_factory import get_vision_llm
+        vision = get_vision_llm().supports_vision()
+    except Exception:
+        vision = False
+
+    # 读上传体是异步 IO；抽文字 / 抽图 / 转 .doc 是同步 CPU 活，放线程里跑——直接在事件循环上做，
+    # 大 PDF 抽取期间整个服务器卡住，其他接口全都等着（实测 35 页图的 PDF 卡 1.2s，扫描书更久）。
+    uploads = [(f.filename or "", f.content_type or "", await f.read()) for f in files]
+    parts, images = await asyncio.to_thread(_extract_uploads, uploads, vision, ocr_prepass)
     raw_text = "\n\n".join(parts)
 
     job_id = _job_new()
@@ -528,9 +537,16 @@ def upload_status(job_id: str):
     return job
 
 
+def _module_view(module: Module, request: Request) -> dict:
+    """本机房主拿全量；其余来源（局域网 / 直连客人）只拿玩家视图——真相、NPC 秘密、
+    结局、触发、线索都是守秘人资料，客人在大厅 / 车卡用不到，也不该看到。"""
+    data = ModuleRead.model_validate(module).model_dump()
+    return data if is_local_client(request) else module_service.player_view(data)
+
+
 @router.get("", response_model=list[ModuleRead])
-def list_modules(db: Session = Depends(get_db)):
-    return module_service.list_modules(db)
+def list_modules(request: Request, db: Session = Depends(get_db)):
+    return [_module_view(m, request) for m in module_service.list_modules(db)]
 
 
 @router.post("", dependencies=[Depends(require_local_client)], response_model=ModuleRead)
@@ -700,12 +716,12 @@ def list_difficulties():
 
 
 @router.get("/{module_id}", response_model=ModuleRead)
-def get_module(module_id: str, db: Session = Depends(get_db)):
+def get_module(module_id: str, request: Request, db: Session = Depends(get_db)):
     module = module_service.get_module(db, module_id)
     if not module:
         raise HTTPException(404, "模组不存在")
     hex_map.ensure_module_map(db, module)   # 存量模组沙盘坐标懒回填（幂等），供详情页沙盘直用
-    return module
+    return _module_view(module, request)
 
 
 @router.post("/{module_id}/images/regenerate", dependencies=[Depends(require_local_client)])

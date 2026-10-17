@@ -9,6 +9,7 @@ import { BookOpen, Bot, Image, NotebookPen, WandSparkles, type LucideIcon } from
 import {
   GiBrain, GiCancel, GiCheckMark, GiCrossedSwords, GiFootTrip, GiHeartPlus, GiMusicalNotes,
   GiPadlock, GiRollingDices, GiRun, GiScrollUnfurled, GiSkullCrossedBones, GiTheaterCurtains,
+  GiBarrier, GiPathDistance, GiSpellBook, GiStoneWall, GiDramaMasks,
 } from 'react-icons/gi'
 
 export type KpAction =
@@ -31,6 +32,11 @@ export type KpAction =
   | 'start_chase'
   | 'chase_round'
   | 'end_chase'
+  | 'mark_seen'
+  | 'block_path'
+  | 'unblock_path'
+  | 'travel_suggest'
+  | 'npc_act'
 
 export const ACTION_LABELS: Record<KpAction, string> = {
   narration: '发布叙事',
@@ -52,6 +58,11 @@ export const ACTION_LABELS: Record<KpAction, string> = {
   start_chase: '发起追逐',
   chase_round: '推进一轮',
   end_chase: '结束追逐',
+  mark_seen: '线索记账',
+  block_path: '封路',
+  unblock_path: '解除封路',
+  travel_suggest: '建议前往',
+  npc_act: 'NPC 代演',
 }
 
 /**
@@ -66,6 +77,7 @@ type ActionIcon = ComponentType<{ size?: number }>
 export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon }> = [
   { id: 'narration', label: '叙事', icon: WandSparkles },
   { id: 'dialogue', label: 'NPC 台词', icon: Bot },
+  { id: 'npc_act', label: 'AI 代演', icon: GiDramaMasks },
   { id: 'dice_check', label: '检定', icon: GiRollingDices },
   { id: 'san_check', label: '理智', icon: GiBrain },
   { id: 'generic_roll', label: '通用骰', icon: GiRollingDices },
@@ -74,6 +86,10 @@ export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon
   { id: 'scene_change', label: '切场景', icon: GiTheaterCurtains },
   { id: 'unlock_place', label: '解锁地点', icon: GiPadlock },
   { id: 'move_actor', label: '移动角色', icon: GiFootTrip },
+  { id: 'mark_seen', label: '记账', icon: GiSpellBook },
+  { id: 'travel_suggest', label: '建议前往', icon: GiPathDistance },
+  { id: 'block_path', label: '封路', icon: GiStoneWall },
+  { id: 'unblock_path', label: '解封', icon: GiBarrier },
   { id: 'hp_change', label: '结算 HP', icon: GiHeartPlus },
   { id: 'start_combat', label: '开战', icon: GiCrossedSwords },
   { id: 'end_combat', label: '结束战斗', icon: GiSkullCrossedBones },
@@ -95,12 +111,15 @@ export const ACTION_CHIPS: Array<{ id: KpAction; label: string; icon: ActionIcon
 export const ACTION_GROUPS: Array<{ label: string; ids: KpAction[] }> = [
   { label: '说', ids: ['narration', 'dialogue', 'handout'] },
   { label: '骰', ids: ['dice_check', 'san_check', 'generic_roll', 'opposed_check'] },
-  { label: '场景', ids: ['scene_change', 'unlock_place'] },
+  { label: '场景', ids: ['scene_change', 'unlock_place', 'mark_seen'] },
   { label: '局势', ids: ['start_combat', 'end_combat', 'start_chase'] },
 ]
 
 /** 收进「更多」的动作 */
-export const ACTION_MORE: KpAction[] = ['move_actor', 'hp_change', 'set_flag', 'clear_flag', 'set_mood']
+export const ACTION_MORE: KpAction[] = [
+  'move_actor', 'hp_change', 'npc_act', 'travel_suggest', 'block_path', 'unblock_path',
+  'set_flag', 'clear_flag', 'set_mood',
+]
 
 /** 当前态势下「局势」组里该露哪几个：开战与结束战斗互斥；战斗中、追逐中都不能再开追逐
  *  （追逐的推进与收场在追逐主台上，不进动作条） */
@@ -137,6 +156,11 @@ export const ACTION_COMMANDS: Array<{ cmd: string; action: KpAction; hint: strin
   { cmd: '解除', action: 'clear_flag', hint: '解除剧情标志' },
   { cmd: '配乐', action: 'set_mood', hint: '换当前场景的背景音乐氛围' },
   { cmd: '追逐', action: 'start_chase', hint: '发起一场追逐' },
+  { cmd: '记账', action: 'mark_seen', hint: '把给过的线索 / 桥段记进台账' },
+  { cmd: '代演', action: 'npc_act', hint: '让 AI 按 NPC 人格替他说一句（会调用模型）' },
+  { cmd: '建议', action: 'travel_suggest', hint: '给玩家挂一张「要不要去」的卡' },
+  { cmd: '封路', action: 'block_path', hint: '某处此刻过不去' },
+  { cmd: '解封', action: 'unblock_path', hint: '恢复某处通行' },
 ]
 
 /** 旁白与 NPC 台词是「一整段文字」，输入框得写得下；检定那种一行一格的表单撑开只会空旷。 */

@@ -41,6 +41,8 @@ export function parseCombatState(value: unknown): CombatState | null {
     ...(value.started_seq === undefined ? {} : { started_seq: value.started_seq }),
     ...(pendingRoll ? { pending_roll: pendingRoll } : {}),
     ...(isCombatGrid(value.grid) ? { grid: value.grid } : {}),
+    ...(typeof value.kp_controls_enemies === 'boolean' ? { kp_controls_enemies: value.kp_controls_enemies } : {}),
+    ...(typeof value.awaiting_kp === 'string' ? { awaiting_kp: value.awaiting_kp } : {}),
   }
 }
 

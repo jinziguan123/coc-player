@@ -6,7 +6,7 @@
 import { GiRollingDices } from 'react-icons/gi'
 
 export function CheckRequestCard({
-  content, reason, actionable, pending, onRoll, disabled, animClass,
+  content, reason, actionable, pending, onRoll, disabled, animClass, cancelled = false,
 }: {
   /** 后端拼好的提示语，如「请 陈守一 进行一次「理智」检定（惩罚骰 ×1：光线昏暗）」 */
   content: string
@@ -19,6 +19,8 @@ export function CheckRequestCard({
   onRoll: () => void
   disabled?: boolean
   animClass?: string
+  /** KP 撤销了这一掷（人不在、或不必再投） */
+  cancelled?: boolean
 }) {
   return (
     <div data-tour="check-request" className={`chat-msg py-1 flex justify-center ${animClass || ''}`}>
@@ -33,7 +35,7 @@ export function CheckRequestCard({
         <div className="flex items-center gap-3">
           <GiRollingDices style={{ color: 'var(--color-accent)', fontSize: '1.1rem', flexShrink: 0 }} />
           <span className="whitespace-pre-wrap">{content}</span>
-          {pending && actionable && (
+          {pending && actionable && !cancelled && (
             <button
               onClick={onRoll}
               disabled={disabled}
@@ -43,12 +45,12 @@ export function CheckRequestCard({
               <GiRollingDices size={13} /> 投骰
             </button>
           )}
-          {!pending && (
+          {(!pending || cancelled) && (
             <span
               className="text-xs flex-shrink-0"
               style={{ color: 'var(--color-text-secondary)', opacity: 0.6 }}
             >
-              已投骰
+              {cancelled ? '已撤销' : '已投骰'}
             </span>
           )}
         </div>

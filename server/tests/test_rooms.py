@@ -85,7 +85,8 @@ def test_claim_seat(db_factory):
     seat = next(p for p in session_service.get_participants(db, session.id) if p.seat_order == empty.seat_order)
     assert seat.claimed and seat.character_id == guest.id and seat.owner_token == "guest-token"
     db.refresh(guest)
-    assert guest.owner_token == "guest-token"
+    # 无主卡客人可以拿来入座，但不转归属——否则房主的角色列表里就再也看不到它
+    assert guest.owner_token is None
 
 
 def test_join_reserves_seat_and_lists_room_for_token(db_factory):

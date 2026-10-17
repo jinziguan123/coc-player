@@ -111,6 +111,24 @@ export function isSoloTable(participants: ParticipantLike[] | undefined): boolea
   return humans.length <= 1
 }
 
+/** 我在本局的房主权限，以及房主此刻是否在线。
+ *
+ *  以后端下发的 `is_host` 为准（新模型按 host_token——真人 KP 局里 KP 席就是房主；旧房间
+ *  回落到主角席）。不能按「0 号席」猜：真人 KP 局的 0 号席是普通玩家，那样房主（KP）反而
+ *  看不到强制推进，0 号席玩家看得到却会被后端拒绝。
+ *
+ *  `hostOnline` 供「重新生成」判断：房主在线时只有房主能用，离线时放开给在座玩家
+ *  （与后端 /regenerate 同口径）。 */
+export function hostAuthority(
+  participants: (ParticipantLike & { is_host?: boolean; is_online?: boolean })[] | undefined,
+): { isHost: boolean; hostOnline: boolean } {
+  const list = participants || []
+  return {
+    isHost: list.some((p) => p.is_mine && p.is_host),
+    hostOnline: list.some((p) => p.is_host && p.is_online),
+  }
+}
+
 export function buildPartyByName(
   participants: ParticipantLike[] | undefined,
 ): Record<string, PartyMember> {

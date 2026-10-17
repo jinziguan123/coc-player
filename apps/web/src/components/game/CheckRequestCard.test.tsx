@@ -54,4 +54,12 @@ describe('投骰请求卡', () => {
 
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
+
+  it('KP 撤销后不再给按钮，标明已撤销', () => {
+    render(
+      <CheckRequestCard content="请 陈守一 进行一次「侦查」检定" actionable pending cancelled onRoll={() => {}} />,
+    )
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('已撤销')).toBeInTheDocument()
+  })
 })

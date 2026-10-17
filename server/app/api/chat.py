@@ -23,7 +23,9 @@ from app.schemas.event import (
     TravelRequest,
 )
 from app.schemas.session import KpActionRequest
-from app.services import human_kp_service, module_service, rate_limit, session_service
+from app.services import (
+    human_kp_desk, human_kp_service, module_service, rate_limit, session_service,
+)
 from app.services.event_protocol import (
     MAX_OOC_CHARS,
     event_to_chunk,
@@ -67,6 +69,47 @@ def _continue_human_kp_turn(
         session_id,
         _make_chunk("kp_turn_ready", "玩家回合已提交，等待真人 KP 处理"),
     )
+
+
+def _commit_ready_turn(
+    db: Session, session_id: str, game_session: GameSession,
+) -> None:
+    """所有在线真人已确认：暂存发言转正；真人 KP 模式只通知 KP，不启动 AI 生成。"""
+    session_service.commit_turn(db, session_id)
+    if game_session.kp_mode == "human":
+        # 真人 KP 不会进入 AI 生成管线，因此必须在此处完成前往动作的位置同步。
+        commit_pending_travel(db, session_id)
+        _continue_human_kp_turn(db, session_id, game_session)
+    else:
+        room_hub.broadcast(session_id, _make_chunk("generating"))
+        generation_manager.start(session_id, run_chat_generation(session_id))
+
+
+def _reevaluate_turn_on_leave(session_id: str) -> None:
+    """有人断开 /live：在线集合变小，剩下的人可能都已确认推进。
+
+    不重判的话，已确认者的「推进」按钮已禁用，只能等房主/KP 强制推进——掉线豁免形同虚设。
+    无人确认时 ready 为假（要求 total>0 且全员确认），不会凭空推进。
+    """
+    from app import database
+
+    if generation_manager.is_generating(session_id):
+        return
+    db = database.SessionLocal()
+    try:
+        game_session = db.get(GameSession, session_id)
+        if not game_session or game_session.status != "active":
+            return
+        # 没推进也要广播：分母随在线集合变了，「已确认 N/M」得跟着刷新。
+        state = session_service.live_turn_state(db, session_id)
+        room_hub.broadcast(session_id, _make_chunk("turn_state", metadata=state))
+        if state["ready"]:
+            _commit_ready_turn(db, session_id, game_session)
+    finally:
+        db.close()
+
+
+room_hub.add_leave_listener(_reevaluate_turn_on_leave)
 
 
 @router.post("/{session_id}/ooc")
@@ -149,7 +192,7 @@ async def chat(
     session_service.set_turn_confirm(db, session_id, player_char.id, False)
     room_hub.broadcast(
         session_id,
-        _make_chunk("turn_state", metadata=session_service.turn_confirm_state(db, session_id)),
+        _make_chunk("turn_state", metadata=session_service.live_turn_state(db, session_id, token)),
     )
     return {"ok": True}
 
@@ -182,7 +225,26 @@ async def kp_action(
         # 防止暗投结果经所有成员共享的 SSE 通道泄露。
         _make_chunk("kp_action", metadata={"action": data.action}),
     )
+    # 结果另记进 KP 私有台账（暗投点数下一次动作后还能回看），同样只经 KP 鉴权接口读出
+    db.refresh(session)
+    human_kp_desk.record_ledger(db, session, data.action, result, chunks)
+    if data.action == "narration" and not session_service.human_character_ids(db, session_id):
+        # 全 AI 玩家席没人点「推进」：KP 每发一段旁白就是一轮，自动队友在这里接上
+        _maybe_auto_team_turn(db, session_id, session)
     return {"ok": True, "result": result}
+
+
+def _maybe_auto_team_turn(db: Session, session_id: str, game_session: GameSession) -> None:
+    if (
+        human_kp_service.auto_ai_teammates_enabled(game_session)
+        and session_service.get_ai_teammates(db, session_id)
+        and human_kp_service.has_unprocessed_player_turn(db, session_id, game_session)
+        and not generation_manager.is_generating(session_id)
+    ):
+        room_hub.broadcast(session_id, _make_chunk("generating"))
+        generation_manager.start(
+            session_id, human_kp_service.run_human_team_turn_generation(session_id),
+        )
 
 
 @router.post("/{session_id}/check")
@@ -231,16 +293,19 @@ async def check(
         session_service.set_turn_confirm(db, session_id, actor.id, False)
         room_hub.broadcast(
             session_id,
-            _make_chunk("turn_state", metadata=session_service.turn_confirm_state(db, session_id)),
+            _make_chunk("turn_state", metadata=session_service.live_turn_state(db, session_id, token)),
         )
         return {"ok": True, "stashed": True}
 
+    human_kp = game_session.kp_mode == "human"
     ev = session_service.add_event(
         db, session_id, "action", content,
         actor_id=actor.id, actor_name=actor.name,
+        # 真人 KP 局：带上技能与意图，进 KP 待办（一键照此发起检定），不靠 toast 记住
+        metadata={"check_request": True, "skill": skill, "intent": intent} if human_kp else None,
     )
     room_hub.broadcast(session_id, event_to_chunk(ev))
-    if game_session.kp_mode == "human":
+    if human_kp:
         room_hub.broadcast(
             session_id,
             _make_chunk(
@@ -307,6 +372,9 @@ async def decide_luck(
         raise HTTPException(404, "没有待决的幸运消费")
     if pending.get("char_id") not in (None, actor.id):
         raise HTTPException(403, "只有这次检定的角色本人能决定是否消费幸运")
+    # 重复点击 / 两端同时拍板：第一次已经把结算链跑起来了，第二次给 409 而不是 500
+    if generation_manager.is_generating(session_id):
+        raise HTTPException(409, "这一骰正在结算，请稍候")
 
     room_hub.broadcast(session_id, _make_chunk("generating"))
     generation_manager.start(
@@ -327,8 +395,15 @@ async def regenerate(
 
     高风险操作（可能明显改变剧情走向），前端须二次确认后才调用；只作用于「最新一轮」——回滚逻辑
     天然只清理事件流尾部的 KP 产物。
+
+    只有房主能用：它会打断并回滚整桌共享的叙事，不该由任一玩家单方决定。房主不在线时
+    放开给在座真人——否则房主掉线后生成一旦卡住，整桌就没人解得开。
     """
     require_session_token_actor(db, session_id, token)
+    if not session_service.can_manage_session(db, session_id, token):
+        host = session_service.host_token_of(db, session_id)
+        if host and host in room_hub.online_tokens(session_id):
+            raise HTTPException(403, "只有房主可以重新生成（房主不在线时在座玩家可用）")
     game_session = db.get(GameSession, session_id)
     if game_session.status != "active":
         raise HTTPException(400, "会话未处于活跃状态")
@@ -368,20 +443,11 @@ async def advance(
 
     session_service.set_turn_confirm(db, session_id, actor.id, True)
     # 掉线豁免：按在线 token 计算需确认者（并入本次确认者，防其 /live 恰好瞬断被漏算）。
-    online = room_hub.online_tokens(session_id) | ({token} if token else set())
-    state = session_service.turn_confirm_state(db, session_id, online)
+    state = session_service.live_turn_state(db, session_id, token)
     room_hub.broadcast(session_id, _make_chunk("turn_state", metadata=state))
 
     if state["ready"]:
-        # 所有在线真人已确认：暂存发言转正；真人 KP 模式只通知 KP，不启动 AI 生成。
-        session_service.commit_turn(db, session_id)
-        if game_session.kp_mode == "human":
-            # 真人 KP 不会进入 AI 生成管线，因此必须在此处完成前往动作的位置同步。
-            commit_pending_travel(db, session_id)
-            _continue_human_kp_turn(db, session_id, game_session)
-        else:
-            room_hub.broadcast(session_id, _make_chunk("generating"))
-            generation_manager.start(session_id, run_chat_generation(session_id))
+        _commit_ready_turn(db, session_id, game_session)
     return {"ok": True, "ready": state["ready"]}
 
 
@@ -394,16 +460,18 @@ async def force_advance(
     """房主强制推进：跳过未确认者（掉线/挂机），直接把本回合暂存发言整批交 KP。
 
     掉线豁免虽已让在线玩家能推进，但极端情形（有人挂机不点、或掉线判定滞后）仍可能卡住；
-    此端点给房主一个确定性的兜底出口。仅房主/纯本机会话可用。
+    此端点给房主一个确定性的兜底出口。仅房主、真人 KP 或纯本机会话可用。
     """
     game_session = db.get(GameSession, session_id)
     if not game_session:
         raise HTTPException(404, "会话不存在")
     if game_session.status != "active":
         raise HTTPException(400, "会话未处于活跃状态")
-    require_session_manager(
-        db, session_id, token, detail="只有房主可以强制推进",
-    )
+    # 真人 KP 推进本就是他的职责：旧模型里 KP 席可能不是房主，也要能兜底
+    if not session_service.is_kp(db, session_id, token):
+        require_session_manager(
+            db, session_id, token, detail="只有房主或 KP 可以强制推进",
+        )
     if generation_manager.is_generating(session_id):
         raise HTTPException(409, "KP 正在叙事，请稍候")
     session_service.commit_turn(db, session_id)
@@ -445,7 +513,7 @@ async def edit_event(
     room_hub.broadcast(session_id, _make_chunk("event_update", content, event_id=event_id))
     room_hub.broadcast(
         session_id,
-        _make_chunk("turn_state", metadata=session_service.turn_confirm_state(db, session_id)),
+        _make_chunk("turn_state", metadata=session_service.live_turn_state(db, session_id, token)),
     )
     return {"ok": True}
 
@@ -474,7 +542,7 @@ async def delete_event(
     room_hub.broadcast(session_id, _make_chunk("event_delete", event_id=event_id))
     room_hub.broadcast(
         session_id,
-        _make_chunk("turn_state", metadata=session_service.turn_confirm_state(db, session_id)),
+        _make_chunk("turn_state", metadata=session_service.live_turn_state(db, session_id, token)),
     )
     return {"ok": True}
 
@@ -620,7 +688,7 @@ async def travel(
         session_service.set_turn_confirm(db, session_id, actor.id, False)
         room_hub.broadcast(
             session_id,
-            _make_chunk("turn_state", metadata=session_service.turn_confirm_state(db, session_id)),
+            _make_chunk("turn_state", metadata=session_service.live_turn_state(db, session_id, token)),
         )
         return {"ok": True, "stashed": True}
 

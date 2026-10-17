@@ -169,7 +169,9 @@ async def _exec_san_check(
     # KP 没写恐怖源时，用「本轮玩家行动锚点」顶上幂等键：同一轮里同一个人至多被这种
     # 无名 SAN 扣一次——重新生成时 KP 再发一遍，不会再扣。
     anchor = _turn_anchor_seq(db, session_id, [player_char, *(teammates or [])])
-    key_source = source or f"turn:{anchor}"
+    # san_key：调用方自带的幂等键。真人 KP 没有「重新生成」，每次手动发起都是一次新的
+    # 恐怖遭遇，按轮去重只会吞掉同一轮里第二次真不同的无名 SAN。
+    key_source = source or str(kv.get("san_key") or "").strip() or f"turn:{anchor}"
     _sync_san_turn(db, game_session, anchor)
     # 同一角色对同一恐怖源只检定一次：用 session_ledger.san_checked 记 "source|char_id"。
     led = game_session.ledger
@@ -415,8 +417,12 @@ def _resolve_hp_target(
     name = (target_str or "").strip()
     if not name or name.lower() == "player" or name in ("主角", "玩家", player_char.name):
         return player_char
+    # 先精确再模糊：「李」与「李四」同队时，按子串先撞上谁全看排序
+    exact = next((t for t in (teammates or []) if t.name == name), None)
+    if exact is not None:
+        return exact
     for t in (teammates or []):
-        if t.name and (t.name == name or name in t.name or t.name in name):
+        if t.name and (name in t.name or t.name in name):
             return t
     return None
 
@@ -517,6 +523,7 @@ async def _exec_hp_change(
     target_str: str, delta_str: str, reason: str,
     module: Module | None = None,
     teammates: list[Character] | None = None,
+    target: Character | None = None,
 ) -> list[str]:
     """执行一条 HP 变化结算（target=player/主角 或队友名；NPC/匹配不到则不结算）。返回 chunks。
 
@@ -525,8 +532,9 @@ async def _exec_hp_change(
     落 major_wound 状态并**系统自动**过一次体质（CON）检定，失败则昏迷（unconscious）。
     昏迷判定是被动生理反应而非玩家主动行动，故不走「待玩家投骰」、直接自动掷。
     队友受伤同样结算（多人局队友也会重伤/昏迷）。
+    ``target`` 给定时（真人 KP 从下拉里点了具体角色）不再按名字解析。
     """
-    char = _resolve_hp_target(target_str, player_char, teammates)
+    char = target or _resolve_hp_target(target_str, player_char, teammates)
     if char is None:
         return []
     try:
@@ -1112,13 +1120,16 @@ def _exec_flag(
 ) -> list[str]:
     """置/清剧情标志，并刷新内存里的 world_state 使后续处理立即可见。
 
+    **不向全桌播报标志名。** 标志是模组作者写给 KP 的剧情结构（``butler_exposed``、
+    ``cult_revealed``），念给玩家听就是把真相的骨架报了出去；剧情推进本身由叙事交代。
+    KP 那一侧的回执由调用方自己写（AI 的工具结果 / 真人 KP 的动作回执）。
+
     如果当前场景的视觉状态因此发生变化，立即落一张状态配图卡；没有视觉影响的
     flag 不会产生额外图片。
     """
     session_service.set_flag(db, session_id, flag, value)
     db.refresh(game_session)
-    label = "剧情推进" if value else "剧情状态解除"
-    chunks = [_make_chunk("system", f"{label}：{flag}")]
+    chunks: list = []
     module = db.get(Module, game_session.module_id)
     if module is not None:
         chunks.extend(_maybe_scene_illustration(

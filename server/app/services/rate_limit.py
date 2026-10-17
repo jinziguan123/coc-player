@@ -28,6 +28,10 @@ JOIN_LIMIT = "10/minute"
 # 那需要的是房间级配额，不是按 IP 限速，见 ADR-007 的未决项。
 AI_TRIGGER_LIMIT = "10/minute"
 
+# 真人 KP 的 AI 参谋（叙事草稿 / 裁定建议 / 资料速查）：每次都烧房主的模型额度。
+# KP 不一定坐在房主机器上（客人也能认领 KP 席），本机豁免照旧。
+ADVISOR_LIMIT = "12/minute"
+
 # 场外聊天：正常聊天到不了这个量，只挡刷屏。
 OOC_LIMIT = "30/minute"
 

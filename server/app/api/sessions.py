@@ -1,11 +1,12 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
+    is_local_client,
     player_token,
     require_session_actor,
     require_session_host,
@@ -18,6 +19,7 @@ from app.database import get_db
 from app.models.character import Character
 from app.models.event_log import EventLog
 from app.models.module import Module
+from app.models.session import GameSession
 from app.schemas.event import EventRead
 from app.schemas.session import (
     ClaimSeatRequest,
@@ -48,11 +50,52 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
+#: 玩家视图里保留的 world_state 键。前端只读结局（顶栏「结束模组」按钮）与结束投票；
+#: 其余——幕后推演游标、NPC 记忆（含暗投心理学的看穿与否）、线索台账、临场 NPC 卡的秘密、
+#: 队友心事、剧情摘要、剧情标志——都是守秘人资料。白名单：新加的键默认不下发给玩家。
+_PLAYER_WORLD_STATE_KEYS = ("epilogue_done", "end_vote")
+
+
+def _player_world_state(ws: dict | None) -> dict:
+    ws = ws or {}
+    out = {k: ws[k] for k in _PLAYER_WORLD_STATE_KEYS if k in ws}
+    ending = ws.get("ending_reached")
+    if isinstance(ending, dict):
+        # 结局名玩家会在旁白里看到；规划器的判定理由（reason）引的是结局条件，不给。
+        out["ending_reached"] = {k: ending[k] for k in ("id", "name") if k in ending}
+    elif ending:
+        out["ending_reached"] = ending
+    return out
+
+
+def _owns_kp_seat(session, token: str | None) -> bool:
+    return bool(token) and any(
+        sp.role == "kp" and sp.owner_token == token for sp in session.participants
+    )
+
+
+def _session_read(session, *, keeper: bool) -> dict:
+    """``SessionRead`` 的下发形状：非 KP 视角时 world_state 只剩玩家白名单。"""
+    data = SessionRead.model_validate(session).model_dump()
+    if not keeper:
+        data["world_state"] = _player_world_state(data.get("world_state"))
+    return data
+
+
 def _session_payload(
     session, chars_map: dict[str, str], module_title: str | None,
-    token: str | None = None,
+    token: str | None = None, *, request: Request | None = None,
 ) -> dict:
-    data = SessionRead.model_validate(session).model_dump()
+    """会话的完整下发载荷。
+
+    KP 视角（完整 world_state）只给本局真人 KP 席位与本机房主；本机与否要看请求来源，
+    没传 ``request`` 的调用点（入座、准备等写接口的回包）一律按玩家视图——它们的前端
+    消费者都不读 world_state，默认收紧不会少任何东西。
+    """
+    keeper = _owns_kp_seat(session, token) or (
+        request is not None and is_local_client(request)
+    )
+    data = _session_read(session, keeper=keeper)
     online = room_hub.online_tokens(session.id)
     # session.participants 与 data["participants"] 均按 seat_order，可对齐计算 is_mine
     for p, sp in zip(data.get("participants", []), session.participants):
@@ -132,6 +175,7 @@ def create_session(
 
 @router.get("")
 def list_sessions(
+    request: Request,
     db: Session = Depends(get_db), token: str | None = Depends(player_token),
 ):
     sessions = session_service.list_sessions_for_token(db, token)
@@ -145,7 +189,9 @@ def list_sessions(
     out = []
     for s in sessions:
         module = modules_map.get(s.module_id)
-        payload = _session_payload(s, chars_map, module.title if module else None, token)
+        payload = _session_payload(
+            s, chars_map, module.title if module else None, token, request=request,
+        )
         payload.update(_scene_brief(s, module))
         # 最后一次交互：本局最后一条事件的时间。updated_at 两头都不可靠——战斗态回写之类的
         # 后台写入会刷新它，只发消息时它又纹丝不动。没有任何事件的局才退回 updated_at。
@@ -190,23 +236,34 @@ def _scene_brief(session, module: Module | None) -> dict:
 @limiter.limit(rate_limit.ROOM_CODE_LOOKUP_LIMIT, exempt_when=rate_limit.exempt_local)
 def get_session_by_code(
     request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
+    response: Response,  # noqa: ARG001 — 返回 dict 时 slowapi 往它上面写 X-RateLimit-* 头；缺了它客人一调就 500
     room_code: str,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
+    """凭房间码找房间：只回加入所需的最少信息。
+
+    拿着房间码的人还没入座，连「能不能读这一局」都没判过，这里不能给完整会话载荷。
+    入座之后前端改走 ``GET /sessions/{id}``，那里有正常的读取授权。
+    """
     session = session_service.get_session_by_code(db, room_code)
     if not session:
         raise HTTPException(404, "房间不存在或房间码有误")
     module = db.get(Module, session.module_id)
-    return _session_payload(
-        session, _chars_map(db, [session]), module.title if module else None, token,
-    )
+    return {
+        "id": session.id,
+        "room_code": session.room_code,
+        "status": session.status,
+        "kp_mode": session.kp_mode,
+        "module_title": module.title if module else None,
+    }
 
 
 @router.post("/{session_id}/join")
 @limiter.limit(rate_limit.JOIN_LIMIT, exempt_when=rate_limit.exempt_local)
 def join_session(
     request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
+    response: Response,  # noqa: ARG001 — 返回 dict 时 slowapi 往它上面写 X-RateLimit-* 头；缺了它客人一调就 500
     session_id: str,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
@@ -322,10 +379,19 @@ def kick_seat(
     in_game = require_session_host(
         db, session_id, token, detail="只有房主可以移出玩家",
     ).status != "setup"
+    kicked_token = next(
+        (p.owner_token for p in session_service.get_participants(db, session_id)
+         if p.seat_order == seat_order),
+        None,
+    )
     try:
         session, name = session_service.kick_seat(db, session_id, seat_order, token)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if kicked_token and kicked_token != token:
+        # 掐掉被踢者在本房间的 /live：已建好的长连接不掐，他会继续收到这一桌的一切。
+        # 开局后他重连会吃 403，前端据此停止重连并提示；大厅里席位回到空席，他仍可旁观大厅。
+        room_hub.disconnect_room_token(session_id, kicked_token)
     moved = f"{name} 的席位已交给 AI 接管" if in_game else f"{name} 已被移出席位"
     room_hub.broadcast(session_id, _make_chunk("seat", moved, actor_name=name))
     room_hub.broadcast(session_id, _make_chunk("lobby"))
@@ -430,6 +496,7 @@ def style_options():
 @router.get("/{session_id}")
 def get_session(
     session_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
@@ -437,6 +504,7 @@ def get_session(
     module = db.get(Module, session.module_id)
     return _session_payload(
         session, _chars_map(db, [session]), module.title if module else None, token,
+        request=request,
     )
 
 
@@ -618,7 +686,7 @@ def update_status(
     session = session_service.update_session_status(db, session_id, data.status)
     if not session:
         raise HTTPException(404, "会话不存在")
-    return session
+    return _session_read(session, keeper=_owns_kp_seat(session, token))
 
 
 @router.put("/{session_id}/style", response_model=SessionRead)
@@ -640,7 +708,54 @@ def update_style(
     )
     if not session:
         raise HTTPException(404, "会话不存在")
-    return session
+    return _session_read(session, keeper=_owns_kp_seat(session, token))
+
+
+def _announce_module_ended(session_id: str, kp_mode: str) -> None:
+    """结束投票达成共识后的收尾：广播状态变更并排一次收场叙事。"""
+    # 广播状态变更，各端刷新会话（成长结算 / 最终战报入口据 status==ended 出现）。
+    room_hub.broadcast(
+        session_id,
+        _make_chunk("status", "（全体玩家一致同意，本模组已结束，可进行成长结算与最终战报。）",
+                    actor_name="系统"),
+    )
+    # 收场：尾声叙事 + 真相揭晓 + 幕间休息。只翻个状态就散场太虎头蛇尾——玩家刚演完终局，
+    # 该有人把故事讲完、把他们没查到的真相说透。真人 KP 的局不代劳（那是 KP 自己的话）。
+    #
+    # 排不上就算了：模组**已经结束**是既成事实，绝不能因为配额用尽或恰好有生成在跑
+    # 就把这次投票响应变成 429/500。收场是锦上添花，不是结束的前置条件。
+    if kp_mode == "ai" and not generation_manager.is_generating(session_id):
+        try:
+            generation_manager.start(session_id, run_epilogue_generation(session_id))
+        except Exception:
+            logger.exception("收场生成未能启动: session=%s", session_id)
+
+
+def _reevaluate_end_vote_on_leave(session_id: str) -> None:
+    """有人断开 /live：在线集合变小，进行中的结束投票可能已满足（剩下的人都同意了）。
+
+    不重判的话，已同意的人按钮已经收起，只能干等掉线者回来——掉线豁免形同虚设。
+    """
+    from app import database
+
+    db = database.SessionLocal()
+    try:
+        result = session_service.reevaluate_end_vote(
+            db, session_id, room_hub.online_tokens(session_id),
+        )
+        if result is None:
+            return
+        ended, vote = result
+        if ended:
+            session = db.get(GameSession, session_id)
+            _announce_module_ended(session_id, session.kp_mode if session else "ai")
+        else:
+            room_hub.broadcast(session_id, _make_chunk("end_vote", metadata={"end_vote": vote}))
+    finally:
+        db.close()
+
+
+room_hub.add_leave_listener(_reevaluate_end_vote_on_leave)
 
 
 @router.post("/{session_id}/end-vote")
@@ -660,28 +775,15 @@ async def vote_end_module(
     acting = data.acting_character_id if data else None
     actor = require_session_actor(db, session_id, token, acting)
     try:
+        # 掉线豁免：与回合确认同口径，按在线 token（并入投票者本人）计需同意者
+        online = room_hub.online_tokens(session_id) | ({token} if token else set())
         ended, vote = session_service.cast_end_vote_for_actor(
-            db, session_id, actor.id,
+            db, session_id, actor.id, online,
         )
     except ValueError as e:
         raise HTTPException(403, str(e)) from e
     if ended:
-        # 达成共识：广播状态变更，各端刷新会话（成长结算 / 最终战报入口据 status==ended 出现）。
-        room_hub.broadcast(
-            session_id,
-            _make_chunk("status", "（全体玩家一致同意，本模组已结束，可进行成长结算与最终战报。）",
-                        actor_name="系统"),
-        )
-        # 收场：尾声叙事 + 真相揭晓 + 幕间休息。只翻个状态就散场太虎头蛇尾——玩家刚演完终局，
-        # 该有人把故事讲完、把他们没查到的真相说透。真人 KP 的局不代劳（那是 KP 自己的话）。
-        #
-        # 排不上就算了：模组**已经结束**是既成事实，绝不能因为配额用尽或恰好有生成在跑
-        # 就把这次投票响应变成 429/500。收场是锦上添花，不是结束的前置条件。
-        if session.kp_mode == "ai" and not generation_manager.is_generating(session_id):
-            try:
-                generation_manager.start(session_id, run_epilogue_generation(session_id))
-            except Exception:
-                logger.exception("收场生成未能启动: session=%s", session_id)
+        _announce_module_ended(session_id, session.kp_mode)
     else:
         # 投票进行中：广播公开投票态，各端更新「已同意 N/M」提示。
         room_hub.broadcast(session_id, _make_chunk("end_vote", metadata={"end_vote": vote}))
@@ -731,7 +833,7 @@ def get_events(
 
 
 @router.delete("/{session_id}")
-def delete_session(
+async def delete_session(
     session_id: str,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
@@ -739,8 +841,13 @@ def delete_session(
     require_session_manager(
         db, session_id, token, detail="只有房主可以删除该会话",
     )
+    # 先停掉正在跑的生成：它被取消时会把半截叙事落库，必须发生在删库之前，
+    # 否则要么写进一个已经不存在的房间，要么在删除之后又冒出孤儿事件。
+    await generation_manager.cancel(session_id)
     if not session_service.delete_session(db, session_id):
         raise HTTPException(404, "会话不存在")
+    # 掐断所有成员的 /live：他们重连会吃 404，前端据此停止重连并提示房间已不存在。
+    room_hub.close_room(session_id)
     return {"ok": True}
 
 

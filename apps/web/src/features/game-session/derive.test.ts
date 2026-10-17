@@ -4,6 +4,7 @@ import {
   battleMapOf,
   buildPartyByName,
   fmtTime,
+  hostAuthority,
   isSoloTable,
   sceneBackdropOf,
   npcHue,
@@ -320,5 +321,31 @@ describe('battleMapOf', () => {
 
   it('level 缺省补 normal——旧数据只存过 url', () => {
     expect(battleMapOf([有图(true, '/x.jpg', '')], '')?.level).toBe('normal')
+  })
+})
+
+describe('hostAuthority', () => {
+  const seat = (over: Record<string, unknown>) => ({
+    role: 'human', character_id: 'c', is_mine: false, is_host: false, is_online: true, ...over,
+  })
+
+  it('真人 KP 局：KP 席是房主，0 号席玩家不是', () => {
+    const parts = [
+      seat({ is_mine: true }),                                         // 0 号席，我是普通玩家
+      seat({ role: 'kp', character_id: null, is_host: true }),
+    ]
+    expect(hostAuthority(parts).isHost).toBe(false)
+    const asKp = [seat({}), seat({ role: 'kp', character_id: null, is_host: true, is_mine: true })]
+    expect(hostAuthority(asKp).isHost).toBe(true)
+  })
+
+  it('房主离线时 hostOnline 为 false', () => {
+    expect(hostAuthority([seat({ is_host: true, is_online: false }), seat({ is_mine: true })]))
+      .toEqual({ isHost: false, hostOnline: false })
+    expect(hostAuthority([seat({ is_host: true }), seat({ is_mine: true })]).hostOnline).toBe(true)
+  })
+
+  it('没有参与者时都为 false', () => {
+    expect(hostAuthority(undefined)).toEqual({ isHost: false, hostOnline: false })
   })
 })

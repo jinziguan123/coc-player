@@ -13,16 +13,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { ACTION_LABELS, type KpAction } from '@/components/game/kpActions'
 
-/** 设计上需要、但后端 /kp/action 还没有的动作。原型里照样摆出来，标注清楚，不假装已经有了。 */
-export type DeckAction = KpAction | 'unlock_place' | 'move_actor'
+/** 原型里能摆出来的动作 = 正式写作台的动作（解锁地点、移动角色早已由后端提供）。 */
+export type DeckAction = KpAction
 
-const PENDING_BACKEND = new Set<DeckAction>(['unlock_place', 'move_actor'])
-
-const DECK_LABELS: Record<DeckAction, string> = {
-  ...ACTION_LABELS,
-  unlock_place: '解锁地点',
-  move_actor: '移动角色',
-}
+const DECK_LABELS: Record<DeckAction, string> = ACTION_LABELS
 
 /** 命令 → 动作。中文缩写取「打两个字就够」的长度，KP 不该背全称。 */
 const COMMANDS: { cmd: string; action: DeckAction; hint: string }[] = [
@@ -149,10 +143,8 @@ export function CommandDeck({ action, onActionChange, draft, onDraftChange, onSu
             key={a}
             className={`kl-chip ${a === action ? 'kl-chip--on' : ''}`}
             onClick={() => onActionChange(a)}
-            title={PENDING_BACKEND.has(a) ? '设计需要，后端尚未提供这个动作' : undefined}
           >
             {DECK_LABELS[a]}
-            {PENDING_BACKEND.has(a) && <kbd>待接</kbd>}
           </button>
         ))}
       </div>

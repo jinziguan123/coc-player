@@ -121,5 +121,8 @@ class KpActionRequest(BaseModel):
         "scene_change", "set_flag", "clear_flag", "handout", "hp_change",
         "start_combat", "end_combat", "unlock_place", "move_actor", "set_battle_map", "set_token",
         "set_mood", "start_chase", "chase_round", "end_chase",
+        "mark_seen", "block_path", "unblock_path", "travel_suggest", "npc_act",
+        "cancel_check", "dismiss_request", "edit_event", "withdraw_event",
+        "combat_control", "combat_npc_act",
     ]
     payload: dict = Field(default_factory=dict)

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import logging.handlers
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from app.api.router import api_router
 from app.config import settings
 from app.database import SessionLocal
 from app.services.ai_quota import QuotaExceeded
+from app.services.generation_manager import AlreadyGenerating
 from app.services.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -141,7 +143,11 @@ async def lifespan(_app: FastAPI):
         plugins.install_all(settings.plugins_dir, reserved_tool_names=TOOLS_BY_NAME)
     except Exception:
         logger.exception("加载规则插件时出错，已按无插件运行")
+    # 事件循环被同步代码卡住时把卡住它的代码栈写进日志（「接口都不返回了」的定位工具）
+    from app.services import loop_watchdog
+    watchdog = loop_watchdog.start(asyncio.get_running_loop())
     yield
+    watchdog.set()
 
 
 app = FastAPI(title="CoC Player", version="0.1.0", lifespan=lifespan)
@@ -159,6 +165,12 @@ async def _quota_exceeded_handler(_request: Request, exc: QuotaExceeded) -> JSON
         {"detail": f"本房间的 AI 配额已用尽（上限 {exc.limit_spec}），请稍后再试或在设置里调整。"},
         status_code=429,
     )
+
+@app.exception_handler(AlreadyGenerating)
+async def _already_generating_handler(_request: Request, exc: AlreadyGenerating) -> JSONResponse:
+    """房间已有生成在跑 → 409。生成入口各自做前置检查，这里兜住漏网与竞态（重复提交）。"""
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
 
 # 本进程实际绑在哪：默认按回环记，``run_desktop.py`` 启动时按开关与实挑端口改写。
 # 设置页据此判断「改了开关但还没重启」，并给出客人要填的完整地址。
@@ -208,7 +220,15 @@ async def _peer_gate(request: Request, call_next):
             {"detail": "房主未允许局域网加入，或请求来自不可信网络"}, status_code=403
         )
 
-    if net_access.peer_kind(client, request.headers) == "lan":
+    kind = net_access.peer_kind(client, request.headers)
+    # 本机来源还得是本应用的界面：房主浏览器里的任意网页同样来自回环，CORS 又是 *，
+    # 不挡的话它能读走 AI 密钥、跨站删存档。见 net_access.foreign_page_reason。
+    if kind == "local":
+        reason = net_access.foreign_page_reason(request.headers)
+        if reason:
+            return JSONResponse({"detail": reason, "code": "foreign_origin"}, status_code=403)
+
+    if kind == "lan":
         db = SessionLocal()
         try:
             status = lan_roster.check_in(

@@ -10,6 +10,11 @@ from app.services.room_hub import room_hub
 logger = logging.getLogger(__name__)
 
 
+class AlreadyGenerating(ValueError):
+    """同一房间已有生成在跑。继承 ValueError 以兼容既有的 ``except ValueError`` 调用点；
+    冒到 API 层时由 main.py 统一映射成 409（重复点击 / 并发提交不该变成 500）。"""
+
+
 class GenerationManager:
     """单房间生成 task 的生命周期与并发锁。
 
@@ -30,7 +35,7 @@ class GenerationManager:
         # 否则每次拒绝都留下一条 "coroutine was never awaited" 告警，日志里全是噪音。
         if self.is_generating(room_id):
             coro.close()
-            raise ValueError("该房间正在生成中")
+            raise AlreadyGenerating("KP 正在叙事，请稍候")
         # 房间级 AI 配额（默认关闭）。放在这里是因为本方法是全应用唯一的生成入口——
         # 真人发言、AI 队友回合、战斗续跑、开场都汇到这一处。超额抛 QuotaExceeded，
         # 由 main.py 的异常处理器映射成 429，调用点无需各自处理。

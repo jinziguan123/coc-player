@@ -185,6 +185,12 @@ def workspace_payload(
                 {"id": str(item.get("id") or ""), "name": str(item.get("title") or item.get("id") or "")}
                 for item in (getattr(module, "handouts", None) or []) if isinstance(item, dict)
             ],
+            # 线索台账的记账入口（mark_seen）要按 id 记；名字给 KP 认
+            "clues": [
+                {"id": str(item.get("id") or ""),
+                 "name": str(item.get("title") or item.get("name") or item.get("id") or "")}
+                for item in (module.clues or []) if isinstance(item, dict) and item.get("id")
+            ],
         },
     }
 
@@ -265,13 +271,34 @@ def _advisor_context(
         if query.strip() and rulebook_service.has_rulebook(db, module.rule_system)
         else None
     )
-    return build_kp_context(
+    return _with_kp_notes(game_session, build_kp_context(
         game_session, module, player, events, teammates=others,
         rules_lookup_enabled=rulebook_service.has_rulebook(db, module.rule_system),
         module_excerpts=module_hits,
         module_lookup_enabled=getattr(module, "rag_status", "") == "ready",
         rule_excerpts=rule_hits,
-    )
+    ))
+
+
+_NOTES_LIMIT = 4000
+
+
+def _with_kp_notes(game_session: GameSession, messages: list[dict]) -> list[dict]:
+    """把 KP 笔记接进参谋上下文：KP 记下的伏笔、临场改的设定、对玩家的判断，参谋都该知道。
+
+    笔记只进这条仅 KP 可见的参谋调用，不进 AI KP 主上下文（真人局里也没有 AI KP）。
+    """
+    notes = str(_private_state(game_session).get("notes") or "").strip()
+    if not notes:
+        return messages
+    note = {
+        "role": "system",
+        "content": "【真人 KP 的私人笔记（仅供你参考，以此为准修正你对局面的理解，不要原样念给玩家）】\n"
+                   + notes[:_NOTES_LIMIT],
+    }
+    # 插在开头那几条 system 之后：部分模型接口不认对话中途出现的 system 消息
+    head = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
+    return [*messages[:head], note, *messages[head:]]
 
 
 async def generate_narration_draft(
@@ -314,10 +341,10 @@ async def generate_turn_plan(
         rulebook_service.retrieve(db, focus, module.rule_system, k=3)
         if focus.strip() and rules_enabled else None
     )
-    messages = turn_planner.build_turn_plan_messages(
+    messages = _with_kp_notes(game_session, turn_planner.build_turn_plan_messages(
         game_session, module, player, events, teammates=others,
         rules_lookup_enabled=rules_enabled, rule_excerpts=rule_hits,
-    )
+    ))
     if focus.strip():
         messages.append({
             "role": "user",

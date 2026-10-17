@@ -1717,7 +1717,7 @@ async def _run_combat_aftermath_generation(session_id: str) -> None:
         db.close()
 
 
-async def run_roll_generation(session_id: str, check_id: str) -> None:
+async def run_roll_generation(session_id: str, check_id: str, proxy: bool = False) -> None:
     """玩家点『投骰』：取出待定检定 → 按 KP 定的难度掷骰 → 广播达成等级 → KP 据等级续写。
 
     **顺序要紧**：掷骰是纯确定性引擎调用，一次 LLM 都不需要，所以先把点数掷出来广播给玩家，
@@ -1727,10 +1727,11 @@ async def run_roll_generation(session_id: str, check_id: str) -> None:
     """
     # drain=False：这条路的排干刻意放在掷骰之后（见上），那一段自带打点。
     async with _timed(session_id, "投骰", drain=False):
-        await _run_roll_generation(session_id, check_id)
+        await _run_roll_generation(session_id, check_id, proxy)
 
 
-async def _run_roll_generation(session_id: str, check_id: str) -> None:
+async def _run_roll_generation(session_id: str, check_id: str, proxy: bool = False) -> None:
+    """``proxy``：真人 KP 替缺席玩家代投——骰面注明代投，不弹幸运消费（那得玩家本人决定）。"""
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -1843,6 +1844,8 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
         dice_content = (
             f"{shown_name}｜{skill} 检定（{difficulty}）：{tier_cn}（{result.description}）"
         )
+        if proxy:
+            dice_content = f"KP 代投｜{dice_content}"
         dice_meta = {
             "skill": skill, "skill_value": result.skill_value, "roll": result.roll,
             "target": result.target, "outcome": result.outcome, "tier": result.tier,
@@ -1877,7 +1880,7 @@ async def _run_roll_generation(session_id: str, check_id: str) -> None:
             result, difficulty, char_data,
             in_combat=bool(combat_service.get_combat(game_session)),
         )
-        if offer and char_id:
+        if offer and char_id and not proxy:
             session_service.set_pending_luck(db, session_id, {
                 "check": check,
                 "check_id": check_id,

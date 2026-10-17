@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from app.services.room_events import RoomEvent
 
@@ -50,6 +50,11 @@ class RoomHub:
         # token → 它的所有活跃队列（跨房间）。吊销一个客户端时要能立刻掐掉它的 SSE，
         # 而 _subs 只按房间索引，拿着 token 找不到队列。
         self._by_token: dict[str, set[asyncio.Queue]] = defaultdict(set)
+        # (room, token) → 该 token 在该房间的队列。踢人只掐这一个房间，不连坐他在别的房间的连接。
+        self._room_token: dict[tuple[str, str], set[asyncio.Queue]] = defaultdict(set)
+        # 有带 token 的订阅者离开房间时回调 (room_id)。在线集合变了，依赖在线集合的
+        # 共识（如结束投票的掉线豁免）要据此重判；回调异常只记日志，不影响断开流程。
+        self._leave_listeners: list[Callable[[str], None]] = []
 
     def subscribe(self, room_id: str, token: str | None = None) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=MAX_PENDING_CHUNKS)
@@ -62,6 +67,7 @@ class RoomHub:
         if token:
             self._presence[room_id][token] = self._presence[room_id].get(token, 0) + 1
             self._by_token[token].add(q)
+            self._room_token[(room_id, token)].add(q)
         return q
 
     def unsubscribe(
@@ -85,6 +91,11 @@ class RoomHub:
                 held.discard(q)
                 if not held:
                     self._by_token.pop(token, None)
+            in_room = self._room_token.get((room_id, token))
+            if in_room is not None:
+                in_room.discard(q)
+                if not in_room:
+                    self._room_token.pop((room_id, token), None)
 
     def online_tokens(self, room_id: str) -> set[str]:
         return set(self._presence.get(room_id, {}).keys())
@@ -137,12 +148,45 @@ class RoomHub:
         """
         queues = list(self._by_token.get(token, ()))
         for q in queues:
-            while not q.empty():
-                q.get_nowait()
-            q.put_nowait(None)
+            self._terminate(q)
         if queues:
             logger.info("吊销客户端 %s…，掐断 %d 条实时连接", token[:8], len(queues))
         return len(queues)
+
+    def disconnect_room_token(self, room_id: str, token: str) -> int:
+        """只掐某个 token 在某个房间的 /live 连接（踢人用），返回掐掉的条数。
+
+        对方随后的重连会被 ``/live`` 的读取授权挡回（403），前端据此停止重连并提示。
+        """
+        queues = list(self._room_token.get((room_id, token), ()))
+        for q in queues:
+            self._terminate(q)
+        return len(queues)
+
+    def close_room(self, room_id: str) -> int:
+        """掐断房间里所有 /live 连接（删房用）。重连会吃 404，前端据此提示房间已不存在。"""
+        queues = list(self._subs.get(room_id, ()))
+        for q in queues:
+            self._terminate(q)
+        self._inflight.pop(room_id, None)
+        return len(queues)
+
+    @staticmethod
+    def _terminate(q: asyncio.Queue) -> None:
+        while not q.empty():
+            q.get_nowait()
+        q.put_nowait(None)
+
+    def add_leave_listener(self, fn: Callable[[str], None]) -> None:
+        if fn not in self._leave_listeners:
+            self._leave_listeners.append(fn)
+
+    def notify_left(self, room_id: str) -> None:
+        for fn in list(self._leave_listeners):
+            try:
+                fn(room_id)
+            except Exception:
+                logger.exception("房间 %s 成员离开回调出错", room_id)
 
     def begin_generation(self, room_id: str) -> None:
         self._inflight[room_id] = []
@@ -177,3 +221,5 @@ async def stream_room(
     finally:
         room_hub.unsubscribe(room_id, q, token)
         room_hub.broadcast(room_id, RoomEvent(type="presence"))
+        if token:
+            room_hub.notify_left(room_id)

@@ -374,6 +374,9 @@ def _combat_meta(state: dict) -> dict:
         # 本场战斗日志起点 seq：前端据此让日志抽屉只收本场结算行（重连也能拿到边界，防掺上一场）。
         "started_seq": state.get("started_seq"),
         "grid": state.get("grid"),   # 方格战场（尺寸/障碍/掩体）→ 前端画棋盘
+        # 真人 KP 操控敌人：开关状态与「正等 KP 给谁下令」→ KP 端弹出下令条
+        "kp_controls_enemies": bool(state.get("kp_controls_enemies")),
+        "awaiting_kp": state.get("awaiting_kp"),
     }
 
 
@@ -1155,12 +1158,25 @@ def _apply_one_action(db: Session, session_id: str, state: dict, actor: dict, ac
     return chunks, summary
 
 
-async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scene_hint: str = "") -> tuple[list[str], list[str]]:
+async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scene_hint: str = "",
+                     kp_order: dict | None = None, resume: bool = False) -> tuple[list[str], list[str]]:
     """从**当前行动者**起自动跑非真人回合（关键 NPC 走 agent.decide，杂兵走启发式），停在真人回合
-    或战斗结束。返回 (chunks, 各回合摘要行)。"""
+    或战斗结束。返回 (chunks, 各回合摘要行)。
+
+    真人 KP 打开「我来操控敌人」后，敌方回合也像真人回合一样停下（state.awaiting_kp），
+    等 KP 经 kp_command_npc 下令；``kp_order`` 就是这道命令，只用于当前这一个敌方回合。
+    ``resume``：当前行动者的回合开始结算（燃烧/流血/濒死 tick）在停下前已经跑过，续跑时不再重跑。
+    """
     rs = _rules(db, session_id)
     chunks: list[str] = []
     beats: list[str] = []
+    if "kp_controls_enemies" not in state:
+        # 开战时从 KP 的私有偏好继承：先攻最快的敌人在 KP 来得及点开关之前就会出手
+        sess = db.get(GameSession, session_id)
+        state["kp_controls_enemies"] = bool(
+            sess is not None and sess.kp_mode == "human"
+            and (sess.kp_state or {}).get("control_enemies"),
+        )
     for _ in range(64):  # 安全上限，防死循环
         end = rs.combat.check_combat_end(state.get("initiative") or [])
         if end:
@@ -1169,35 +1185,47 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
         actor = current_actor(state)
         if actor is None:
             break
+        turn_started, resume = resume, False
         # 燃烧 tick：着火者回合开始先烧一次（1D6），可能致其濒死/死亡 → 须在 is_active 判断前。
-        if "burning" in (actor.get("conditions") or []) and rs.combat.is_active(actor):
+        if not turn_started and "burning" in (actor.get("conditions") or []) and rs.combat.is_active(actor):
             burn = rs.combat.roll_weapon_damage({"dam": "1D6"}, "0")["total"]
             for line in apply_damage(db, state, actor, burn, reason="持续燃烧",
                                      ignore_armor=True, session_id=session_id):
                 chunks.append(_combat_line(db, session_id, line))
             _save_combat(db, session_id, state)
         # 规则钩子的持续伤害（如流血）：同燃烧，回合开始结算、须在 is_active 判断前
-        if rs.combat.is_active(actor):
+        if not turn_started and rs.combat.is_active(actor):
             for eff in rs.wound.turn_start_damage(actor):
                 for line in apply_damage(db, state, actor, int(eff["damage"]), reason=str(eff.get("reason") or ""),
                                          ignore_armor=True, session_id=session_id):
                     chunks.append(_combat_line(db, session_id, line))
                 _save_combat(db, session_id, state)
         # 濒死者回合开始先跑体质 tick（须在 is_active 跳过之前，否则永远不掷）
-        if actor.get("status") == "dying":
+        if not turn_started and actor.get("status") == "dying":
             for line in rs.wound.tick_dying(actor):
                 chunks.append(_combat_line(db, session_id, line))
             _save_combat(db, session_id, state)
         if not rs.combat.is_active(actor):   # 当前指针落在失能者 → 跳过
+            kp_order = None   # KP 的命令只给那一个敌人，不顺延给下一个
             rs.combat.advance_turn(state)
             continue
+        # 只接管敌方：AI 队友（side=ally）是调查员，照旧自己行动
+        kp_turn = bool(state.get("kp_controls_enemies")) and actor.get("side") == "enemy" \
+            and not actor.get("is_human")
+        state["awaiting_kp"] = actor["id"] if kp_turn and kp_order is None else None
         _save_combat(db, session_id, state)
         chunks.append(_combat_state_chunk(state))
         if actor.get("is_human"):
             return chunks, beats   # 停下等真人操作
-        # 关键 NPC 走子代理决策；失败/杂兵回落启发式
         action = None
-        if agent and actor.get("is_key"):
+        if kp_turn:
+            if kp_order is None:
+                return chunks, beats   # 停下等 KP 给这个敌人下令
+            action, kp_order = kp_order, None
+            if action.get("type") == "auto":
+                action = None   # KP 把这一回合交给启发式
+        # 关键 NPC 走子代理决策；失败/杂兵回落启发式
+        elif agent and actor.get("is_key"):
             action = _validate_npc_action(state, actor, await agent.decide(state, actor, scene_hint), rs=rs)
         if action is None:
             action = rs.combat.heuristic_npc_action(state, actor)
@@ -1264,6 +1292,50 @@ def _validate_npc_action(state: dict, actor: dict, action: dict | None, *, rs: R
         return None
     return {"type": "attack", "target_id": action["target_id"],
             "weapon": action.get("weapon") or actor.get("weapon") or "徒手格斗"}
+
+
+async def kp_command_npc(db: Session, session_id: str, order: dict) -> list[str]:
+    """真人 KP 给当前等令的敌人下令：attack（目标/武器）、dodge、flee、wait，或 auto 交给启发式。
+
+    结算后照常续跑驱动，停在下一个真人回合、下一个等令的敌人或战斗结束。
+    """
+    rs = _rules(db, session_id)
+    state = get_combat(db.get(GameSession, session_id))
+    if not state:
+        raise ValueError("当前没有进行中的战斗")
+    if state.get("pending_reaction") or state.get("pending_roll"):
+        raise ValueError("先等真人完成反应或掷骰")
+    actor = current_actor(state)
+    if not actor or state.get("awaiting_kp") != actor.get("id"):
+        raise ValueError("现在不是等 KP 下令的敌方回合")
+    kind = str(order.get("type") or "").strip()
+    if kind == "attack":
+        action = _validate_npc_action(state, actor, {
+            "action": "attack", "target_id": str(order.get("target_id") or ""),
+            "weapon": str(order.get("weapon") or "").strip() or None,
+        }, rs=rs)
+        if action is None:
+            raise ValueError("攻击目标须是场上仍能行动的对方")
+    elif kind in ("dodge", "flee", "wait", "auto"):
+        action = {"type": kind}
+    else:
+        raise ValueError(f"不支持的敌方行动：{kind or '（空）'}")
+    chunks, _beats = await drive_npcs(db, session_id, state, kp_order=action, resume=True)
+    return chunks
+
+
+async def set_kp_enemy_control(db: Session, session_id: str, on: bool) -> list[str]:
+    """进行中的战斗里开关「KP 操控敌人」。关掉时若正停在等令的敌人上，立刻交回启发式续跑。"""
+    state = get_combat(db.get(GameSession, session_id))
+    if not state:
+        return []
+    state["kp_controls_enemies"] = on
+    if on or not state.get("awaiting_kp"):
+        _save_combat(db, session_id, state)
+        return [_combat_state_chunk(state)]
+    state["awaiting_kp"] = None
+    chunks, _beats = await drive_npcs(db, session_id, state, resume=True)
+    return chunks
 
 
 def add_combatant(db: Session, session_id: str, spec: dict, side: str = "enemy") -> dict:

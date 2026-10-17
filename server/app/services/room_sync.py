@@ -55,9 +55,18 @@ def _chase_snapshot(db: Session, session: GameSession) -> dict:
 
 @register("turn")
 def _turn_snapshot(db: Session, session: GameSession) -> dict:
-    # 在线集合交给调用方注入过——这里按「全体应确认者」取，重连场景下宁可多显示
-    # 一个待确认者，也好过让已确认的人看不到自己的确认。
-    return session_service.turn_confirm_state(db, session.id)
+    # 与广播同一口径（掉线豁免）。请求方此时已先开好 /live（先订阅、再对齐），
+    # 必在在线集合里，不会漏掉自己的确认。
+    return session_service.live_turn_state(db, session.id)
+
+
+@register("end_vote")
+def _end_vote_snapshot(db: Session, session: GameSession) -> dict:
+    """进行中的结束投票。``end_vote`` 广播是 sync 类、不落库——刷新或断线一次，
+    「结束投票 N/M」条就消失了，人却不知道还有一票在等他。"""
+    from app.services.room_hub import room_hub
+
+    return session_service.end_vote_public(db, session.id, room_hub.online_tokens(session.id))
 
 
 @register("luck")

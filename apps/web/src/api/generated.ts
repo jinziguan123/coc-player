@@ -306,7 +306,7 @@ export interface paths {
         put?: never;
         /**
          * Upload Module
-         * @description 上传模组：同步做文件抽取与格式校验（错误立即可见），解析转后台任务。
+         * @description 上传模组：先抽取文件与校验格式（在线程里做，错误立即可见），解析转后台任务。
          *
          *     返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。
          *
@@ -1180,7 +1180,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Session By Code */
+        /**
+         * Get Session By Code
+         * @description 凭房间码找房间：只回加入所需的最少信息。
+         *
+         *     拿着房间码的人还没入座，连「能不能读这一局」都没判过，这里不能给完整会话载荷。
+         *     入座之后前端改走 ``GET /sessions/{id}``，那里有正常的读取授权。
+         */
         get: operations["get_session_by_code_api_sessions_by_code__room_code__get"];
         put?: never;
         post?: never;
@@ -1537,7 +1543,7 @@ export interface paths {
          * @description 房主强制推进：跳过未确认者（掉线/挂机），直接把本回合暂存发言整批交 KP。
          *
          *     掉线豁免虽已让在线玩家能推进，但极端情形（有人挂机不点、或掉线判定滞后）仍可能卡住；
-         *     此端点给房主一个确定性的兜底出口。仅房主/纯本机会话可用。
+         *     此端点给房主一个确定性的兜底出口。仅房主、真人 KP 或纯本机会话可用。
          */
         post: operations["force_advance_api_sessions__session_id__force_advance_post"];
         delete?: never;
@@ -1814,6 +1820,48 @@ export interface paths {
         put?: never;
         /** Generate Plan */
         post: operations["generate_plan_api_sessions__session_id__kp_advisor_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/kp/checks/{check_id}/roll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Proxy Roll
+         * @description KP 替没在场的玩家投一个待投检定：与玩家自己点「投骰」同一条结算链，结果照常公开。
+         *
+         *     代投不弹幸运消费——那是玩家本人的决定，人不在就不替他花。
+         */
+        post: operations["proxy_roll_api_sessions__session_id__kp_checks__check_id__roll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/kp/desk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Desk
+         * @description KP 待办台：待投检定、玩家的检定申请、私有台账（含暗投结果）。仅 KP 可读。
+         */
+        get: operations["get_desk_api_sessions__session_id__kp_desk_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2173,6 +2221,9 @@ export interface paths {
          *
          *     高风险操作（可能明显改变剧情走向），前端须二次确认后才调用；只作用于「最新一轮」——回滚逻辑
          *     天然只清理事件流尾部的 KP 产物。
+         *
+         *     只有房主能用：它会打断并回滚整桌共享的叙事，不该由任一玩家单方决定。房主不在线时
+         *     放开给在座真人——否则房主掉线后生成一旦卡住，整桌就没人解得开。
          */
         post: operations["regenerate_api_sessions__session_id__regenerate_post"];
         delete?: never;
@@ -3617,7 +3668,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "narration" | "dialogue" | "dice_check" | "opposed_check" | "generic_roll" | "san_check" | "scene_change" | "set_flag" | "clear_flag" | "handout" | "hp_change" | "start_combat" | "end_combat" | "unlock_place" | "move_actor" | "set_battle_map" | "set_token" | "set_mood" | "start_chase" | "chase_round" | "end_chase";
+            action: "narration" | "dialogue" | "dice_check" | "opposed_check" | "generic_roll" | "san_check" | "scene_change" | "set_flag" | "clear_flag" | "handout" | "hp_change" | "start_combat" | "end_combat" | "unlock_place" | "move_actor" | "set_battle_map" | "set_token" | "set_mood" | "start_chase" | "chase_round" | "end_chase" | "mark_seen" | "block_path" | "unblock_path" | "travel_suggest" | "npc_act" | "cancel_check" | "dismiss_request" | "edit_event" | "withdraw_event" | "combat_control" | "combat_npc_act";
             /** Payload */
             payload?: {
                 [key: string]: unknown;
@@ -7898,6 +7949,69 @@ export interface operations {
                 "application/json": components["schemas"]["KpPlanRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proxy_roll_api_sessions__session_id__kp_checks__check_id__roll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                check_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_desk_api_sessions__session_id__kp_desk_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

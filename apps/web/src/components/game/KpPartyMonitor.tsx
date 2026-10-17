@@ -21,8 +21,9 @@ const OUT_STATUS = new Set(['dead', 'dying', 'unconscious', 'fled'])
 /** 行内动作：点了不是立刻发出，而是把动作与目标预填进工作台。 */
 const ACTS: { key: string; label: string; fill: (p: PartyVital) => [KpAction, Record<string, string>] }[] = [
   { key: 'check', label: '检定', fill: (p) => ['dice_check', { char: `character:${p.id}` }] },
-  { key: 'san', label: 'SAN', fill: (p) => ['san_check', { targets: p.name, loss: '1/1d6' }] },
-  { key: 'hp', label: '伤害', fill: (p) => ['hp_change', { target: p.name, delta: '-' }] },
+  // 字段名与理智检定表单一致（chars / success_loss / failure_loss），否则预填进去是空的
+  { key: 'san', label: 'SAN', fill: (p) => ['san_check', { chars: p.name, success_loss: '1', failure_loss: '1d6' }] },
+  { key: 'hp', label: '伤害', fill: (p) => ['hp_change', { target: `character:${p.id}`, hp_mode: 'damage' }] },
   { key: 'move', label: '移动', fill: (p) => ['move_actor', { character_id: p.id }] },
 ]
 

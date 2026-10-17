@@ -16,6 +16,9 @@ export interface Character {
   avatar_url?: string | null
   /** 模组经历：一局落幕后由后端归档，前端只读。 */
   experiences?: CharacterExperience[]
+  created_at?: string
+  /** 每次写库（扣血、成长、物品）都会刷新；多份参战副本以它判断哪份是最近一局。 */
+  updated_at?: string
 }
 
 /** 一条模组经历：story 是给人读的第三人称小传，其余是给档案卡计数/排序的元数据。 */

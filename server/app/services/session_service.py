@@ -60,6 +60,7 @@ from app.services.turn_state_service import (  # noqa: F401
     get_pending_check,
     get_pending_luck,
     human_character_ids,
+    live_turn_state,
     pop_pending_check,
     rollback_last_kp_output,
     set_pending_luck,
@@ -402,6 +403,10 @@ def claim_seat(
     # 一堆指向旧角色的记录，那不是换角色而是把存档搞坏。
     mine = seat.role == "human" and seat.claimed and seat.owner_token == token
     reserved_by_me = bool(mine and (not seat.character_id or session.status == "setup"))
+    # 开局后不再接收新入座（与 join 同口径）：唯一例外是大厅里已占座、还没选角色的人
+    # 补选角色（真人 KP 局允许带着这种预留席开局）。
+    if session.status != "setup" and not reserved_by_me:
+        raise ValueError("已开局，无法更换角色" if mine else "游戏已经开始，无法入座")
     if seat.claimed and not reserved_by_me:
         raise ValueError("已开局，无法更换角色" if mine else "该席位已被认领")
 
@@ -456,7 +461,11 @@ def claim_seat(
     seat.ready = False
     if strict_identity:
         seat.identity_version = 2
-    char.owner_token = token
+    # 无主卡（旧数据、AI 生成卡）客人可以拿来入座，但不就此归他：归属一转，房主的
+    # 角色列表里就再也看不到这张卡（列表按 owner_token 过滤），等于被人顺手拿走了。
+    # 谁在驱动角色看的是席位归属，与卡的 owner_token 无关。
+    if char.owner_token or is_host(db, session_id, token):
+        char.owner_token = token
     # 真人坐上去了，这张卡就是一张玩家调查员卡——哪怕它当初是按「AI 队友」生成的。
     #
     # is_player 决定的只是**归档口径**（结局后只给玩家角色写模组经历）和**它出现在
@@ -509,6 +518,17 @@ def is_host(db: Session, session_id: str, token: str | None) -> bool:
     return bool(token and seat and seat.owner_token == token)
 
 
+def host_token_of(db: Session, session_id: str) -> str | None:
+    """房主的 token：新模型取 host_token，旧房间回落到主角席 owner_token；纯本机会话为 None。"""
+    session = db.get(GameSession, session_id)
+    if session is None:
+        return None
+    if session.host_token is not None:
+        return session.host_token
+    seat = _primary_seat(db, session_id)
+    return seat.owner_token if seat else None
+
+
 def is_kp(db: Session, session_id: str, token: str | None) -> bool:
     """真人 KP 授权：只认 role=kp 的席位，不把普通房主权限隐式升级为 KP。"""
     if not token:
@@ -542,7 +562,12 @@ def authorize_kp(db: Session, session_id: str, token: str | None) -> GameSession
 # ── 结束模组：全体非AI玩家共识投票 ──────────────────────────────────
 # 结束不再由房主单方拍板，而是「所有真人玩家一致同意」才执行（单人时自然退化为一键结束）。
 # 投票者口径与回合确认（turn_confirm）一致：所有已填角色的真人席，按 character_id 计票；
-# 投票经 resolve_actor 按 token 校验席位归属。按 A 方案不做掉线豁免（严格全体一致）。
+# 投票经 resolve_actor 按 token 校验席位归属。
+#
+# 掉线豁免（与回合确认同口径）：有归属但不在线的真人不计入「需同意」——否则任一玩家
+# 关掉浏览器，这一局就永远结束不了。资格（谁能投、谁能撤）仍按全体真人算；无归属席位
+# （纯本机会话）无法判在线，一律计入。有人掉线时由 /live 断开钩子重新判一次（见
+# ``reevaluate_end_vote``），已同意的人不必再点一次。
 
 def _end_voter_ids(db: Session, session_id: str) -> set[str]:
     """有资格参与结束投票的角色 id = 所有已填角色的真人席（与回合确认口径一致）。"""
@@ -552,10 +577,31 @@ def _end_voter_ids(db: Session, session_id: str) -> set[str]:
     }
 
 
-def end_vote_public(db: Session, session_id: str) -> dict:
-    """对外可见的结束投票态：每个真人玩家是否已同意、已同意数 / 总数、是否进行中。"""
+def _end_required_ids(db: Session, session_id: str, online: set[str] | None) -> set[str]:
+    """需要同意才能结束的角色 id：在线（或无归属）的真人席；``online`` 为 None 时取全体。"""
+    return {
+        p.character_id for p in get_participants(db, session_id)
+        if p.role == "human" and p.character_id
+        and (online is None or not p.owner_token or p.owner_token in online)
+    }
+
+
+def _online_tokens(session_id: str, extra_token: str | None = None) -> set[str]:
+    from app.services.room_hub import room_hub
+
+    return room_hub.online_tokens(session_id) | ({extra_token} if extra_token else set())
+
+
+def end_vote_public(
+    db: Session, session_id: str, online: set[str] | None = None,
+) -> dict:
+    """对外可见的结束投票态：每个真人玩家是否已同意、已同意数 / 需同意数、是否进行中。
+
+    ``voters`` 列出全体真人；掉线豁免者 ``exempt`` 为 True、不计入 ``total``。
+    """
     session = db.get(GameSession, session_id)
     voter_ids = _end_voter_ids(db, session_id)
+    required = _end_required_ids(db, session_id, online)
     agreed = (
         set((session.world_state or {}).get("end_vote", {}).get("agreed") or []) & voter_ids
         if session else set()
@@ -565,14 +611,17 @@ def end_vote_public(db: Session, session_id: str) -> dict:
         for c in db.query(Character).filter(Character.id.in_(voter_ids)).all()
     } if voter_ids else {}
     voters = [
-        {"character_id": cid, "name": names.get(cid, "玩家"), "agreed": cid in agreed}
+        {
+            "character_id": cid, "name": names.get(cid, "玩家"), "agreed": cid in agreed,
+            "exempt": cid not in required and cid not in agreed,
+        }
         for cid in sorted(voter_ids)
     ]
     return {
         "open": len(agreed) > 0,
         "voters": voters,
-        "agreed_count": len(agreed),
-        "total": len(voter_ids),
+        "agreed_count": len(agreed & required),
+        "total": len(required),
     }
 
 
@@ -581,15 +630,33 @@ def cast_end_vote(
 ) -> tuple[bool, dict]:
     """兼容入口：校验 token 后由纯业务投票函数执行。"""
     actor = resolve_actor(db, session_id, token, acting_character_id)
-    return cast_end_vote_for_actor(db, session_id, actor.id)
+    return cast_end_vote_for_actor(db, session_id, actor.id, _online_tokens(session_id, token))
+
+
+def _settle_end_vote(
+    db: Session, session_id: str, agreed: set[str], online: set[str] | None,
+) -> tuple[bool, dict]:
+    """按当前同意集判定：需同意者都同意了（且至少有一票）即结束。"""
+    from app.services import world_state
+
+    required = _end_required_ids(db, session_id, online)
+    if agreed and agreed >= required:
+        update_session_status(db, session_id, "ended")
+        world_state.set_key(db, db.get(GameSession, session_id), "end_vote", None)
+        return True, end_vote_public(db, session_id, online)
+    return False, end_vote_public(db, session_id, online)
 
 
 def cast_end_vote_for_actor(
     db: Session,
     session_id: str,
     actor_id: str,
+    online: set[str] | None = None,
 ) -> tuple[bool, dict]:
-    """以已授权真人角色投票；返回 (是否结束, 公开投票态)。"""
+    """以已授权真人角色投票；返回 (是否结束, 公开投票态)。
+
+    ``online`` 为在线 token 集合（应并入投票者本人）；None 表示不做掉线豁免（旧调用/测试）。
+    """
     from app.services import world_state
 
     voter_ids = _end_voter_ids(db, session_id)
@@ -599,11 +666,21 @@ def cast_end_vote_for_actor(
     ev = dict((session.world_state or {}).get("end_vote") or {})
     agreed = (set(ev.get("agreed") or []) | {actor_id}) & voter_ids
     world_state.set_key(db, session, "end_vote", {"agreed": sorted(agreed)})
-    if agreed >= voter_ids:                                            # 全体真人一致同意
-        update_session_status(db, session_id, "ended")
-        world_state.set_key(db, db.get(GameSession, session_id), "end_vote", None)
-        return True, end_vote_public(db, session_id)
-    return False, end_vote_public(db, session_id)
+    return _settle_end_vote(db, session_id, agreed, online)
+
+
+def reevaluate_end_vote(
+    db: Session, session_id: str, online: set[str],
+) -> tuple[bool, dict] | None:
+    """有人掉线后重判进行中的投票：剩下在线的人已全数同意就结束。无进行中投票返回 None。"""
+    session = db.get(GameSession, session_id)
+    if session is None or session.status == "ended":
+        return None
+    agreed = set(((session.world_state or {}).get("end_vote") or {}).get("agreed") or [])
+    agreed &= _end_voter_ids(db, session_id)
+    if not agreed:
+        return None
+    return _settle_end_vote(db, session_id, agreed, online)
 
 
 def cancel_end_vote(
@@ -625,7 +702,7 @@ def cancel_end_vote_for_actor(
     if actor_id not in _end_voter_ids(db, session_id):
         raise ValueError("只有真人玩家可撤销结束投票")
     world_state.set_key(db, db.get(GameSession, session_id), "end_vote", None)
-    return end_vote_public(db, session_id)
+    return end_vote_public(db, session_id, _online_tokens(session_id))
 
 
 def set_ready(
@@ -1188,6 +1265,37 @@ def update_session_rule_options(
 
 
 
+
+
+def can_view_character(db: Session, char: Character, token: str | None) -> bool:
+    """读一张角色卡的权限（客人经房主机器读取时；房主本机由调用方豁免）。
+
+    - 无主卡（旧数据、AI 队友）与列表接口同口径，所有人可见；
+    - 自己名下的卡；
+    - 同桌队友的卡：该角色坐在某个房间的席位上，而请求方在同一房间有席位
+      （局内队伍血条、KP 看全队都要读别人的卡）。
+    """
+    if not char.owner_token:
+        return True
+    if not token:
+        return False
+    if char.owner_token == token:
+        return True
+    session_ids = {
+        sid for (sid,) in db.query(SessionParticipant.session_id)
+        .filter(SessionParticipant.character_id == char.id).all()
+    }
+    if not session_ids:
+        return False
+    return (
+        db.query(SessionParticipant.id)
+        .filter(
+            SessionParticipant.session_id.in_(session_ids),
+            SessionParticipant.owner_token == token,
+        )
+        .first()
+        is not None
+    )
 
 
 def can_manage_session(db: Session, session_id: str, token: str | None) -> bool:

@@ -72,7 +72,7 @@ def test_sync_returns_all_systems_and_watermark(client, db_factory):
     # 四个系统都要在——turn 此前根本没有查询端点，重连时确认进度只能靠错过的那条广播；
     # luck 更狠，它不是显示对不对的问题：询价停住整条结算链，而 luck_offer 事件不落库，
     # 少了这份快照，刷新一次那张卡就永远回不来，人却还等着拍板。
-    assert set(body["systems"]) == {"combat", "chase", "turn", "luck"}
+    assert set(body["systems"]) == {"combat", "chase", "turn", "luck", "end_vote"}
     assert body["systems"]["combat"] == {"active": False}
     assert body["systems"]["chase"] == {"active": False}
     assert body["systems"]["luck"] == {"pending": False}

@@ -31,6 +31,7 @@ import secrets
 import socket
 from collections.abc import Mapping
 from typing import Literal
+from urllib.parse import urlsplit
 
 from app.config import settings
 
@@ -230,3 +231,76 @@ def _source_address_for(probe: str) -> str | None:
         return None
     finally:
         s.close()
+
+
+# ── 本机来源的第二个维度：是哪个页面发的 ─────────────────────────────────
+#
+# ``peer_kind == "local"`` 只说明请求来自房主这台机器，不说明来自**本应用的界面**。
+# 房主浏览器里随便打开的一个网页也能 ``fetch("http://127.0.0.1:8000/...")``：CORS 是
+# ``*``（客人要跨源连房主，收不紧），于是那个网页能直接读到 AI 配置的明文密钥，也能
+# 用一个简单 POST 删房主的存档。浏览器给了两样伪造不了的东西来区分：
+#
+# - ``Origin``：跨源请求（以及同源的非 GET）一律带上，页面脚本改不了；
+# - ``Host``：DNS 重绑定攻击里页面与回环「同源」、不带 Origin，但 Host 仍是攻击者的域名。
+
+#: 桌面壳加载页的来源：macOS / Linux 的 WebView 是 ``tauri://localhost``，
+#: Windows 的 WebView2 是 ``http(s)://tauri.localhost``（后者已被 ``*.localhost`` 覆盖）。
+_TAURI_ORIGINS = frozenset({"tauri://localhost"})
+
+
+def _is_loopback_name(hostname: str) -> bool:
+    name = hostname.strip("[]").lower()
+    if name == "localhost" or name.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def is_app_origin(origin: str) -> bool:
+    """``Origin`` 是否是本应用自己的界面：同机任意端口（同源托管 / vite dev）或桌面壳。"""
+    if origin in _TAURI_ORIGINS:
+        return True
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    return _is_loopback_name(parts.hostname)
+
+
+def is_rebindable_host(host_header: str) -> bool:
+    """``Host`` 是不是一个可能被 DNS 重绑定到回环的外部域名。
+
+    放行：IP 字面量、``localhost`` / ``*.localhost``、不带点的单段主机名（本机名、
+    ASGI 测试客户端的 ``testserver``——攻击者控制不了它们的解析）。其余带点的域名一律
+    视为可重绑定：房主自己打开本应用从来不会经过一个公网域名回到回环。
+    """
+    hostname = urlsplit(f"//{host_header}").hostname or ""
+    if not hostname:
+        return False
+    try:
+        ipaddress.ip_address(hostname)
+        return False
+    except ValueError:
+        pass
+    if _is_loopback_name(hostname):
+        return False
+    return "." in hostname
+
+
+def foreign_page_reason(headers: Mapping[str, str]) -> str | None:
+    """本机请求若出自外站网页，返回拒绝理由；本应用自己的界面返回 None。
+
+    只对 ``peer_kind == "local"`` 的请求有意义——客人本来就从别的来源连过来，
+    他们的权限由席位与本机专属闸把关，不靠这里。
+    """
+    origin = headers.get("origin")
+    if origin is not None and not is_app_origin(origin):
+        return "请求来自外部网页，已拒绝"
+    host = headers.get("host")
+    if host and is_rebindable_host(host):
+        return "请求的主机名不是本机地址，已拒绝"
+    return None

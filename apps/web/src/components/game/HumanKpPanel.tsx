@@ -31,6 +31,7 @@ import { useDictation } from './useDictation'
 import { useSlashCommands } from './useSlashCommands'
 import { ACTION_LABELS, PROSE_ACTIONS, REFERENCE_IDS, type KpAction } from './kpActions'
 import { KpActionBar } from './KpActionBar'
+import { KpDesk } from './KpDesk'
 
 type PanelTab = 'tools' | 'advisor' | 'assets' | 'director' | 'source'
 
@@ -73,6 +74,7 @@ interface Workspace {
     scenes: CatalogItem[]
     npcs: CatalogItem[]
     handouts: CatalogItem[]
+    clues?: CatalogItem[]
   }
 }
 
@@ -694,6 +696,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
           <div className="kp-composer-row">
           <div className={`kp-composer-form flex flex-wrap gap-2${PROSE_ACTIONS.has(action) ? ' kp-composer-form--prose' : ''}`}>
             <KpActionForm
+              sessionId={sessionId}
               action={action}
               fields={fields}
               workspace={workspace}
@@ -714,13 +717,9 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
           </div>
           </div>
           </div>
-          {lastActionResult && (
-            <div className="mt-2 flex items-start gap-2 border-t pt-2 text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} aria-live="polite">
-              <strong className="shrink-0" style={{ color: 'var(--color-text-primary)' }}>最近结果</strong>
-              <span className="min-w-0 flex-1 whitespace-pre-wrap">{lastActionResult}</span>
-              <button type="button" onClick={() => setLastActionResult('')} className="btn-secondary !p-1" title="清除最近结果"><X size={12} /></button>
-            </div>
-          )}
+          {/* 最近结果 + 待办（待投检定 / 玩家申请）+ 私有台账：见 KpDesk */}
+          <KpDesk sessionId={sessionId} tick={vitalsTick} lastResult={lastActionResult}
+            onClearResult={() => setLastActionResult('')} onAdopt={adoptToTools} />
         </div>
       )}
 
@@ -775,7 +774,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
                   </div>
                 )}
                 {plan.auto_outcome && plan.auto_outcome !== 'none' && <div>免检结论：{plan.auto_outcome} · {plan.auto_outcome_reason}</div>}
-                {!!plan.clue_policy?.candidate_clue_ids?.length && <div>候选线索：{plan.clue_policy.candidate_clue_ids.join('、')} · {plan.clue_policy.notes}</div>}
+                {!!plan.clue_policy?.candidate_clue_ids?.length && <div className="flex flex-wrap items-center gap-2">候选线索：{plan.clue_policy.candidate_clue_ids.map((cid) => <button key={cid} className="btn-secondary !px-2 !py-0.5" title="已经在叙事里给出了 → 记进线索台账" onClick={() => void postAction('mark_seen', { clue: cid }, `线索 ${cid} 已记账`)}>记账 {workspace?.catalogs.clues?.find((c) => c.id === cid)?.name || cid}</button>)}{plan.clue_policy.candidate_clue_ids.length > 1 && <button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('mark_seen', { clues: plan.clue_policy?.candidate_clue_ids }, '候选线索已全部记账')}>全部记账</button>}<span>{plan.clue_policy.notes}</span></div>}
                 {plan.scene_policy?.scene_change && (
                   <div className="flex items-center gap-2">建议切场：{plan.scene_policy.scene_change}<button className="btn-secondary !px-2 !py-0.5" onClick={() => void postAction('scene_change', { scene_id: plan.scene_policy?.scene_change }, '已按建议切换场景')}>执行</button></div>
                 )}

@@ -382,6 +382,21 @@ def turn_confirm_state(
     }
 
 
+def live_turn_state(
+    db: Session, session_id: str, extra_token: str | None = None,
+) -> dict:
+    """按当前在线集合算回合确认进度——所有广播与快照共用这一个口径。
+
+    从前只有 /advance 带在线集合，其余广播（发言、暂存、改删）与 /sync 都按全体算，
+    同桌看到的「已确认 N/M」分母随最后一条广播的来源来回跳。``extra_token`` 并入
+    本次请求方，防其 /live 恰好瞬断被漏算。
+    """
+    from app.services.room_hub import room_hub
+
+    online = room_hub.online_tokens(session_id) | ({extra_token} if extra_token else set())
+    return turn_confirm_state(db, session_id, online)
+
+
 def commit_turn(db: Session, session_id: str) -> None:
     """推进：把本回合所有『暂存发言』(metadata.pending_turn) 转正（去标记），并清空确认状态。"""
     session = db.get(GameSession, session_id)

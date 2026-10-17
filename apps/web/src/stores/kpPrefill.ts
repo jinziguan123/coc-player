@@ -20,6 +20,10 @@ interface KpPrefillState {
   request: KpPrefillRequest | null
   ask: (action: KpAction, fields: Record<string, string>) => void
   consume: () => void
+  /** 待办台（KpDesk）的刷新信号：玩家那一侧投了骰、申请了检定，房间流在页面上，
+   *  待办台在写作台里，同样是两棵组件树——借这个 store 把「该重拉了」递过去。 */
+  deskTick: number
+  bumpDesk: () => void
 }
 
 export const useKpPrefill = create<KpPrefillState>((set) => ({
@@ -28,4 +32,6 @@ export const useKpPrefill = create<KpPrefillState>((set) => ({
     request: { action, fields, nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}` },
   }),
   consume: () => set({ request: null }),
+  deskTick: 0,
+  bumpDesk: () => set((s) => ({ deskTick: s.deskTick + 1 })),
 }))

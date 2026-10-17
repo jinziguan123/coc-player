@@ -63,7 +63,11 @@ async def generate_and_store_recap(db: Session, session_id: str) -> dict | None:
     if module is None or player_char is None:
         return None
 
-    events = session_service.get_session_events(db, session_id, limit=0)
+    # 战报是给玩家看的：仅 KP 可见的事件（幕后推演等）不能喂给撰稿模型，否则会被写进战报。
+    events = [
+        e for e in session_service.get_session_events(db, session_id, limit=0)
+        if not session_service.is_kp_only_event(e)
+    ]
     if not events:
         return None
     teammates = session_service.get_party_members(

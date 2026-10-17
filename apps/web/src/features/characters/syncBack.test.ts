@@ -128,4 +128,28 @@ describe('参战结果写回本机角色卡', () => {
     expect(result.failed).toBe(1)
     expect(result.synced).toEqual(['另一张'])
   })
+
+  it('同一原件有多份副本（跑过不止一局）：只写回最近一局，旧局不能盖掉新局', async () => {
+    // 列表按创建时间倒序返回：新局在前。此前逐份覆盖，最后落进原件的是最旧那一局。
+    const newer = { ...copy, id: 'copy-new', skills: { 侦查: 75 }, created_at: '2026-10-10T00:00:00', updated_at: '2026-10-12T00:00:00' }
+    const older = { ...copy, id: 'copy-old', skills: { 侦查: 62 }, created_at: '2026-09-01T00:00:00', updated_at: '2026-09-03T00:00:00' }
+    hostGet.mockResolvedValue([newer, older])
+
+    const result = await syncCharactersBackFromHost()
+
+    expect(result.synced).toEqual(['许闻舟'])
+    expect(localPut).toHaveBeenCalledTimes(1)
+    expect(localPut.mock.calls[0][1]).toMatchObject({ skills: { 侦查: 75 } })
+  })
+
+  it('以 updated_at 而非创建顺序判断最近一局', async () => {
+    // 早建的副本后来又跑了一局（updated_at 更新），它才是最近的结果
+    const reused = { ...copy, id: 'copy-a', skills: { 侦查: 80 }, created_at: '2026-09-01T00:00:00', updated_at: '2026-10-15T00:00:00' }
+    const stale = { ...copy, id: 'copy-b', skills: { 侦查: 65 }, created_at: '2026-10-01T00:00:00', updated_at: '2026-10-02T00:00:00' }
+    hostGet.mockResolvedValue([stale, reused])
+
+    await syncCharactersBackFromHost()
+    expect(localPut).toHaveBeenCalledTimes(1)
+    expect(localPut.mock.calls[0][1]).toMatchObject({ skills: { 侦查: 80 } })
+  })
 })

@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useSyncBackOnVisit } from '@/features/characters/useSyncBack'
 import { api, connectSSE, getServerUrl, localApi } from '../api/client'
+import { runLiveSession, type LiveGoneError } from '@/lib/liveSession'
+import { LiveGoneNotice } from '../components/game/LiveGoneNotice'
 import type { SessionParticipant } from '../stores/sessionStore'
 import { CharacterPanel } from '../components/character/CharacterPanel'
 import { CharacterPortrait } from '../components/character/CharacterPortrait'
@@ -62,6 +64,7 @@ export function RoomLobbyPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
   const [room, setRoom] = useState<RoomData | null>(null)
+  const [liveGone, setLiveGone] = useState<LiveGoneError | null>(null)   // 房间已删 / 被拒：停止重连
   const [moduleDesc, setModuleDesc] = useState('')
   /** 本模组的车卡建议：挑角色/写生成提示词时都要看它，此前只挂在角色页上。 */
   const [guidance, setGuidance] = useState<CharacterGuidance | null>(null)
@@ -201,16 +204,18 @@ export function RoomLobbyPage() {
       await refreshCharPools()
       if (cancelled) return
 
-      while (!cancelled) {
-        try {
-          for await (const chunk of connectSSE(`/sessions/${sessionId}/live`, ac.signal)) {
-            if (cancelled) break
-            handleChunk(chunk as Chunk)
-          }
-        } catch { /* dropped */ }
-        if (cancelled) break
-        await new Promise((res) => setTimeout(res, 1500))
-      }
+      // 与局内同一套重连循环：指数退避；房间被删 / 被拒（404/403）就停下并提示，
+      // 而不是每 1.5 秒无声地敲一次门。聊天补漏仍由 ready 事件触发（见 handleChunk）。
+      await runLiveSession<Chunk>({
+        connect: (signal) => connectSSE(`/sessions/${sessionId}/live`, signal) as AsyncIterable<Chunk>,
+        resync: async () => {},
+        onEvent: handleChunk,
+        onDisconnect: () => {},
+        onGone: (e) => { if (!cancelled) setLiveGone(e) },
+        isCancelled: () => cancelled,
+        wait: (ms) => new Promise((res) => setTimeout(res, ms)),
+        signal: ac.signal,
+      })
     }
     init().catch(() => navigate('/game', { replace: true }))
     return () => { cancelled = true; ac.abort() }
@@ -494,6 +499,7 @@ export function RoomLobbyPage() {
     // 于是角色卡一多，「开始游戏」就被顶到折线以下（实测已入座时内容 793px > 视口 720px）。
     // relative：聊天是浮层（absolute 右侧居中），它的定位原点就是这一层
     <div className="lobby-shell relative flex h-full min-h-0 gap-0">
+      {liveGone && <LiveGoneNotice error={liveGone} />}
       <div className="flex flex-col flex-1 min-w-0 min-h-0 max-w-3xl mx-auto w-full">
         <div className="flex flex-shrink-0 items-center gap-3 pb-2 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <button onClick={() => navigate('/game')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">

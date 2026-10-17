@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -26,9 +26,11 @@ from app.services import (
     character_avatar,
     character_service,
     image_store,
+    rate_limit,
     rule_options_service,
     session_service,
 )
+from app.services.rate_limit import limiter
 from app.services.excel_import import parse_coc_character_sheet
 
 router = APIRouter(prefix="/api", tags=["characters"])
@@ -143,7 +145,13 @@ class EvaluateRequest(BaseModel):
 
 
 @router.post("/characters/evaluate")
-async def evaluate_character(data: EvaluateRequest, db: Session = Depends(get_db)):
+@limiter.limit(rate_limit.AI_TRIGGER_LIMIT, exempt_when=rate_limit.exempt_local)
+async def evaluate_character(
+    request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
+    response: Response,  # noqa: ARG001 — headers_enabled 下 slowapi 往这里写 X-RateLimit-*
+    data: EvaluateRequest,
+    db: Session = Depends(get_db),
+):
     module = db.get(Module, data.module_id)
     if not module:
         raise HTTPException(404, "模组不存在")
@@ -205,7 +213,13 @@ class AIGenerateRequest(BaseModel):
 
 
 @router.post("/characters/ai-generate")
-async def ai_generate_character(data: AIGenerateRequest, db: Session = Depends(get_db)):
+@limiter.limit(rate_limit.AI_TRIGGER_LIMIT, exempt_when=rate_limit.exempt_local)
+async def ai_generate_character(
+    request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
+    response: Response,  # noqa: ARG001 — headers_enabled 下 slowapi 往这里写 X-RateLimit-*
+    data: AIGenerateRequest,
+    db: Session = Depends(get_db),
+):
     try:
         result = await ai_character_service.generate_ai_character(
             db, data.module_id, data.hint, data.is_player,
@@ -335,10 +349,21 @@ def list_characters(
 
 
 @router.get("/characters/{character_id}", response_model=CharacterRead)
-def get_character(character_id: str, db: Session = Depends(get_db)):
+def get_character(
+    character_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    token: str | None = Depends(player_token),
+):
     char = character_service.get_character(db, character_id)
     if not char:
         raise HTTPException(404, "角色不存在")
+    # 房主本机看自己库里的一切；客人只能看无主卡、自己的卡与同桌队友的卡。
+    # 不在这里把关的话，列表接口刻意藏起来的别人的卡，拿 id 就能整张读走。
+    if not rate_limit.exempt_local(request) and not session_service.can_view_character(
+        db, char, token,
+    ):
+        raise HTTPException(403, "无权查看该角色")
     return char
 
 

@@ -67,5 +67,12 @@ export interface SyncSnapshot {
     chase?: { active: boolean }
     turn?: { confirmed_ids: string[]; total: number; ready: boolean }
     luck?: LuckSnapshot & { id?: string }
+    /** 结束模组投票（掉线豁免后的需同意数）；open=false 表示没有进行中的投票 */
+    end_vote?: {
+      open: boolean
+      voters: { character_id: string; name: string; agreed: boolean; exempt?: boolean }[]
+      agreed_count: number
+      total: number
+    }
   }
 }
