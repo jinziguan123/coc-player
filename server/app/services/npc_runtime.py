@@ -17,7 +17,7 @@ from app.ai.context import build_npc_context
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import agent_trace, illustration_service, npc_identity, session_service, turn_context, world_memory
+from app.services import agent_trace, illustration_service, npc_identity, npc_state, session_service, turn_context, world_memory
 from app.services.event_protocol import make_chunk as _make_chunk
 
 _attach_npc_portrait = illustration_service._attach_npc_portrait
@@ -52,11 +52,8 @@ class NpcRuntime:
         messages = build_npc_context(
             npc_id, self.game_session, self.module, events, trigger_context=trigger,
         )
-        npc_def = next(
-            (n for n in (self.module.npcs or []) if n.get("id") == npc_id),
-            None,
-        )
-        true_name = npc_def["name"] if npc_def else npc_id
+        state = npc_state.NpcState.load(self.module, self.game_session, npc_id)
+        true_name = state.name
         trace = agent_trace.start(self.session_id, "npc", npc_id=npc_id)
         try:
             line = await asyncio.wait_for(

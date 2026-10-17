@@ -20,7 +20,7 @@ from app.models.combat_state import CombatState
 from app.models.session import GameSession
 from app.rules import Ruleset, ruleset_for
 from app.ai.provider import model_meta
-from app.services import character_service, rule_options_service, session_service, world_memory
+from app.services import character_service, npc_state, rule_options_service, session_service, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
@@ -1234,9 +1234,13 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             npc_actor = dict(actor)
             try:
                 sess = db.get(GameSession, session_id)
-                npc_actor["memory"] = world_memory.format_npc_self_memory(
-                    (sess.world_state if sess else None) or {}, str(actor.get("id") or ""),
-                )
+                if sess is not None:
+                    from app.models.module import Module
+                    module = db.get(Module, sess.module_id)
+                    if module is not None:
+                        npc_actor["memory"] = npc_state.NpcState.load(
+                            module, sess, str(actor.get("id") or ""),
+                        ).memory
             except Exception:
                 logger.exception("战斗 NPC 记忆注入失败（忽略）: id=%s", actor.get("id"))
             action = _validate_npc_action(
