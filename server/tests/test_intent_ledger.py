@@ -19,3 +19,9 @@ def test_ledger_unlock_and_version_increment():
 
 def test_ledger_unknown_target_allows():
     assert intent_ledger.allows({}, "未知", "open") is True
+
+
+def test_target_alias_resolves_to_existing_locked_door():
+    ws = intent_ledger.record({}, "地下室的门", "npc", "lock", 1)
+    assert intent_ledger.resolve_target(ws, "门") == "地下室的门"
+    assert intent_ledger.allows(ws, "门", "open") is False

@@ -79,7 +79,8 @@ def _norm_verb(value) -> str:
 
 
 def from_decision(character, decision: dict, observes_seq: int, world_state=None) -> TeamIntent:
-    target = str(decision.get("target") or "").strip()
+    raw_target = str(decision.get("target") or "").strip()
+    target = intent_ledger.resolve_target(world_state or {}, raw_target) if raw_target else ""
     return TeamIntent(
         actor_id=character.id,
         actor_name=character.name,

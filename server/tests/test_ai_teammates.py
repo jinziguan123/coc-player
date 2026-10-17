@@ -96,6 +96,30 @@ def test_team_turn_runs_once_per_teammate(db_factory, monkeypatch):
     assert sum('"npc_dialogue"' in c for c in chunks) == 2
 
 
+def test_team_dependency_on_lock_drops_stale_enter(db_factory, monkeypatch):
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    a, b = teammates
+
+    async def fake_decide(self, messages):
+        if self.character_id == a.id:
+            return '{"action":"act","content":"我把门反锁。","target":"门","verb":"lock"}'
+        return (
+            '{"action":"act","content":"我推门进去。","target":"门","verb":"enter",'
+            '"depends_on":["阿尔法"]}'
+        )
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session.id, session, module, hero, teammates, llm=None,
+    )))
+    actions = [
+        e for e in session_service.get_session_events(db, session.id)
+        if e.event_type == "action" and e.actor_id in {t.id for t in teammates}
+    ]
+    assert [e.actor_id for e in actions] == [a.id]
+
+
 def test_team_depends_on_commits_prerequisite_first(db_factory, monkeypatch):
     db = db_factory()
     module, hero, teammates, session = _seed(db)

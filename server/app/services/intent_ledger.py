@@ -31,12 +31,32 @@ def _ledger(world_state: dict | None) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def resolve_target(world_state: dict | None, target: str) -> str:
+    """把「门」「那扇门」「地下室的门」尽量收敛到已有对象 key。
+
+    只做保守的包含匹配：已有 key 包含新词，或新词包含已有 key。找不到就返回规范化新 key；
+    绝不做模糊语义猜测。
+    """
+    key = _key(target)
+    if not key:
+        return ""
+    ledger = _ledger(world_state)
+    if key in ledger:
+        return key
+    for existing in ledger:
+        if key in existing or existing in key:
+            return existing
+    return key
+
+
 def version(world_state: dict | None, target: str) -> int:
-    return int((_ledger(world_state).get(_key(target)) or {}).get("version") or 0)
+    key = resolve_target(world_state, target)
+    return int((_ledger(world_state).get(key) or {}).get("version") or 0)
 
 
 def state(world_state: dict | None, target: str) -> str:
-    return str((_ledger(world_state).get(_key(target)) or {}).get("state") or "")
+    key = resolve_target(world_state, target)
+    return str((_ledger(world_state).get(key) or {}).get("state") or "")
 
 
 def allows(world_state: dict | None, target: str, verb: str) -> bool:
@@ -58,7 +78,7 @@ def allows(world_state: dict | None, target: str, verb: str) -> bool:
 def record(world_state: dict, target: str, actor_id: str, verb: str, seq: int) -> dict:
     """返回新的 world_state；按 target 单调递增 version，并合并少量状态。"""
     ws = deepcopy(dict(world_state or {}))
-    key = _key(target)
+    key = resolve_target(world_state, target)
     if not key:
         return ws
     ledger = dict(ws.get(_LEDGER_KEY) or {})

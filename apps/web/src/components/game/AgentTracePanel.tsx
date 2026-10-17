@@ -18,6 +18,7 @@ const AGENT_LABEL: Record<string, string> = {
   planner: 'planner',
   team: '队友',
   npc: 'NPC',
+  intent: '裁决',
   kp: 'KP',
   combat: '战斗',
   backstage: '幕后',

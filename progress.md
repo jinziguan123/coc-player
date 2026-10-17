@@ -142,4 +142,7 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 验证更新：后端 2546 passed / 11 skipped、ruff 通过。
 - 新增 `intent_ledger`：target 带跨回合 version 与 locked/open/closed/blocked/taken 状态；队友动作提交前检查 open 遇 locked、enter 遇 blocked 等前置，成功后更新账本。
 - 验证更新：后端 2550 passed / 11 skipped、ruff 通过（建卡随机用例首轮偶发失败，单独重跑通过）。
+- target 别名收敛到已有对象 key（“门”命中“地下室的门”）；提交前比较 target version，旧版本意图会记录 stale 日志并在前置不满足时丢弃。
+- 意图裁决冲突写入 agent_trace（agent=intent, outcome=conflict）；KP 轨迹面板新增“裁决”标签。
+- 验证更新：后端 2552 passed / 11 skipped、ruff 通过（建卡随机用例单独重跑通过）；前端 typecheck 通过。
 - 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。已覆盖：旧 [SAY]/分头路径 NPC 边界、分头工具循环、ContextBundle、队友 relevance gate/重复冲突兜底、agent_trace 落表与 KP 面板。后续可继续做语义级冲突裁决和跨 Agent 的完整调度器。

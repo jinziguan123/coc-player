@@ -364,6 +364,13 @@ async def _run_team_turn(
         verb = str(decision.get("verb") or "").strip().lower()
         if target and verb:
             current_ws = game_session.world_state or {}
+            expected_version = decision.get("_target_version")
+            current_version = intent_ledger.version(current_ws, target)
+            if expected_version is not None and current_version != expected_version:
+                logger.info(
+                    "队友意图基于旧对象版本：%s target=%s v%s->v%s session=%s",
+                    teammate.name, target, expected_version, current_version, session_id,
+                )
             if not intent_ledger.allows(current_ws, target, verb):
                 logger.info(
                     "队友意图对象状态不满足：%s 对 %s 执行 %s，丢弃 session=%s",
@@ -576,11 +583,17 @@ async def _run_team_turn(
                     team_intents.append((teammate, decision, parsed_intent))
 
     resolved = team_intent.resolve_team_intents(team_intents, committed_actors, world_state=snapshot_world)
-    if len(resolved) < len(team_intents):
+    dropped = len(team_intents) - len(resolved)
+    if dropped:
         logger.info(
-            "队友意图冲突：%d 条同目标动作被裁决丢弃 session=%s",
-            len(team_intents) - len(resolved), session_id,
+            "队友意图冲突：%d 条同目标/依赖动作被裁决丢弃 session=%s",
+            dropped, session_id,
         )
+        trace = agent_trace.start(
+            session_id, "intent", db=db,
+            total=len(team_intents), committed=len(resolved), dropped=dropped,
+        )
+        agent_trace.finish(trace, outcome="conflict")
     for teammate, decision, _intent in resolved:
         async for chunk in _commit(teammate, decision=decision):
             yield chunk
