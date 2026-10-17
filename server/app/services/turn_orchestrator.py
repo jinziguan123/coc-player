@@ -925,7 +925,7 @@ def _failure_notice(exc: BaseException) -> str:
 
 
 async def run_chat_generation(session_id: str) -> None:
-    # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → planner → 队友 →
+    # 一个回合是若干 **串行** 的 LLM 环节（等上轮收尾 → 队友 → planner →
     # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
     # 都要有耗时，否则「为什么这么慢」只能靠猜。t_turn 给出总时长做对账。
     openai_compat.reset_endpoint_health()   # 见 run_regenerate_generation 里的同一行
@@ -970,65 +970,22 @@ async def run_chat_generation(session_id: str) -> None:
             if e.event_type in ("action", "dialogue") and e.actor_id == acting.id and (e.content or "").strip()
         )
 
-        # planner 前移：在队友回合之前先跑一次裁定计划，作为本回合的共享契约——队友据
-        # plan.direction 派生的导演提示行动（如把话头递给冷场玩家），KP 叙事时再以队友实际
-        # 行动 + plan 为准。plan 是「裁定意图」不是「剧本」，队友行动后语义不变；开场不跑。
-        # 结构化副任务走快模型（get_fast_llm，未配置时即主模型）。
-        pre_events = session_service.get_session_events(db, session_id)
-        plan = None
-        fast_llm = get_fast_llm()
-        if pre_events:
-            room_hub.broadcast(session_id, _make_chunk("housekeeping", "守秘人正在判读局势…"))
-            t_plan = time.monotonic(); u_plan = usage_tracker.snapshot()
-            rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
-            plan_messages = turn_planner.build_turn_plan_messages(
-                game_session, module, player_char, pre_events,
-                teammates=party_others, rules_lookup_enabled=rules_enabled,
-                rule_excerpts=_rule_excerpts_for_planner(db, module, pre_events, game_session),
-                rule_options_block=rule_options_service.context_block(db, game_session),
-            )
-            plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
-            planned_effects.enforce_plan_item_locations(
-                plan, module, game_session.current_scene_id,
-            )
-            logger.info(
-                "耗时|planner %.1fs（%s）session=%s",
-                time.monotonic() - t_plan, usage_tracker.fmt(usage_tracker.delta(u_plan)), session_id,
-            )
-            # 世界记忆钩子 a：本轮裁定要揭示线索 → 写入线索台账（前移后在此统一记账）
-            if plan is not None:
-                _record_clue_ledger_from_plan(
-                    db, game_session, plan, pre_events, player_char, party_others,
-                    module=module,
-                )
-                _settle_plan_ending(db, session_id, game_session, module, plan)
-
-        # 玩家明确申请检定 → 直接走确定性检定裁定（避免被 KP 当叙事顺过去），不走常规叙事。
-        # 战斗宣言不走此路。
-        #
-        # 技能页点出来的申请带 check_request 元数据，**优先据此确定性取技能名**：那是玩家点
-        # 明白了的，不该再让 planner 从「（申请「侦查」检定）」这行文本里认一遍——认漏了这次
-        # 申请就被当成普通叙事顺过去，玩家点的那一下等于没发生。planner 的
-        # player_check_request 仍作为「玩家直接打字申请」的兜底。
+        # 玩家本轮明确从技能页申请的检定：先确定性处理，不必等 planner。
+        # 这一轮如果还有玩家的台词/行动，队友仍要接话，由 _run_kp_turn 负责在检定提示后跑队友。
         stashed_check = _stashed_check_request(turn, acting.id)
-        requested_skill = (stashed_check or (plan.player_check_request if plan else "")).strip()
         if (
-            requested_skill and player_text
+            stashed_check and player_text
             and not _looks_like_combat_declaration(player_text)
-            and not (plan and plan.combat.should_start)
         ):
             await _run_kp_turn(
                 db, session_id, game_session, module, player_char, party_others,
                 CHECK_REQUEST_PROMPT.format(
-                    actor=acting.name, skill=requested_skill, intent=player_text,
+                    actor=acting.name, skill=stashed_check, intent=player_text,
                 ),
-                requested_check=(acting, requested_skill),
+                requested_check=(acting, stashed_check),
                 focus_member=acting.name,
                 split_aware=True,
-                # 暂存式申请：这一轮里还有玩家的台词与行动，队友得像常规回合那样接话——
-                # 否则「说一句 + 顺手查一下」会让队友从申请一路哑到投骰结果之后（这条路和
-                # 投骰续写都不跑队友回合）。打字申请的老路径维持原样，不跑队友。
-                then_team_turn=ai_teammates if stashed_check else None,
+                then_team_turn=ai_teammates,
             )
             return
 
@@ -1052,9 +1009,57 @@ async def run_chat_generation(session_id: str) -> None:
             )
 
         events = session_service.get_session_events(db, session_id)
-        # 队友行动后不重跑 planner：队友的决策与 KP 的裁定计划已经解耦。KP 拿到的是
-        # 回合起点计划 + 队友实际发生的事件；需要按新事实补裁的确定性守卫在 _run_generation
-        # 之后照常执行。原「队友一动手就跑二次 planner」实测占掉近半回合时间。
+
+        # planner 放在队友行动之后：队友不再读 plan，也不再被 KP 的导演计划牵引；
+        # 这里只对「最终会发生什么」做一次 KP 裁定，而不是先判、再让队友改、再重判。
+        # 结构化的副任务走快模型；没有事件（开场）不跑。
+        plan = None
+        fast_llm = get_fast_llm()
+        if events:
+            room_hub.broadcast(session_id, _make_chunk("housekeeping", "守秘人正在判读局势…"))
+            t_plan = time.monotonic(); u_plan = usage_tracker.snapshot()
+            rules_enabled = rulebook_service.has_rulebook(db, module.rule_system)
+            plan_messages = turn_planner.build_turn_plan_messages(
+                game_session, module, player_char, events,
+                teammates=party_others, rules_lookup_enabled=rules_enabled,
+                rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
+                rule_options_block=rule_options_service.context_block(db, game_session),
+            )
+            plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
+            planned_effects.enforce_plan_item_locations(
+                plan, module, game_session.current_scene_id,
+            )
+            logger.info(
+                "耗时|planner（队友后） %.1fs（%s）session=%s",
+                time.monotonic() - t_plan, usage_tracker.fmt(usage_tracker.delta(u_plan)), session_id,
+            )
+            if plan is not None:
+                _record_clue_ledger_from_plan(
+                    db, game_session, plan, events, player_char, party_others,
+                    module=module,
+                )
+                _settle_plan_ending(db, session_id, game_session, module, plan)
+
+        # 玩家直接打字申请检定：planner 从自由文本里识别出来后，仍走确定性检定裁定。
+        # 此时队友已经行动过，所以不再重复跑队友；战斗宣言不走此路。
+        requested_skill = (stashed_check or (plan.player_check_request if plan else "")).strip()
+        if (
+            requested_skill and player_text
+            and not _looks_like_combat_declaration(player_text)
+            and not (plan and plan.combat.should_start)
+        ):
+            await _run_kp_turn(
+                db, session_id, game_session, module, player_char, party_others,
+                CHECK_REQUEST_PROMPT.format(
+                    actor=acting.name, skill=requested_skill, intent=player_text,
+                ),
+                requested_check=(acting, requested_skill),
+                focus_member=acting.name,
+                split_aware=True,
+                then_team_turn=None,
+            )
+            return
+
         generation_plan = plan
 
         t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()

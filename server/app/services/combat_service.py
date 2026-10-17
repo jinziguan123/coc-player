@@ -9,6 +9,7 @@ HP·重伤应用（玩家队友同步角色卡，敌人只在战斗态）/ 结�
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import uuid
 
@@ -23,6 +24,8 @@ from app.services import character_service, rule_options_service, session_servic
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
+
+logger = logging.getLogger(__name__)
 
 # 火器大类（决定先攻火器优先与「远程」判定）
 _FIREARM_CATEGORIES = {"手枪", "半自动步枪", "全自动步枪", "霰弹枪", "冲锋枪", "狙击步枪", "机枪"}
@@ -1226,7 +1229,19 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
                 action = None   # KP 把这一回合交给启发式
         # 关键 NPC 走子代理决策；失败/杂兵回落启发式
         elif agent and actor.get("is_key"):
-            action = _validate_npc_action(state, actor, await agent.decide(state, actor, scene_hint), rs=rs)
+            # 战斗中的关键 NPC 也用同一份 NPC 私有记忆：平时记得的承诺、被看穿/被欺骗
+            # 不该在进入战斗后突然失忆。这里只传记忆，不做对话；对话仍走 NpcRuntime。
+            npc_actor = dict(actor)
+            try:
+                sess = db.get(GameSession, session_id)
+                npc_actor["memory"] = world_memory.format_npc_self_memory(
+                    (sess.world_state if sess else None) or {}, str(actor.get("id") or ""),
+                )
+            except Exception:
+                logger.exception("战斗 NPC 记忆注入失败（忽略）: id=%s", actor.get("id"))
+            action = _validate_npc_action(
+                state, actor, await agent.decide(state, npc_actor, scene_hint), rs=rs,
+            )
         if action is None:
             action = rs.combat.heuristic_npc_action(state, actor)
         atype = action.get("type") or action.get("action")
