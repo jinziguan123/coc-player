@@ -26,3 +26,17 @@ def test_context_bundle_without_system_is_passthrough():
     )
     assert bundle.system == ""
     assert bundle.for_model() == [{"role": "user", "content": "hi"}]
+
+
+def test_context_bundle_fit_drops_oldest_but_keeps_last():
+    bundle = ContextBundle.from_messages(
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old" * 50},
+            {"role": "assistant", "content": "mid" * 50},
+            {"role": "user", "content": "new"},
+        ],
+        budget_tokens=30,
+    ).fit()
+    assert bundle.messages[-1]["content"] == "new"
+    assert len(bundle.messages) == 1

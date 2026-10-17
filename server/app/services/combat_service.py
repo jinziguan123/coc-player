@@ -20,7 +20,7 @@ from app.models.combat_state import CombatState
 from app.models.session import GameSession
 from app.rules import Ruleset, ruleset_for
 from app.ai.provider import model_meta
-from app.services import character_service, npc_state, rule_options_service, session_service, world_memory
+from app.services import agent_trace, character_service, npc_state, rule_options_service, session_service, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_events import RoomEvent
 from app.services.room_hub import room_hub
@@ -1243,9 +1243,14 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
                         ).memory
             except Exception:
                 logger.exception("战斗 NPC 记忆注入失败（忽略）: id=%s", actor.get("id"))
-            action = _validate_npc_action(
-                state, actor, await agent.decide(state, npc_actor, scene_hint), rs=rs,
-            )
+            trace = agent_trace.start(session_id, "combat", db=db, npc_id=actor.get("id"))
+            try:
+                raw_action = await agent.decide(state, npc_actor, scene_hint)
+            except Exception:
+                agent_trace.finish(trace, outcome="error", provider=getattr(agent, "llm", None))
+                raise
+            agent_trace.finish(trace, provider=getattr(agent, "llm", None))
+            action = _validate_npc_action(state, actor, raw_action, rs=rs)
         if action is None:
             action = rs.combat.heuristic_npc_action(state, actor)
         atype = action.get("type") or action.get("action")

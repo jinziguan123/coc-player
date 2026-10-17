@@ -315,7 +315,7 @@ async def _run_team_turn(
         )
         bundle = agent_runtime.ContextBundle.from_messages(
             messages, budget_tokens=12000, visibility=(teammate.id,),
-        )
+        ).fit()
         trace = agent_trace.start(session_id, "team", db=db, char_id=teammate.id)
         t0 = time.monotonic()
         try:

@@ -98,6 +98,30 @@ def _extract_leaked_dialogue(
         hits.append((s, e, name, _leaked_text(m)))
     if not hits:
         return narration, marks
+    # 有名 NPC 的台词不能在这里被当成普通 mark 交给 KP 落库：这条同步兜底没有
+    # NpcRuntime 上下文，抽出来就等于 KP 用全局视角代言。显式 [SAY] 已由
+    # NpcDialogueGuard 改写；漏进旁白的署名台词直接丢弃，宁可这一句不出现，
+    # 也不把 truth/线索混进 NPC 嘴里。剩余无名龙套不走本函数，避免二次偏移。
+    named_hits = [h for h in hits if h[2] in npcs]
+    if named_hits:
+        removals = [(s, e) for s, e, _name, _text in named_hits]
+        for s, e in sorted(removals, reverse=True):
+            narration = narration[:s] + narration[e:]
+
+        def _shift_mark(off: int) -> int:
+            removed = 0
+            for s, e in removals:
+                if e <= off:
+                    removed += e - s
+                elif s < off < e:
+                    removed += off - s
+            return off - removed
+
+        shifted = [(_shift_mark(o), spk, txt) for o, spk, txt in (marks or [])]
+        logger.info("台词残留兜底：丢弃 %d 条有名 NPC 的署名台词（拒绝 KP 代言）", len(named_hits))
+        return narration, shifted
+    if not hits:
+        return narration, marks
     logger.info("台词残留兜底：从旁白抽出 %d 条显式署名台词（模型漏调 say()）", len(hits))
     removals = [(s, e) for s, e, _, _ in hits]
 

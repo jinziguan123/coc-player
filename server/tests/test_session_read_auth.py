@@ -72,6 +72,8 @@ def auth_env(tmp_path):
     [
         "/api/sessions/{sid}",
         "/api/sessions/{sid}/context-estimate",
+        "/api/sessions/{sid}/agent-traces",
+        "/api/sessions/{sid}/agent-traces",
         "/api/sessions/{sid}/rag-stats",
         "/api/sessions/{sid}/recaps",
         "/api/sessions/{sid}/growth?character_id={hero}",

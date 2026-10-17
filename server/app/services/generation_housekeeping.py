@@ -10,7 +10,7 @@ from app.ai import story_summarizer
 from app.ai.agents import backstage_agent
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import event_recall, session_service, turn_context, world_memory
+from app.services import agent_trace, event_recall, session_service, turn_context, world_memory
 from app.services.event_protocol import make_chunk
 from app.services.room_hub import room_hub
 
@@ -252,7 +252,13 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
         # 状态由 _maybe_roll_story_summary 的「整理笔记」承担；此处保持静默。
         agent = backstage_agent.BackstageAgent(llm)
         valid_ids = {n.get("id") for n in (module.npcs or []) if n.get("id")}
-        bevents = await agent.infer(messages, valid_ids)
+        trace = agent_trace.start(session_id, "backstage", db=db)
+        try:
+            bevents = await agent.infer(messages, valid_ids)
+        except Exception:
+            agent_trace.finish(trace, outcome="error", provider=llm)
+            raise
+        agent_trace.finish(trace, provider=llm)
         if bevents is None:
             return  # 首次调用本身失败：游标不动、不落库（网络恢复后重试）
 

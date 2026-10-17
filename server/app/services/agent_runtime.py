@@ -38,6 +38,28 @@ class ContextBundle:
             metadata=dict(metadata or {}),
         )
 
+    def fit(self) -> "ContextBundle":
+        """按 budget_tokens 裁掉最旧的历史消息；system 与最后一条消息始终保留。
+
+        这是跨 Agent 的兜底预算，不替代 KP 自己的分段预算。估算口径与上下文模块一致
+        （约 3 字符 = 1 token）；只做减法，不重写内容。
+        """
+        def _cost(text: str) -> int:
+            return max(1, len(str(text or "")) // 3)
+
+        messages = [dict(m) for m in self.messages]
+        total = _cost(self.system) + sum(_cost(m.get("content")) for m in messages)
+        while len(messages) > 1 and total > self.budget_tokens:
+            dropped = messages.pop(0)
+            total -= _cost(dropped.get("content"))
+        return ContextBundle(
+            system=self.system,
+            messages=messages,
+            budget_tokens=self.budget_tokens,
+            visibility=self.visibility,
+            metadata=self.metadata,
+        )
+
     def for_model(self) -> list[dict]:
         if not self.system:
             return [dict(m) for m in self.messages]

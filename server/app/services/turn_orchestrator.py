@@ -27,6 +27,8 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    agent_runtime,
+    agent_trace,
     character_chronicle,
     chat_event_writer,
     command_protocol,
@@ -864,6 +866,8 @@ async def _run_split_narrations_tool_loop(
         messages.append({"role": "user", "content": user_content})
 
         result = ["", "", [], [], []]
+        base_seq = session_service.get_next_sequence_num(db, session_id) - 1
+        event_order: list = []
         execute = _build_kp_tool_executor(
             db, session_id, game_session, module, player_char, teammates, llm, result,
             pre_gen_seq=pre_gen_seq, ruleset=rs, dice_scope=char_scope,
@@ -873,14 +877,20 @@ async def _run_split_narrations_tool_loop(
                 llm, messages, result, execute,
                 tools=tools, npcs=matcher_npcs, group_label=label, plan=plan,
                 party_names=party_names, shown_dialogues=shown_dialogues,
+                event_order=event_order,
                 masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
                 npc_guard=_npc_dialogue_guard(
                     db, session_id, game_session, module, llm, player_char,
                 ),
             ):
+                meta = dict(getattr(chunk, "metadata", None) or {})
+                if meta.get("group") != label:
+                    meta["group"] = label
+                    chunk = chunk.model_copy(update={"metadata": meta})
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
-            _persist_narration(db, session_id, result, llm=llm)
+            _persist_narration(db, session_id, result, event_order, llm=llm)
+            _reorder_turn_events(db, session_id, event_order, base_seq)
             raise
         await _validate_and_patch_narration(
             llm, plan, result, seen_context=_recent_seen_text(events),
@@ -891,7 +901,8 @@ async def _run_split_narrations_tool_loop(
                 location_guard if player_char.name in (grp.get("members") or []) else ""
             ),
         )
-        _persist_narration(db, session_id, result, llm=llm)
+        _persist_narration(db, session_id, result, event_order, llm=llm)
+        _reorder_turn_events(db, session_id, event_order, base_seq)
         _record_npc_say_memory(
             db, session_id, game_session, module, result[2], grp["members"],
         )
@@ -1164,7 +1175,16 @@ async def run_chat_generation(session_id: str) -> None:
                 rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
                 rule_options_block=rule_options_service.context_block(db, game_session),
             )
-            plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
+            trace = agent_trace.start(session_id, "planner", db=db)
+            plan_messages = agent_runtime.ContextBundle.from_messages(
+                plan_messages, budget_tokens=16000,
+            ).fit().for_model()
+            try:
+                plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
+            except Exception:
+                agent_trace.finish(trace, outcome="error", provider=fast_llm)
+                raise
+            agent_trace.finish(trace, provider=fast_llm)
             planned_effects.enforce_plan_item_locations(
                 plan, module, game_session.current_scene_id,
             )

@@ -58,6 +58,22 @@ def test_npc_runtime_times_out_and_traces(tmp_path, monkeypatch, caplog):
     assert "timeout" in caplog.text
 
 
+def test_agent_trace_prune_keeps_recent(tmp_path):
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+    from app.models.agent_trace import AgentTraceLog
+
+    for i in range(6):
+        db.add(AgentTraceLog(
+            session_id=session.id, agent="npc", stage=str(i), outcome="ok",
+            duration_ms=i, detail={"i": i},
+        ))
+    db.commit()
+    removed = agent_trace.prune_for_session(db, session.id, keep=2)
+    assert removed == 4
+    assert db.query(AgentTraceLog).filter(AgentTraceLog.session_id == session.id).count() == 2
+
+
 def test_npc_runtime_reply_persists_dialogue_and_memory(tmp_path, monkeypatch):
     db = _db(tmp_path)()
     module, hero, session = _seed(db)

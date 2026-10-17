@@ -76,8 +76,34 @@ def _persist(trace: AgentTrace, payload: dict) -> None:
                 detail=payload,
             ))
             tdb.commit()
+            # 轻量保留策略：每个会话最多 800 条；轨迹只是诊断数据，不需要永久历史。
+            if tdb.query(AgentTraceLog).filter(
+                AgentTraceLog.session_id == trace.session_id,
+            ).count() > 800:
+                prune_for_session(tdb, trace.session_id, keep=800)
     except Exception:
         logger.exception("agent_trace 落库失败（忽略）: session=%s agent=%s", trace.session_id, trace.agent)
+
+
+def prune_for_session(db, session_id: str, keep: int = 800) -> int:
+    """只保留最近 keep 条，避免轨迹表无限增长。返回删除条数。"""
+    from app.models.agent_trace import AgentTraceLog
+
+    keep = max(1, int(keep))
+    q = db.query(AgentTraceLog).filter(AgentTraceLog.session_id == session_id)
+    total = q.count()
+    if total <= keep:
+        return 0
+    old_ids = [
+        row.id for row in q.order_by(AgentTraceLog.created_at.asc()).limit(total - keep).all()
+    ]
+    if not old_ids:
+        return 0
+    db.query(AgentTraceLog).filter(AgentTraceLog.id.in_(old_ids)).delete(
+        synchronize_session=False,
+    )
+    db.commit()
+    return len(old_ids)
 
 
 def list_for_session(db, session_id: str, limit: int = 100) -> list[dict]:

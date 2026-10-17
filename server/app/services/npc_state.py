@@ -34,6 +34,14 @@ class NpcState:
             (n for n in (module.npcs or []) if str(n.get("id") or "") == npc_id),
             None,
         )
+        if npc_def is not None:
+            # 与 build_npc_context 同口径解析当前 flags（已暴露/敌对/死亡等），否则
+            # 对话看到的是「当前形态」，战斗状态看到的还是原始卡。
+            try:
+                from app.ai.context import _active_flags, _resolve_state
+                npc_def = _resolve_state(npc_def, _active_flags(session))
+            except Exception:
+                pass
         if npc_def is None:
             npc_def = next(
                 (c for c in world_memory.promoted_npc_cards(session.world_state or {})
