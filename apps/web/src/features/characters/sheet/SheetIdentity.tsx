@@ -5,10 +5,10 @@ import { ChevronDown } from 'lucide-react'
 import { GiDiceSixFacesSix, GiUpCard } from 'react-icons/gi'
 import { uploadFile } from '@/api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
-import { hasGuidance, useModuleStore, type CharacterGuidance } from '@/stores/moduleStore'
+import { useModuleStore } from '@/stores/moduleStore'
 import { generateCharacter } from '@/features/characters/api'
 import { applyBuilt, applyImported, type ImportedCharacterData } from './importCard'
+import { jumpTo } from './jump'
 import type { useSheet } from './useSheet'
 
 type Sheet = ReturnType<typeof useSheet>
@@ -17,7 +17,6 @@ const NONE = '__none'
 export function SheetIdentity({ sheet, onPickOccupation }: { sheet: Sheet; onPickOccupation: () => void }) {
   const { state, dispatch } = sheet
   const { modules } = useModuleStore()
-  const selectedModule = modules.find((m) => m.id === state.moduleId) ?? null
   const set = (patch: Partial<typeof state>) => dispatch({ type: 'set', patch })
   const occName = state.imported ? state.imported.occupation || state.occName : state.occName
 
@@ -41,7 +40,7 @@ export function SheetIdentity({ sheet, onPickOccupation }: { sheet: Sheet; onPic
           onChange={(e) => set({ residence: e.target.value })} /></label>
         <label><span>出生地</span><input className="input w-full" value={state.birthplace}
           onChange={(e) => set({ birthplace: e.target.value })} /></label>
-        <div className="cs-wide">
+        <div className="cs-wide" id="cs-module">
           <label>所属模组（可选，只用于归类与车卡建议）</label>
           <Select value={state.moduleId || NONE} onValueChange={(v) => set({ moduleId: v === NONE ? '' : v })}>
             <SelectTrigger className="w-full"><SelectValue placeholder="— 不指定 —" /></SelectTrigger>
@@ -54,11 +53,6 @@ export function SheetIdentity({ sheet, onPickOccupation }: { sheet: Sheet; onPic
           </Select>
         </div>
       </div>
-      {selectedModule && hasGuidance(selectedModule.character_guidance) && (
-        <div style={{ marginTop: 12 }}>
-          <CharacterGuidanceCard guidance={selectedModule.character_guidance as CharacterGuidance} moduleTitle={selectedModule.title} />
-        </div>
-      )}
       <ImportTools sheet={sheet} />
     </>
   )
@@ -73,7 +67,11 @@ function ImportTools({ sheet }: { sheet: Sheet }) {
   const loadBuilt = (data: ImportedCharacterData) => dispatch({ type: 'load', state: applyBuilt(state, data, table, specs) })
 
   const importExcel = async (file: File) => {
-    if (!state.moduleId) { toast.error('请先选择模组'); return }
+    if (!state.moduleId) {
+      toast.info('导入要按模组的规则表解析：请先在「所属模组」里选一个')
+      jumpTo('cs-module', 'center')
+      return
+    }
     setBusy('excel')
     try {
       const form = new FormData()
@@ -87,7 +85,11 @@ function ImportTools({ sheet }: { sheet: Sheet }) {
   }
 
   const aiGenerate = async () => {
-    if (!state.moduleId) { toast.error('请先选择模组'); return }
+    if (!state.moduleId) {
+      toast.info('AI 要按模组背景建卡：请先在「所属模组」里选一个')
+      jumpTo('cs-module', 'center')
+      return
+    }
     setBusy('ai')
     try {
       const data = await generateCharacter<ImportedCharacterData & { _fallback?: boolean }>({ module_id: state.moduleId, hint: hint.trim() })
@@ -111,7 +113,8 @@ function ImportTools({ sheet }: { sheet: Sheet }) {
       <GiDiceSixFacesSix aria-hidden style={{ color: 'var(--color-text-accent)', marginLeft: 12 }} />
       <input className="input text-sm" style={{ flex: 1, minWidth: 160 }} value={hint} disabled={!!busy}
         placeholder="让 AI 建卡：角色概念（可选，如：胆小的图书管理员）" onChange={(e) => setHint(e.target.value)} />
-      <button className="btn-secondary btn-sm" disabled={!!busy || !state.moduleId} onClick={() => void aiGenerate()}>
+      <button className="btn-secondary btn-sm" disabled={!!busy} onClick={() => void aiGenerate()}
+        title={state.moduleId ? undefined : '需要先选所属模组'}>
         {busy === 'ai' ? '生成中…' : 'AI 生成'}
       </button>
       {state.imported && (

@@ -1,6 +1,9 @@
 // 人物卡右栏：派生值、建卡清单（点哪项跳到哪块）、本桌的建卡规则。
 import { Check } from 'lucide-react'
 import { useDerivedStats } from '@/components/character/useCocData'
+import { CharacterGuidanceCard } from '@/components/module/CharacterGuidanceCard'
+import { hasGuidance, useModuleStore, type CharacterGuidance } from '@/stores/moduleStore'
+import { GENERAL_GUIDANCE } from './guidance'
 import type { Area } from './creationRules'
 import type { useSheet } from './useSheet'
 import { jumpTo } from './jump'
@@ -48,6 +51,7 @@ export function SheetRail({ sheet }: { sheet: Sheet }) {
           </button>
         )
       })}
+      <Guidance moduleId={state.moduleId} />
       <div className="cs-rail-sec">
         <h4>本桌建卡规则</h4>
         <p className="cs-hint">
@@ -58,5 +62,22 @@ export function SheetRail({ sheet }: { sheet: Sheet }) {
         </p>
       </div>
     </aside>
+  )
+}
+
+/** 车卡建议常驻右栏，边车卡边对照：选了模组且有建议就用模组的，否则给通用建议。 */
+function Guidance({ moduleId }: { moduleId: string }) {
+  const { modules } = useModuleStore()
+  const mod = modules.find((m) => m.id === moduleId)
+  const own = mod && hasGuidance(mod.character_guidance) ? mod.character_guidance as CharacterGuidance : null
+  return (
+    <div className="cs-rail-sec cs-guidance">
+      <CharacterGuidanceCard guidance={own ?? GENERAL_GUIDANCE} moduleTitle={own ? mod!.title : '通用'} />
+      {!own && (
+        <p className="cs-hint" style={{ marginTop: 6 }}>
+          {mod ? '这个模组还没有车卡建议（房主可在模组详情页生成）。' : '在「基础信息」里选了所属模组，这里会换成那个本子的建议。'}
+        </p>
+      )}
+    </div>
   )
 }

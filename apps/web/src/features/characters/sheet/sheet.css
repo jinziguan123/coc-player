@@ -135,7 +135,8 @@
 .cs-rail-sec { padding: 12px 0; border-top: 1px solid var(--color-border); }
 
 /* 底栏 */
-.cs-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 10px 0; margin-top: 8px; background: linear-gradient(0deg, var(--color-bg-primary) 70%, transparent); }
+/* z-index 要高过技能表吸顶的表头（z-index 1），否则表头滚到底栏位置时会盖住它 */
+.cs-foot { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 12px 0 10px; margin-top: 8px; background: linear-gradient(0deg, var(--color-bg-primary) 82%, transparent); }
 .cs-foot .msg { font-size: 12.5px; color: var(--color-text-secondary); }
 .cs-foot .msg.bad { color: var(--color-danger); }
 
@@ -148,3 +149,21 @@
 @media (prefers-reduced-motion: reduce) {
   .cs-attr.is-rolled { animation: none; }
 }
+
+/* 跳到某个字段（如 AI 生成缺模组时跳到「所属模组」）时，闪一下轮廓 */
+.cs-wide.is-flash { outline: 1px solid var(--color-accent); outline-offset: 4px; transition: outline-color .3s; }
+.cs-guidance .guidance-card { margin: 0; }
+
+/* 创建前 AI 的契合度顾虑：页面中央的浮窗，可收起成底部小条（见 EvalConcerns.tsx）。
+   居中不用 transform——Motion 的缩放动画要占用它，改用 inset:0 + margin:auto。 */
+.cs-eval { position: fixed; inset: 0; margin: auto; z-index: 60; width: min(560px, 92vw); height: fit-content; max-height: 72vh; display: flex; flex-direction: column; border: 1px solid var(--color-accent); background: var(--color-bg-card); box-shadow: 0 24px 60px rgba(0, 0, 0, .55); }
+.cs-eval-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--color-border); color: var(--color-text-accent); }
+.cs-eval-h h3 { font-family: var(--font-title); font-size: 15px; letter-spacing: .08em; }
+.cs-eval-ic { display: inline-flex; padding: 4px; color: var(--color-text-secondary); }
+.cs-eval-ic:hover { color: var(--color-text-accent); }
+.cs-eval-b { overflow: auto; padding: 10px 16px; font-size: 13.5px; line-height: 1.8; }
+.cs-eval-b ul { margin: 2px 0 10px 18px; list-style: disc; }
+.cs-eval-label { font-size: 11.5px; letter-spacing: .14em; color: var(--color-text-secondary); }
+.cs-eval-f { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--color-border); }
+.cs-eval-pill { position: fixed; left: 0; right: 0; bottom: 84px; margin: 0 auto; z-index: 60; width: fit-content; display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; font-size: 13px; border: 1px solid var(--color-accent); background: var(--color-bg-card); color: var(--color-text-accent); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+.cs-eval-pill:hover { background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-card)); }

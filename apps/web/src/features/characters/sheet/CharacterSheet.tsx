@@ -22,6 +22,7 @@ import { SheetExtras, SheetGear, SheetStory } from './SheetStory'
 import { SheetRail } from './SheetRail'
 import { jumpTo } from './jump'
 import { OccupationDialog } from './OccupationDialog'
+import { EvalConcerns, type EvalResult } from './EvalConcerns'
 import './sheet.css'
 
 const METHODS: Array<[Method, string]> = [['roll', '掷骰'], ['buy', '点数购买'], ['quick', '快速车卡']]
@@ -59,7 +60,8 @@ export function CharacterSheet({ initial, onCreated, onCancel, cancelLabel = '�
   const { modules, fetchModules } = useModuleStore()
   const [occOpen, setOccOpen] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [evalResult, setEvalResult] = useState<{ warnings: string[]; suggestions: string[] } | null>(null)
+  const [evalResult, setEvalResult] = useState<EvalResult | null>(null)
+  const [evalCollapsed, setEvalCollapsed] = useState(false)
 
   useEffect(() => { if (modules.length === 0) void fetchModules() }, [modules.length, fetchModules])
 
@@ -135,7 +137,7 @@ export function CharacterSheet({ initial, onCreated, onCancel, cancelLabel = '�
       })
       setCreating(false)
       if (r.compatible && r.warnings.length === 0) await doCreate()
-      else setEvalResult(r)
+      else { setEvalResult(r); setEvalCollapsed(false) }
     } catch {
       setCreating(false)
       await doCreate()
@@ -170,21 +172,6 @@ export function CharacterSheet({ initial, onCreated, onCancel, cancelLabel = '�
           <Card id="cs-story" title="背景故事" en="Backstory"><SheetStory sheet={sheet} /></Card>
           <Card id="cs-extra" title="神话、关系与经历" en="Mythos · Companions"><SheetExtras sheet={sheet} /></Card>
 
-          {evalResult && (
-            <div className="cs-card" style={{ borderColor: 'var(--color-accent)' }}>
-              <div className="cs-card-b" style={{ paddingTop: 12 }}>
-                <b>与所选模组的契合度有些顾虑</b>
-                <ul className="cs-hint" style={{ margin: '6px 0 10px 18px', listStyle: 'disc' }}>
-                  {[...evalResult.warnings, ...evalResult.suggestions].map((w) => <li key={w}>{w}</li>)}
-                </ul>
-                <div className="flex gap-2">
-                  <button className="btn-secondary btn-sm" onClick={() => setEvalResult(null)}>回去修改</button>
-                  <button className="btn-primary btn-sm" disabled={creating} onClick={() => { setEvalResult(null); void doCreate() }}>仍然创建</button>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="cs-foot">
             <span className={`msg${blocked ? ' bad' : ''}`}>{footMsg}</span>
             <span className="cs-grow" />
@@ -199,6 +186,10 @@ export function CharacterSheet({ initial, onCreated, onCancel, cancelLabel = '�
         </div>
         <SheetRail sheet={sheet} />
       </div>
+
+      <EvalConcerns result={evalResult} collapsed={evalCollapsed} creating={creating}
+        onCollapse={() => setEvalCollapsed(true)} onExpand={() => setEvalCollapsed(false)}
+        onDismiss={() => setEvalResult(null)} onCreateAnyway={() => void doCreate()} />
 
       <OccupationDialog open={occOpen} onOpenChange={setOccOpen} occupations={occupations} categories={categories}
         attrs={attrs} current={state.occName}
