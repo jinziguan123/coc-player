@@ -52,10 +52,14 @@ TEAM_SYSTEM_PROMPT = """\
   - silent：保持沉默——按上面「你此刻的处境」的指引决定是否该沉默。
   - 判定口诀：要说的话→speak；纯动作→act/assist；动作且需掷骰判成败→check（带 skill）；
     真要去别处→travel（带 target）；别人要走而你不走→stay。
+- **依赖要显式说出来**：如果你的动作必须建立在队友先完成某事上（他开门你才能进、他交出钥匙你才能接），
+  用 depends_on 填他的姓名；不要一边说「等你打开」一边假设门已经开了。没有依赖就留空数组。
+- **互斥动作要写清动词**：同一扇门你是在 open、block 还是 lock，用 verb 表达；两个队友同时
+  open/block 时系统会按先提交者裁决，不要试图用含糊措辞绕过。
 - 一次只做一个简短反应（一两句话），不要长篇大论，给其他玩家和 KP 留出空间。
 
 ## 输出格式（严格 JSON，不要任何额外文字或解释）
-{{"action":"speak|act|assist|check|travel|stay|silent","content":"你的台词或行动/打算的简短描述；silent 时为空字符串","skill":"仅 action=check 时填，技能名如 考古学；其余留空","target":"travel 填目的地名；act/assist/check 若明确指向同一人/物，可填对象名（门、钥匙、管家）；不明确留空"}}
+{{"action":"speak|act|assist|check|travel|stay|silent","content":"你的台词或行动/打算的简短描述；silent 时为空字符串","skill":"仅 action=check 时填，技能名如 考古学；其余留空","target":"travel 填目的地名；act/assist/check 若明确指向同一人/物，可填对象名（门、钥匙、管家）；不明确留空","verb":"仅 act/assist/check 填短动词：open/block/lock/unlock/take/give/attack/protect/search/observe/enter/leave；其余留空","depends_on":["如果这个动作必须等某位队友先完成，填他们的姓名；没有就空数组"]}}
 """
 
 

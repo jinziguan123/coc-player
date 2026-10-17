@@ -338,6 +338,7 @@ async def _run_team_turn(
 
     seen_actions: list[tuple[str, str]] = []
     team_intents: list[tuple] = []
+    committed_actors: set[str] = set()
 
     async def _commit(teammate: Character, raw: str | None = None, decision: dict | None = None):
         if decision is None:
@@ -543,6 +544,8 @@ async def _run_team_turn(
                 if action in ("speak", "silent"):
                     async for chunk in _commit(teammate, decision=decision):
                         yield chunk
+                    committed_actors.add(teammate.id)
+                    committed_actors.add(teammate.name)
                 else:
                     decision["observes_seq"] = snapshot_seq
                     team_intents.append((
@@ -550,7 +553,7 @@ async def _run_team_turn(
                         team_intent.from_decision(teammate, decision, snapshot_seq),
                     ))
 
-    resolved = team_intent.resolve_team_intents(team_intents)
+    resolved = team_intent.resolve_team_intents(team_intents, committed_actors)
     if len(resolved) < len(team_intents):
         logger.info(
             "队友意图冲突：%d 条同目标动作被裁决丢弃 session=%s",

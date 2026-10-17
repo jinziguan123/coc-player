@@ -138,4 +138,6 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 新增 ExecutionScope：分头组声明 group/scene/actor 边界；scene_change/start_combat/start_chase 不再在组内直接执行，改为 CoordinatorIntent，由回合协调器统一接受/拒绝（重复请求提示忽略，非主队组拒绝切场景/追逐）。
 - 新增 TeamIntent/resolve_team_intents：队友决策带 observes_seq 与 target；act/assist/check 对同一 target 的并发写只保留先提交者，speak/silent 仍完成即提交；TeamAgent 输出格式补充 target 语义。
 - 验证：后端 2540 passed / 11 skipped、ruff 通过。
+- TeamAgent 输出新增 verb/depends_on；TeamIntent 解析中文/英文动词别名，互斥矩阵覆盖 open/block/lock/take/give/attack/protect 等；依赖按拓扑排序，缺失/成环依赖整支丢弃。
+- 验证更新：后端 2546 passed / 11 skipped、ruff 通过。
 - 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。已覆盖：旧 [SAY]/分头路径 NPC 边界、分头工具循环、ContextBundle、队友 relevance gate/重复冲突兜底、agent_trace 落表与 KP 面板。后续可继续做语义级冲突裁决和跨 Agent 的完整调度器。
