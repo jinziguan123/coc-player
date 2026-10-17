@@ -1507,7 +1507,8 @@ export function GameSessionPage() {
                   ? [{ label: '本局风格', icon: <GiQuillInk size={13} />, onClick: () => setShowStyle(true),
                        title: '文风与画风：几档预设或自己写一段，留空则跟随模组', separated: !myCharId }]
                   : []),
-                ...(isKp
+                // 运行轨迹：后端允许房主或真人 KP 席读取。AI 当 KP 的局里调用最多，房主必须看得到
+                ...(isKp || isHost
                   ? [{ label: '运行轨迹', icon: <GiScrollUnfurled size={13} />, onClick: () => setShowTrace(true),
                        title: '每次 AI 调用的耗时与用量、NPC / 战斗的动作意图', separated: true }]
                   : []),
@@ -2364,7 +2365,7 @@ export function GameSessionPage() {
       )}
       </div>
 
-      {isKp && <AgentTracePanel sessionId={currentSession.id} open={showTrace} onClose={() => setShowTrace(false)} />}
+      {(isKp || isHost) && <AgentTracePanel sessionId={currentSession.id} open={showTrace} onClose={() => setShowTrace(false)} />}
       <KpConsoleDock
         isKp={isKp} combat={combat} sessionId={currentSession.id} combatLog={combatLog}
         kpCollapsed={kpCollapsed} kpFullDesk={kpFullDesk} desk={desk} immersiveOn={immersiveOn}
