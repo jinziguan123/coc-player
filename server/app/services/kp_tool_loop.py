@@ -36,6 +36,7 @@ from app.services import (
     module_rag_service,
     narration_protocol,
     npc_identity,
+    npc_runtime,
     rule_options_service,
     rulebook_service,
     session_service,
@@ -47,6 +48,15 @@ from app.services import (
 from app.services.event_protocol import make_chunk as _make_chunk
 
 logger = logging.getLogger(__name__)
+
+
+def _npc_guard(db, session_id, game_session, module, llm, player_char):
+    if llm is None:
+        return None
+    return npc_runtime.NpcDialogueGuard(
+        npc_runtime.NpcRuntime(db, session_id, game_session, module, llm, player_char)
+    )
+
 
 DICE_CHECK_RE = command_protocol.DICE_CHECK_RE
 OPPOSED_CHECK_RE = command_protocol.OPPOSED_CHECK_RE
@@ -640,6 +650,7 @@ async def _run_kp_agent_loop(
     event_order: list | None = None,
     masker_factory: Callable[[], npc_identity.NameMasker] | None = None,
     usage_probe: dict | None = None,
+    npc_guard=None,
 ) -> AsyncIterator[str]:
     """KP agent loop：与 _stream_narration_filtered 并列的新路径（use_tool_calls 开启时用）。
 
@@ -712,6 +723,7 @@ async def _run_kp_agent_loop(
                 shown_dialogues=shown_dialogues,
                 prior_narration=result[0],
                 masker=_step_masker(),
+                npc_guard=npc_guard,
             ):
                 yield chunk
         except BaseException:
@@ -815,6 +827,7 @@ async def _run_kp_agent_loop(
                 shown_dialogues=shown_dialogues,
                 prior_narration=result[0],
                 masker=_step_masker(),
+                npc_guard=npc_guard,
             ):
                 yield chunk
         except BaseException:
@@ -1204,6 +1217,9 @@ async def _handle_rule_lookup(
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
             masker=npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             yield chunk
     finally:
@@ -1266,6 +1282,9 @@ async def _handle_module_lookup(
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
             masker=npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             yield chunk
     finally:
@@ -1322,6 +1341,9 @@ async def _handle_recall_history(
         async for chunk in _stream_narration_filtered(
             kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
             masker=npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             yield chunk
     finally:

@@ -125,4 +125,5 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 新增 `agent_trace` 结构化日志：NPC / 队友调用记录 session、agent、耗时、token usage、timeout/outcome，先供运维 grep，不新增表。
 - `NpcRuntime` 增加 30 秒回应超时 `NpcResponseTimeout`，超时不落 NPC 台词、不阻塞 KP 工具循环；新增超时与轨迹测试。
 - 新增 `NpcState` 只读状态视图：对话/战斗共享同一份身份、人设、位置与私有记忆；幕后仍保留独立世界推演模式。
-- 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。尚未覆盖：通用 Actor 抽象、分头行动的工具循环、旧 [SAY] 路径的严格切断；agent_trace 目前只有结构化日志，未落表/未进 UI。
+- 旧 [SAY] / 分头路径接上 `NpcDialogueGuard`：扫描器只把真实说话人放在私有 metadata，过滤器在出站前剥掉；有名 NPC 的显式台词改由 NpcRuntime 生成并按原偏移回写，不再让 KP 的全局上下文直接代言。
+- 验证：后端 2523 passed / 11 skipped、ruff 通过；更新了 NPC 知识边界、NPC 运行时、队友并发/超时、导演信号接线等测试。尚未覆盖：通用 Actor 抽象、分头行动的工具循环、队友 relevance gate/冲突检测；agent_trace 目前只有结构化日志，未落表/未进 UI。

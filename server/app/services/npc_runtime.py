@@ -46,14 +46,17 @@ class NpcRuntime:
         self.llm = llm
         self.player_char = player_char
 
-    async def reply(self, npc_id: str, trigger: str) -> tuple[list[str], str]:
-        """让 NPC 基于自己的可见上下文回应；台词落库、广播、写互动史。"""
+    async def generate(self, npc_id: str, trigger: str) -> tuple[str, str]:
+        """只生成 NPC 台词与对外署名，不落库、不广播。
+
+        旧 SAY 文本路径的守卫用它把 KP 代写的台词换掉，再交给原持久化流程按原偏移落库；
+        这样不会出现「NPC 事件先落、KP 旁白后落」的顺序错位。
+        """
         events = session_service.get_session_events(self.db, self.session_id)
         messages = build_npc_context(
             npc_id, self.game_session, self.module, events, trigger_context=trigger,
         )
         state = npc_state.NpcState.load(self.module, self.game_session, npc_id)
-        true_name = state.name
         trace = agent_trace.start(self.session_id, "npc", npc_id=npc_id)
         try:
             line = await asyncio.wait_for(
@@ -70,7 +73,13 @@ class NpcRuntime:
         # 因为他可能在这一句里自报家门。
         shown_name = npc_identity.build_masker(
             self.db, self.session_id, self.module,
-        )(true_name, extra_prose=line)
+        )(state.name, extra_prose=line)
+        agent_trace.finish(trace, provider=self.llm)
+        return shown_name, line
+
+    async def reply(self, npc_id: str, trigger: str) -> tuple[list[str], str]:
+        """让 NPC 基于自己的可见上下文回应；台词落库、广播、写互动史。"""
+        shown_name, line = await self.generate(npc_id, trigger)
         event = session_service.add_event(
             self.db, self.session_id, "dialogue", line,
             actor_id=npc_id, actor_name=shown_name,
@@ -89,5 +98,34 @@ class NpcRuntime:
                 ws, npc_id, event.sequence_num, f"受场景触发而行动/开口：{trigger}",
             ),
         )
-        agent_trace.finish(trace, provider=self.llm)
         return chunks, line
+
+
+class NpcDialogueGuard:
+    """旧文本路径的 NPC 守卫：把有名 NPC 的 SAY 改写成 NpcRuntime 生成。
+
+    只负责辨认与生成；落库仍由原路径按原偏移完成，避免事件顺序错位。
+    """
+
+    def __init__(self, runtime: NpcRuntime) -> None:
+        self.runtime = runtime
+        self._ids: dict[str, str] = {}
+        for npc in (runtime.module.npcs or []):
+            for key in ("id", "name"):
+                value = str(npc.get(key) or "").strip()
+                if value:
+                    self._ids[value] = str(npc.get("id") or value)
+        for card in world_memory.promoted_npc_cards(runtime.game_session.world_state or {}):
+            for key in ("id", "name"):
+                value = str(card.get(key) or "").strip()
+                if value:
+                    self._ids[value] = str(card.get("id") or value)
+
+    def named_id(self, speaker: str) -> str | None:
+        return self._ids.get((speaker or "").strip())
+
+    async def rewrite(self, speaker: str, trigger: str) -> tuple[str, str] | None:
+        npc_id = self.named_id(speaker)
+        if not npc_id:
+            return None
+        return await self.runtime.generate(npc_id, trigger)

@@ -202,7 +202,12 @@ class NarrationScanner:
         shown = self._shown_name(speaker, text)
         self.extracted.append((shown, text))
         self.dialogue_marks.append((len(self.narration), shown, text))
-        return self._mk("npc_dialogue", text, actor_name=shown)
+        # 私有的真实说话人名：只给 filter_narration_stream 的 NPC 守卫辨认用，
+        # 出 filter 前一定会剥掉，绝不进客户端 metadata（遮名不能在这里破功）。
+        return self._mk(
+            "npc_dialogue", text, actor_name=shown,
+            metadata={"_speaker": speaker},
+        )
 
     def _emit_say(self) -> Any | None:
         # 气泡本身即「引号」，KP 若在 [SAY] 内又套了引号（[SAY]“台词”[/SAY]）会让气泡显示成

@@ -42,6 +42,7 @@ from app.services import (
     kp_tool_loop,
     narration_protocol,
     npc_identity,
+    npc_runtime,
     planned_effects,
     combat_service,
     rule_options_service,
@@ -57,6 +58,17 @@ from app.services.event_protocol import luck_offer_event_id
 from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
+
+
+def _npc_dialogue_guard(db, session_id, game_session, module, llm, player_char):
+    """旧文本路径 / 分头路径的 NPC 守卫；无 LLM 的确定性测试环境不启用。"""
+    if llm is None:
+        return None
+    runtime = npc_runtime.NpcRuntime(
+        db, session_id, game_session, module, llm, player_char,
+    )
+    return npc_runtime.NpcDialogueGuard(runtime)
+
 
 # 兼容既有调用与测试；协议的单一事实来源位于 command_protocol。
 DICE_CHECK_RE = command_protocol.DICE_CHECK_RE
@@ -520,6 +532,9 @@ async def _run_generation(
                 event_order=event_order,
                 masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
                 usage_probe=usage_probe,
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
@@ -552,6 +567,9 @@ async def _run_generation(
                 kp, messages, result, npcs=matcher_npcs, party_names=party_names,
                 shown_dialogues=shown_dialogues,
                 masker=npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
             ):
                 room_hub.broadcast(session_id, chunk)
         except BaseException:
@@ -740,6 +758,9 @@ async def _run_split_narrations(
             async for chunk in _stream_narration_filtered(
                 kp, messages, result, npcs=matcher_npcs, group_label=label,
                 masker=npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, llm, player_char,
+                ),
                 **stream_kwargs,
             ):
                 room_hub.broadcast(session_id, chunk)
@@ -1302,6 +1323,9 @@ async def _run_kp_turn_tool_loop(
             party_names=party_names,
             event_order=event_order,
             masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_dialogue_guard(
+                db, session_id, game_session, module, llm, player_char,
+            ),
         ):
             if hold:
                 held.append(chunk)
@@ -1427,6 +1451,9 @@ async def _run_kp_turn(
                 async for chunk in _stream_narration_filtered(
                     kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
                     masker=npc_identity.build_masker(db, session_id, module),
+                    npc_guard=_npc_dialogue_guard(
+                        db, session_id, game_session, module, llm, player_char,
+                    ),
                 ):
                     if hold:
                         held.append(chunk)
@@ -2275,6 +2302,9 @@ async def _run_epilogue_generation(session_id: str) -> None:
             async for chunk in _stream_narration_filtered(
                 kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
                 masker=npc_identity.build_masker(db, session_id, module),
+                npc_guard=_npc_dialogue_guard(
+                    db, session_id, game_session, module, kp, player_char,
+                ),
             ):
                 room_hub.broadcast(session_id, chunk)
         except asyncio.CancelledError:
