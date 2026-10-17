@@ -100,3 +100,10 @@ Original prompt: 根据/Users/jinziguan/Desktop/trpg-player/docs/plans/2026-07-2
 - 修复「选中在座调查员却开不了追逐」：旧表单提交 `character:<id>`，后端按裸 id 比对失败；现在前后端都去前缀，并兼容 `quarry`/`quarries`、`pursuer`/`pursuers` 与列表/逗号串。
 - 统一 KP 工作台控件：console dock 内的单行 input 固定 36px，与 Select / MultiSelect 同高；追逐表单改为两行等宽字段，数字框统一 112px；新增 `KpStartCombatForm`、`KpStartChaseForm`，不再在 `KpActionForm` 里拼大小不一的裸控件；`KpChaseStage` 的障碍输入也统一高度。
 - 验证：后端 2528 passed / 11 skipped、ruff 通过；前端 77 个测试文件 523 项、typecheck、Vite build、oxlint 0 errors；真实 KP 会话浏览器验收开战/追逐表单（截获请求确认 payload，未写库），所有单行控件高度一致、无横向溢出。
+
+## 2026-10-17 追逐发起后主台不出现
+
+- 现象：真人 KP 发起追逐后，追逐态已落库，刷新页面能看到追逐台；但当前页面不切换，底栏只停在原写作台。
+- 根因：发起动作的 HTTP 成功只返回 `result`，页面依赖 `/live` 的 `chase_start` 事件更新 `chase`；SSE 断线或该条事件丢失时，页面没有主动重拉权威快照，直到刷新才从 `/sync` 里读到追逐态。
+- 修复：新增 `useKpPrefill.bumpSync`，KP 动作成功后由写作台发出完成信号；游戏页订阅该信号并调用 `resyncState()` 重拉 `/sync`，用服务端快照兜底战斗/追逐的起停，不再只赌单条广播。
+- 验证：在浏览器里把 `/live` 请求全部 abort（模拟实时事件丢失）后发起追逐，主台仍能自动出现；随后用 API 中止追逐，库中 `chase_states` 归零。前端 typecheck / 523 项测试 / build / oxlint 均通过。

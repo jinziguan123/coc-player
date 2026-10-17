@@ -336,7 +336,7 @@ export function HumanKpPanel({ sessionId, turnReady = false, variant = 'inline',
       const response = await api.post<{ result?: string }>(`/sessions/${sessionId}/kp/action`, { action: nextAction, payload })
       const result = response.result || success
       setLastActionResult(result)
-      setVitalsTick((t) => t + 1)   // 动作可能改了血量/理智，监控列跟着刷
+      setVitalsTick((t) => t + 1); useKpPrefill.getState().bumpSync()  // 体征可能变；起/停战斗、追逐后重拉 /sync
       toast.success(success)
       return result
     } catch (error) {

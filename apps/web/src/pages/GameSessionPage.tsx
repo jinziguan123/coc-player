@@ -631,6 +631,11 @@ export function GameSessionPage() {
     }
   }, [sessionId])
 
+  const kpSyncTick = useKpPrefill((s) => s.syncTick)
+  useEffect(() => {
+    if (kpSyncTick) void resyncState()
+  }, [kpSyncTick, resyncState])
+
   // 节流刷新会话（席位/在线变更用）：合并 400ms 内的连续 presence/seat，避免风暴
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refetchSession = useCallback(() => {
