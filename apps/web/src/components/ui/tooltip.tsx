@@ -31,7 +31,7 @@ const TooltipContent = React.forwardRef<
         <TooltipPrimitive.Portal forceMount>
           <TooltipPrimitive.Content ref={ref} forceMount asChild sideOffset={sideOffset} {...props}>
             <m.div
-              className={cn('z-50 overflow-hidden rounded px-3 py-1.5 text-xs shadow-md', className)}
+              className={cn('tooltip-content z-50 overflow-hidden rounded px-3 py-1.5 text-xs shadow-md', className)}
               variants={popoverVariants}
               initial="initial"
               animate="enter"

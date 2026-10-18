@@ -34,7 +34,7 @@ export function ConfirmDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       {children(() => setOpen(true))}
-      <DialogContent>
+      <DialogContent className="confirm-dialog">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

@@ -1,0 +1,280 @@
+/* ===== 手机适配：设置与通用弹层线 =====
+ *
+ * 本文件只写 <= 767px 的手机覆盖规则；桌面样式保持原样。
+ * 具体范围见团队任务说明。
+ *
+ * 约定：index.css 在 @import 之后还有同名规则，所以这里的覆盖一律用
+ * 「.settings-page …」这类更高特异性的选择器，尽量不靠 !important；
+ * 只有调用方写死在 style 里的 maxHeight 例外（弹窗滚动区）。
+ */
+
+@media (max-width: 767px) {
+  /* ── 设置页：左侧二级栏折成顶部横向页签 ─────────────────────────
+     外层在手机上变成 flex-col（SettingsPage 用 md:flex-row 回到桌面），
+     导航在内容滚动区之外，因此始终可见；内容区独立滚动，页面不会整页横滚。 */
+  .settings-page > .settings-subnav {
+    display: flex;
+    align-items: center;
+    width: auto;
+    flex: none;
+    gap: 0.15rem;
+    padding: 0.1rem 0 0.35rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+    background: transparent;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .settings-page > .settings-subnav::-webkit-scrollbar { display: none; }
+
+  /* 手机上没有空间给「设置」这行小标题 */
+  .settings-page > .settings-subnav .subnav-title { display: none; }
+
+  .settings-page > .settings-subnav .subnav-item {
+    width: auto;
+    flex: 0 0 auto;
+    gap: 0.4rem;
+    margin-bottom: 0;
+    padding: 0.55rem 0.8rem;
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+  }
+  .settings-page > .settings-subnav .subnav-item svg { font-size: 1rem; }
+
+  /* 横向页签的选中提示改成下缘色带——左缘竖线是侧边栏的语言 */
+  .settings-page > .settings-subnav .subnav-active {
+    background: linear-gradient(180deg, transparent 55%, rgba(200, 162, 90, 0.14));
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+  }
+  :root[data-theme='parchment'] .settings-page > .settings-subnav .subnav-active {
+    background: rgba(139, 37, 0, 0.07);
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+  }
+
+  /* 内容区全宽单列：外层 .app-main 已留了 1rem 左右边距，这里不再叠加。
+     顶部不留 padding：AI 配置的 sticky 页签要严丝合缝贴住滚动区顶端，
+     否则滚动时内容会从页签上方的内边距缝里露出来。留白改给直接子元素。 */
+  .settings-page > .settings-content {
+    padding: 0 0 0.5rem;
+  }
+  .settings-page > .settings-content > * { margin-top: 0.65rem; }
+  .settings-page .page-title {
+    letter-spacing: 0.1em;
+    margin-bottom: 1rem;
+  }
+
+  /* ── AI 配置 ───────────────────────────────────────────────────── */
+  /* 二级页签 sticky 在内容滚动区顶部即可：顶部横向导航在滚动区之外，无需 top 偏移 */
+  .settings-content .settings-tabs {
+    top: 0;
+    margin: 0 0 0.2rem;
+    padding: 0.3rem 0 0.6rem;
+    gap: 0.5rem;
+    background: var(--color-bg-primary);
+  }
+
+  /* 岗位卡与配置行：单列全宽 */
+  .settings-page .role-grid,
+  .settings-page .role-grid--single {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+  .settings-page .profile-row {
+    gap: 0.5rem;
+    padding: 0.55rem 0.65rem;
+  }
+  .settings-page .profile-row__actions { gap: 0.25rem; }
+  /* 列表行里的下拉菜单贴右缘展开时别被裁掉 */
+  .settings-page .profile-row__actions .btn-secondary { padding-inline: 0.5rem; }
+
+  /* 外观：主题卡从并排改成整行，点击区更大 */
+  .settings-page .theme-option {
+    flex: 1 1 100%;
+    min-width: 0 !important;
+  }
+
+  /* RAG 统计：五列在窄屏里收紧字号/内边距先尝试放下；实在放不下仍可横向滚动 */
+  .settings-page .rag-table-wrap {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .settings-page .rag-table-wrap table {
+    min-width: 0 !important;
+    font-size: 0.7rem;
+  }
+  .settings-page .rag-table-wrap th,
+  .settings-page .rag-table-wrap td {
+    padding: 0.35rem 0.28rem !important;
+  }
+  /* 表头保持一行：宽度不够时让表格横向滚动，别把「调 用」拆成竖排单字 */
+  .settings-page .rag-table-wrap th { white-space: nowrap; }
+  .settings-page .rag-table-wrap td { overflow-wrap: anywhere; }
+  .settings-page .rag-toolbar { align-items: stretch; }
+
+  /* ── 联机面板 ─────────────────────────────────────────────────── */
+  .settings-page .network-settings { width: 100%; }
+  .settings-page .card { padding: 0.95rem 1rem; }
+  .settings-page .setting-head { align-items: flex-start; }
+  .settings-page .setting-head .switch-state { display: none; }
+  .settings-page .quota-editor {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .settings-page .quota-editor .input { width: min(100%, 10rem); }
+  .settings-page .quota-hint { flex-basis: 100%; }
+  .settings-page .copy-line {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+  .settings-page .netlink-invite .input,
+  .settings-page .netlink-invite .btn-secondary { width: 100%; }
+  .settings-page .netlink-peer,
+  .settings-page .netlink-peer--pending { max-width: 100%; }
+  /* 待批准行：自称 + 操作占一行，备注框独占下一行 */
+  .settings-page .netlink-peer--pending { flex-wrap: wrap; }
+  .settings-page .netlink-peer__label {
+    order: 3;
+    flex: 1 1 100%;
+    width: auto;
+  }
+
+  /* ── 通用弹层：100dvh + 安全区 ─────────────────────────────────── */
+  .modal-positioner {
+    --modal-top-offset: calc(0.75rem + env(safe-area-inset-top, 0px));
+    /* 居中时也留一点上沿呼吸位：panel 高度已按 100dvh 算过，加这个不会顶出视口 */
+    padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  }
+  .modal-panel {
+    --modal-max-height: calc(
+      100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
+    );
+  }
+  /* 带内边距的窗体内边距收一点，并给底部安全区留位置 */
+  .modal-panel.p-5 {
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* AI 配置 / 生图配置这类大表单：标题与底部按钮固定，只让中间滚动 */
+  .modal-panel--form {
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+  .modal-panel--form .modal-form-title { flex: none; }
+  .modal-panel--form .modal-form-tabs {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .modal-panel--form .modal-form-tablist { flex: none; }
+  .modal-panel--form .modal-form-panes {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .modal-panel--form .modal-form-pane {
+    max-height: none !important;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal-panel--form .modal-form-actions { flex: none; }
+  .modal-panel--form .image-modal-shell {
+    flex: 1 1 auto;
+    max-height: none !important;
+  }
+  .modal-panel--form .image-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal-panel--form .modal-form-actions .btn-primary,
+  .modal-panel--form .modal-form-actions .btn-secondary {
+    min-height: 2.5rem;
+  }
+
+  /* Radix Dialog：窄屏左右各留 1rem（dialog.tsx 里已改成 calc(100% - 2rem)），
+     非 flex 布局的窗体自己滚动；flex 布局的（角色编辑等）保留内部滚动结构。 */
+  .dialog-panel {
+    --dialog-max-height: calc(
+      100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
+    );
+    padding: 1rem 0.95rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+  .dialog-panel:not(.flex) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dialog-footer { flex-wrap: wrap; }
+  .dialog-footer > button { flex: 1 1 auto; min-height: 2.5rem; }
+
+  /* ── Radix 浮层：不被屏幕边缘裁切 ─────────────────────────────── */
+  [data-radix-popper-content-wrapper] { max-width: calc(100vw - 1rem); }
+  [data-radix-popper-content-wrapper] > * { max-width: calc(100vw - 1rem); }
+  .combo-list,
+  .more-menu-list { max-width: calc(100vw - 1.5rem); }
+  .more-menu-item {
+    padding: 0.55rem 0.6rem;
+    font-size: 0.8rem;
+  }
+  .combo-option {
+    padding: 0.55rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  /* 页签列表可横向滚动：手机上不把标签压成一条条竖字 */
+  .tabs-list {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs-list::-webkit-scrollbar { display: none; }
+  .tabs-list > [role='tab'] {
+    flex: 0 0 auto;
+    min-width: max-content;
+    padding-inline: 0.85rem;
+  }
+
+  /* ── 其他通用组件 ─────────────────────────────────────────────── */
+  .tooltip-content {
+    max-width: calc(100vw - 2rem);
+    white-space: normal;
+    line-height: 1.5;
+    text-align: center;
+  }
+  .number-field { max-width: 100%; }
+  .app-toast { width: min(356px, calc(100vw - 1.5rem)); }
+  [data-sonner-toaster] { max-width: calc(100vw - 1.5rem); }
+  /* 关闭钮的主题上色已由 index.css 的 [data-sonner-toast].app-toast 统一负责，
+     手机端只需把它再做大一点，触摸更稳。 */
+  [data-sonner-toast].app-toast [data-close-button] { width: 1.5rem; height: 1.5rem; }
+
+  /* ── 新手团 / onboarding ──────────────────────────────────────── */
+  .onboarding-page { padding-left: 0.25rem; padding-right: 0.25rem; }
+  .onboarding-page .page-title {
+    font-size: 1.35rem;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.75rem;
+  }
+  .onboarding-page .onboarding-steps {
+    font-size: 0.82rem;
+    line-height: 1.8;
+    padding-left: 1.15rem;
+    margin-bottom: 1.25rem;
+  }
+  .onboarding-page > .btn-primary {
+    width: 100%;
+    min-height: 2.6rem;
+    justify-content: center;
+  }
+}

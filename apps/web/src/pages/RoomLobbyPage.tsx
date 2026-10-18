@@ -500,8 +500,8 @@ export function RoomLobbyPage() {
     // relative：聊天是浮层（absolute 右侧居中），它的定位原点就是这一层
     <div className="lobby-shell relative flex h-full min-h-0 gap-0">
       {liveGone && <LiveGoneNotice error={liveGone} />}
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 max-w-3xl mx-auto w-full">
-        <div className="flex flex-shrink-0 items-center gap-3 pb-2 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="lobby-main flex flex-col flex-1 min-w-0 min-h-0 max-w-3xl mx-auto w-full">
+        <div className="lobby-head flex flex-shrink-0 items-center gap-3 pb-2 mb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <button onClick={() => navigate('/game')} className="btn-secondary flex items-center gap-1 !px-2 !py-1 text-sm">
             <GiReturnArrow /> 返回
           </button>
@@ -555,7 +555,7 @@ export function RoomLobbyPage() {
             {kpSeats.length > 0 && (
               <div className="mb-2 space-y-1.5">
                 {kpSeats.map((p) => (
-                  <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
+                  <div key={p.seat_order} className="seat-row flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
                     <SeatIcon kind={p.is_host ? 'host' : 'human'} size={15} />
                     <span className="text-sm flex-1" style={{ color: p.is_mine ? 'var(--color-text-accent)' : 'var(--color-text-primary)' }}>
                       {p.claimed ? '真人 KP' : '空席 · 等待真人 KP 加入'}
@@ -580,7 +580,7 @@ export function RoomLobbyPage() {
                     ? (p.is_mine ? '已加入，等待选择角色' : '已预留 · 等待玩家选择角色')
                     : '空席 · 等待真人加入'
                 return (
-                  <div key={p.seat_order} className="flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
+                  <div key={p.seat_order} className="seat-row flex items-center gap-2 px-2 py-1.5 rounded" style={{ background: 'var(--surface-2)' }}>
                     <SeatIcon kind={seatKind(p)} size={15} />
                     {showDot && (
                       <span
@@ -827,7 +827,7 @@ export function RoomLobbyPage() {
         </div>
 
         {/* 开局条钉在底部：无论上面配到多少张角色卡，「开始游戏」永远在屏幕上 */}
-        <div className="card flex-shrink-0 mt-3">
+        <div className="lobby-start card flex-shrink-0 mt-3">
           {amHost ? (
             <div className="flex items-center gap-3">
               <button onClick={startGame} disabled={busy || seatGaps.length > 0} className="btn-primary">
@@ -848,7 +848,7 @@ export function RoomLobbyPage() {
       {/* 右栏常驻：选人模式下它永远在场，像格斗/英雄游戏的选人详情栏——
           未选时是提示，点选后是「角色登场 + 完整档案 + 确认入座」。 */}
       {asideOpen && (
-        <aside className={`w-80 flex-shrink-0 border-l overflow-y-auto flex flex-col${selectingCharacter ? ' hero-dossier' : ''}`} style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}>
+        <aside className={`lobby-aside${preview || panelChar ? ' lobby-aside--filled' : ''} w-80 flex-shrink-0 border-l overflow-y-auto flex flex-col${selectingCharacter ? ' hero-dossier' : ''}`} style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-card)' }}>
           <div className="flex items-center justify-between px-3 py-1.5 text-xs border-b" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
             <span>{selectingCharacter ? (preview ? '已选择 · 等待入座' : '选择你的调查员') : (preview ? '预览 · 尚未入座' : '角色卡')}</span>
             {(preview || panelChar) && (

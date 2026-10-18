@@ -97,7 +97,7 @@ export function ContextUsageBadge({
       style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
       title={cumTitle}
     >
-      <GiTwoCoins size={13} /> 累计上下文 {fmt(su.total_tokens)}
+      <GiTwoCoins size={13} /> <span className="ctx-usage-label">累计上下文 </span>{fmt(su.total_tokens)}
     </span>
   )
 }

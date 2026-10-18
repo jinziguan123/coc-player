@@ -44,9 +44,10 @@ export function SettingsPage() {
   const returnTo = getOnboardingReturnTo(location.state)
 
   return (
-    <div style={{ display: 'flex', gap: 0, height: '100%', minHeight: 0 }}>
+    // 桌面：左导航 + 右内容各自滚动；手机（settings.css）：导航折成顶部横向页签。
+    <div className="settings-page flex h-full min-h-0 flex-col md:flex-row">
       {/* 左侧二级导航：与主侧边栏同一套语言（静息灰字 / 选中琥珀 + 左缘色带） */}
-      <nav className="subnav">
+      <nav className="subnav settings-subnav">
         <div className="subnav-title">设置</div>
         {SETTINGS_TABS.map(({ key, label, Icon }) => (
           <button
@@ -60,8 +61,8 @@ export function SettingsPage() {
         ))}
       </nav>
 
-      {/* 右侧内容区 */}
-      <div style={{ flex: 1, padding: '1rem 1.5rem', overflow: 'auto' }}>
+      {/* 右侧内容区（手机端全宽单列，见 styles/mobile/settings.css） */}
+      <div className="settings-content min-h-0 flex-1 overflow-y-auto p-4 md:px-6">
         {activeTab === 'ai' && (
           <AISettingsPanel
             onTestSuccess={returnTo ? () => navigate(returnTo, { replace: true }) : undefined}
@@ -418,6 +419,7 @@ function AppearanceSettingsPanel() {
               <button
                 key={opt.value}
                 onClick={() => choose(opt.value)}
+                className="theme-option"
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -595,7 +597,7 @@ function RagStatsPanel() {
           主动＝KP 发起的查阅；被动＝建上下文时按情境预取。命中率低 / 空命中多，说明语料覆盖或检索组织有待改进。
         </p>
 
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
+        <div className="rag-toolbar" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <Select value={selected} onValueChange={setSelected}>
               <SelectTrigger className="w-full">
@@ -635,7 +637,7 @@ function RagStatsPanel() {
             </div>
 
             {/* 四象限 */}
-            <div style={{ overflowX: 'auto' }}>
+            <div className="rag-table-wrap" style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                 <thead>
                   <tr style={{ color: 'var(--color-text-secondary)', textAlign: 'left' }}>

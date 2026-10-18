@@ -1,0 +1,391 @@
+/* ===== 手机适配：游戏内线（<= 767px） =====
+ *
+ * 覆盖范围：对局页 /game/:id、大厅 /room/:id、开局入口与表单。
+ * 只写手机覆盖；桌面样式（index.css）保持原样。
+ *
+ * 注意 index.css 把 mobile/*.css 的 @import 放在文件前部（CSS 规范要求），
+ * 因此这里覆盖既有类时一律用更高特异性的选择器，避免被后面的桌面规则反超。
+ */
+
+/* 顶栏里的「长标签 / 手机短标签」成对出现：桌面只显示长标签，手机上由短标签或图标代替。 */
+.gtool-short { display: none; }
+
+@media (max-width: 767px) {
+  /* ---------- 对局页：壳层与安全区 ---------- */
+  /* base.css / index.css 的 .app-main padding 二选一；这里加高特异性确保生效，
+     并把 iPhone 底部安全区预留在页面内容之外，聊天输入框不会压在 Home 指示条上。 */
+  .app-shell.game-session-shell .app-main {
+    padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  [data-scene-backdrop='on'] .app-shell.game-session-shell .app-main { padding: 0; }
+  [data-scene-backdrop='on'] .game-session-layout {
+    padding: 0.6rem 0.6rem calc(0.6rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* ---------- 对局页顶栏：两行，工具收成图标 ----------
+     390 宽下原来会折成三行、吃掉约 150px；现在第一行只留「返回 / 标题 / 房间码」，
+     第二行是一排 36px 图标按钮，检索 / 战报 / 结束模组 / 大地图都靠 title/aria-label 说明。 */
+  .game-topbar {
+    gap: 0.4rem 0.5rem;
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.4rem;
+    align-items: center;
+  }
+  .game-topbar .btn-secondary,
+  .game-topbar .btn-xs {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    justify-content: center;
+  }
+  .game-topbar .gtool-label { display: none; }
+  .game-topbar .gtool-short { display: inline; }
+  .game-topbar-tools {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    gap: 0.35rem !important;
+    flex-wrap: wrap;
+  }
+  .game-topbar-tools > * { flex-shrink: 0; }
+  .game-topbar .ctx-usage-label { display: none; }
+  .game-topbar .game-room-code-prefix { display: none; }
+  .game-topbar .kp-locus {
+    max-width: 46vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-2xs);
+  }
+  /* 顶栏标题行在房间码很长时也保持单行省略，避免再次折行。 */
+  .game-topbar > .text-sm.font-semibold {
+    min-width: 0;
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ---------- 对局页：聊天区与输入框 ---------- */
+  .game-session-layout .gsl-stage { overflow: hidden; }
+  .game-session-layout .game-chat-pane { min-width: 0; }
+  .game-session-layout .chat-scroll { overflow-x: hidden; }
+
+  .game-session-layout .chat-input-bar {
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.15rem;
+  }
+  .game-session-layout .chat-input-bar textarea {
+    min-height: 2.75rem;
+    max-height: 40dvh;
+    padding: 0.55rem 0.7rem;
+    line-height: 1.45;
+    overflow-y: auto;
+  }
+  .game-session-layout .chat-input-bar .btn-primary {
+    min-height: 2.75rem;
+    min-width: 3.4rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    font-size: 0.9rem;
+    letter-spacing: 0.08em;
+  }
+  .game-session-layout .chat-input-bar--kp {
+    padding-bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* ---------- 对局页：聊天内卡片不横向溢出 ---------- */
+  .game-session-layout .chat-msg,
+  .game-session-layout .chat-content,
+  .game-session-layout .chat-bubble-player,
+  .game-session-layout .chat-bubble-npc,
+  .game-session-layout .chat-bubble-action {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .game-session-layout .chat-bubble-player { max-width: 86%; }
+  .game-session-layout .chat-bubble-npc { max-width: 88%; }
+  .game-session-layout .chat-msg--narration .chat-content { padding-left: 0.8rem; }
+
+  /* 检定请求 / 幸运询价：图标 + 说明 + 按钮原先硬挤一行，窄屏会把按钮顶出卡片。
+     改成可换行，按钮各自留出触摸高度。 */
+  .game-session-layout [data-tour='check-request'] > div,
+  .game-session-layout [data-tour='luck-offer'] > div {
+    max-width: 100%;
+  }
+  .game-session-layout [data-tour='check-request'] .flex,
+  .game-session-layout [data-tour='luck-offer'] .flex {
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+  }
+  .game-session-layout [data-tour='check-request'] .whitespace-pre-wrap,
+  .game-session-layout [data-tour='luck-offer'] .whitespace-pre-wrap {
+    flex: 1 1 11rem;
+    min-width: 0;
+  }
+  .game-session-layout [data-tour='check-request'] .btn-primary,
+  .game-session-layout [data-tour='luck-offer'] .btn-primary,
+  .game-session-layout [data-tour='luck-offer'] .btn-secondary {
+    min-height: 2.4rem;
+  }
+  .game-session-layout .dice-card,
+  .game-session-layout [data-tour='dice-result'] {
+    max-width: 100%;
+  }
+  .game-session-layout .msg-row img,
+  .game-session-layout .chat-msg img,
+  .game-session-layout .chat-content img {
+    max-width: 100%;
+    height: auto;
+  }
+  .game-session-layout .chat-content pre { max-width: 100%; }
+
+  /* 分头行动：原本 2 列并排 + 横向滚动，手机上每列 280px 起步，读起来要左右来回拖。
+     改为各场景竖向堆叠，各自占满聊天列宽。 */
+  .game-session-layout .scene-split {
+    flex-direction: column;
+    gap: 0.5rem;
+    overflow-x: visible;
+  }
+  .game-session-layout .scene-split > [data-scene-col] {
+    width: 100%;
+    min-width: 0 !important;
+    max-height: none !important;
+  }
+
+  /* 触屏没有 hover：暂存发言的「改 / 删」不能只靠悬停出现，否则手机上永远点不到。 */
+  .game-session-layout .msg-row .msg-actions {
+    opacity: 0.85;
+    pointer-events: auto;
+  }
+  /* 推进 / 重新生成这一排也是常按的操作，给到 36px 触摸高度。 */
+  .game-session-layout .game-chat-pane > .px-3.pb-1 button {
+    min-height: 2.25rem;
+  }
+
+  /* ---------- 对局页：角色卡抽屉 ---------- */
+  .game-session-layout .game-character-panel {
+    z-index: 70;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    overscroll-behavior: contain;
+  }
+  .game-session-layout .game-character-panel > div:first-child {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--color-bg-card);
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+  .game-session-layout .game-character-panel > div:first-child button {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+  .game-session-layout .char-panel-scrim { z-index: 69; }
+
+  /* ---------- 对局页：战斗 / 追逐面板 ---------- */
+  /* 内嵌战斗卡此前铺满整列，把聊天和输入挤出可视区。手机上封顶 56dvh、卡片内部滚动，
+     关键动作（攻击/防御/闪避/结算）都能在卡内滚到。 */
+  .game-session-layout .gsl-stage .combat-hud[data-tour='combat'] {
+    flex-shrink: 0;
+    max-height: min(56dvh, 30rem);
+    margin-left: 0;
+    margin-right: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .game-session-layout .gsl-stage .combat-hud[data-tour='combat'] .combat-side-list > * { width: 8.5rem; }
+  .game-session-layout .gsl-stage .chase-hud {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  /* ---------- 对局页：真人 KP 控制台 ---------- */
+  /* 默认在 JS 里收起（见 GameSessionPage 的 kpCollapsed 初始值）；展开时封顶 40dvh，
+     内部滚动，聊天与叙事不会被压成一条缝。 */
+  .game-session-layout .kp-console-dock {
+    height: auto;
+    max-height: 40dvh;
+    margin-top: 0.5rem;
+    overflow: hidden;
+  }
+  .game-session-layout .kp-console-dock .kp-console { min-height: 0; }
+  .game-session-layout .kp-console-dock .kp-console-split {
+    flex-direction: column;
+  }
+  .game-session-layout .kp-console-dock .kp-situation {
+    width: auto;
+    max-height: 8.5rem;
+    border-right: none;
+  }
+  .game-session-layout .kp-console-dock .kp-console-body { overflow-y: auto; }
+  .game-session-layout .kp-enemy-control {
+    padding: 0.35rem 0.5rem;
+    gap: 0.35rem;
+    font-size: 11px;
+  }
+}
+/* ===================== 大厅 /room/:id（手机 + iPad 竖屏） =====================
+ *
+ * 断点比其余页面宽一档（<=1023）：768 宽时左侧 13rem 侧栏仍在，再并排一张 320px
+ * 常驻右栏，主列只剩约 240px——「房间大厅」四个字会被挤成竖排单字。大厅是选人 +
+ * 席位 + 开局的单线程流程，平板竖屏也按单列处理；对局页仍保持 767 断点，平板上
+ * 不把顶栏收成图标。
+ */
+@media (max-width: 1023px) {
+  /* 大厅主列：桌面是「主列 + 右栏 320px」的横向固定列布局；窄屏右栏会把主列
+     挤到只剩一条，选人舞台与席位都看不见。这里改为单列，
+     右侧档案卡在选中角色后变成全屏抽屉。 */
+  .lobby-shell {
+    flex-direction: column;
+    gap: 0;
+  }
+  .lobby-main {
+    max-width: none;
+    width: 100%;
+  }
+  .lobby-head {
+    gap: 0.4rem 0.6rem;
+    padding-bottom: 0.45rem;
+    margin-bottom: 0.55rem;
+    flex-wrap: wrap;
+  }
+  .lobby-head > .btn-secondary {
+    min-height: 2.25rem;
+    padding-left: 0.7rem;
+    padding-right: 0.7rem;
+  }
+  .lobby-head > .text-sm.font-semibold {
+    flex: 1 1 8rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lobby-head > .badge { margin-left: 0; }
+
+  /* 席位行：房主会同时看到「看卡 / 评估 / 移出 / 删除」四颗按钮，390 宽必炸。
+     允许换行，按钮保留可按的尺寸。 */
+  .lobby-main .seat-row { flex-wrap: wrap; row-gap: 0.35rem; }
+  .lobby-main .seat-row > .btn-secondary { min-height: 2rem; min-width: 2rem; }
+  .lobby-main .seat-row > input,
+  .lobby-main .seat-row > [role='combobox'],
+  .lobby-main .seat-row > button:not(.btn-secondary) { min-height: 2rem; }
+
+  /* 选人舞台：单列铺满，卡片两列；搜索与创建按钮换行。 */
+  .lobby-shell .hero-select { padding: 0.8rem 0.7rem 0.7rem; }
+  .lobby-shell .hero-select-title { font-size: 1.5rem; letter-spacing: 0.12em; }
+  .lobby-shell .hero-select-bar { flex-wrap: wrap; row-gap: 0.4rem; }
+  .lobby-shell .hero-select-count { flex: 1 1 100%; }
+  .lobby-shell .hero-search { width: 100%; max-width: none; order: 3; }
+  .lobby-shell .hero-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+  .lobby-shell .hero-card .char-portrait { width: 3.4rem; height: 3.4rem; }
+  .lobby-shell .hero-card-name { font-size: 0.9rem; }
+  .lobby-shell .hero-card-info { padding: 0.5rem 0.55rem 0.6rem; }
+  .lobby-shell .hero-card-skills { white-space: normal; }
+
+  /* 角色档案抽屉：未选中时整个右栏不占位；选中后全屏覆盖，顶部有「清空/关闭」。 */
+  .lobby-main + .lobby-aside { display: none; }
+  .lobby-main + .lobby-aside.lobby-aside--filled {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    width: 100%;
+    max-width: none;
+    border-left: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .lobby-main + .lobby-aside.lobby-aside--filled > div:first-child {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--color-bg-card);
+    padding: 0.6rem 0.8rem;
+  }
+  .lobby-main + .lobby-aside.lobby-aside--filled > div:first-child .btn-secondary {
+    min-height: 2.5rem;
+    padding-left: 0.9rem;
+    padding-right: 0.9rem;
+  }
+  /* 选中角色后的「用这张卡入座 / 再看看」是这一步的主操作，抬到 44px。 */
+  .lobby-main + .lobby-aside.lobby-aside--filled .hero-dossier-actions .btn-primary,
+  .lobby-main + .lobby-aside.lobby-aside--filled .hero-dossier-actions .btn-secondary {
+    min-height: 2.75rem;
+  }
+
+  /* 大厅聊天：桌面上是右缘居中的浮窗，手机改为「右下角圆 token + 全宽底部抽屉」。
+     抽屉停在开局条上方，不盖住「开始游戏」；开局条本身也加高到 44px。 */
+  .lobby-shell .chat-float {
+    position: absolute;
+    left: auto;
+    right: 0.6rem;
+    top: auto;
+    bottom: 6.1rem;
+    transform: none;
+    z-index: 46;
+  }
+  .lobby-shell .chat-token {
+    width: 3rem;
+    height: 3rem;
+    animation: none;
+  }
+  .lobby-shell .chat-dock {
+    left: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    height: min(50dvh, 22rem);
+    top: auto;
+    bottom: 6.1rem;
+    transform: none;
+    animation: none;
+    border-radius: 12px;
+  }
+  .lobby-shell .chat-dock-head { padding: 0.55rem 0.7rem; }
+  .lobby-shell .chat-dock-head .btn-secondary { min-height: 2.25rem; min-width: 2.25rem; }
+  .lobby-shell .chat-dock-send .btn-primary { min-height: 2.75rem; min-width: 3.4rem; }
+  .lobby-shell .chat-dock-send .input { min-height: 2.75rem; }
+
+  /* 开局条：手机上占满整行，按钮 44px 触摸目标。 */
+  .lobby-start { margin-top: 0.5rem; padding: 0.75rem 0.9rem; }
+  .lobby-start > div { flex-wrap: wrap; gap: 0.5rem; }
+  .lobby-start .btn-primary {
+    width: 100%;
+    min-height: 2.75rem;
+  }
+}
+
+/* ---------- 「新增游戏」入口分岔（手机，<=767） ---------- */
+@media (max-width: 767px) {
+  .entry-backdrop { gap: 1rem; padding: 1rem; }
+  .entry-backdrop .entry-choices {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: 22rem;
+    padding: 0;
+  }
+  .entry-backdrop .entry-card {
+    width: 100%;
+    min-width: 0;
+    aspect-ratio: auto;
+    min-height: 8.5rem;
+    padding: 1.1rem 1.2rem 1.25rem;
+    justify-content: center;
+    border-radius: 45% 45% 3px 3px / 22% 22% 3px 3px;
+  }
+  .entry-backdrop .entry-card > svg { font-size: 2rem; margin-bottom: 0.2rem; }
+  .entry-backdrop .entry-card > strong { font-size: 1.15rem; }
+  .entry-backdrop .entry-card > span { font-size: 0.8rem; line-height: 1.55; }
+  .entry-backdrop .entry-dismiss { min-height: 2.75rem; padding-left: 2rem; padding-right: 2rem; }
+
+  /* ---------- 开局表单（features/game-setup） ---------- */
+  /* 表单本身已是 flex-wrap；这里只补触摸尺寸与窄屏下的整行输入。 */
+  .app-shell.has-mobile-nav .input,
+  .app-shell.has-mobile-nav .btn-primary,
+  .app-shell.has-mobile-nav .btn-secondary { min-height: 2.5rem; }
+  .app-shell.has-mobile-nav .card .flex.flex-wrap.items-center.gap-2 { row-gap: 0.5rem; }
+}

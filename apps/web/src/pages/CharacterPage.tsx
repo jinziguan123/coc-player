@@ -76,9 +76,24 @@ export function CharacterPage() {
 
   const closeSheet = () => { setSheet(null); setDraft(readDraft()) }
 
+  /** 手机上名录在上、角色卡在下：选中后把角色卡滚进视野，省得用户自己找。 */
+  const selectCharacter = (character: Character) => {
+    const deselect = selectedChar?.id === character.id
+    setSelectedChar(deselect ? null : character)
+    if (deselect) return
+    // 手机（<=767）与平板兜底单列（<=1023）都需要把角色卡滚进视野
+    const narrow = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width: 1023px)').matches
+    if (!narrow) return
+    window.setTimeout(() => {
+      document.getElementById('character-sheet-panel')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    }, 60)
+  }
+
   if (sheet) {
     return (
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="character-sheet-page flex h-full min-h-0 flex-col">
         <ArchiveHead
           title="新建调查员"
           actions={(
@@ -94,7 +109,7 @@ export function CharacterPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col pb-4">
+    <div className="characters-page flex h-full min-h-0 flex-col pb-4">
       <ArchiveHead
         title="角色"
         stats={[{ label: '调查员', value: characters.length }]}
@@ -130,17 +145,17 @@ export function CharacterPage() {
       )}
 
       {/* 默认视图：一本摊开的书——左页名录、右页详情，中间一道书脊 */}
-      <div className="tome min-h-0 flex-1">
+      <div className="tome character-tome min-h-0 flex-1">
         <div className="tome-page tome-page--left">
           <CharacterList
             characters={characters}
             selectedId={selectedChar?.id ?? null}
-            onSelect={(character) => setSelectedChar(selectedChar?.id === character.id ? null : character)}
+            onSelect={selectCharacter}
             onEdit={setEditingChar}
             onDelete={deleteCharacter}
           />
         </div>
-        <div className="tome-page tome-page--right">
+        <div className="tome-page tome-page--right" id="character-sheet-panel">
           {selectedChar ? (
             <CharacterPanel key={selectedChar.id} character={selectedChar} />
           ) : (

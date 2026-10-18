@@ -380,21 +380,22 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
 
       <ModalPresence>
       {editingId !== null && (
-        <Modal onClose={cancelEdit} widthClass="max-w-xl" padded>
-          <h3 className="card-title">{editingId === 'new' ? '新增配置' : '编辑配置'}</h3>
+        <Modal onClose={cancelEdit} widthClass="max-w-xl" padded panelClassName="modal-panel--form">
+          <h3 className="card-title modal-form-title">{editingId === 'new' ? '新增配置' : '编辑配置'}</h3>
           {/* 分页签而非一条长表单：连接四件套（协议/地址/模型/密钥）本该挨在一起，
               从前被「高级配置」折叠块从中劈开，密钥反而落在最下面。 */}
-          <Tabs defaultValue="conn">
-            <TabsList>
+          <Tabs defaultValue="conn" className="modal-form-tabs">
+            <TabsList className="modal-form-tablist">
               <TabsTrigger value="conn">连接</TabsTrigger>
               <TabsTrigger value="caps">能力</TabsTrigger>
             </TabsList>
 
-            {/* 两页叠放同时挂载：窗体高度取较高的「连接」页，切到「能力」页不再缩一截 */}
-            <TabsPanes>
+            {/* 两页叠放同时挂载：窗体高度取较高的「连接」页，切到「能力」页不再缩一截。
+                手机端（settings.css）把这里变成唯一滚动区，保存/取消始终露在下面。 */}
+            <TabsPanes className="modal-form-panes">
             <TabsPane
               value="conn"
-              className="!p-0 !pt-4"
+              className="modal-form-pane !p-0 !pt-4"
               style={{ maxHeight: '62vh', overflowY: 'auto' }}
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
@@ -507,7 +508,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
 
             <TabsPane
               value="caps"
-              className="!p-0 !pt-4"
+              className="modal-form-pane !p-0 !pt-4"
               style={{ maxHeight: '62vh', overflowY: 'auto' }}
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -600,7 +601,7 @@ export function AISettingsPanel({ onTestSuccess }: { onTestSuccess?: () => void 
             </TabsPanes>
           </Tabs>
 
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+          <div className="modal-form-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
             <button className="btn-primary" onClick={handleSave} disabled={saving}>
               {saving ? '保存中...' : '保存'}
             </button>

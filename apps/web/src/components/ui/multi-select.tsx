@@ -70,7 +70,8 @@ export function MultiSelect({
         <PopoverPrimitive.Content
           align="start"
           sideOffset={4}
-          className="z-[110] max-h-72 w-[var(--radix-popover-trigger-width)] min-w-48 overflow-y-auto rounded-md border p-1 shadow-lg"
+          collisionPadding={12}
+          className="z-[110] max-h-72 w-[var(--radix-popover-trigger-width)] min-w-48 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-md border p-1 shadow-lg"
           style={{
             background: 'var(--color-bg-secondary)',
             borderColor: 'var(--color-border-strong)',

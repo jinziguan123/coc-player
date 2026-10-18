@@ -1,0 +1,150 @@
+/* ===== 手机适配基础层（<= 767px） =====================================
+ *
+ * 只放全局规则：移动端壳层、底部导航、安全区、触摸/输入法基础修正。
+ * 各页面的手机布局分别在 content.css / game.css / settings.css，按页面拆文件，
+ * 便于并行维护，也避免继续把 index.css 撑大。
+ *
+ * 断点统一 767px（与游戏页既有窄屏规则一致）；768–1023 的平板只做兜底。
+ */
+
+.mobile-nav { display: none; }
+
+@media (max-width: 767px) {
+  /* 手机浏览器地址栏会伸缩：100vh 会把底部按钮顶出可视区，用 dvh。 */
+  .app-shell { height: 100dvh; }
+  #root { min-height: 100dvh; }
+  body { overflow-x: hidden; }
+
+  /* 手机上没有空间常驻 13rem 侧栏，导航改到底部。 */
+  .app-shell > .sidebar { display: none; }
+
+  /* 有底部导航的页面：内容区给导航留出高度 + iPhone 底部安全区。 */
+  .app-shell.has-mobile-nav .app-main {
+    padding: 1rem 1rem calc(4.6rem + env(safe-area-inset-bottom, 0px));
+    width: 100%;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 游戏内 / 大厅这类满屏页面：不渲染底部导航，内容贴边。 */
+  .app-shell.no-mobile-nav .app-main {
+    padding: 0.75rem;
+    width: 100%;
+  }
+
+  /* iOS 上 <16px 的输入框聚焦时会自动放大页面，把整屏顶歪。 */
+  .app-shell input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  .app-shell textarea,
+  .app-shell select { font-size: 16px; }
+
+  /* 长单词/URL/房间码不撑破窄屏 */
+  .app-main { overflow-wrap: anywhere; }
+}
+
+/* ===== 底部导航 ========================================================= */
+@media (max-width: 767px) {
+  .mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* 40：必须低于 Radix 弹层/浮层（z-50）与各类 Modal（z-100）。
+       否则打开确认框、选择器时底部导航会压在遮罩和弹窗上面，还能被误点。
+       game.css 里的角色卡抽屉是 70，但它只在 /game/:id 出现，那里不渲染导航。 */
+    z-index: 40;
+    padding: 0.3rem 0.2rem calc(0.3rem + env(safe-area-inset-bottom, 0px));
+    background: color-mix(in srgb, var(--color-bg-primary) 92%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--color-border-strong);
+    box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.28);
+  }
+  :root[data-theme='parchment'] .mobile-nav { box-shadow: 0 -10px 24px rgba(90, 60, 20, 0.12); }
+
+  .mobile-nav-link {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    min-height: 3.1rem;
+    padding: 0.2rem 0.1rem;
+    border-radius: 4px;
+    color: var(--color-text-secondary);
+    font-family: var(--font-title);
+    font-size: 0.625rem;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mobile-nav-link svg { font-size: 1.2rem; opacity: 0.85; }
+  .mobile-nav-link.active { color: var(--color-text-accent); }
+  .mobile-nav-link.active svg { opacity: 1; }
+  .mobile-nav-link.active::before {
+    content: '';
+    position: absolute;
+    top: -0.3rem;
+    left: 50%;
+    width: 1.5rem;
+    height: 2px;
+    transform: translateX(-50%);
+    background: var(--color-accent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  }
+  .mobile-nav-link:active { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+}
+/* ===== 首页卷宗抬头（components/home/CaseFileHeader） =================
+ * 390 宽下三格铭牌每格只剩约 100px：2.25rem 的数字与 14px 标签横排会把
+ * 「15」折成上下两行。手机上改成竖排数字在上、标签在下，并收掉字距。 */
+@media (max-width: 767px) {
+  .case-eyebrow { letter-spacing: 0.16em; }
+  .case-title { font-size: 2rem; line-height: 1.4; letter-spacing: 0.08em; }
+  .case-band-cell {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    padding: 0.7rem 0.75rem 0.65rem;
+  }
+  .case-band-num { font-size: 2rem; white-space: nowrap; }
+  .case-band-label { font-size: var(--text-xs); letter-spacing: 0.08em; white-space: nowrap; }
+  .case-stat-empty { font-size: var(--text-xs); line-height: 1.5; }
+}
+
+/* ===== 各页抬头（components/layout/ArchiveHead） ======================
+ * 标题 + 统计 + 操作在 390 宽必须换行：标题独占一行，统计与操作各占一行，
+ * 否则统计标签会跟着数字竖排。 */
+@media (max-width: 767px) {
+  .archive-head { margin-bottom: 1.25rem; }
+  .archive-head-row {
+    align-items: flex-start;
+    gap: 0.55rem 0.9rem;
+    padding-bottom: 0.7rem;
+  }
+  .archive-title { font-size: 1.9rem; letter-spacing: 0.12em; }
+  .archive-stats { width: 100%; padding-bottom: 0; }
+  .archive-stat { padding: 0 0.9rem 0 0; }
+  .archive-stat + .archive-stat { padding-left: 0.9rem; }
+  .archive-stat-num { font-size: 1.35rem; }
+  .archive-stat-label { letter-spacing: 0.12em; white-space: nowrap; }
+  .archive-head .page-head-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+  .archive-back { align-self: flex-start; }
+}
+/* ===== 列表栅格：小屏不允许被最小列宽撑破 =====================
+ * 模组卡 minmax(19rem) 与牌桌卡 minmax(21rem) 在 390 宽刚好，360 及以下
+ * （Galaxy S 系列、iPhone SE）会把网格撑出屏幕。手机上一律单列。 */
+@media (max-width: 767px) {
+  .module-grid,
+  .table-grid { grid-template-columns: minmax(0, 1fr); }
+  .table-card-title { letter-spacing: 0.1em; }
+  .table-card-body { padding: 0.85rem 0.9rem; }
+  .table-card-scene { width: 52%; }
+}

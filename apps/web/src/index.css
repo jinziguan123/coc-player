@@ -7228,6 +7228,21 @@ select.input option {
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
 }
+/* sonner 在运行时注入自己的样式表，顺序排在 index.css 之后；上面两条与它同特异性，
+   于是桌面又被反超成白点。带上 .app-toast（toaster.tsx 固定挂的类名）提高一级，
+   手机端的 settings.css 就不必再为这一处写 !important。 */
+[data-sonner-toast].app-toast [data-close-button] {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+}
+[data-sonner-toast].app-toast [data-close-button]:hover {
+  border-color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
 
 /* 大厅聊天是右侧浮层，不占布局宽度——好处是聊天再多也不把大厅顶长，代价是它会压住
    底下贴右的东西：席位行最右的「移出」「删除」正好在它下面，房主点不到。

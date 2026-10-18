@@ -239,7 +239,7 @@ export function CharacterEditModal({
   return (
     <RuleModuleContext.Provider value={character.module_id ?? null}>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-4xl !h-[88vh] flex flex-col overflow-hidden">
+      <DialogContent className="character-edit-dialog !max-w-4xl h-[88vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2.5">
             <CharacterPortrait name={name || character.name} avatarUrl={avatarUrl} size="sm" />

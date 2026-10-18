@@ -61,7 +61,8 @@ const DialogContent = React.forwardRef<
             <m.div
               // 居中用 Tailwind 的 translate 属性，Motion 动的是 transform，两者叠加互不覆盖
               className={cn(
-                'fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2',
+                // 手机上左右各留 1rem（w-full 会让窄屏窗体贴边）；桌面仍受 max-w-* 限制
+                'fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2',
                 // dialog-panel：与 .modal-panel 同一窗体质感（琥珀顶缘高光 + 深层投影）
                 'rounded-md border p-6 dialog-panel',
                 className,
@@ -76,6 +77,8 @@ const DialogContent = React.forwardRef<
                 borderColor: 'var(--color-border-strong)',
                 color: 'var(--color-text-primary)',
                 fontFamily: 'var(--font-ui)',
+                // 手机端由 settings.css 定义成 100dvh 减去安全区；桌面变量未定义 → 原行为
+                maxHeight: 'var(--dialog-max-height)',
                 ...style,
               }}
             >
@@ -94,7 +97,7 @@ function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
 }
 
 function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex justify-end gap-2 mt-4', className)} {...props} />
+  return <div className={cn('dialog-footer flex justify-end gap-2 mt-4', className)} {...props} />
 }
 
 const DialogTitle = React.forwardRef<

@@ -255,11 +255,13 @@ export function ImageProfilePanel({ openCreateAt = 0 }: {
 
       <ModalPresence>
       {editingId !== null && (
-        <Modal onClose={cancelEdit} widthClass="max-w-xl" padded>
-          <div style={{ maxHeight: '78vh', overflowY: 'auto', paddingRight: '0.25rem' }}>
-            <h3 className="card-title">
+        <Modal onClose={cancelEdit} widthClass="max-w-xl" padded panelClassName="modal-panel--form">
+          {/* 标题与底部按钮在滚动区外：长表单（ComfyUI 工作流 JSON）滚到底也点得到保存 */}
+          <div className="image-modal-shell" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, maxHeight: '78vh' }}>
+            <h3 className="card-title modal-form-title">
               {editingId === 'new' ? '新增生图配置' : '编辑生图配置'}
             </h3>
+            <div className="image-modal-body" style={{ minHeight: 0, overflowY: 'auto', paddingRight: '0.25rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               <div>
                 <label
@@ -380,14 +382,15 @@ export function ImageProfilePanel({ openCreateAt = 0 }: {
                 </>
               )}
 
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                <button className="btn-primary" onClick={handleSave} disabled={saving}>
-                  {saving ? '保存中...' : '保存'}
-                </button>
-                <button className="btn-secondary" onClick={cancelEdit}>
-                  取消
-                </button>
-              </div>
+            </div>
+            </div>
+            <div className="modal-form-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.85rem', flexShrink: 0 }}>
+              <button className="btn-primary" onClick={handleSave} disabled={saving}>
+                {saving ? '保存中...' : '保存'}
+              </button>
+              <button className="btn-secondary" onClick={cancelEdit}>
+                取消
+              </button>
             </div>
           </div>
         </Modal>

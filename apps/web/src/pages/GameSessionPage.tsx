@@ -551,9 +551,13 @@ export function GameSessionPage() {
   // 聊天侧栏折叠：折叠后战场更大；期间到达的新消息计入未读徽标（展开即清）。
   const [chatCollapsed, setChatCollapsed] = useState(false)
   // KP 控制台侧栏折叠：跨会话记住偏好（KP 常年开着，玩家看不到这一栏）
-  const [kpCollapsed, setKpCollapsed] = useState(
-    () => localStorage.getItem('trpg_kp_panel_collapsed') === '1',
-  )
+  const [kpCollapsed, setKpCollapsed] = useState(() => {
+    const stored = localStorage.getItem('trpg_kp_panel_collapsed')
+    if (stored !== null) return stored === '1'
+    // 手机上默认收起 KP 控制台：展开时它是一整块写作台，会挤掉聊天与叙事。
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+    return window.matchMedia('(max-width: 767px)').matches
+  })
   useEffect(() => {
     localStorage.setItem('trpg_kp_panel_collapsed', kpCollapsed ? '1' : '0')
   }, [kpCollapsed])
@@ -1366,6 +1370,10 @@ export function GameSessionPage() {
   const desk = isKp && wideViewport
   // 追逐台：值班台 + 追逐中 + 主台在「追逐」档
   const kpChaseOn = desk && !!chase
+  // 手机输入框窄：长占位符会折成两行被裁掉，换成一句能完整显示的提示。
+  const narrowScreen = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 767px)').matches
 
   return (
     <div className="game-session-layout flex flex-col h-full">
@@ -1378,7 +1386,7 @@ export function GameSessionPage() {
       {battleVeil && <div className="scene-veil" aria-hidden="true" />}
 
       {/* 顶栏工具行：从聊天列提上来横贯整页——沉浸战斗收栏时它不该跟着消失（含 KP 值班条） */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="game-topbar flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
           {/* 返回收成图标贴在标题左边，像面包屑那样。它是「离开这一局」的导航，和右边
               那排局内工具不是一回事；而带文字的按钮在三栏布局下要占掉近百像素，把标题、
               身份、房间码一路挤到换行——中栏本来就只有 clamp(280px, 25vw, 420px)。 */}
@@ -1402,7 +1410,7 @@ export function GameSessionPage() {
               className="chip chip-btn font-mono flex-shrink-0"
               title="点击复制房间码，分享给队友加入"
             >
-              房间码 {currentSession.room_code} <Copy size={11} />
+              <span className="game-room-code-prefix">房间码 </span>{currentSession.room_code} <Copy size={11} />
             </button>
           )}
           {/* 值班条附加物（真人 KP）：场景定位串 + 主台「叙事 / 战术」切换，对应原型顶栏 */}
@@ -1416,7 +1424,7 @@ export function GameSessionPage() {
                   className="btn-secondary btn-xs"
                   title={`还有 ${kpPendingCount} 人没交本回合；跳过他们，直接收下已提交的行动`}
                 >
-                  跳过未提交者
+                  <span className="gtool-label">跳过未提交者</span><span className="gtool-short">跳过</span>
                 </button>
               )}
               <span className="kp-locus" title="当前场景">
@@ -1425,7 +1433,7 @@ export function GameSessionPage() {
               </span>
             </>
           )}
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <div className="game-topbar-tools ml-auto flex flex-wrap items-center justify-end gap-2">
             <ContextUsageBadge sessionId={currentSession.id} refreshKey={messages.length} paused={streaming} />
             <BgmControl bgm={bgm} />
             <button
@@ -1434,7 +1442,7 @@ export function GameSessionPage() {
               className="btn-secondary btn-xs flex items-center gap-1"
               title="检索本局历史记录"
             >
-              <Search size={12} /> 检索
+              <Search size={12} /> <span className="gtool-label">检索</span>
             </button>
             <button
               onClick={() => setShowRecap(true)}
@@ -1442,7 +1450,7 @@ export function GameSessionPage() {
               className="btn-secondary btn-xs flex items-center gap-1"
               title="战报 / 章节小结：把本局经历浓缩成结构化小结"
             >
-              <GiScrollUnfurled size={13} /> 战报
+              <GiScrollUnfurled size={13} /> <span className="gtool-label">战报</span>
             </button>
             {myCharId && currentSession.status !== 'ended' && (
               endVote?.open ? (
@@ -1475,7 +1483,7 @@ export function GameSessionPage() {
                         ? `已抵达结局：${endingReached.name || ''}。全体真人玩家一致同意即可结束本局`
                         : '结束本模组：需全体真人玩家一致同意'}
                     >
-                      <GiUpgrade size={13} /> {endingReached ? '结束模组（已抵达结局）' : '结束模组'}
+                      <GiUpgrade size={13} /> <span className="gtool-label">{endingReached ? '结束模组（已抵达结局）' : '结束模组'}</span>
                     </button>
                   )}
                 </ConfirmDialog>
@@ -1487,7 +1495,7 @@ export function GameSessionPage() {
               className="btn-secondary btn-xs flex items-center gap-1"
               title="大地图：前往已知地点"
             >
-              <GiTreasureMap size={13} /> {showBigMap ? '收起大地图' : '大地图'}
+              <GiTreasureMap size={13} /> <span className="gtool-label">{showBigMap ? '收起大地图' : '大地图'}</span>
             </button>
             {/* 一局用不了一次的收进「更多」：这几个原本与检索、战报、大地图并排成一堵
                 同样大小的按钮墙，性质却完全不同（房主设置 / 收场结算 / 帮助）。 */}
@@ -1601,7 +1609,7 @@ export function GameSessionPage() {
           玩家与叙事模式照旧：收成侧栏 / 折叠把手那一套只在玩家侧保留。 */}
       {!(isKp && (immersiveOn || kpChaseOn)) && (
       <div
-        className={`flex-col relative ${immersiveOn
+        className={`game-chat-pane flex-col relative ${immersiveOn
           ? (chatCollapsed ? 'hidden' : 'flex flex-shrink-0 chat-side-pane')
           : 'flex flex-1 min-w-0'}`}
         style={immersiveOn && !chatCollapsed ? { width: 'clamp(280px, 25vw, 420px)' } : undefined}
@@ -2065,7 +2073,7 @@ export function GameSessionPage() {
             for (const m of seg.msgs) { const g = sceneOf(m); if (!labels.includes(g)) labels.push(g) }
             const shown = labels.filter((g) => !hiddenGroups.has(g))
             return (
-              <div key={`c${i}`} className="flex gap-3 overflow-x-auto items-start my-1">
+              <div key={`c${i}`} className="scene-split flex gap-3 overflow-x-auto items-start my-1">
                 {shown.map((g) => (
                   // 每个场景列各自独立滚动：长短不一时互不牵连，可单独翻看某一条线
                   <div key={g} data-scene-col className="flex-1 min-w-[280px] overflow-y-auto chat-scroll pr-1"
@@ -2259,7 +2267,14 @@ export function GameSessionPage() {
             onChange={(e) => {
               setInput(e.target.value)
               e.target.style.height = 'auto'
-              e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+              // 手机上留出更大的草稿视野（不超过视口 40%），桌面维持 120px 上限。
+              const narrow = typeof window.matchMedia === 'function'
+                && window.matchMedia('(max-width: 767px)').matches
+              const cap = narrow
+                ? Math.min((window.visualViewport?.height ?? window.innerHeight) * 0.4, 220)
+                : 120
+              // 清空后回到一行高度；否则 textarea 会按占位符折行后的 scrollHeight 停在两行。
+              e.target.style.height = (narrow && !e.target.value ? 44 : Math.min(e.target.scrollHeight, cap)) + 'px'
               notifyTyping(e.target.value)   // 节流上报"正在输入"给同房间其他人
             }}
             onCompositionStart={() => { composingRef.current = true }}
@@ -2273,7 +2288,9 @@ export function GameSessionPage() {
             }}
             placeholder={streaming
               ? 'KP 叙事中，可先打草稿，稍后发送…'
-              : '输入行动；用「」或""括住要说出口的台词，（圆括号）内为场外'}
+              : narrowScreen
+                ? '输入行动；「」台词，（）场外'
+                : '输入行动；用「」或""括住要说出口的台词，（圆括号）内为场外'}
             className="input flex-1"
             rows={1}
             style={{ resize: 'none' }}

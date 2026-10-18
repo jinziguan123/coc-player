@@ -45,7 +45,12 @@ export function RulesWorkbenchView({ wb, ruleSystem, readOnly }: {
     const main = mainRef.current
     const el = (key && document.getElementById(`rule-${key}`)) || document.getElementById(`sec-${section}`)
     if (!main || !el) return
-    main.scrollTo?.({ top: el.offsetTop - main.offsetTop - 16, behavior: 'smooth' })
+    // 手机上分区 chips 吸顶，跳转时给它们让出高度，否则目标标题会被压在 chips 下面
+    const stickyNav = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width: 60rem)').matches
+    const avoid = stickyNav ? 52 : 0
+    main.scrollTo?.({ top: el.offsetTop - main.offsetTop - 16 - avoid, behavior: 'smooth' })
     setActive(section)
     el.classList.remove('rules-flash')
     void el.offsetWidth   // 重新触发闪烁动画
@@ -63,6 +68,25 @@ export function RulesWorkbenchView({ wb, ruleSystem, readOnly }: {
       <RulesRail sections={wb.sections} active={active} pending={wb.pending} counts={counts} onPick={(id) => jump(id)} />
       <div className="rules-main" ref={mainRef} onScroll={onScroll}
         style={wb.enabled ? undefined : { opacity: 0.6 }}>
+        {/* 手机上左栏分区导航被隐藏：改成吸顶的横向 chips，仍然一键直达各分区 */}
+        <nav className="rules-mobile-nav" aria-label="规则分区（窄屏）">
+          {wb.sections.map((s) => {
+            const p = wb.pending.filter((c) => c.section === s.id).length
+            const d = counts[s.id] ?? 0
+            return (
+              <button key={s.id} type="button" className={active === s.id ? 'on' : ''}
+                aria-current={active === s.id ? 'true' : undefined} onClick={() => jump(s.id)}>
+                {s.title}
+                {(p > 0 || d > 0) && (
+                  <span className={`rules-cnt ${p > 0 ? 'pending' : ''}`}
+                    title={p > 0 ? `${p} 处未保存` : `与规则书原文有 ${d} 处不同`}>
+                    {p > 0 ? p : d}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </nav>
         <div className="rules-toolbar">
           <label className="rules-search">
             <Search size={14} aria-hidden />

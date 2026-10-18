@@ -46,7 +46,7 @@ export function NumberField({
       {...rest}
       type="number"
       value={draft}
-      className={className}
+      className={className ? `number-field ${className}` : 'number-field'}
       style={style}
       onFocus={(e) => {
         editing.current = true

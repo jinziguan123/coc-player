@@ -4,6 +4,7 @@ import { AnimatePresence, m } from 'motion/react'
 import { useKnockNotices } from '@/features/netlink/useKnockNotices'
 import { useNetlinkAutoStart } from '@/features/netlink/useNetlinkAutoStart'
 import { pageVariants } from '@/lib/motion'
+import { MobileNav } from './MobileNav'
 import { Sidebar } from './Sidebar'
 
 export function AppShell() {
@@ -17,8 +18,11 @@ export function AppShell() {
   // AnimatePresence 冻住，而不是 <Outlet />——后者会在旧页上直接渲染出新路由的内容。
   const outlet = useOutlet()
   const gameSession = pathname.startsWith('/game/')
+  // 对局页在手机上要留出聊天输入区，不渲染底部导航；其余一级页面用底部导航替代侧栏。
+  // （桌面仍渲染它，但 CSS 只在 <=767px 显示，不影响桌面。）
+  const showMobileNav = !gameSession
   return (
-    <div className={`app-shell flex h-screen overflow-hidden ${gameSession ? 'game-session-shell' : ''}`}>
+    <div className={`app-shell flex h-dvh overflow-hidden ${gameSession ? 'game-session-shell' : ''} ${showMobileNav ? 'has-mobile-nav' : 'no-mobile-nav'}`}>
       <Sidebar autoCollapse={gameSession} />
       <AnimatePresence mode="wait" initial={false}>
         <m.main
@@ -34,6 +38,7 @@ export function AppShell() {
           <Suspense fallback={<PageFallback />}>{outlet}</Suspense>
         </m.main>
       </AnimatePresence>
+      {showMobileNav && <MobileNav />}
       <div className="film-grain" aria-hidden />
     </div>
   )

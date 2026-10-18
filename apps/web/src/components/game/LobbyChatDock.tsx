@@ -42,7 +42,14 @@ const STICK_SLACK = 24
 export function LobbyChatDock({
   lines, loaded = true, typingLabel, canSpeak, onSend, onTyping, shifted, compact,
 }: Props) {
-  const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== '0')
+  const [open, setOpen] = useState(() => {
+    const stored = localStorage.getItem(OPEN_KEY)
+    if (stored === '0') return false
+    // 手机上没有空间常驻一张右侧浮窗：默认收成右下角 token，点开才以底部抽屉展开。
+    // 桌面（以及没有 matchMedia 的测试环境）照旧默认展开，除非上次手动收起过。
+    if (typeof window.matchMedia !== 'function') return true
+    return !window.matchMedia('(max-width: 767px)').matches
+  })
   /** 专注模式下临时展开（不写进 OPEN_KEY，退出专注模式即收起）。 */
   const [peek, setPeek] = useState(false)
   /** 聊天卡此刻是否真的看得见：未读与贴底都以它为准。 */

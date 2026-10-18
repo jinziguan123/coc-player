@@ -46,7 +46,7 @@ const TabsList = React.forwardRef<
         if (typeof ref === 'function') ref(node)
         else if (ref) ref.current = node
       }}
-      className={cn('relative flex border-b', className)}
+      className={cn('tabs-list relative flex border-b', className)}
       style={{ borderColor: 'var(--color-border)' }}
       {...props}
     >

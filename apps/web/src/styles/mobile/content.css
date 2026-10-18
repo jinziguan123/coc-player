@@ -1,0 +1,325 @@
+/* ===== 手机适配：内容页线（角色 / 模组详情 / 规则） =====
+ *
+ * 主体是 <= 767px 的手机覆盖规则；另有两段窄平板兜底
+ * （768–1023：书本单列 / 模组工具条换行；<= 60rem：规则页分区 chips）。
+ * 桌面样式保持原样。具体范围见团队任务说明：
+ *   /characters  书本双页 → 单列（名录在上、角色卡在下）+ 新建人物卡可滚动
+ *   /modules/:id 多栏/吸顶工具条 → 单列 + 工具条换行、视图页签横向滚动
+ *   /rules       分区导航 → 横向 chips + 搜索行换行 + 草稿条排版
+ */
+
+/* ===== 新建调查员：≤1100px（人物卡改成上下堆叠的断点）=================
+ * sheet.css 在 1100px 以下把右栏折到下方，但 .cs-main 仍是 flex:1 + overflow:auto，
+ * 而 .cs-rail 的 min-height:auto 会被内容撑满——两者叠加会把上面的人物卡挤成 7px。
+ * 这里让整张卡成为一个滚动区：人物卡按内容展开、清单在下方，底栏 sticky 仍可用。
+ */
+@media (max-width: 1100px) {
+  .character-sheet-page .cs {
+    flex: 1;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .character-sheet-page .cs-main {
+    flex: none;
+    overflow: visible;
+    padding: 0 0 0.5rem;
+  }
+  .character-sheet-page .cs-rail {
+    flex: none;
+    width: auto;
+    overflow: visible;
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  /* ============================================================
+     /characters：把摊开的书改成单页纵排
+     名录在上（列表内部限高可滚），角色卡在下；整页交给 .app-main 滚动。
+     ============================================================ */
+  .character-tome {
+    flex: none;
+    flex-direction: column;
+    overflow: visible;
+    /* 原来的「书脊」是 300px 处的一道竖向渐变；单列后它会变成一条莫名其妙的暗带 */
+    background: var(--color-bg-secondary);
+  }
+  .character-tome::after { display: none; }
+  .character-tome .tome-page--left {
+    width: 100%;
+    flex: none;
+    padding: 0.8rem 0.75rem;
+    border-bottom: 1px solid var(--color-border-strong);
+  }
+  .character-tome .tome-page--right {
+    flex: none;
+    min-width: 0;
+    padding: 0.8rem 0.75rem 1rem;
+  }
+  /* 名录内部限高：十五个人不至于把角色卡推到三四屏之外 */
+  .character-tome .tome-page--left .overflow-y-auto { max-height: min(34dvh, 19rem); }
+  .character-tome .tome-page-head { margin-bottom: 0.5rem; }
+  .character-tome .tome-empty { min-height: 6rem; padding: 1rem 0; }
+  .character-tome .roster-item { padding: 0.55rem 0.5rem; }
+  #character-sheet-panel { scroll-margin-top: 0.5rem; }
+
+  /* ============================================================
+     新建调查员（一页式人物卡）：整张卡纵向滚动，字段单列
+     只作用于角色页里的这张卡；大厅内嵌的同一组件不受影响。
+     ============================================================ */
+  .character-sheet-page .cs-head { gap: 0.5rem; margin-bottom: 0.8rem; }
+  .character-sheet-page .cs-seg button { padding: 0.45rem 0.6rem; font-size: 0.8rem; }
+  .character-sheet-page .cs-card-h { padding: 10px 12px 8px; gap: 8px; }
+  .character-sheet-page .cs-card-b { padding: 2px 12px 14px; }
+  .character-sheet-page .cs-info { grid-template-columns: minmax(0, 1fr); gap: 0.65rem; }
+  /* 桌面版让「所属模组」占两列；单列下必须改回一列，否则会撑出隐式列 */
+  .character-sheet-page .cs-wide { grid-column: auto; }
+  .character-sheet-page .cs-pts { flex-direction: column; gap: 0.5rem; }
+  .character-sheet-page .cs-pt { gap: 0.6rem; padding: 0.5rem 0.6rem; }
+  .character-sheet-page .cs-pt-big { font-size: 1.35rem; }
+  /* 技能表 7 列在 390 下放不下：收起最右侧「困难 / 极难」两列，
+     保留本职 / 技能 / 起始 / 加点 / 成功率。 */
+  .character-sheet-page .cs-sk { font-size: 12.5px; }
+  .character-sheet-page .cs-sk th,
+  .character-sheet-page .cs-sk td { padding: 4px 2px; }
+  .character-sheet-page .cs-sk th:nth-child(6),
+  .character-sheet-page .cs-sk td:nth-child(6),
+  .character-sheet-page .cs-sk th:nth-child(7),
+  .character-sheet-page .cs-sk td:nth-child(7) { display: none; }
+  .character-sheet-page .cs-num { width: 46px; padding: 3px 4px; }
+  .character-sheet-page .cs-filters { gap: 0.35rem 0.45rem; }
+  .character-sheet-page .cs-filters button { padding: 3px 7px; font-size: 0.75rem; }
+  /* 底栏：说明占一整行，操作按钮靠右且可换行，长文案不会把按钮挤出屏幕 */
+  .character-sheet-page .cs-foot {
+    flex-wrap: wrap;
+    gap: 0.5rem 0.55rem;
+    padding: 0.6rem 0 0.7rem;
+    margin-top: 0.4rem;
+  }
+  .character-sheet-page .cs-foot .msg { flex: 1 1 100%; }
+  .character-sheet-page .cs-foot .cs-grow { display: none; }
+  .character-sheet-page .cs-foot .btn-primary { margin-left: auto; }
+  /* 建卡前的 AI 契合度浮窗要盖过底部导航（导航 z-index 60） */
+  .character-sheet-page .cs-eval,
+  .character-sheet-page .cs-eval-pill { z-index: 70; }
+
+  /* 角色编辑弹窗（Radix Dialog）：手机左右留白、上下避开底部导航 */
+  .character-edit-dialog {
+    /* 居中的弹窗要同时避开底部导航与安全区：导航 60px 高，居中后上下各让一倍 */
+    height: calc(100dvh - 8rem - 2 * env(safe-area-inset-bottom, 0px));
+    padding: 1rem;
+  }
+  .character-edit-dialog .dialog-footer { flex-wrap: wrap; }
+  .character-edit-dialog .grid-cols-2 { column-gap: 0.6rem; }
+  /* Radix Dialog 的遮罩 z-index（50）低于底部导航（60）：弹窗打开时先把导航藏起来，
+     既避免导航盖在窗体上，也防止误触导航丢掉未保存的编辑。只作用于这两个内容页弹窗。 */
+  body:has(.character-edit-dialog) .mobile-nav,
+  body:has(.occupation-dialog) .mobile-nav { display: none; }
+
+  /* 选择职业弹窗：类别栏改成横向滚动条，职业卡单列 */
+  .occupation-dialog .cs-hint { flex: 1 1 100%; }
+  .occupation-dialog .cs-hint + label { margin-left: auto; }
+  .occupation-dialog .cs-occ-dlg {
+    flex-direction: column;
+    height: min(62dvh, 34rem);
+  }
+  .occupation-dialog .cs-occ-cats {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+    -webkit-overflow-scrolling: touch;
+  }
+  .occupation-dialog .cs-occ-cats button {
+    flex: none;
+    width: auto;
+    white-space: nowrap;
+    padding: 0.45rem 0.8rem;
+  }
+  .occupation-dialog .cs-occ-list { grid-template-columns: minmax(0, 1fr); padding: 0.6rem; }
+  .occupation-dialog .cs-occ h3 { flex-wrap: wrap; }
+  .occupation-dialog .cs-occ h3 .btn-primary { margin-left: auto; }
+
+  /* ============================================================
+     /modules/:id：工具条换行 + 吸顶偏移按手机 p-4 修正
+     ============================================================ */
+  .module-detail-page .module-toolbar {
+    top: -1rem;
+    margin: -1rem -1rem 1rem;
+    padding: 1rem 1rem 0.65rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .module-detail-page .module-toolbar .page-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 1.15rem;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .module-detail-page .module-toolbar .page-title svg { flex: none; }
+  .module-detail-page .module-toolbar > .ml-auto { margin-left: auto; }
+  /* 视图页签独占一行并横向滚动：五个页签在 390 下塞不进一行 */
+  .module-detail-page .module-toolbar .module-view-tabs {
+    order: 10;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .module-detail-page .module-toolbar .module-view-tabs::-webkit-scrollbar { display: none; }
+  .module-detail-page .module-view-tab {
+    flex: none;
+    white-space: nowrap;
+    padding: 0.42rem 0.7rem;
+    font-size: 0.82rem;
+  }
+  .module-detail-page .module-hero { height: clamp(9rem, 24vh, 12rem); }
+  .module-detail-page .module-hero-body { left: 1rem; right: 1rem; bottom: 0.9rem; }
+  .module-detail-page .module-hero-title { font-size: 1.9rem; letter-spacing: 0.16em; }
+  /* 标签—值行：标签略收窄，内容区多一点宽度 */
+  .module-detail-page .module-row { gap: 0.55rem; }
+  .module-detail-page .module-row-label { width: 4.25rem; }
+  .module-detail-page .row-grid { gap: 0; }
+
+  /* ============================================================
+     /rules：搜索行 + 草稿条 + 书架（分区导航见文件末尾的 960 断点）
+     ============================================================ */
+  /* 搜索框与「只看改过的」在 390 下并排会把开关挤出可视区：分两行 */
+  .rules-page .rules-toolbar { flex-wrap: wrap; gap: 0.5rem 0.75rem; }
+  .rules-page .rules-search { flex: 1 1 100%; }
+  .rules-page .rules-only { margin-left: auto; }
+  .rules-page .rules-sec { margin-bottom: 1.6rem; }
+  .rules-page .rules-sec-head { flex-wrap: wrap; gap: 0.15rem 0.6rem; }
+  .rules-page .rules-sec-head span { line-height: 1.5; }
+  .rules-page .rules-row { padding: 0.65rem 0.4rem; column-gap: 0.6rem; }
+  .rules-page .rules-row.nested { margin-left: 0.4rem; }
+  .rules-page .rules-row-ctl { flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; }
+  .rules-page .rules-seg button { padding: 0 0.55rem; }
+  .rules-page .rules-card-head { gap: 0.55rem; padding: 0.75rem 0.7rem; }
+  .rules-page .rules-card-body { padding: 0 0.4rem 0.35rem 0; }
+  .rules-page .rules-ov-card { padding: 0.7rem 0.8rem; }
+  .rules-page .rules-ov-card .v { font-size: 1.8rem; }
+  .rules-page .rules-compare { padding: 0.6rem 0.65rem; }
+  .rules-page .rules-compare th,
+  .rules-page .rules-compare td { padding: 0.4rem 0.45rem; }
+  .rules-page .rules-compare tbody th { width: 4.2rem; white-space: normal; }
+
+  /* 草稿条：不再让文字把按钮挤到下一行——文字收窄并最多两行，两个按钮留在同一行右侧 */
+  .rules-page .rules-draft {
+    gap: 0.45rem 0.6rem;
+    padding: 0.6rem 0.75rem;
+  }
+  .rules-page .rules-draft .n { font-size: 1.35rem; }
+  .rules-page .rules-draft > .min-w-0 { flex: 1 1 0; min-width: 0; }
+  .rules-page .rules-draft .what {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rules-page .rules-draft .scope { display: none; }
+  .rules-page .rules-draft > .btn-secondary,
+  .rules-page .rules-draft > .btn-primary { flex: none; white-space: nowrap; }
+
+  /* 规则书书架：390 下两册一行，比单册居中留下的空档更整齐 */
+  .rules-page .rules-books { padding-bottom: 7.5rem; }
+  .rules-page .tome-shelf { gap: 1rem 0.7rem; }
+  .rules-page .tome-shelf > .tilt-card-enter { width: calc(50% - 0.35rem); }
+}
+
+/* ===== 平板兜底（768–1023px）========================================
+ * 平板由桌面壳层承载（侧栏仍在），但 1023px 以下「开本」右页不足 400px，
+ * 双页并排时角色名会被压成一字一行；这里只把书本与模组工具条改成单列/换行，
+ * 不引入底部导航，也不改桌面的断点与视觉。
+ */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .character-tome {
+    flex: none;
+    flex-direction: column;
+    overflow: visible;
+    background: var(--color-bg-secondary);
+  }
+  .character-tome::after { display: none; }
+  .character-tome .tome-page--left {
+    width: 100%;
+    flex: none;
+    padding: 0.8rem 0.9rem;
+    border-bottom: 1px solid var(--color-border-strong);
+  }
+  .character-tome .tome-page--right {
+    flex: none;
+    min-width: 0;
+    padding: 0.9rem;
+  }
+  .character-tome .tome-page--left .overflow-y-auto { max-height: min(36dvh, 22rem); }
+  .character-tome .tome-empty { min-height: 6rem; }
+  #character-sheet-panel { scroll-margin-top: 0.5rem; }
+}
+
+@media (min-width: 768px) and (max-width: 959px) {
+  /* 视图页签在 512–704px 的内容区里塞不进一行：换到第二行并横向滚动 */
+  .module-detail-page .module-toolbar { flex-wrap: wrap; row-gap: 0.5rem; }
+  .module-detail-page .module-toolbar .module-view-tabs {
+    order: 10;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .module-detail-page .module-toolbar .module-view-tabs::-webkit-scrollbar { display: none; }
+  .module-detail-page .module-view-tab { flex: none; white-space: nowrap; }
+}
+
+/* ===== 规则页分区导航（≤ 60rem / 960px）=============================
+ * index.css 在 max-width: 60rem（960px）隐藏了左栏 .rules-rail；
+ * 768–959 的 iPad 竖屏也需要分区入口，所以 chips 跟随同一条断点显示，
+ * 767 以下与手机共享同一套样式。桌面（>960）不渲染入口。
+ */
+.rules-mobile-nav { display: none; }
+
+@media (max-width: 60rem) {
+  .rules-mobile-nav {
+    display: flex;
+    gap: 0.4rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    margin: 0 -0.35rem 0.8rem;
+    padding: 0.35rem 0.35rem 0.45rem;
+    background: var(--color-bg-primary);
+    border-bottom: 1px solid var(--color-border);
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rules-mobile-nav::-webkit-scrollbar { display: none; }
+  .rules-mobile-nav button {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.4rem 0.7rem;
+    border: 1px solid var(--color-border-strong);
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+  .rules-mobile-nav button.on {
+    color: var(--color-text-accent);
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    font-weight: 600;
+  }
+  .rules-mobile-nav .rules-cnt { margin-left: 0; min-width: 1.05rem; height: 1.05rem; font-size: 0.62rem; }
+}

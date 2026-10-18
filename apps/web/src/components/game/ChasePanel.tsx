@@ -42,7 +42,7 @@ export function ChasePanel({ chase, sessionId }: { chase: ChaseState; sessionId:
   }
 
   return (
-    <div className="card mx-3 mb-2 !px-3 !py-2.5">
+    <div className="chase-hud card mx-3 mb-2 !px-3 !py-2.5">
       {/* 顶部：轮次 */}
       <div className="flex items-center gap-2 mb-2.5">
         <GiRun style={{ color: 'var(--color-text-accent)', fontSize: '1.05rem', flexShrink: 0 }} />

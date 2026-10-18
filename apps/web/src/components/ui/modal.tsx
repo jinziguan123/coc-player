@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, m, useIsPresent } from 'motion/react'
 import { modalBackdropVariants, modalPanelVariants } from '@/lib/motion'
@@ -20,12 +20,18 @@ export function Modal({
   widthClass = 'max-w-xl',
   align = 'center',
   padded = false,
+  /** 追加到窗体上的类名：给需要「固定标题/底部、只滚中间」的大表单用。 */
+  panelClassName,
+  /** 与类名配合的内联样式（如 display:flex）。合并顺序在底色之后，可安全覆盖。 */
+  panelStyle,
 }: {
   onClose: () => void
   children: ReactNode
   widthClass?: string
   align?: 'center' | 'top'
   padded?: boolean
+  panelClassName?: string
+  panelStyle?: CSSProperties
 }) {
   // 退场途中（ModalPresence 还留着它播动画）：不再响应 Esc / 遮罩，点击直接穿透到底下页面
   const isPresent = useIsPresent()
@@ -65,19 +71,22 @@ export function Modal({
       style={isPresent ? undefined : { pointerEvents: 'none' }}
       onMouseDown={dismissOnBackdrop}
     >
+      {/* 定位层用 CSS 变量而不是写死 10vh/86vh：手机上要按 100dvh 与安全区收
+          （见 styles/mobile/settings.css），桌面仍取 10vh / 86vh 原值。 */}
       <div
-        className={`fixed flex justify-center ${align === 'top' ? 'items-start' : 'items-center'}`}
-        style={{ top: 0, bottom: 0, left, right: 0, paddingTop: align === 'top' ? '10vh' : undefined }}
+        className={`modal-positioner fixed flex justify-center ${align === 'top' ? 'items-start' : 'items-center'}`}
+        style={{ top: 0, bottom: 0, left, right: 0, paddingTop: align === 'top' ? 'var(--modal-top-offset, 10vh)' : undefined }}
         onMouseDown={dismissOnBackdrop}
       >
         <m.div
           variants={modalPanelVariants}
-          className={`modal-panel w-full ${widthClass} mx-4 rounded-lg overflow-hidden ${padded ? 'p-5' : ''}`}
+          className={`modal-panel w-full ${widthClass} mx-4 rounded-lg overflow-hidden ${padded ? 'p-5' : ''}${panelClassName ? ` ${panelClassName}` : ''}`}
           style={{
             // 双层背景保证**不透明**（浅色主题 --color-bg-card 带 alpha）：不透明底 + 卡片色
             background: 'var(--color-bg-tertiary)',
             backgroundImage: 'linear-gradient(var(--color-bg-card), var(--color-bg-card))',
-            maxHeight: '86vh',
+            maxHeight: 'var(--modal-max-height, 86vh)',
+            ...panelStyle,
           }}
           onClick={(e) => e.stopPropagation()}
         >

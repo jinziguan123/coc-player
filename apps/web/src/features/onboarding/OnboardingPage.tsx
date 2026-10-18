@@ -31,7 +31,7 @@ export function OnboardingPage() {
   }, [run])
 
   return (
-    <main className="mx-auto flex min-h-[60vh] max-w-xl flex-col items-center justify-center px-4 text-center">
+    <main className="onboarding-page mx-auto flex min-h-[60vh] max-w-xl flex-col items-center justify-center px-4 text-center">
       {(state === 'checking' || state === 'creating') && (
         <>
           {/* 状态图标收进纹章框（与空态/入口卡同一语言），不再裸挂 */}

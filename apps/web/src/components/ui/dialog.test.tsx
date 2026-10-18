@@ -44,4 +44,19 @@ describe('Dialog 退场', () => {
     await user.click(screen.getByRole('button', { name: '开' }))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
+
+  it('窄屏左右留出边距，高度交给 100dvh 变量（桌面变量未定义时不生效）', async () => {
+    const user = userEvent.setup()
+    render(
+      <Dialog>
+        <DialogTrigger>开</DialogTrigger>
+        <DialogContent aria-describedby={undefined}><DialogTitle>标题</DialogTitle></DialogContent>
+      </Dialog>,
+    )
+    await user.click(screen.getByRole('button', { name: '开' }))
+    const dialog = screen.getByRole('dialog')
+
+    expect(dialog).toHaveClass('w-[calc(100%-2rem)]')
+    expect(dialog.style.maxHeight).toBe('var(--dialog-max-height)')
+  })
 })

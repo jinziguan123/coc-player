@@ -25,10 +25,10 @@ export function OccupationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-5xl">
+      <DialogContent className="occupation-dialog !max-w-5xl">
         <DialogHeader>
           <DialogTitle>选择职业</DialogTitle>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <p className="cs-hint">职业点按你现在的属性算出；换职业会清空本职勾选与职业定值。</p>
             <label className="relative ml-auto">
               <Search size={13} aria-hidden className="absolute left-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-secondary)' }} />
