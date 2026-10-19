@@ -65,8 +65,8 @@ describe('@ 补全：一级（分组入口）', () => {
     expect(rows()[0]).toContain('队友')
     expect(rows()[1]).toContain('已知地点')
     expect(rows()[2]).toContain('技能')
-    // 每行右边给出这一组有几项，省得点进去才发现是空的
-    expect(rows()[1]).toContain('2 项')
+    // 每行右边给出这一组有几项，省得点进去才发现是空的（项数在单独的角标里）
+    expect(rows()[1]).toMatch(/已知地点.*2/)
     expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true')
   })
 
@@ -89,8 +89,9 @@ describe('@ 补全：二级（具体值）', () => {
     await user.keyboard('{Enter}')
     // 顺序与 buildCandidates 一致：当前所在的地点排最前（这里给的就是「地下室」在前）
     expect(rows()).toEqual(['地下室当前', '旧宅门厅已到过'])
-    expect(screen.getByText('已知地点')).toBeTruthy()
-    expect(screen.getByText('Esc 返回')).toBeTruthy()
+    expect(screen.getByText('已知地点')).toBeTruthy()   // 头部写明在哪一组
+    expect(screen.getByText('Esc')).toBeTruthy()        // 键位做成小签
+    expect(screen.getByText('返回')).toBeTruthy()
   })
 
   it('二级里 Esc 退回一级，高亮停回原来那一组', async () => {
@@ -141,8 +142,14 @@ describe('@ 补全：直接打字跳过一级', () => {
     const user = userEvent.setup()
     render(<Harness />)
     await user.type(ta(), '@地下')
-    expect(rows()).toEqual(['地下室当前'])
-    expect(screen.queryByText('已知地点')).toBeNull()   // 没进二级头部：这是一次直接过滤
+    // 一行、且名字后面标出组名（这里没有二级头部，所以「已知地点」只出现这一次）。
+    expect(rows()).toHaveLength(1)
+    expect(screen.getByText('地下室')).toBeTruthy()
+    expect(screen.getAllByText('已知地点')).toHaveLength(1)
+    expect(screen.getByText('当前')).toBeTruthy()
+    // 直接过滤时名字后面标出组名，免得不知道「地下室」是地点还是别的
+    expect(screen.getByText('已知地点')).toBeTruthy()
+    expect(screen.getAllByText('已知地点')).toHaveLength(1)
   })
 
   it('按名字过滤时图标按类型给', async () => {
@@ -164,12 +171,41 @@ describe('@ 补全：直接打字跳过一级', () => {
   })
 })
 
+describe('@ 补全：空状态', () => {
+  it('打了字一条没命中：面板留着说清楚，而不是凭空消失', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.type(ta(), '@乌撒')
+    expect(screen.getByText('没有匹配的队友、地点或技能')).toBeTruthy()
+    expect(screen.getByText('接着写下去就好，@ 只是补全')).toBeTruthy()
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+  })
+
+  it('空状态里不吞 Enter：那一下仍然是发送', async () => {
+    sent = []
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.type(ta(), '@乌撒')
+    await user.keyboard('{Enter}')
+    expect(sent).toEqual(['@乌撒'])
+  })
+
+  it('空状态里 Esc 收起', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.type(ta(), '@乌撒')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByText('没有匹配的队友、地点或技能')).toBeNull()
+  })
+})
+
 describe('@ 补全：收起与失效', () => {
-  it('候选里没有的东西：不弹菜单，但 @ 照常是普通字符', async () => {
+  it('候选里没有的东西：不列候选，但 @ 照常是普通字符（面板改说一句没匹配）', async () => {
     const user = userEvent.setup()
     render(<Harness />)
     await user.type(ta(), '@不存在的人')
-    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+    expect(screen.getByText('没有匹配的队友、地点或技能')).toBeTruthy()
     expect(ta().value).toBe('@不存在的人')
   })
 

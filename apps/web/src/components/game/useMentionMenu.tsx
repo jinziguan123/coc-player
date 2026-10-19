@@ -90,10 +90,13 @@ export function useMentionMenu(input: {
   const mode: 'groups' | 'items' = query !== '' || scope != null ? 'items' : 'groups'
   const rows = mode === 'groups' ? groups.length : matches.length
 
+  // 打了字却一条都没命中：面板留着说一句「没有匹配」，而不是凭空消失。
+  const empty = query !== '' && rows === 0
   // 刚选完那一下不该立刻再弹：光标停在名字右侧时，同一个 @ 会被重新判成触发态
   // （query 成了名字本身），菜单马上又冒出来。要接着打字才算翻篇——
   // 那种情况下文本已变、dismissed 自动失效，菜单照常出现。
-  const confirmedOpen = rows > 0 && !!trigger && !(dismissedCaret && trigger.at === dismissedCaret.start)
+  const confirmedOpen = (rows > 0 || empty) && !!trigger
+    && !(dismissedCaret && trigger.at === dismissedCaret.start)
   // 换了一个 @（at 变了）就从头开始：分组回到一级、高亮回到第一条。
   const at = trigger?.at
   useEffect(() => {
@@ -159,6 +162,11 @@ export function useMentionMenu(input: {
     // 中文输入法组字中：Enter 是选字，不是"确认这一项"。textarea 那边有同样的守卫。
     if (e.nativeEvent.isComposing || e.keyCode === 229) return false
     if (!confirmedOpen) return false
+    // 空状态：只有 Esc 有意义。**不吞 Enter**——一句话都还没写完，那一下该去发送。
+    if (rows === 0) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return true }
+      return false
+    }
     const move = (delta: number) => {
       e.preventDefault()
       setCursor((c) => (c + delta + rows) % rows)
@@ -182,9 +190,11 @@ export function useMentionMenu(input: {
     return false
   }, [backOrClose, close, confirmedOpen, cursor, enterGroup, mode, pick, rows])
 
-  const palette = confirmedOpen && trigger ? (
+  // 面板常挂、由 Palette 里的 AnimatePresence 管进出场：直接返回 null 的话退场动画没机会播。
+  const palette = (
     mode === 'groups' ? (
       <MentionPalette
+        open={confirmedOpen}
         mode="groups"
         groups={groups.map((g) => ({
           key: g.kind,
@@ -199,8 +209,17 @@ export function useMentionMenu(input: {
       />
     ) : (
       <MentionPalette
+        open={confirmedOpen}
         mode="items"
-        items={matches.map((m) => ({ ...m, cls: KIND_CLASS[m.kind], icon: icons[m.kind] }))}
+        empty={empty}
+        items={matches.map((m) => ({
+          ...m,
+          cls: KIND_CLASS[m.kind],
+          icon: icons[m.kind],
+          kindLabel: KIND_LABELS[m.kind],
+          // 直接打字过滤（没进过任何组）时标出组名：一屏里混着人名、地名与技能名。
+          showKind: scope == null,
+        }))}
         cursor={cursor}
         // 组内搜索退到全局时说清楚，别让玩家以为"技能里没有艾琳"是数据问题。
         scopeLabel={fellBack ? '全部' : scope ? KIND_LABELS[scope] : undefined}
@@ -208,7 +227,6 @@ export function useMentionMenu(input: {
         onPick={(i) => pick(i, snap?.text ?? '')}
       />
     )
-  ) : null
-
+  )
   return { palette, sync, onKeyDown, close }
 }
