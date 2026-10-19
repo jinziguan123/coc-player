@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -39,6 +39,7 @@ function Harness(props: { candidates?: MentionCandidate[] }) {
         value={text}
         onChange={(e) => { setText(e.target.value); menu.sync(e.target) }}
         onClick={(e) => menu.sync(e.currentTarget)}
+        onBlur={() => menu.close()}
         onKeyDown={(e) => { menu.onKeyDown(e, text) }}
       />
     </div>
@@ -135,6 +136,17 @@ describe('@ 补全菜单', () => {
     render(<Harness />)
     await user.type(ta(), '@艾琳 你好')
     expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('失焦即收起，文本不受影响', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.type(ta(), '@地下')
+    expect(screen.getByRole('listbox')).toBeTruthy()
+    // jsdom 的 el.blur() 不一定会派发 focusout（React 的 onBlur 听的是它），直接发事件。
+    fireEvent.blur(ta())
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(ta().value).toBe('@地下')
   })
 
   it('Esc 收起菜单但不改文本', async () => {

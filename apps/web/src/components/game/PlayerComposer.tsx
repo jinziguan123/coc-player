@@ -73,6 +73,8 @@ export function PlayerComposer(input: {
           onCompositionStart={() => { composing.current = true }}
           onCompositionEnd={() => { composing.current = false }}
           onKeyDown={onKeyDown}
+          // 点到输入框以外就收起（菜单本身的 mousedown 被 preventDefault，不会走到这里）。
+          onBlur={() => menu.close()}
           // 只有「点一下把光标挪到别处」需要重新同步：打字与方向键都已经走 onChange。
           // 特意不在 keyUp 上同步——选中项之后那次 keyUp 会从 DOM 读回旧光标位
           // （React 刚赋完值、selection 还没落定），把刚收起的菜单又弹回来。

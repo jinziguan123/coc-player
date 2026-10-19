@@ -24,6 +24,8 @@ export interface MentionMenu {
   sync: (el: { value: string; selectionStart: number | null }) => void
   /** 返回 true 表示这一下按键已被菜单消费，调用方不要再处理（如别再当成"发送"）。 */
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>, text: string) => boolean
+  /** 收起菜单（点了别处时用）。不碰文本，只收起。 */
+  close: () => void
 }
 
 /** 图标由调用方注入（react-icons/gi 的 Gi* 组件），这个文件不引图标库——
@@ -86,6 +88,11 @@ export function useMentionMenu(input: {
     setSnap({ text, caret })
   }, [])
 
+  const close = useCallback(() => {
+    dismissed.current = null
+    setSnap(null)
+  }, [])
+
   const pick = useCallback((i: number, text: string) => {
     const hit = matches[i]
     if (!hit || !trigger) return
@@ -121,5 +128,5 @@ export function useMentionMenu(input: {
     />
   ) : null
 
-  return { palette, sync, onKeyDown }
+  return { palette, sync, onKeyDown, close }
 }

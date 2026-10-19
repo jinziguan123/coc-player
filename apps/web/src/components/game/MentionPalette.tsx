@@ -22,7 +22,14 @@ export function MentionPalette(input: {
 }) {
   const { items, cursor, onHover, onPick } = input
   return (
-    <div className="kp-mention" role="listbox" aria-label="可以提到的人与地方">
+    <div
+      className="kp-mention"
+      role="listbox"
+      aria-label="可以提到的人与地方"
+      // 别让点选把焦点从输入框抢走：抢走会先触发 textarea 的 blur（菜单当场收起），
+      // 这一下 click 就落空了。preventDefault 掉 mousedown 是最省事的守法。
+      onMouseDown={(e) => e.preventDefault()}
+    >
       {items.map((m, i) => (
         <button
           key={`${m.kind}:${m.label}`}
