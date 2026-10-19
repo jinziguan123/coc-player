@@ -14,6 +14,26 @@
 
 export type MentionKind = 'character' | 'location' | 'skill'
 
+/** 一级入口（分组）的名字。用「已知道的地点」而不是「场景」：场景是 KP 的词，
+ *  玩家嘴里的说法是「去过哪儿」。 */
+export const KIND_LABELS: Record<MentionKind, string> = {
+  character: '队友',
+  location: '已知地点',
+  skill: '技能',
+}
+
+/** 一级入口只列有内容的组：点进去是空的，比没有这个入口更糟。 */
+export function countByKind(candidates: MentionCandidate[]): Array<{ kind: MentionKind; count: number }> {
+  const order: MentionKind[] = ['character', 'location', 'skill']
+  return order
+    .map((kind) => ({ kind, count: candidates.reduce((n, c) => n + (c.kind === kind ? 1 : 0), 0) }))
+    .filter((g) => g.count > 0)
+}
+
+export function candidatesOfKind(candidates: MentionCandidate[], kind: MentionKind): MentionCandidate[] {
+  return candidates.filter((c) => c.kind === kind)
+}
+
 export interface MentionCandidate {
   kind: MentionKind
   /** 插入的正文。名字里带 @ 会把下一次触发判定搅乱，这里过滤掉。 */

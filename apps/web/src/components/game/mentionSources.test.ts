@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildCandidates, filterCandidates, type MentionCandidate } from './mentionSources'
+import {
+  buildCandidates, candidatesOfKind, countByKind, filterCandidates, KIND_LABELS,
+  type MentionCandidate,
+} from './mentionSources'
 
 const seats = [
   { character_id: 'c1', character_name: '艾琳', role: 'human' },
@@ -104,5 +107,31 @@ describe('filterCandidates', () => {
 
   it('一条都不命中时给空表', () => {
     expect(filterCandidates(list, '不存在的东西')).toEqual([])
+  })
+})
+
+describe('一级入口的计数', () => {
+  it('只列有内容的组，顺序固定为 队友 → 地点 → 技能', () => {
+    expect(countByKind([
+      { kind: 'skill', label: '侦查' },
+      { kind: 'character', label: '艾琳' },
+      { kind: 'character', label: 'Sarah' },
+    ])).toEqual([
+      { kind: 'character', count: 2 },
+      { kind: 'skill', count: 1 },
+    ])
+  })
+
+  it('空候选表给空入口表', () => {
+    expect(countByKind([])).toEqual([])
+  })
+
+  it('取某组的成员', () => {
+    const list: MentionCandidate[] = [
+      { kind: 'character', label: '艾琳' },
+      { kind: 'location', label: '地下室' },
+    ]
+    expect(candidatesOfKind(list, 'location').map((c) => c.label)).toEqual(['地下室'])
+    expect(KIND_LABELS.location).toBe('已知地点')
   })
 })

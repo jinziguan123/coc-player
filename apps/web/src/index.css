@@ -4361,7 +4361,9 @@ button.chip, .chip-btn { cursor: pointer; }
 .kp-mention {
   position: absolute;
   left: 0; bottom: calc(100% + 0.3rem);
-  width: 100%;
+  /* 不跟着输入框铺满：整行 700 多像素宽时，名字在左、技能值被推到最右，
+     中间那一大片空白反而让人串行。收窄到 22rem，在手机上仍被 100% 兜住。 */
+  width: min(100%, 22rem);
   max-height: 13rem;
   overflow-y: auto;
   z-index: 30;
@@ -4376,13 +4378,28 @@ button.chip, .chip-btn { cursor: pointer; }
   align-items: center;
   gap: 0.4rem;
   width: 100%;
-  padding: 0.28rem 0.4rem;
+  padding: 0.34rem 0.45rem;
   border-radius: 3px;
-  font-size: var(--text-2xs);
+  /* 比斜杠面板大一档：那是 KP 背熟了的命令，这里是玩家现场认人名与地名。 */
+  font-size: var(--text-xs);
   text-align: left;
   color: var(--color-text-secondary);
 }
 .kp-mention-row--on { background: var(--color-bg-card); color: var(--color-text-primary); }
+
+/* 二级的头部：写明"现在看的是哪一组"，右边提示 Esc 能退回去。
+   做得比候选行更收（更小、更暗），一眼能分出"这不是能选的行"。 */
+.kp-mention-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem 0.3rem;
+  margin-bottom: 0.1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
 
 /* 图标按语义分色：谁（队友）/ 哪（地点）/ 查（技能）——一眼先看出"这是个人"还是"这是块地方"。 */
 .kp-mention-ic { display: inline-flex; flex-shrink: 0; }
