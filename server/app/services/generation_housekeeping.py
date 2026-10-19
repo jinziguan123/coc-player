@@ -252,7 +252,7 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
         # 状态由 _maybe_roll_story_summary 的「整理笔记」承担；此处保持静默。
         agent = backstage_agent.BackstageAgent(llm)
         valid_ids = {n.get("id") for n in (module.npcs or []) if n.get("id")}
-        trace = agent_trace.start(session_id, "backstage", db=db)
+        trace = agent_trace.start(session_id, "backstage", stage="幕后推演", db=db)
         try:
             bevents = await agent.infer(messages, valid_ids)
         except Exception:

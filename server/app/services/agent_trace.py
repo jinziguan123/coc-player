@@ -27,8 +27,17 @@ class AgentTrace:
     db: Session | None = None
 
 
-def start(session_id: str, agent: str, db: Session | None = None, **fields: Any) -> AgentTrace:
-    return AgentTrace(session_id=session_id, agent=agent, fields=dict(fields), db=db)
+def start(
+    session_id: str, agent: str, stage: str, db: Session | None = None, **fields: Any,
+) -> AgentTrace:
+    """开一段轨迹。**stage 是必填的**：此前它带默认空串，于是六个调用点一个都没传，
+    KP 面板那一列常年是一排「—」（实测全表 14 条、零条有值）。必填之后，谁忘了写会当场
+    报 TypeError，而不是又留一列空数据等人去发现。
+
+    stage 写的是「这一步在做什么」，尽量带上当事人（哪个队友、哪个 NPC）——面板上那一格
+    是排查看「谁慢」时最先读的东西。
+    """
+    return AgentTrace(session_id=session_id, agent=agent, stage=stage, fields=dict(fields), db=db)
 
 
 def finish(trace: AgentTrace, *, outcome: str = "ok", provider=None, **fields: Any) -> None:

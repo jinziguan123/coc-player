@@ -1243,7 +1243,10 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
                         ).memory
             except Exception:
                 logger.exception("战斗 NPC 记忆注入失败（忽略）: id=%s", actor.get("id"))
-            trace = agent_trace.start(session_id, "combat", db=db, npc_id=actor.get("id"))
+            trace = agent_trace.start(
+                session_id, "combat", stage=f"战斗行动 · {actor.get('name') or 'NPC'}",
+                db=db, npc_id=actor.get("id"),
+            )
             try:
                 raw_action = await agent.decide(state, npc_actor, scene_hint)
             except Exception:

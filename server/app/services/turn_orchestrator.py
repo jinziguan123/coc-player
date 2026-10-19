@@ -1247,7 +1247,7 @@ async def run_chat_generation(session_id: str) -> None:
                 rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
                 rule_options_block=rule_options_service.context_block(db, game_session),
             )
-            trace = agent_trace.start(session_id, "planner", db=db)
+            trace = agent_trace.start(session_id, "planner", stage="规划本回合", db=db)
             plan_messages = agent_runtime.ContextBundle.from_messages(
                 plan_messages, budget_tokens=16000,
             ).fit().for_model()

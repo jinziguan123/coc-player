@@ -64,7 +64,10 @@ class NpcRuntime:
             messages, budget_tokens=8000, visibility=(npc_id,),
         ).fit()
         state = npc_state.NpcState.load(self.module, self.game_session, npc_id)
-        trace = agent_trace.start(self.session_id, "npc", db=self.db, npc_id=npc_id)
+        trace = agent_trace.start(
+            self.session_id, "npc", stage=f"NPC 代演 · {state.name}",
+            db=self.db, npc_id=npc_id,
+        )
         try:
             line = await asyncio.wait_for(
                 NPCAgent(self.llm, npc_id).respond(bundle.for_model()),
