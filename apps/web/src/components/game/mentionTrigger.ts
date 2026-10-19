@@ -21,29 +21,18 @@ export interface MentionTrigger {
   to: number
 }
 
-/** 词内字符的码点区间：ASCII 字母数字、CJK 统一表意、全角字母数字、假名、谚文。
+/** 前一个字符是不是「标识符里那种字符」：ASCII 字母、数字、下划线。
  *
- *  刻意用码点比较而不是字符类正则：正则里连写多个 `\uXXXX-\uYYYY` 区间时，只要有一个
- *  区间被写歪（少一个字符、多一个括号），表现是「多数用例照常跑通、只有某些词不弹面板」
- *  ——这种错法在测试里极难定位。码点比较没有这层解释空间。 */
-const WORD_RANGES: Array<[number, number]> = [
-  [0x30, 0x39],       // 0-9
-  [0x41, 0x5a],       // A-Z
-  [0x61, 0x7a],       // a-z
-  [0x3040, 0x30ff],   // 平假名 / 片假名
-  [0x3400, 0x9fff],   // CJK 统一表意（含扩展 A）
-  [0xac00, 0xd7af],   // 谚文
-  [0xff10, 0xff19],   // ０-９
-  [0xff21, 0xff3a],   // Ａ-Ｚ
-  [0xff41, 0xff5a],   // ａ-ｚ
-]
+ *  只有这些才算「词内」——邮箱（lin@example）、代码里的 @ 就在这种位置，那里弹面板纯打扰。
+ *
+ *  **汉字/假名/谚文刻意不算词内**：中文写作不加空格，「我对@艾琳说」是常态；按「前一个字符
+ *  是汉字就不触发」会把最常见的用法堵死（曾经就这么写，接上正文 token 渲染时一测就露了）。
+ *  逐字符判断而不是写字符类正则：字符类里塞括号字符极易被读成嵌套区间，且很难发现。 */
+const IDENT_CHAR = /[0-9A-Za-z_]/
 
-/** 前一个字符算不算「起头」：行首、空白、标点都算，只有词内字符不算。
- *  典型反例是邮箱 `lin@example`——`@` 前面是字母，不弹面板。 */
+/** 光标前的字符算不算「起头」：行首、空白、标点、汉字都算，只有标识符字符不算。 */
 export function isBoundaryChar(prev: string): boolean {
-  if (!prev) return true
-  const code = prev.codePointAt(0) ?? 0
-  return !WORD_RANGES.some(([lo, hi]) => code >= lo && code <= hi)
+  return !IDENT_CHAR.test(prev)
 }
 
 /**

@@ -58,6 +58,8 @@ import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpConsoleDock } from '../components/game/KpConsoleDock'
 import { PlayerComposer } from '../components/game/PlayerComposer'
+import { MentionText } from '../components/game/MentionTokens'
+import { useMentionCandidates } from '../components/game/usePlayerMentions'
 import { AgentTracePanel } from '../components/game/AgentTracePanel'
 import { KpCombatSpread } from '../components/game/KpCombatSpread'
 import { KpDeskRail } from '../components/game/KpDeskRail'
@@ -1318,6 +1320,14 @@ export function GameSessionPage() {
       })
   }
 
+  // @ 提到的候选在页面级只算一次：输入框菜单要用它，消息气泡里的 token 也要用同一份
+  // 名单去认「这个名字指的是人、地点还是技能」——两份名单必然会对不上。
+  const mentionCandidates = useMentionCandidates({
+    seats: currentSession?.participants,
+    locations,
+    skills: panelChar?.skills,
+  }).candidates
+
   // 草稿 state 已经在 PlayerComposer 里（它清自己的框），这里只负责把原文发出去。
   const sendMessage = async (raw: string) => {
     if (!raw.trim() || !currentSession || streaming) return
@@ -2007,7 +2017,7 @@ export function GameSessionPage() {
                 )}
                 {isPlayer && msg.type === 'dialogue' ? (
                   <div className="chat-player">
-                    <span className="chat-bubble-player">{msg.content}</span>
+                    <span className="chat-bubble-player"><MentionText text={msg.content} candidates={mentionCandidates} /></span>
                   </div>
                 ) : !isPlayer && msg.type === 'dialogue' ? (
                   // NPC 气泡：有立绘（metadata.portrait，缓存秒挂或生成后 event_patch 补挂）时在气泡旁放小圆头像。
@@ -2031,7 +2041,7 @@ export function GameSessionPage() {
                   </div>
                 ) : msg.type === 'action' ? (
                   <div className={isPlayer ? 'chat-player' : ''}>
-                    <span className="chat-bubble-action">{isPlayer ? msg.content : <InlineMd text={msg.content} />}</span>
+                    <span className="chat-bubble-action">{isPlayer ? <MentionText text={msg.content} candidates={mentionCandidates} /> : <InlineMd text={msg.content} />}</span>
                   </div>
                 ) : msg.type === 'narration' ? (
                   <div className="chat-content markdown-body">
@@ -2041,7 +2051,7 @@ export function GameSessionPage() {
                   </div>
                 ) : (
                   <div className="chat-content">
-                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                    <span className="whitespace-pre-wrap"><MentionText text={msg.content} candidates={mentionCandidates} /></span>
                   </div>
                 )}
               </div>
@@ -2260,9 +2270,7 @@ export function GameSessionPage() {
           <PlayerComposer
             onSend={(text) => void sendMessage(text)}
             locked={streaming}
-            seats={currentSession?.participants}
-            locations={locations}
-            skills={panelChar?.skills}
+            candidates={mentionCandidates}
             onTyping={notifyTyping}
             textareaRef={inputRef}
             placeholder={streaming

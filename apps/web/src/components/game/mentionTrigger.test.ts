@@ -10,8 +10,11 @@ import { caretOf, completeMention, detectMention, isBoundaryChar } from './menti
  * 为什么不让用例直接写 @：那样「被测的 @」和「光标在哪」混在同一串里，标记一写歪就变成
  * 在测另一段文本，而失败信息长得一模一样。
  */
+/** 少了 ^ 就当场报错：helper 会在 indexOf 返回 -1 时把 @ 插到倒数第一个字符前，
+ *  于是「我没写标记」会悄悄变成「在测另一句话」——失败信息还长得一模一样。 */
 function build(marked: string): { text: string; caret: number } {
   const mark = marked.indexOf('^')
+  if (mark < 0) throw new Error(`用例缺 ^ 标记：${marked}`)
   const caretMark = marked.indexOf('$')
   const bare = marked.replace('^', '').replace('$', '')
   return {
@@ -33,9 +36,15 @@ describe('isBoundaryChar', () => {
     }
   })
 
-  it('词内字符不算起头：字母、数字、汉字、全角字母', () => {
-    for (const ch of ['a', 'Z', '0', '对', '我', 'ａ', '１', 'あ', '한']) {
+  it('标识符字符不算起头：字母、数字、下划线（邮箱与代码里的 @ 长这样）', () => {
+    for (const ch of ['a', 'Z', '0', '_']) {
       expect(isBoundaryChar(ch)).toBe(false)
+    }
+  })
+
+  it('汉字/假名/谚文算起头：中文不加空格，「我对@艾琳说」是常态', () => {
+    for (const ch of ['对', '我', 'あ', '한']) {
+      expect(isBoundaryChar(ch)).toBe(true)
     }
   })
 })
@@ -49,8 +58,8 @@ describe('detectMention', () => {
     expect(detect('他说：^管').trigger).toEqual({ at: 3, query: '管', from: 3, to: 5 })
   })
 
-  it('汉字紧跟 @ 不算起头：与邮箱同一条规矩（前面得是标点或空白）', () => {
-    expect(detect('我对^艾琳说').trigger).toBeNull()
+  it('汉字紧跟 @ 也能起头：中文句子不加空格（只有邮箱那种标识符前才不弹）', () => {
+    expect(detect('我对^艾琳说').trigger).toEqual({ at: 2, query: '艾琳说', from: 2, to: 6 })
     expect(detect('我对 ^艾琳说').trigger).toEqual({ at: 3, query: '艾琳说', from: 3, to: 7 })
   })
 
@@ -63,7 +72,8 @@ describe('detectMention', () => {
   })
 
   it('整串没有 @ 时返回 null', () => {
-    expect(detect('我推开门').trigger).toBeNull()
+    // 这一例没有 @ 可插，直接调纯函数（helper 会补 @，语义对不上）
+    expect(detectMention('我推开门', 4)).toBeNull()
   })
 
   it('邮箱里的 @ 不算触发：前一个字符是字母', () => {

@@ -57,13 +57,21 @@ export function useMentionCandidates(input: {
 
 export function usePlayerMentions(input: {
   candidates: MentionCandidate[]
-  icons: Record<'character' | 'location' | 'skill', ReactNode>
   /** 输入框引用：选中后要把光标放回去（受控赋值会把光标甩到串尾）。 */
   textareaRef: RefObject<HTMLTextAreaElement | null>
   /** 文本变了（含补全插入）：调用方据此写回草稿 state。 */
   onTextChange: (text: string) => void
 }) {
-  const { candidates, icons, textareaRef, onTextChange } = input
+  const { candidates, textareaRef, onTextChange } = input
+  // 图标在这里注入（hook 不引图标库展示逻辑），与项目「图标不进文本」同一条约定。
+  const icons = useMemo(
+    () => ({
+      character: <GiCharacter size={12} />,
+      location: <GiPositionMarker size={12} />,
+      skill: <GiRollingDices size={12} />,
+    }),
+    [],
+  )
   return useMentionMenu({
     candidates,
     icons,

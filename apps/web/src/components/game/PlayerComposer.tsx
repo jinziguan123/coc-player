@@ -7,10 +7,9 @@
  */
 import { useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 
-import {
-  applyDraftHeight, useMentionCandidates, usePlayerMentions, type MentionLocationLike,
-} from './usePlayerMentions'
-import type { PartySeatLike } from './mentionSources'
+import { MentionStrip } from './MentionTokens'
+import { applyDraftHeight, usePlayerMentions } from './usePlayerMentions'
+import type { MentionCandidate } from './mentionSources'
 
 export function PlayerComposer(input: {
   /** 发送：拿到的是「要发的原文」。发送失败时页面负责把草稿放回来（见 restore）。 */
@@ -18,21 +17,19 @@ export function PlayerComposer(input: {
   placeholder: string
   /** KP 叙事中：草稿照收，但不发送（同原先的 streaming 行为）。 */
   locked?: boolean
-  seats?: PartySeatLike[] | null
-  locations?: MentionLocationLike[] | null
-  skills?: Record<string, number> | null
+  /** 候选由页面统一算好传进来：消息气泡里的提到也要用同一份名单去认。 */
+  candidates: MentionCandidate[]
   /** 打进草稿时上报「正在输入」（节流交给调用方）。 */
   onTyping: (text: string) => void
   textareaRef?: RefObject<HTMLTextAreaElement | null>
 }) {
-  const { onSend, placeholder, locked, seats, locations, skills, onTyping, textareaRef } = input
+  const { onSend, placeholder, locked, candidates, onTyping, textareaRef } = input
   const [draft, setDraft] = useState('')
   const ownRef = useRef<HTMLTextAreaElement>(null)
   const ref = textareaRef ?? ownRef
   const composing = useRef(false)
 
-  const { candidates, icons } = useMentionCandidates({ seats, locations, skills })
-  const menu = usePlayerMentions({ candidates, icons, textareaRef: ref, onTextChange: setDraft })
+  const menu = usePlayerMentions({ candidates, textareaRef: ref, onTextChange: setDraft })
 
   const submit = () => {
     if (locked || !draft.trim()) return
@@ -60,6 +57,9 @@ export function PlayerComposer(input: {
           往下开会盖住发送按钮，而整条输入区贴着底边）。 */}
       <div className="chat-input-wrap">
         {menu.palette}
+        {/* 选中之后当场看得见"提到的是谁"——textarea 里没法只给一段文字上样式，
+            所以把这层信息摆在框上方：名字仍以纯文本落在正文里，仍是可编辑的。 */}
+        <MentionStrip text={draft} candidates={candidates} />
         <textarea
           ref={ref}
           data-tour="input"

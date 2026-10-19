@@ -4359,7 +4359,8 @@ button.chip, .chip-btn { cursor: pointer; }
    定位挂在 .chat-input-wrap 上——外壳要自己撑满可用宽度，否则它会缩成内容宽度把输入框压扁。
    观感跟站内菜单同一套（.more-menu-list / .combo-list）：卡片底、细边框、同一枚投影。
    不另起一套视觉——它是输入框的一部分，不该长得像个外挂面板。 */
-.chat-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+/* 竖排：菜单绝对定位在上方，草稿框下面撑满；「已提到」条（若有）排在框上面。 */
+.chat-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .kp-mention {
   position: absolute;
   left: 0; bottom: calc(100% + 0.3rem);
@@ -4502,6 +4503,40 @@ button.chip, .chip-btn { cursor: pointer; }
 .kp-mention-empty { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.5rem 0.55rem; }
 .kp-mention-empty-title { font-size: var(--text-xs); color: var(--color-text-primary); }
 .kp-mention-empty-note { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+
+/* ===== @ 提到的 token =====
+   「@纳迪娅·哈桑」在正文里不是一段普通文字，而是一枚小签：图标 + 语义色，
+   与补全菜单里那一行是同一个东西（人=黄铜 / 地点=铜绿 / 技能=骰金）。
+   尺寸跟着正文走（em 而不是 px），所以气泡里的字号变化它也跟着变。 */
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.14em;
+  padding: 0 0.3em;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.94em;
+  line-height: 1.45;
+  white-space: nowrap;
+  vertical-align: baseline;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.mention-chip--character { color: var(--color-text-accent); }
+.mention-chip--location { color: var(--color-verdigris); }
+.mention-chip--skill { color: var(--color-dice-gold); }
+
+/* 草稿上方的「已提到」条：textarea 里没法只给一段文字上样式，于是把"提到的是谁"
+   摆在框上方。没有提到时整条不渲染，不占高度。 */
+.mention-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0 0.1rem 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.mention-strip-label { letter-spacing: 0.06em; }
 
 /* 手机上给更大的点按目标（行高按手指算，不按鼠标算） */
 @media (max-width: 767px) {
