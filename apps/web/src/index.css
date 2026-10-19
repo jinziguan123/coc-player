@@ -4354,6 +4354,44 @@ button.chip, .chip-btn { cursor: pointer; }
   font-style: italic;
 }
 
+/* ===== @ 补全菜单 =====
+   浮在输入框上方（同 KP 斜杠面板）：往下开会盖住发送按钮，而输入区本就贴着底边。
+   定位挂在 .chat-input-wrap 上——外壳要自己撑满可用宽度，否则它会缩成内容宽度把输入框压扁。 */
+.chat-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.kp-mention {
+  position: absolute;
+  left: 0; bottom: calc(100% + 0.3rem);
+  width: 100%;
+  max-height: 13rem;
+  overflow-y: auto;
+  z-index: 30;
+  padding: 0.2rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.kp-mention-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.28rem 0.4rem;
+  border-radius: 3px;
+  font-size: var(--text-2xs);
+  text-align: left;
+  color: var(--color-text-secondary);
+}
+.kp-mention-row--on { background: var(--color-bg-card); color: var(--color-text-primary); }
+
+/* 图标按语义分色：谁（队友）/ 哪（地点）/ 查（技能）——一眼先看出"这是个人"还是"这是块地方"。 */
+.kp-mention-ic { display: inline-flex; flex-shrink: 0; }
+.kp-mention-ic--who { color: var(--color-text-accent); }
+.kp-mention-ic--where { color: var(--color-success, #41ba41); }
+.kp-mention-ic--skill { color: var(--color-warning, #ffbf00); }
+.kp-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-mention-hint { margin-left: auto; opacity: 0.7; white-space: nowrap; }
+
 .chat-input-bar {
   display: flex;
   align-items: flex-end;
