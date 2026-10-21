@@ -97,8 +97,8 @@ export function RulebookLibrary({ onCount }: {
       await localApi.delete(`/rulebooks/${id}`)
       fetchBooks()
       toast.success('规则书已删除')
-    } catch {
-      toast.error('删除失败')
+    } catch (e) {
+      toast.error(`删除失败：${e instanceof Error ? e.message : '未知原因'}`)
     }
   }
 

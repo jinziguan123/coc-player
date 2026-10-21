@@ -883,12 +883,20 @@ def get_events(
 @router.delete("/{session_id}")
 async def delete_session(
     session_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     token: str | None = Depends(player_token),
 ):
-    require_session_manager(
-        db, session_id, token, detail="只有房主可以删除该会话",
-    )
+    # 房间存在本机库里：本机用户删自己库里的房间总是可以的，哪怕房主身份不是自己
+    # （例如演示 / 测试脚本建的房间，房主是一个虚构的 KP 令牌，本机用户永远「不是房主」）。
+    # 局域网 / 直连来的客人仍须是房主。
+    if is_local_client(request):
+        if session_service.get_session(db, session_id) is None:
+            raise HTTPException(404, "会话不存在")
+    else:
+        require_session_manager(
+            db, session_id, token, detail="只有房主可以删除这个房间（你不是它的房主）",
+        )
     # 先停掉正在跑的生成：它被取消时会把半截叙事落库，必须发生在删库之前，
     # 否则要么写进一个已经不存在的房间，要么在删除之后又冒出孤儿事件。
     await generation_manager.cancel(session_id)

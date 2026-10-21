@@ -151,8 +151,8 @@ export function ImageProfilePanel({ openCreateAt = 0 }: {
       toast.success('生图配置已删除')
       if (editingId === id) cancelEdit()
       await fetchProfiles()
-    } catch {
-      toast.error('删除失败')
+    } catch (e) {
+      toast.error(`删除失败：${e instanceof Error ? e.message : '未知原因'}`)
     }
   }
 

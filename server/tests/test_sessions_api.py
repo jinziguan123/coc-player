@@ -433,11 +433,16 @@ def test_regenerate_endpoint_cancels_and_restarts(client, monkeypatch):
     assert calls["cancel"] == 1 and calls["start"] == 1
 
 
-def test_delete_session_requires_host_token(client):
-    """有主会话只能房主删：无 token / 他人 token 一律 403，房主 token 才放行。
+def test_delete_session_requires_host_token(client, tmp_path, monkeypatch):
+    """局域网 / 直连来的客人只有房主能删：无 token / 他人 token 一律 403，房主 token 才放行。
 
     回归：此前 delete 端点零校验，同网段任何人都能删掉整场存档。
     """
+    from app.services import net_access
+
+    monkeypatch.setattr(net_access, "SETTINGS_FILE", tmp_path / "net_settings.json")
+    net_access.reset_cache()
+    net_access.set_lan_enabled(True)
     c, ids = client
     host = {"X-Player-Token": "host-tok"}
     sid = c.post(
@@ -447,11 +452,28 @@ def test_delete_session_requires_host_token(client):
         headers=host,
     ).json()["id"]
 
-    assert c.request("DELETE", f"/api/sessions/{sid}").status_code == 403  # 无 token
-    assert c.request(
-        "DELETE", f"/api/sessions/{sid}", headers={"X-Player-Token": "guest"}
-    ).status_code == 403  # 他人 token
-    assert c.request("DELETE", f"/api/sessions/{sid}", headers=host).status_code == 200
+    lan = TestClient(app, client=("192.168.1.50", 5555))
+    try:
+        assert lan.request("DELETE", f"/api/sessions/{sid}").status_code == 403  # 无 token
+        r = lan.request("DELETE", f"/api/sessions/{sid}", headers={"X-Player-Token": "guest"})
+        assert r.status_code == 403 and "不是它的房主" in r.json()["detail"]   # 他人 token，提示说清原因
+        assert lan.request("DELETE", f"/api/sessions/{sid}", headers=host).status_code == 200
+    finally:
+        net_access.reset_cache()
+
+
+def test_local_user_can_delete_any_room_in_own_db(client):
+    """房间存在本机库里：本机用户删它不必是房主（如脚本建的演示房间，房主是虚构的 KP 令牌）。"""
+    c, ids = client
+    sid = c.post(
+        "/api/sessions",
+        json={"module_id": ids["module"],
+              "participants": [{"character_id": ids["hero"], "is_primary": True}]},
+        headers={"X-Player-Token": "someone-else"},
+    ).json()["id"]
+    r = c.request("DELETE", f"/api/sessions/{sid}", headers={"X-Player-Token": "me"})
+    assert r.status_code == 200, r.text
+    assert c.request("DELETE", f"/api/sessions/{sid}").status_code == 404
 
 
 def test_list_sessions_hides_others_private_sessions(client):
