@@ -60,6 +60,9 @@ import { CombatStage, type CombatState, type PendingReaction, type CombatLogEntr
 import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpConsoleDock } from '../components/game/KpConsoleDock'
+import { PlayerComposer } from '../components/game/PlayerComposer'
+import { MentionText } from '../components/game/MentionTokens'
+import { useMentionCandidates } from '../components/game/usePlayerMentions'
 import { AgentTracePanel } from '../components/game/AgentTracePanel'
 import { KpCombatSpread } from '../components/game/KpCombatSpread'
 import { KpDeskRail } from '../components/game/KpDeskRail'
@@ -291,7 +294,6 @@ export function GameSessionPage() {
     if (isKp || !combat) return
     showHintOnce('combat', '[data-tour="combat"]')
   }, [combat, isKp])
-  const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   // 开局前置校验：是否已配置可用 AI（null=未知/检查中）。未配置时提示去设置，避免开场直接失败。
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null)
@@ -340,7 +342,6 @@ export function GameSessionPage() {
   const [waitSec, setWaitSec] = useState(0)   // 本次生成已等待秒数（长回合的进度感）
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const openingTriggered = useRef(false)
-  const composingRef = useRef(false)
   // 场外身份（排除自己的「正在输入」用）：玩家席优先，真人 KP 用 KP 席
   const myChatSeat = myPlayerSeat
     ?? currentSession?.participants?.find((p) => p.is_mine && p.role === 'kp') ?? null
@@ -1325,12 +1326,18 @@ export function GameSessionPage() {
       })
   }
 
-  const sendMessage = async () => {
-    if (!input.trim() || !currentSession || streaming) return
-    const text = input.trim()
-    setInput('')
-    notifyTyping('')
-    if (inputRef.current) inputRef.current.style.height = 'auto'
+  // @ 提到的候选在页面级只算一次：输入框菜单要用它，消息气泡里的 token 也要用同一份
+  // 名单去认「这个名字指的是人、地点还是技能」——两份名单必然会对不上。
+  const mentionCandidates = useMentionCandidates({
+    seats: currentSession?.participants,
+    locations,
+    skills: panelChar?.skills,
+  }).candidates
+
+  // 草稿 state 已经在 PlayerComposer 里（它清自己的框），这里只负责把原文发出去。
+  const sendMessage = async (raw: string) => {
+    if (!raw.trim() || !currentSession || streaming) return
+    const text = raw.trim()
 
     // fire-and-forget：不做本地乐观回显，自己的消息同样经 /live 广播回来渲染，
     // 保证与其他成员看到的内容/顺序一致。
@@ -2034,7 +2041,7 @@ export function GameSessionPage() {
                 )}
                 {isPlayer && msg.type === 'dialogue' ? (
                   <div className="chat-player">
-                    <span className="chat-bubble-player">{msg.content}</span>
+                    <span className="chat-bubble-player"><MentionText text={msg.content} candidates={mentionCandidates} /></span>
                   </div>
                 ) : !isPlayer && msg.type === 'dialogue' ? (
                   // NPC 气泡：有立绘（metadata.portrait，缓存秒挂或生成后 event_patch 补挂）时在气泡旁放小圆头像。
@@ -2058,7 +2065,7 @@ export function GameSessionPage() {
                   </div>
                 ) : msg.type === 'action' ? (
                   <div className={isPlayer ? 'chat-player' : ''}>
-                    <span className="chat-bubble-action">{isPlayer ? msg.content : <InlineMd text={msg.content} />}</span>
+                    <span className="chat-bubble-action">{isPlayer ? <MentionText text={msg.content} candidates={mentionCandidates} /> : <InlineMd text={msg.content} />}</span>
                   </div>
                 ) : msg.type === 'narration' ? (
                   <div className="chat-content markdown-body">
@@ -2068,7 +2075,7 @@ export function GameSessionPage() {
                   </div>
                 ) : (
                   <div className="chat-content">
-                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                    <span className="whitespace-pre-wrap"><MentionText text={msg.content} candidates={mentionCandidates} /></span>
                   </div>
                 )}
               </div>
@@ -2252,44 +2259,18 @@ export function GameSessionPage() {
           </div>
         )) : (
         <div className="chat-input-bar">
-          <textarea
-            ref={inputRef}
-            data-tour="input"
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value)
-              e.target.style.height = 'auto'
-              // 手机上留出更大的草稿视野（不超过视口 40%），桌面维持 120px 上限。
-              const narrow = typeof window.matchMedia === 'function'
-                && window.matchMedia('(max-width: 767px)').matches
-              const cap = narrow
-                ? Math.min((window.visualViewport?.height ?? window.innerHeight) * 0.4, 220)
-                : 120
-              // 清空后回到一行高度；否则 textarea 会按占位符折行后的 scrollHeight 停在两行。
-              e.target.style.height = (narrow && !e.target.value ? 44 : Math.min(e.target.scrollHeight, cap)) + 'px'
-              notifyTyping(e.target.value)   // 节流上报"正在输入"给同房间其他人
-            }}
-            onCompositionStart={() => { composingRef.current = true }}
-            onCompositionEnd={() => { composingRef.current = false }}
-            onKeyDown={(e) => {
-              if (composingRef.current || e.nativeEvent.isComposing) return
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                sendMessage()
-              }
-            }}
+          <PlayerComposer
+            onSend={(text) => void sendMessage(text)}
+            locked={streaming}
+            candidates={mentionCandidates}
+            onTyping={notifyTyping}
+            textareaRef={inputRef}
             placeholder={streaming
               ? 'KP 叙事中，可先打草稿，稍后发送…'
               : narrowScreen
                 ? '输入行动；「」台词，（）场外'
                 : '输入行动；用「」或""括住要说出口的台词，（圆括号）内为场外'}
-            className="input flex-1"
-            rows={1}
-            style={{ resize: 'none' }}
           />
-          <button onClick={sendMessage} disabled={streaming || !input.trim()} className="btn-primary">
-            发送
-          </button>
         </div>
         )}
       </div>

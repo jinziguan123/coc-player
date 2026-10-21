@@ -81,7 +81,8 @@ async def _maybe_merge_chapters(db: Session, session: GameSession, llm) -> None:
         head = world_memory.chapters_to_merge(ws)
         if not head:
             return
-        merged = await story_summarizer.merge_chapters(llm, [c["text"] for c in head])
+        with agent_trace.span("summary", f"章节合并 · {len(head)} 章", session_id=session.id, db=db):
+            merged = await story_summarizer.merge_chapters(llm, [c["text"] for c in head])
         if not merged:
             return
         session.world_state = world_memory.replace_merged_chapters(ws, merged, len(head))
@@ -137,11 +138,14 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
         )
         # 叙事主流已停但仍持锁做收尾：给前端一个可读状态，别让玩家对着无声脉冲点干等。
         room_hub.broadcast(session_id, _make_chunk("housekeeping", "KP 正在整理笔记…"))
-        result = await story_summarizer.summarize_and_extract(
-            llm, world_memory.story_summary_text(ws), to_summ,
-            world_memory.format_npc_memory_all_brief(ws, npc_names),
-            team_memory_brief=team_brief,
-        )
+        with agent_trace.span(
+            "summary", f"滚动摘要 · {len(to_summ)} 条事件", session_id=session_id, db=db,
+        ):
+            result = await story_summarizer.summarize_and_extract(
+                llm, world_memory.story_summary_text(ws), to_summ,
+                world_memory.format_npc_memory_all_brief(ws, npc_names),
+                team_memory_brief=team_brief,
+            )
         if not result:
             return
         new_chapter, npc_updates, clue_notes, team_updates = result
@@ -252,13 +256,13 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
         # 状态由 _maybe_roll_story_summary 的「整理笔记」承担；此处保持静默。
         agent = backstage_agent.BackstageAgent(llm)
         valid_ids = {n.get("id") for n in (module.npcs or []) if n.get("id")}
-        trace = agent_trace.start(session_id, "backstage", db=db)
+        trace = agent_trace.start(session_id, "backstage", stage="幕后推演", db=db)
         try:
             bevents = await agent.infer(messages, valid_ids)
         except Exception:
-            agent_trace.finish(trace, outcome="error", provider=llm)
+            agent_trace.finish(trace, outcome="error")
             raise
-        agent_trace.finish(trace, provider=llm)
+        agent_trace.finish(trace)
         if bevents is None:
             return  # 首次调用本身失败：游标不动、不落库（网络恢复后重试）
 

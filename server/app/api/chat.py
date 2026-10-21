@@ -10,6 +10,7 @@ from app.api.deps import (
     require_session_token_actor,
     require_session_viewer,
 )
+from app.ai import usage_tracker
 from app.database import get_db
 from app.models.module import Module
 from app.models.session import GameSession
@@ -198,6 +199,7 @@ async def chat(
 
 
 @router.post("/{session_id}/kp/action")
+@usage_tracker.session_scoped
 async def kp_action(
     session_id: str,
     data: KpActionRequest,

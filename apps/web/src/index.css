@@ -4354,6 +4354,195 @@ button.chip, .chip-btn { cursor: pointer; }
   font-style: italic;
 }
 
+/* ===== @ 补全菜单 =====
+   浮在输入框上方（同 KP 斜杠面板）：往下开会盖住发送按钮，而输入区本就贴着底边。
+   定位挂在 .chat-input-wrap 上——外壳要自己撑满可用宽度，否则它会缩成内容宽度把输入框压扁。
+   观感跟站内菜单同一套（.more-menu-list / .combo-list）：卡片底、细边框、同一枚投影。
+   不另起一套视觉——它是输入框的一部分，不该长得像个外挂面板。 */
+/* 竖排：菜单绝对定位在上方，草稿框下面撑满；「已提到」条（若有）排在框上面。 */
+.chat-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.kp-mention {
+  position: absolute;
+  left: 0; bottom: calc(100% + 0.3rem);
+  /* 底走 bg-secondary：局内那套 surface-* / bg-card 都被刻意调成半透（好透出糊过的场景底，
+     见上面「半透明卡片」那段注释），但这一层飘在**清晰的旁白**上——半透会让底下的字透进菜单，
+     与候选名撞在一行里，读起来反而更费劲（实测对比过）。bg-secondary 在局内仍是不透明的那一档。 */
+  /* 不跟着输入框铺满：整行 700 多像素宽时，名字在左、技能值被推到最右，
+     中间那一大片空白反而让人串行。收窄到 22rem，在手机上仍被 100% 兜住。 */
+  width: min(100%, 22rem);
+  /* 高度按「还能往上长多少」给：技能动辄五十多项，一屏只看得到七八条就得一直滚。
+     45vh 是给矮视口（笔记本分屏）留的余量——不能让菜单顶到叙事区上沿。 */
+  max-height: min(22rem, 45vh);
+  overflow-y: auto;
+  /* 列表滚到底不要把整条消息流带着一起滚 */
+  overscroll-behavior: contain;
+  z-index: 30;
+  padding: 0.25rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.kp-mention-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.34rem 0.45rem;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  /* 比斜杠面板大一档：那是 KP 背熟了的命令，这里是玩家现场认人名与地名。 */
+  font-size: var(--text-xs);
+  text-align: left;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+/* 高亮：底色抬一档 + 左侧一道黄铜竖标。只靠底色在深色底上太弱，扫一眼分不出选中的是哪行。
+   底色本身是半透的（局内那套），压在**不透明**的面板底上，所以不会透出背后的旁白。 */
+.kp-mention-row--on {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+.kp-mention-row:focus-visible {
+  outline: 2px solid var(--color-text-accent);
+  outline-offset: -2px;
+}
+
+/* 图标装进一枚同色淡底的方片：三类的色相一眼可分，又不会在深底上糊成一块。
+   底色由 currentColor 兑出来，所以只改上面的 --who/--where/--skill 就能换配色。 */
+.kp-mention-ic {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.kp-mention-ic--who { color: var(--color-text-accent); }
+.kp-mention-ic--where { color: var(--color-verdigris); }
+.kp-mention-ic--skill { color: var(--color-dice-gold); }
+
+.kp-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 直接打字时的组名（队友/已知地点/技能）：比名字更小更淡，只用来消除"这是谁"的疑问 */
+.kp-mention-kind {
+  flex-shrink: 0;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  opacity: 0.75;
+}
+.kp-mention-hint { margin-left: auto; opacity: 0.7; white-space: nowrap; }
+/* 技能值这类数字：等宽 + 等宽数字，一列扫下来对得齐 */
+.kp-mention-hint--num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* 「当前所在」：与「已到过」不同级，给一枚小小的铜边签 */
+.kp-mention-tag {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  font-size: var(--text-2xs);
+  color: var(--color-text-accent);
+  white-space: nowrap;
+}
+/* 一级每行右侧的项数：等宽数字，别让 4 和 51 的宽度把箭头推来推去 */
+.kp-mention-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.kp-mention-go { flex-shrink: 0; color: var(--color-brass-dim); }
+
+/* 二级的头部：写明"现在看的是哪一组"，右边提示 Esc 能退回去。
+   做得比候选行更收（更小、更暗），一眼能分出"这不是能选的行"。 */
+.kp-mention-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem 0.3rem;
+  margin-bottom: 0.1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+.kp-mention-head-title { color: var(--color-text-accent); }
+.kp-mention-kbd {
+  margin-left: auto;
+  padding: 0 0.25rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  background: var(--color-input-bg);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+}
+.kp-mention-head-note { opacity: 0.8; }
+
+/* 一级底部的键位提示：两级这件事不写出来，第一次用的人不会想到按 Enter。
+   放在面板里而不是提示气泡里——它要恰好在人正在犹豫的那一刻在眼前。 */
+.kp-mention-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.45rem 0.2rem;
+  margin-top: 0.15rem;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+/* 键位图标跟正文同色但亮一档：太小又会糊成一团，看不清就等于没提示 */
+.kp-mention-foot svg { color: var(--color-brass-dim); }
+.kp-mention-foot-note { margin-left: auto; }
+
+/* 打了字却一条没命中：面板留着把话说清楚，别凭空消失 */
+.kp-mention-empty { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.5rem 0.55rem; }
+.kp-mention-empty-title { font-size: var(--text-xs); color: var(--color-text-primary); }
+.kp-mention-empty-note { font-size: var(--text-2xs); color: var(--color-text-secondary); }
+
+/* ===== @ 提到的 token =====
+   「@纳迪娅·哈桑」在正文里不是一段普通文字，而是一枚小签：图标 + 语义色，
+   与补全菜单里那一行是同一个东西（人=黄铜 / 地点=铜绿 / 技能=骰金）。
+   尺寸跟着正文走（em 而不是 px），所以气泡里的字号变化它也跟着变。 */
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.14em;
+  padding: 0 0.3em;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.94em;
+  line-height: 1.45;
+  white-space: nowrap;
+  vertical-align: baseline;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.mention-chip--character { color: var(--color-text-accent); }
+.mention-chip--location { color: var(--color-verdigris); }
+.mention-chip--skill { color: var(--color-dice-gold); }
+
+/* 草稿上方的「已提到」条：textarea 里没法只给一段文字上样式，于是把"提到的是谁"
+   摆在框上方。没有提到时整条不渲染，不占高度。 */
+.mention-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0 0.1rem 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+.mention-strip-label { letter-spacing: 0.06em; }
+
+/* 手机上给更大的点按目标（行高按手指算，不按鼠标算） */
+@media (max-width: 767px) {
+  .kp-mention-row { padding: 0.5rem 0.55rem; }
+  .kp-mention-ic { width: 1.35rem; height: 1.35rem; }
+}
 .chat-input-bar {
   display: flex;
   align-items: flex-end;
@@ -8019,6 +8208,21 @@ select.input option {
 .trace-summary b { font-family: var(--font-display); font-size: 1.35rem; font-weight: 400; line-height: 1; color: var(--color-text-primary); }
 .trace-summary span { font-size: 0.6875rem; letter-spacing: 0.08em; color: var(--color-text-secondary); }
 .trace-summary .is-bad b { color: var(--color-danger); }
+/* 按环节汇总：环节 / token（带比例条）/ 缓存命中 / 思考占比 + 末行对账 */
+.trace-usage { margin-bottom: 0.75rem; font-size: var(--text-xs); }
+.trace-usage-head, .trace-usage-row {
+  display: grid;
+  grid-template-columns: 4rem 1fr 3.6rem 3.6rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.trace-usage-head { font-size: 0.6875rem; letter-spacing: 0.08em; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); }
+.trace-usage-head > span:not(:first-child), .trace-usage-row > span:not(:first-child) { text-align: right; }
+.trace-usage-row { color: var(--color-text-primary); font-family: var(--font-display); }
+.trace-usage-tok { display: flex; align-items: center; gap: 0.45rem; }
+.trace-usage-diff { margin-top: 0.35rem; padding-top: 0.35rem; border-top: 1px dashed var(--color-border); font-size: 0.6875rem; color: var(--color-text-secondary); }
+.trace-usage-diff.is-bad { color: var(--color-danger); }
 /* 列表 */
 .trace-list { display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
 .trace-row {
@@ -8046,7 +8250,7 @@ select.input option {
 }
 .trace-agent--npc, .trace-agent--team { color: var(--color-verdigris); border-color: color-mix(in srgb, var(--color-verdigris) 50%, transparent); }
 .trace-agent--combat { color: var(--combat-foe); border-color: color-mix(in srgb, var(--combat-foe) 50%, transparent); }
-.trace-agent--backstage, .trace-agent--intent { color: var(--color-text-secondary); }
+.trace-agent--backstage, .trace-agent--intent, .trace-agent--summary, .trace-agent--chronicle { color: var(--color-text-secondary); }
 .trace-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.3rem; }
 .trace-row-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem; min-width: 0; font-size: var(--text-xs); }
 .trace-stage { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }

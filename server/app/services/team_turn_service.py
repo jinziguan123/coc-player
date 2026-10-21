@@ -322,22 +322,25 @@ async def _run_team_turn(
         bundle = agent_runtime.ContextBundle.from_messages(
             messages, budget_tokens=12000, visibility=(teammate.id,),
         ).fit()
-        trace = agent_trace.start(session_id, "team", db=db, char_id=teammate.id)
+        trace = agent_trace.start(
+            session_id, "team", stage=f"队友决策 · {teammate.name}",
+            db=db, char_id=teammate.id,
+        )
         t0 = time.monotonic()
         try:
             raw = await TeamAgent(llm, teammate.id).decide(bundle.for_model())
         except asyncio.CancelledError:
-            agent_trace.finish(trace, outcome="cancelled", provider=llm)
+            agent_trace.finish(trace, outcome="cancelled")
             raise
         except Exception:
-            agent_trace.finish(trace, outcome="error", provider=llm)
+            agent_trace.finish(trace, outcome="error")
             logger.exception("队友决策失败: char=%s", teammate.id)
             return None
         logger.info(
             "耗时|队友决策 %.1fs char=%s(%s)",
             time.monotonic() - t0, teammate.name, teammate.id,
         )
-        agent_trace.finish(trace, provider=llm)
+        agent_trace.finish(trace)
         return raw
 
     seen_actions: list[tuple[str, str]] = []
@@ -591,7 +594,7 @@ async def _run_team_turn(
             dropped, session_id,
         )
         trace = agent_trace.start(
-            session_id, "intent", db=db,
+            session_id, "intent", stage=f"意图裁决 · 丢弃 {dropped} 条", db=db,
             total=len(team_intents), committed=len(resolved), dropped=dropped,
         )
         agent_trace.finish(trace, outcome="conflict")

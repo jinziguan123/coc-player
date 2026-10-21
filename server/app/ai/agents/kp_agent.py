@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from app.ai.agents.base import BaseAgent
 from app.ai.provider import LLMProvider
 from app.ai.turn_planner import REQUIRES_CHECK_MARKER
+from app.services import agent_trace
 
 # 裁定轮（requires_check=true）的采样温度：明显低于常规叙事的 0.85。检定轮要求模型只写
 # 「尝试过程 + 以 [DICE_CHECK] 收尾、不提前泄结果/线索位置」，这是强约束遵循而非创作发挥；
@@ -22,6 +23,13 @@ class KPAgent(BaseAgent):
         super().__init__(llm, temperature=0.85)
 
     async def narrate(self, messages: list[dict]) -> AsyncIterator[str]:
+        # 非工具路径的主叙事都汇到这里（常规回合、续写、开场/尾声、查规则后的续写…），
+        # 在这一处记轨迹就不必每个调用点各包一层；所在路径由 stage 前缀（phase）区分。
+        with agent_trace.span("kp", "主叙事"):
+            async for chunk in self._narrate(messages):
+                yield chunk
+
+    async def _narrate(self, messages: list[dict]) -> AsyncIterator[str]:
         directive = _required_check_directive(messages)
         if directive is None:
             # 常规叙事轮：原样流式，温度不变。

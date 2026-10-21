@@ -16,6 +16,7 @@ from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
+    agent_trace,
     human_kp_service,
     module_image_service,
     npc_identity,
@@ -79,13 +80,14 @@ async def _illustrate_event(
     # 写提示词与出图用**同一份**画风：取两次的话，中途改了本局画风就会一半新一半旧。
     suffix = _style_suffix(session_id)
     try:
-        raw = await get_fast_llm().complete(
-            [
-                {"role": "system", "content": prompt_sys + module_image_service.style_discipline(suffix)},
-                {"role": "user", "content": prompt_user},
-            ],
-            temperature=0.7,
-        )
+        with agent_trace.span("illustration", "配图提示词", session_id=session_id):
+            raw = await get_fast_llm().complete(
+                [
+                    {"role": "system", "content": prompt_sys + module_image_service.style_discipline(suffix)},
+                    {"role": "user", "content": prompt_user},
+                ],
+                temperature=0.7,
+            )
         sd_prompt = module_image_service.trim_prompt(raw if isinstance(raw, str) else "")
         if not sd_prompt:
             return

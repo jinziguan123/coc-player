@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.ai.text_guard import has_near_duplicate_passages
 from app.ai.turn_planner import TurnPlan, _extract_json_object
+from app.services import agent_trace
 
 logger = logging.getLogger(__name__)
 
@@ -403,35 +404,37 @@ async def validate_turn_narration(
     if on_start is not None:
         on_start()
 
-    from app.ai.llm_factory import check_llm_pair
+    # 快模型 + 回退叙事模型可能是两次调用，记成一段（终检这一环的总花费）。
+    with agent_trace.span("validator", "终检本回合叙事"):
+        from app.ai.llm_factory import check_llm_pair
 
-    first_llm, fallback_llm = check_llm_pair(llm)
-    kwargs = {
-        "seen_context": seen_context,
-        "turn_inputs": turn_inputs,
-        "party_names": party_names,
-        "location_context": location_context,
-        "settled_checks": settled_checks,
-    }
-    if fallback_llm is None:
+        first_llm, fallback_llm = check_llm_pair(llm)
+        kwargs = {
+            "seen_context": seen_context,
+            "turn_inputs": turn_inputs,
+            "party_names": party_names,
+            "location_context": location_context,
+            "settled_checks": settled_checks,
+        }
+        if fallback_llm is None:
+            t0 = time.monotonic()
+            result = await _validate_once(first_llm, plan, narration, **kwargs)
+            logger.info("耗时|终检 %.1fs（%s）", time.monotonic() - t0, _verdict_label(result))
+            return _keep_original_when_empty(result, narration)
+
         t0 = time.monotonic()
-        result = await _validate_once(first_llm, plan, narration, **kwargs)
-        logger.info("耗时|终检 %.1fs（%s）", time.monotonic() - t0, _verdict_label(result))
+        first = await _validate_once(first_llm, plan, narration, **kwargs)
+        first_s = time.monotonic() - t0
+        reason = _fallback_reason(first, narration, plan)
+        if reason is None:
+            logger.info("耗时|终检 快模型 %.1fs（%s）", first_s, _verdict_label(first))
+            return _keep_original_when_empty(first, narration)
+
+        logger.info("耗时|终检 快模型 %.1fs 不可用（%s），回退叙事模型重跑", first_s, reason)
+        t1 = time.monotonic()
+        result = await _validate_once(fallback_llm, plan, narration, **kwargs)
+        logger.info(
+            "耗时|终检 叙事模型回退 %.1fs（%s）",
+            time.monotonic() - t1, _verdict_label(result),
+        )
         return _keep_original_when_empty(result, narration)
-
-    t0 = time.monotonic()
-    first = await _validate_once(first_llm, plan, narration, **kwargs)
-    first_s = time.monotonic() - t0
-    reason = _fallback_reason(first, narration, plan)
-    if reason is None:
-        logger.info("耗时|终检 快模型 %.1fs（%s）", first_s, _verdict_label(first))
-        return _keep_original_when_empty(first, narration)
-
-    logger.info("耗时|终检 快模型 %.1fs 不可用（%s），回退叙事模型重跑", first_s, reason)
-    t1 = time.monotonic()
-    result = await _validate_once(fallback_llm, plan, narration, **kwargs)
-    logger.info(
-        "耗时|终检 叙事模型回退 %.1fs（%s）",
-        time.monotonic() - t1, _verdict_label(result),
-    )
-    return _keep_original_when_empty(result, narration)

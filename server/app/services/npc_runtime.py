@@ -64,24 +64,27 @@ class NpcRuntime:
             messages, budget_tokens=8000, visibility=(npc_id,),
         ).fit()
         state = npc_state.NpcState.load(self.module, self.game_session, npc_id)
-        trace = agent_trace.start(self.session_id, "npc", db=self.db, npc_id=npc_id)
+        trace = agent_trace.start(
+            self.session_id, "npc", stage=f"NPC 代演 · {state.name}",
+            db=self.db, npc_id=npc_id,
+        )
         try:
             line = await asyncio.wait_for(
                 NPCAgent(self.llm, npc_id).respond(bundle.for_model()),
                 timeout=NPC_RESPONSE_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError as exc:
-            agent_trace.finish(trace, outcome="timeout", provider=self.llm)
+            agent_trace.finish(trace, outcome="timeout")
             raise NpcResponseTimeout("NPC 回应超时") from exc
         except Exception:
-            agent_trace.finish(trace, outcome="error", provider=self.llm)
+            agent_trace.finish(trace, outcome="error")
             raise
         # 玩家还没认出这东西时，气泡不能替他报出真名；这句台词本身也要参与判据，
         # 因为他可能在这一句里自报家门。
         shown_name = npc_identity.build_masker(
             self.db, self.session_id, self.module,
         )(state.name, extra_prose=line)
-        agent_trace.finish(trace, provider=self.llm)
+        agent_trace.finish(trace)
         return shown_name, line
 
     async def reply(

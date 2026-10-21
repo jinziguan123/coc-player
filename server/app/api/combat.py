@@ -12,6 +12,7 @@ from app.api.deps import (
     require_session_token_actor,
     require_session_viewer,
 )
+from app.ai import usage_tracker
 from app.database import get_db
 from app.schemas.combat import ChaseActionRequest, CombatActionRequest, ReactionRequest
 from app.services import chase_service, combat_service, session_service
@@ -35,6 +36,7 @@ def get_combat(
 
 
 @router.post("/{session_id}/combat/action")
+@usage_tracker.session_scoped
 async def combat_action(
     session_id: str,
     data: CombatActionRequest,
@@ -78,6 +80,7 @@ async def combat_action(
 
 
 @router.post("/{session_id}/combat/roll")
+@usage_tracker.session_scoped
 async def combat_roll(
     session_id: str,
     db: Session = Depends(get_db),
@@ -99,6 +102,7 @@ async def combat_roll(
 
 
 @router.post("/{session_id}/combat/reaction")
+@usage_tracker.session_scoped
 async def combat_reaction(
     session_id: str,
     data: ReactionRequest,
@@ -173,6 +177,7 @@ def get_chase(
 
 
 @router.post("/{session_id}/chase/action")
+@usage_tracker.session_scoped
 async def chase_action(
     session_id: str,
     data: ChaseActionRequest,

@@ -36,8 +36,11 @@ function fmt(n: number): string {
 }
 
 /**
- * 头部单枚小徽标「累计上下文」——本局累计 token 消耗（session_usage.total_tokens），含每一次
+ * 头部单枚小徽标「本局消耗」——本局累计 token 消耗（session_usage.total_tokens），含每一次
  * LLM 调用，**单调累增**，对应本局真实 API 花费的趋势。
+ *
+ * 曾叫「累计上下文」，常被读成「上下文快满了」——它不是窗口占用，是累计花掉的量，名字照实说。
+ * 各环节花了多少见 KP 的「运行轨迹」抽屉（按环节汇总，并与这个数对账）。
  *
  * （早先并列的「上下文占用」徽标已移除：占用由组装预算主动裁剪、永不撑爆窗口，占比只会绕着远低于
  * 窗口的天花板抖，对玩家无实际决策价值，反而易被误读为「快满了」。）
@@ -78,12 +81,13 @@ export function ContextUsageBadge({
     : []
 
   const cumTitle = [
-    `本局累计 token 消耗：${fmt(su.total_tokens)}`,
+    `本局消耗：累计 ${fmt(su.total_tokens)} token`,
     `· 输入 ${fmt(su.prompt_tokens)} + 输出 ${fmt(su.completion_tokens)}`,
-    `· 共 ${su.calls} 次 LLM 调用（含 planner/主叙事/校验/队友/子代理/战斗等）`,
+    `· 共 ${su.calls} 次 LLM 调用（规划、主叙事、终检、队友、NPC、战斗、摘要，以及真人 KP 的参谋等）`,
     ...cacheLines,
     '',
-    '随游戏推进单调累增，对应本局真实 API 花费的趋势。',
+    '这是累计花掉的量，不是上下文窗口的占用；随游戏推进只增不减。',
+    'KP 可在「运行轨迹」里看各环节分别花了多少。',
   ].join('\n')
 
   return (
@@ -97,7 +101,7 @@ export function ContextUsageBadge({
       style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
       title={cumTitle}
     >
-      <GiTwoCoins size={13} /> <span className="ctx-usage-label">累计上下文 </span>{fmt(su.total_tokens)}
+      <GiTwoCoins size={13} /> <span className="ctx-usage-label">本局消耗 </span>{fmt(su.total_tokens)}
     </span>
   )
 }

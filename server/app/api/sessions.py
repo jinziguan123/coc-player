@@ -850,9 +850,12 @@ def get_agent_traces(
 ):
     """KP 面板的 Agent 调用轨迹；仅房主可见。"""
     _require_kp_or_host(db, session_id, token)
-    from app.services.agent_trace import list_for_session
+    from app.services.agent_trace import list_for_session, usage_summary
 
-    return {"items": list_for_session(db, session_id, limit=limit)}
+    return {
+        "items": list_for_session(db, session_id, limit=limit),
+        "summary": usage_summary(db, session_id),
+    }
 
 
 @router.get("/{session_id}/events")

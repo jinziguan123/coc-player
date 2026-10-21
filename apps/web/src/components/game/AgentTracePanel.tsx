@@ -15,7 +15,30 @@ interface TraceItem {
   prompt_tokens: number | null
   completion_tokens: number | null
   total_tokens: number | null
+  reasoning_tokens?: number | null
+  cache_read_tokens?: number | null
+  cache_write_tokens?: number | null
+  calls?: number | null
   created_at: string | null
+}
+
+interface Usage {
+  prompt_tokens: number
+  completion_tokens: number
+  reasoning_tokens: number
+  total_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  calls: number
+}
+
+/** 后端 agent_trace.usage_summary：按环节的累计（不受轨迹条数裁剪影响）与本局累计的差额。 */
+export interface UsageSummary {
+  agents: Array<Usage & { agent: string }>
+  session_total: Usage
+  since: Usage
+  traced: Usage
+  untraced: Usage
 }
 
 interface IntentItem {
@@ -34,6 +57,8 @@ interface IntentItem {
 const AGENT_LABEL: Record<string, string> = {
   planner: '规划', team: '队友', npc: 'NPC', intent: '裁决',
   kp: 'KP 叙事', combat: '战斗', backstage: '幕后',
+  validator: '终检', style: '去口癖', summary: '摘要', chronicle: '小传',
+  illustration: '配图', advisor: '参谋',
 }
 const OUTCOME_LABEL: Record<string, string> = {
   ok: '成功', error: '出错', timeout: '超时', cancelled: '已取消', conflict: '冲突',
@@ -47,6 +72,62 @@ const SOURCE_LABEL: Record<string, string> = { npc: 'NPC', combat: '战斗' }
 
 function fmtMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+}
+
+function fmtTok(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+function pct(part: number, whole: number): string {
+  return whole > 0 ? `${Math.round((part / whole) * 100)}%` : '—'
+}
+
+/** 单条轨迹的悬停明细：入/出之外，思考与缓存命中决定「钱花得值不值」。 */
+function rowUsageTitle(it: TraceItem): string | undefined {
+  if (it.prompt_tokens == null) return undefined
+  const lines = [`输入 ${it.prompt_tokens} · 输出 ${it.completion_tokens ?? 0}`]
+  if (it.calls) lines.push(`${it.calls} 次调用`)
+  if (it.reasoning_tokens) lines.push(`其中思考 ${it.reasoning_tokens}`)
+  if (it.cache_read_tokens) lines.push(`缓存命中 ${it.cache_read_tokens}（${pct(it.cache_read_tokens, it.prompt_tokens)}）`)
+  return lines.join('\n')
+}
+
+/**
+ * 按环节汇总：哪一环花得最多、缓存有没有生效、输出里多少是被丢弃的思考。
+ * 末行对账：各环节之和与「本局消耗」的差额——没挂在任何环节上的调用，理论上接近 0。
+ */
+export function UsageBreakdown({ summary }: { summary: UsageSummary }) {
+  const { agents, untraced, since, session_total: total } = summary
+  if (!agents.length && !total.total_tokens) return null
+  const scoped = total.total_tokens - since.total_tokens
+  const max = agents.reduce((m, a) => Math.max(m, a.total_tokens), 0)
+  return (
+    <section className="trace-usage" aria-label="按环节的用量">
+      <div className="trace-usage-head">
+        <span>环节</span><span>token</span><span title="输入里命中提示词缓存的比例（命中部分约按 1/10 计费）">缓存命中</span><span title="输出里模型思考的比例（思考内容生成完即被丢弃）">思考占比</span>
+      </div>
+      {agents.map((a) => (
+        <div key={a.agent} className="trace-usage-row">
+          <span className={`trace-agent trace-agent--${a.agent}`}>{AGENT_LABEL[a.agent] || a.agent}</span>
+          <span className="trace-usage-tok" title={`${a.calls} 次调用 · 输入 ${a.prompt_tokens} · 输出 ${a.completion_tokens}`}>
+            <span className="trace-bar"><i style={{ width: `${max ? Math.max(3, (a.total_tokens / max) * 100) : 0}%` }} /></span>
+            {fmtTok(a.total_tokens)}
+          </span>
+          <span>{a.cache_read_tokens ? pct(a.cache_read_tokens, a.prompt_tokens) : '—'}</span>
+          <span>{a.reasoning_tokens ? pct(a.reasoning_tokens, a.completion_tokens) : '—'}</span>
+        </div>
+      ))}
+      <div
+        className={`trace-usage-diff ${Math.abs(untraced.total_tokens) > scoped * 0.02 ? 'is-bad' : ''}`}
+        title={since.total_tokens
+          ? `按环节记账启用前本局已累计 ${fmtTok(since.total_tokens)}，不计入对账`
+          : undefined}
+      >
+        各环节合计 {fmtTok(summary.traced.total_tokens)} / 本局消耗 {fmtTok(scoped)}
+        {' · '}未归入环节 {fmtTok(untraced.total_tokens)}（{untraced.calls} 次调用）
+      </div>
+    </section>
+  )
 }
 
 function fmtTime(iso: string | null): string {
@@ -71,6 +152,7 @@ export function AgentTracePanel({ sessionId, open, onClose }: {
 }) {
   const [tab, setTab] = useState<'traces' | 'intents'>('traces')
   const [items, setItems] = useState<TraceItem[]>([])
+  const [usage, setUsage] = useState<UsageSummary | null>(null)
   const [intents, setIntents] = useState<IntentItem[]>([])
   const [filterSource, setFilterSource] = useState('')
   const [filterActor, setFilterActor] = useState('')
@@ -80,9 +162,9 @@ export function AgentTracePanel({ sessionId, open, onClose }: {
   const loadTraces = useCallback(() => {
     setLoading(true)
     setError('')
-    api.get<{ items: TraceItem[] }>(`/sessions/${sessionId}/agent-traces?limit=50`)
-      .then((data) => setItems(data.items || []))
-      .catch((e) => { setItems([]); setError(e instanceof Error ? e.message : '读取失败') })
+    api.get<{ items: TraceItem[]; summary?: UsageSummary }>(`/sessions/${sessionId}/agent-traces?limit=50`)
+      .then((data) => { setItems(data.items || []); setUsage(data.summary ?? null) })
+      .catch((e) => { setItems([]); setUsage(null); setError(e instanceof Error ? e.message : '读取失败') })
       .finally(() => setLoading(false))
   }, [sessionId])
 
@@ -164,11 +246,12 @@ export function AgentTracePanel({ sessionId, open, onClose }: {
               {items.length > 0 && (
                 <div className="trace-summary">
                   <div><b>{items.length}</b><span>次调用</span></div>
-                  <div><b>{summary.tokens.toLocaleString()}</b><span>合计 token</span></div>
+                  <div><b>{summary.tokens.toLocaleString()}</b><span>本页 token</span></div>
                   <div><b>{fmtMs(Math.round(summary.avg))}</b><span>平均耗时</span></div>
                   <div className={summary.failed ? 'is-bad' : ''}><b>{summary.failed}</b><span>未成功</span></div>
                 </div>
               )}
+              {usage && <UsageBreakdown summary={usage} />}
               {!items.length && !loading && <div className="trace-empty">还没有调用记录。下一轮生成后会出现。</div>}
               <ol className="trace-list">
                 {items.map((it) => {
@@ -186,7 +269,7 @@ export function AgentTracePanel({ sessionId, open, onClose }: {
                         <span className="trace-row-bottom">
                           <span className="trace-bar"><i style={{ width: `${Math.max(3, ratio * 100)}%` }} /></span>
                           <span className="trace-ms">{fmtMs(it.duration_ms)}</span>
-                          <span className="trace-tok" title={it.prompt_tokens != null ? `输入 ${it.prompt_tokens} · 输出 ${it.completion_tokens ?? 0}` : undefined}>
+                          <span className="trace-tok" title={rowUsageTitle(it)}>
                             {it.total_tokens ? `${it.total_tokens.toLocaleString()} token` : '—'}
                           </span>
                         </span>
