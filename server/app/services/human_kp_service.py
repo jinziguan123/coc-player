@@ -19,6 +19,7 @@ from app.models.character import Character
 from app.models.module import Module, ModuleChunk
 from app.models.session import GameSession
 from app.services import (
+    agent_trace,
     generation_lifecycle,
     image_store,
     module_image_service,
@@ -320,7 +321,8 @@ async def generate_narration_draft(
         },
         {"role": "user", "content": f"真人 KP 的写作要求：{instruction}"},
     ])
-    raw = await get_llm().complete(messages, temperature=0.7)
+    with agent_trace.span("advisor", "参谋 · 叙事草稿", session_id=session_id, db=db):
+        raw = await get_llm().complete(messages, temperature=0.7)
     draft = _CONTROL_TAG_RE.sub("", str(raw or "")).strip()
     if not draft:
         raise ValueError("AI 参谋没有返回可用草稿")
@@ -350,7 +352,8 @@ async def generate_turn_plan(
             "role": "user",
             "content": f"真人 KP 希望本次建议重点考虑：{focus.strip()}。仍只输出原 schema 的 JSON。",
         })
-    plan = await turn_planner.run_turn_planner(get_fast_llm(), messages)
+    with agent_trace.span("planner", "参谋 · 规划建议", session_id=session_id, db=db):
+        plan = await turn_planner.run_turn_planner(get_fast_llm(), messages)
     if plan is None:
         raise ValueError("AI 参谋未能生成有效裁定建议")
     return plan.model_dump(mode="json")
@@ -382,17 +385,18 @@ async def generate_image_preview(
     if not image_llm.supports_image_gen():
         raise ValueError("尚未配置生图模型：请到「设置 → AI 配置 → 生图模型」添加并激活一个")
     suffix = module_image_service.style_suffix_for(module, session)
-    translated = await get_fast_llm().complete(
-        [
-            {
-                "role": "system",
-                "content": "把真人 KP 的画面描述改写成一行英文文生图提示词。保留主体、环境、光线与年代，不要解释。"
-                + module_image_service.style_discipline(suffix),
-            },
-            {"role": "user", "content": prompt.strip()},
-        ],
-        temperature=0.4,
-    )
+    with agent_trace.span("illustration", "配图预览 · 写提示词"):
+        translated = await get_fast_llm().complete(
+            [
+                {
+                    "role": "system",
+                    "content": "把真人 KP 的画面描述改写成一行英文文生图提示词。保留主体、环境、光线与年代，不要解释。"
+                    + module_image_service.style_discipline(suffix),
+                },
+                {"role": "user", "content": prompt.strip()},
+            ],
+            temperature=0.4,
+        )
     visual_prompt = module_image_service.trim_prompt(str(translated or prompt))
     b64 = await image_llm.generate_image(f"{visual_prompt}, {suffix}")
     url = image_store.save_image_b64(b64 or "")

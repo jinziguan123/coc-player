@@ -27,7 +27,7 @@ from app.ai.llm_factory import get_llm
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import session_service, world_memory
+from app.services import agent_trace, session_service, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -137,10 +137,13 @@ async def archive_session(db: Session, session_id: str) -> int:
             if already_archived(char, session_id):
                 continue
             try:
-                raw = await llm.complete(
-                    _chronicle_messages(char, module, story, ending_name, char.status),
-                    temperature=0.7,
-                )
+                with agent_trace.span(
+                    "chronicle", f"角色小传 · {char.name}", session_id=session_id, db=db,
+                ):
+                    raw = await llm.complete(
+                        _chronicle_messages(char, module, story, ending_name, char.status),
+                        temperature=0.7,
+                    )
             except Exception:
                 logger.exception("角色小传生成失败（跳过该角色）：character=%s", char.id)
                 continue

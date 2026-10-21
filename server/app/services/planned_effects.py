@@ -15,6 +15,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
 from app.services import (
+    agent_trace,
     dice_runtime,
     inventory_service,
     kp_actions,
@@ -704,9 +705,10 @@ async def _confirm_narrated_engagement(payload: dict) -> dict | None:
     ]
     try:
         # 不设 max_tokens：推理模型的 reasoning 会把输出预算吃光，content 返回空串。
-        raw = await get_fast_llm().complete(
-            messages, temperature=0, response_format={"type": "json_object"},
-        )
+        with agent_trace.span("planner", "交战确认"):
+            raw = await get_fast_llm().complete(
+                messages, temperature=0, response_format={"type": "json_object"},
+            )
     except Exception:
         logger.exception("交战确认调用失败，本轮不补开战")
         return None

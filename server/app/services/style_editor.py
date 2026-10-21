@@ -22,6 +22,7 @@ from collections.abc import Callable
 from app.ai.turn_validator import (
     _ANTITHESIS_RE, _SIMILE_RE, _VAGUE_RE, TIC_CATALOG,
 )
+from app.services import agent_trace
 
 logger = logging.getLogger(__name__)
 
@@ -140,33 +141,34 @@ async def polish_narration(
     if on_start is not None:
         on_start()
 
-    from app.ai.llm_factory import check_llm_pair
+    with agent_trace.span("style", "去口癖改写"):
+        from app.ai.llm_factory import check_llm_pair
 
-    first_llm, fallback_llm = check_llm_pair(llm)
-    if fallback_llm is None:
+        first_llm, fallback_llm = check_llm_pair(llm)
+        if fallback_llm is None:
+            t0 = time.monotonic()
+            new = await _polish_once(first_llm, narration, flagged)
+            logger.info(
+                "耗时|去口癖 %.1fs（%s）",
+                time.monotonic() - t0, "已改写" if new is not None else "未通过，保留原文",
+            )
+            return new
+
         t0 = time.monotonic()
         new = await _polish_once(first_llm, narration, flagged)
+        first_s = time.monotonic() - t0
+        if new is not None:
+            logger.info("耗时|去口癖 快模型 %.1fs（已改写）", first_s)
+            return new
+
+        logger.info("耗时|去口癖 快模型 %.1fs 未通过校验，回退叙事模型重跑", first_s)
+        t1 = time.monotonic()
+        new = await _polish_once(fallback_llm, narration, flagged)
         logger.info(
-            "耗时|去口癖 %.1fs（%s）",
-            time.monotonic() - t0, "已改写" if new is not None else "未通过，保留原文",
+            "耗时|去口癖 叙事模型回退 %.1fs（%s）",
+            time.monotonic() - t1, "已改写" if new is not None else "仍未通过，保留原文",
         )
         return new
-
-    t0 = time.monotonic()
-    new = await _polish_once(first_llm, narration, flagged)
-    first_s = time.monotonic() - t0
-    if new is not None:
-        logger.info("耗时|去口癖 快模型 %.1fs（已改写）", first_s)
-        return new
-
-    logger.info("耗时|去口癖 快模型 %.1fs 未通过校验，回退叙事模型重跑", first_s)
-    t1 = time.monotonic()
-    new = await _polish_once(fallback_llm, narration, flagged)
-    logger.info(
-        "耗时|去口癖 叙事模型回退 %.1fs（%s）",
-        time.monotonic() - t1, "已改写" if new is not None else "仍未通过，保留原文",
-    )
-    return new
 
 
 async def polish_result(

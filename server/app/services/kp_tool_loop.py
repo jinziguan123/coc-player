@@ -27,6 +27,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.rules.kp_tools import KpToolContext, KpToolResult
 from app.services import (
+    agent_trace,
     chat_event_writer,
     command_protocol,
     dice_runtime,
@@ -695,6 +696,23 @@ async def _run_kp_agent_loop(
     循环结束后的 ``llm.last_usage`` 是最后一步的，多了前面各步累积的工具往返，拿它校准
     会让系数随工具步数抖动、系统性偏低（见 turn_context._record_turn_usage）。
     """
+    # 整个工具循环记一段（各步调用的合计）；工具里调起的 NPC 代演、查规则续写各自另记一段，
+    # 独占口径下不会重复算进这里。
+    with agent_trace.span("kp", "主叙事（工具循环）") as trace:
+        async for chunk in _kp_agent_loop_body(
+            llm, messages, result, execute_tool, trace, tools=tools, npcs=npcs,
+            group_label=group_label, plan=plan, max_steps=max_steps, party_names=party_names,
+            shown_dialogues=shown_dialogues, event_order=event_order,
+            masker_factory=masker_factory, usage_probe=usage_probe, npc_guard=npc_guard,
+        ):
+            yield chunk
+
+
+async def _kp_agent_loop_body(
+    llm, messages: list[dict], result: list, execute_tool, trace, *,
+    tools, npcs, group_label, plan, max_steps, party_names, shown_dialogues,
+    event_order, masker_factory, usage_probe, npc_guard,
+) -> AsyncIterator[str]:
     tools = tools if tools is not None else kp_tools.openai_tool_schemas()
     requires_check = bool(plan is not None and plan.requires_check)
     temperature = _CHECK_TURN_TEMPERATURE if requires_check else 0.85
@@ -717,6 +735,7 @@ async def _run_kp_agent_loop(
     usage_before = getattr(llm, "last_usage", None)
 
     def _log_rounds() -> None:
+        trace.fields["tools"] = list(used_tools)
         if used_tools:
             logger.info("耗时|KP 工具循环 %d 轮：%s", len(used_tools), "、".join(used_tools))
 

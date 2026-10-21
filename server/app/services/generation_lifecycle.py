@@ -38,6 +38,13 @@ async def generation_timing(
 
     合计写在 ``finally``：生成失败或被取消时**更**该知道时间花在哪儿。
     """
+    with usage_tracker.phase(label):
+        async with _timing_body(session_id, label, drain):
+            yield
+
+
+@contextlib.asynccontextmanager
+async def _timing_body(session_id: str, label: str, drain):
     started = time.monotonic()
     if drain is not None:
         t_drain = time.monotonic()
@@ -98,8 +105,9 @@ class HousekeepingManager:
             db = SessionLocal()
             started_at = time.monotonic()
             try:
-                await summarize(db, session_id, llm)
-                await backstage(db, session_id, llm)
+                with usage_tracker.phase("收尾"):
+                    await summarize(db, session_id, llm)
+                    await backstage(db, session_id, llm)
             finally:
                 db.close()
                 elapsed = time.monotonic() - started_at

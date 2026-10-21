@@ -10,6 +10,7 @@ import json
 
 from app.ai.agents.base import BaseAgent
 from app.ai.provider import LLMProvider
+from app.services import agent_trace
 
 _NARRATE_SYS = (
     "你是克苏鲁的呼唤（CoC）战斗描述器。根据【本轮机械结算】用 1-3 句紧凑、有画面感的中文，"
@@ -50,10 +51,11 @@ class CombatAgent(BaseAgent):
             + "【本轮机械结算】\n" + "\n".join(f"- {b}" for b in beats)
         )
         try:
-            return (await self.generate([
-                {"role": "system", "content": _NARRATE_SYS},
-                {"role": "user", "content": user},
-            ]) or "").strip()
+            with agent_trace.span("combat", "战斗叙述"):
+                return (await self.generate([
+                    {"role": "system", "content": _NARRATE_SYS},
+                    {"role": "user", "content": user},
+                ]) or "").strip()
         except Exception:
             return ""   # fail-open：叙述失败不阻断战斗结算
 

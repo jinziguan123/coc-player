@@ -424,7 +424,8 @@ async def _run_generation(
             rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
             rule_options_block=rule_options_service.context_block(db, game_session),
         )
-        plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
+        with agent_trace.span("planner", "规划本回合", session_id=session_id, db=db):
+            plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
         logger.info(
             "耗时|planner（生成内） %.1fs（%s）session=%s",
             time.monotonic() - t_plan, usage_tracker.fmt(usage_tracker.delta(u_plan)), session_id,
@@ -1151,6 +1152,7 @@ async def run_chat_generation(session_id: str) -> None:
     # KP 叙事 → 校验）。单看任何一次调用都不慢，叠起来就是玩家等的那几分钟——所以每一环
     # 都要有耗时，否则「为什么这么慢」只能靠猜。t_turn 给出总时长做对账。
     openai_compat.reset_endpoint_health()   # 见 run_regenerate_generation 里的同一行
+    usage_tracker.enter_phase("回合")         # 轨迹 stage 前缀：分得清是哪条路径上的调用
     t_turn = time.monotonic()
     t_drain = time.monotonic()
     await _drain_housekeeping(session_id)
@@ -1247,16 +1249,11 @@ async def run_chat_generation(session_id: str) -> None:
                 rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
                 rule_options_block=rule_options_service.context_block(db, game_session),
             )
-            trace = agent_trace.start(session_id, "planner", stage="规划本回合", db=db)
             plan_messages = agent_runtime.ContextBundle.from_messages(
                 plan_messages, budget_tokens=16000,
             ).fit().for_model()
-            try:
+            with agent_trace.span("planner", "规划本回合（队友行动后）", session_id=session_id, db=db):
                 plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
-            except Exception:
-                agent_trace.finish(trace, outcome="error", provider=fast_llm)
-                raise
-            agent_trace.finish(trace, provider=fast_llm)
             planned_effects.enforce_plan_item_locations(
                 plan, module, game_session.current_scene_id,
             )
@@ -1746,7 +1743,8 @@ async def _run_kp_turn(
             rule_excerpts=_rule_excerpts_for_planner(db, module, post_events, game_session),
             rule_options_block=rule_options_service.context_block(db, game_session),
         )
-        plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
+        with agent_trace.span("planner", "判理智/反噬（叙事后）", session_id=session_id, db=db):
+            plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
         planned_effects.enforce_plan_item_locations(
             plan, module, game_session.current_scene_id,
         )
@@ -2664,6 +2662,7 @@ async def run_regenerate_generation(session_id: str) -> None:
     # 三次重试。玩家点「重新生成」是明确的重试意图，网络多半也是这会儿刚好了，
     # 不清掉的话这一下会被自己的熔断短路——那就成了帮倒忙。
     openai_compat.reset_endpoint_health()
+    usage_tracker.enter_phase("重新生成")
     t_turn = time.monotonic()
     t_drain = time.monotonic()
     await _drain_housekeeping(session_id)

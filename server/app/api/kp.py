@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import player_token, require_session_kp
+from app.ai import usage_tracker
 from app.database import get_db
 from app.models.module import Module
 from app.schemas.kp import (
@@ -80,6 +81,7 @@ def update_workspace(
 
 @router.post("/{session_id}/kp/advisor/draft")
 @limiter.limit(rate_limit.ADVISOR_LIMIT, exempt_when=rate_limit.exempt_local)
+@usage_tracker.session_scoped
 async def generate_draft(
     request: Request,  # noqa: ARG001 — slowapi 要求端点显式声明才能取到请求
     session_id: str,
@@ -99,6 +101,7 @@ async def generate_draft(
 
 @router.post("/{session_id}/kp/advisor/plan")
 @limiter.limit(rate_limit.ADVISOR_LIMIT, exempt_when=rate_limit.exempt_local)
+@usage_tracker.session_scoped
 async def generate_plan(
     request: Request,  # noqa: ARG001
     session_id: str,
@@ -135,6 +138,7 @@ def lookup(
 
 
 @router.post("/{session_id}/kp/images/preview")
+@usage_tracker.session_scoped
 async def preview_image(
     session_id: str,
     data: KpImagePreviewRequest,

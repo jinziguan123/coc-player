@@ -8208,6 +8208,21 @@ select.input option {
 .trace-summary b { font-family: var(--font-display); font-size: 1.35rem; font-weight: 400; line-height: 1; color: var(--color-text-primary); }
 .trace-summary span { font-size: 0.6875rem; letter-spacing: 0.08em; color: var(--color-text-secondary); }
 .trace-summary .is-bad b { color: var(--color-danger); }
+/* 按环节汇总：环节 / token（带比例条）/ 缓存命中 / 思考占比 + 末行对账 */
+.trace-usage { margin-bottom: 0.75rem; font-size: var(--text-xs); }
+.trace-usage-head, .trace-usage-row {
+  display: grid;
+  grid-template-columns: 4rem 1fr 3.6rem 3.6rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.trace-usage-head { font-size: 0.6875rem; letter-spacing: 0.08em; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); }
+.trace-usage-head > span:not(:first-child), .trace-usage-row > span:not(:first-child) { text-align: right; }
+.trace-usage-row { color: var(--color-text-primary); font-family: var(--font-display); }
+.trace-usage-tok { display: flex; align-items: center; gap: 0.45rem; }
+.trace-usage-diff { margin-top: 0.35rem; padding-top: 0.35rem; border-top: 1px dashed var(--color-border); font-size: 0.6875rem; color: var(--color-text-secondary); }
+.trace-usage-diff.is-bad { color: var(--color-danger); }
 /* 列表 */
 .trace-list { display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
 .trace-row {
@@ -8235,7 +8250,7 @@ select.input option {
 }
 .trace-agent--npc, .trace-agent--team { color: var(--color-verdigris); border-color: color-mix(in srgb, var(--color-verdigris) 50%, transparent); }
 .trace-agent--combat { color: var(--combat-foe); border-color: color-mix(in srgb, var(--combat-foe) 50%, transparent); }
-.trace-agent--backstage, .trace-agent--intent { color: var(--color-text-secondary); }
+.trace-agent--backstage, .trace-agent--intent, .trace-agent--summary, .trace-agent--chronicle { color: var(--color-text-secondary); }
 .trace-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.3rem; }
 .trace-row-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem; min-width: 0; font-size: var(--text-xs); }
 .trace-stage { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }

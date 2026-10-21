@@ -330,17 +330,17 @@ async def _run_team_turn(
         try:
             raw = await TeamAgent(llm, teammate.id).decide(bundle.for_model())
         except asyncio.CancelledError:
-            agent_trace.finish(trace, outcome="cancelled", provider=llm)
+            agent_trace.finish(trace, outcome="cancelled")
             raise
         except Exception:
-            agent_trace.finish(trace, outcome="error", provider=llm)
+            agent_trace.finish(trace, outcome="error")
             logger.exception("队友决策失败: char=%s", teammate.id)
             return None
         logger.info(
             "耗时|队友决策 %.1fs char=%s(%s)",
             time.monotonic() - t0, teammate.name, teammate.id,
         )
-        agent_trace.finish(trace, provider=llm)
+        agent_trace.finish(trace)
         return raw
 
     seen_actions: list[tuple[str, str]] = []

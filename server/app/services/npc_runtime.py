@@ -74,17 +74,17 @@ class NpcRuntime:
                 timeout=NPC_RESPONSE_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError as exc:
-            agent_trace.finish(trace, outcome="timeout", provider=self.llm)
+            agent_trace.finish(trace, outcome="timeout")
             raise NpcResponseTimeout("NPC 回应超时") from exc
         except Exception:
-            agent_trace.finish(trace, outcome="error", provider=self.llm)
+            agent_trace.finish(trace, outcome="error")
             raise
         # 玩家还没认出这东西时，气泡不能替他报出真名；这句台词本身也要参与判据，
         # 因为他可能在这一句里自报家门。
         shown_name = npc_identity.build_masker(
             self.db, self.session_id, self.module,
         )(state.name, extra_prose=line)
-        agent_trace.finish(trace, provider=self.llm)
+        agent_trace.finish(trace)
         return shown_name, line
 
     async def reply(

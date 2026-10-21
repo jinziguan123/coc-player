@@ -1250,9 +1250,9 @@ async def drive_npcs(db: Session, session_id: str, state: dict, agent=None, scen
             try:
                 raw_action = await agent.decide(state, npc_actor, scene_hint)
             except Exception:
-                agent_trace.finish(trace, outcome="error", provider=getattr(agent, "llm", None))
+                agent_trace.finish(trace, outcome="error")
                 raise
-            agent_trace.finish(trace, provider=getattr(agent, "llm", None))
+            agent_trace.finish(trace)
             action = _validate_npc_action(state, actor, raw_action, rs=rs)
         if action is None:
             action = rs.combat.heuristic_npc_action(state, actor)

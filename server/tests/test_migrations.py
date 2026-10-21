@@ -518,3 +518,20 @@ def test_downgrade_scenario_rejected(tmp_path, monkeypatch):
         con.close()
     with pytest.raises(RuntimeError, match="高于本程序已知"):
         database.run_migrations()
+
+
+def test_trace_usage_detail_migration_adds_columns(tmp_path, monkeypatch):
+    """20261021：轨迹表带全段用量明细，session_stats 带按环节的账本（空库与重复跑都成立）。"""
+    db_file = tmp_path / "trace.db"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    database.run_migrations()
+    database.run_migrations()
+
+    con = sqlite3.connect(db_file)
+    try:
+        trace_cols = {r[1] for r in con.execute("PRAGMA table_info(agent_trace_logs)")}
+        stats_cols = {r[1] for r in con.execute("PRAGMA table_info(session_stats)")}
+    finally:
+        con.close()
+    assert {"reasoning_tokens", "cache_read_tokens", "cache_write_tokens", "calls"} <= trace_cols
+    assert "usage_by_agent" in stats_cols

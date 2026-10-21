@@ -31,4 +31,9 @@ class AgentTraceLog(Base, TimestampMixin):
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 该段内全部调用的合计（独占口径，见 usage_tracker._span），不只是最后一次调用。
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_write_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    calls: Mapped[int | None] = mapped_column(Integer, nullable=True)
     detail: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")

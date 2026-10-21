@@ -26,6 +26,9 @@ class SessionStats(Base, TimestampMixin):
     )
     # 本局累计 token 用量（单调累增）：planner/主叙事/validator/队友/子代理/战斗… 的合计。
     session_usage: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # 按环节（agent_trace 的 agent 名）拆开的累计用量：{"since": 基线, "agents": {agent: 用量}}。
+    # 与 session_usage 同一次落账；轨迹表会裁剪，这里不会，面板据此对「各环节之和 vs 累计」。
+    usage_by_agent: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     # 上一回合主叙事那次调用的服务端真实 usage（供「上下文占用」显示实测值）。
     turn_usage: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     # RAG（规则书/模组原文检索）调用与命中质量统计。
