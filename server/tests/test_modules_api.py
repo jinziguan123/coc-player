@@ -92,12 +92,17 @@ def test_parse_module_text_falls_back_to_restarted_json(monkeypatch):
 
 
 def _png_bytes(w: int, h: int) -> bytes:
-    """生成一张带渐变纹理的真实 PNG（够大、可被 Pillow 解码）。"""
+    """生成一张随机像素的真实 PNG（可被 Pillow 解码）。
+
+    用固定种子的随机像素而非规则纹理：随机数据几乎不可压缩，体积≈w*h*3 字节，
+    与 zlib 实现无关。规则渐变在 Linux 版 Pillow 自带的 zlib 下会压到比 macOS
+    小近一半，曾让 120x120 的图跌破 min_bytes 被当成图标剔掉（CI 独挂）。
+    """
     import io
+    import random
 
     from PIL import Image
-    im = Image.new("RGB", (w, h))
-    im.putdata([((x * 3) % 256, (y * 5) % 256, (x + y) % 256) for y in range(h) for x in range(w)])
+    im = Image.frombytes("RGB", (w, h), random.Random(w * h).randbytes(w * h * 3))
     b = io.BytesIO()
     im.save(b, "PNG")
     return b.getvalue()
@@ -129,8 +134,8 @@ def test_select_pdf_images_filters_sorts_and_normalizes():
         def __init__(self, pages):
             self.pages = pages
 
-    big = _png_bytes(200, 200)      # ~1KB
-    small = _png_bytes(120, 120)    # ~0.5KB
+    big = _png_bytes(200, 200)      # ~120KB
+    small = _png_bytes(120, 120)    # ~43KB
     reader = _Reader([
         _Page([_Img(b"x" * 100)]),                 # 太小 → 剔除（min_bytes）
         _Page([_Img(big), _Img(small), _Img(b"g" * 9000)]),  # 末个是畸形大字节 → 规整失败跳过
