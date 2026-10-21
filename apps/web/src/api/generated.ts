@@ -1258,6 +1258,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/agent-traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Traces
+         * @description KP 面板的 Agent 调用轨迹；仅房主可见。
+         */
+        get: operations["get_agent_traces_api_sessions__session_id__agent_traces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/chase": {
         parameters: {
             query?: never;
@@ -1649,6 +1669,26 @@ export interface paths {
          *     生成失败返回 502；未登记的名字返回 404。
          */
         post: operations["promote_improvised_npc_api_sessions__session_id__improvised_npcs_promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/intent-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Intent History
+         * @description KP 面板的 NPC/战斗动作意图历史；仅房主可见，可按来源/角色筛选。
+         */
+        get: operations["get_intent_history_api_sessions__session_id__intent_history_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6954,6 +6994,39 @@ export interface operations {
             };
         };
     };
+    get_agent_traces_api_sessions__session_id__agent_traces_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_chase_api_sessions__session_id__chase_get: {
         parameters: {
             query?: never;
@@ -7643,6 +7716,41 @@ export interface operations {
                 };
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_intent_history_api_sessions__session_id__intent_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                source?: string;
+                actor?: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
