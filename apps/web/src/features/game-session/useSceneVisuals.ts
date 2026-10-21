@@ -31,8 +31,10 @@ export function useSceneVisuals(input: {
   messages: MessageLike[]
   locations: KnownLocation[]
   mapBackdrop: string
+  /** 对话框模式：场景图清晰铺满当舞台，不受「氛围底」开关管 */
+  clear?: boolean
 }) {
-  const { messages, locations, mapBackdrop } = input
+  const { messages, locations, mapBackdrop, clear = false } = input
 
   // 氛围底的开关在设置页，从那儿切回来要即时生效，所以听 focus 而不是只读一次。
   const [backdropOn, setBackdropOn] = useState(() => getSceneBackdropEnabled())
@@ -43,10 +45,10 @@ export function useSceneVisuals(input: {
   }, [])
 
   const sceneBackdrop = useMemo(() => {
-    if (!backdropOn) return ''
+    if (!backdropOn && !clear) return ''
     const raw = sceneBackdropOf(messages as never, locations as never)
     return raw ? absolutize(raw) : ''
-  }, [backdropOn, messages, locations])
+  }, [backdropOn, clear, messages, locations])
 
   const battleMap = useMemo(() => battleMapOf(locations, getServerUrl()), [locations])
 

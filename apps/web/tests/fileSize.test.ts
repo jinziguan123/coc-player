@@ -29,13 +29,13 @@ const DEFAULT_MAX = 700
  * 每一条都欠着一次拆分；拆完请把数字调下来，别留着当额度用。
  */
 const GRANDFATHERED: Record<string, number> = {
-  'pages/GameSessionPage.tsx': 2410,   // 局内三份远端数据已搬进 features/game-session/useSessionResources.ts；骰子消息 → DiceMessage，手书卡 → HandoutCard
+  'pages/GameSessionPage.tsx': 2389,   // 局内三份远端数据已搬进 features/game-session/useSessionResources.ts；骰子消息 → DiceMessage，手书卡 → HandoutCard
   // 语音转文字 → useDictation；悬浮窗拖拽缩放 → ui/useDragResize；二级标签 → KpSubTabs；
   // 各动作的输入表单 → KpActionForm
   'components/game/HumanKpPanel.tsx': 1101,
   'pages/ModuleDetailPage.tsx': 1261,
   'pages/RoomLobbyPage.tsx': 1019,
-  'pages/SettingsPage.tsx': 722,
+  'pages/SettingsPage.tsx': 695,
 }
 
 /** 生成物不算数：它由 openapi-typescript 产出，长度不受我们控制。 */

@@ -17,8 +17,8 @@
   .app-shell.game-session-shell .app-main {
     padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
   }
-  [data-scene-backdrop='on'] .app-shell.game-session-shell .app-main { padding: 0; }
-  [data-scene-backdrop='on'] .game-session-layout {
+  [data-scene-backdrop] .app-shell.game-session-shell .app-main { padding: 0; }
+  [data-scene-backdrop] .game-session-layout {
     padding: 0.6rem 0.6rem calc(0.6rem + env(safe-area-inset-bottom, 0px));
   }
 

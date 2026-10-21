@@ -39,6 +39,9 @@ import { DiceRoller, type DiceRollerHandle, type DiceSpec } from '../components/
 import { diceSpecsOf } from '../components/game/diceNotation'
 import { CheckRequestCard } from '../components/game/CheckRequestCard'
 import { LuckOfferCard } from '../components/game/LuckOfferCard'
+import { StreamTail } from '../components/game/StreamTail'
+import { VnStage } from '@/features/game-session/vn/VnStage'
+import { useGameDisplay } from '@/features/game-session/vn/useGameDisplay'
 import { MoreMenu } from '@/components/ui/more-menu'
 import { luckSnapshotFrom, type LuckSnapshot, type SyncSnapshot } from '@/lib/roomSync'
 import { startGameTour, hasSeenGameTour } from '@/features/tour/gameTour'
@@ -66,7 +69,7 @@ import { KpChaseStage } from '../components/game/KpChaseStage'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
 import { Modal, ModalPresence } from '../components/ui/modal'
-import { GiReturnArrow, GiScrollUnfurled, GiTreasureMap, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains } from 'react-icons/gi'
+import { GiReturnArrow, GiScrollUnfurled, GiTreasureMap, GiUpgrade, GiCharacter, GiCrossedSwords, GiAncientRuins, GiMagnifyingGlass, GiQuillInk, GiTalk, GiTheaterCurtains, GiConversation } from 'react-icons/gi'
 import { Copy, Bot, RotateCcw, Search, X, PanelRightOpen, PanelRightClose, HelpCircle, ChevronDown, Pencil, Trash2, Hexagon, Eye, EyeOff } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/confirm-dialog'
 import { parseChaseState, parseCombatState, parsePendingReaction } from '../lib/liveState'
@@ -248,6 +251,9 @@ export function GameSessionPage() {
   const myCharId = myPlayerSeat?.character_id ?? (currentSession?.participants?.length ? null : primaryId)
   const isKp = currentSession?.kp_mode === 'human'
     && !!currentSession.participants?.some((p) => p.role === 'kp' && p.is_mine)
+  // 对话框模式（视觉小说式）只给玩家视角：KP 工作台要一眼扫全局，一律聊天流
+  const [display, setDisplay] = useGameDisplay()
+  const vnOn = display === 'dialogue' && !isKp
   // 独自开团 → 发送即推进（判定见 derive.isSoloTable）。KP 席不适用：他走右侧工作台。
   const soloTable = !isKp && !!currentSession && isSoloTable(currentSession.participants)
   const shownCharId = panelCharId ?? myCharId
@@ -481,16 +487,16 @@ export function GameSessionPage() {
   // 局内三张图（场景氛围底 / 战场底图 / 沙盘氛围底）：来源与用途各不相同，
   // 派生规则集中在 features/game-session/useSceneVisuals.ts。
   const { sceneBackdrop, battleMap, sandboxBackdropUrl } = useSceneVisuals({
-    messages, locations, mapBackdrop,
+    messages, locations, mapBackdrop, clear: vnOn,
   })
   const bgm = useSessionBgm({ combat, chase, locations, ended: currentSession?.status === 'ended' })  // 背景音乐
   // 氛围底真的铺上了才给正文加护读底：没图（未配生图 / 还在生成）时保持原有的透明观感。
   useEffect(() => {
     const root = document.documentElement
-    if (sceneBackdrop) root.dataset.sceneBackdrop = 'on'
+    if (sceneBackdrop) root.dataset.sceneBackdrop = vnOn ? 'clear' : 'on'
     else delete root.dataset.sceneBackdrop
     return () => { delete root.dataset.sceneBackdrop }
-  }, [sceneBackdrop])
+  }, [sceneBackdrop, vnOn])
 
   // 角色名 → 归属（用于消息前的身份图标：我 / AI 队友 / 其他真人 / NPC）
   const partyByName = useMemo(
@@ -1375,6 +1381,17 @@ export function GameSessionPage() {
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(max-width: 767px)').matches
 
+  const luckCard = luckOffer && (
+    <LuckOfferCard
+      actor={luckOffer.actor ?? ''} skill={luckOffer.skill ?? ''} cost={luckOffer.cost ?? 0}
+      rerollCost={luckOffer.reroll_cost ?? 0} available={luckOffer.available ?? 0}
+      mine={!luckOffer.char_id || luckOffer.char_id === myCharId} busy={luckDecided || streaming} onDecide={decideLuck}
+    />
+  )
+  const streamTail = streaming && (
+    <StreamTail note={tailNote || (thinking ? 'KP 正在思考……' : '')} waitSec={waitSec}
+      onInterrupt={showInterrupt && messages.some((m) => m.type === 'action') ? regenerate : undefined} />
+  )
   return (
     <div className="game-session-layout flex flex-col h-full">
       {sceneBackdrop && (
@@ -1497,6 +1514,13 @@ export function GameSessionPage() {
             >
               <GiTreasureMap size={13} /> <span className="gtool-label">{showBigMap ? '收起大地图' : '大地图'}</span>
             </button>
+            {!isKp && (
+              <button onClick={() => setDisplay(vnOn ? 'chat' : 'dialogue')} aria-pressed={vnOn}
+                className={`btn-xs flex items-center gap-1 ${vnOn ? 'btn-primary' : 'btn-secondary'}`}
+                title={vnOn ? '切回聊天流' : '对话框模式：场景图清晰铺满，文字在底部对话框里一段一段读'}>
+                <GiConversation size={13} /> <span className="gtool-label">对话框</span>
+              </button>
+            )}
             {/* 一局用不了一次的收进「更多」：这几个原本与检索、战报、大地图并排成一堵
                 同样大小的按钮墙，性质却完全不同（房主设置 / 收场结算 / 帮助）。 */}
             <MoreMenu
@@ -1646,7 +1670,7 @@ export function GameSessionPage() {
         )}
         </ModalPresence>
         {currentSession.participants && currentSession.participants.length > 1 && !desk && (
-          <div data-tour="party" className="pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div data-tour="party" className="party-strip pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
             <PartyRoster
               participants={currentSession.participants}
               selectedId={shownCharId}
@@ -1760,10 +1784,10 @@ export function GameSessionPage() {
             })}
           </div>
         )}
-        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto pb-4 chat-scroll game-info">
+        <div ref={scrollRef} onScroll={handleScroll} className={vnOn ? 'vn-host flex-1 min-h-0' : 'flex-1 overflow-auto pb-4 chat-scroll game-info'}>
           {/* 内容包一层专供 ResizeObserver 量高度：容器自身的盒子不随内容变，观察它量不到
               「流式续写把叙事撑长了」「场景图片刚加载完把下面顶下去了」这两件事。 */}
-          <div ref={attachContent}>
+          <div ref={attachContent} className={vnOn ? 'h-full' : undefined}>
           {loadingOlder && (
             <div className="text-center py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               加载更早的记录...
@@ -2056,6 +2080,10 @@ export function GameSessionPage() {
           const sceneOf = (m: ChatMessage) => String(m.metadata?.group || '').trim()
           // 战斗机械结算（combat_log）不进主聊天流——它由 CombatStage 的日志抽屉展示。
           const visibleMessages = messages.filter((m) => m.metadata?.combat_log !== true)
+          if (vnOn) {
+            const pendingChecks = new Set([...Object.keys((currentSession?.turn_state as { pending_checks?: object } | null)?.pending_checks || {}), ...optimisticPending])
+            return <VnStage messages={visibleMessages} renderMessage={renderRow} pendingCheckIds={pendingChecks} luck={luckCard || undefined} tail={streamTail || undefined} streaming={streaming} />
+          }
           if (!splitView || sceneGroups.length < 2) {
             return visibleMessages.map(renderRow)
           }
@@ -2090,44 +2118,8 @@ export function GameSessionPage() {
           })
           })()}
           {/* 幸运询价固定挂在消息流末尾：它是此刻待办的事，不是历史里的一条 */}
-          {luckOffer && (
-            <LuckOfferCard
-              actor={luckOffer.actor ?? ''}
-              skill={luckOffer.skill ?? ''}
-              cost={luckOffer.cost ?? 0}
-              rerollCost={luckOffer.reroll_cost ?? 0}
-              available={luckOffer.available ?? 0}
-              mine={!luckOffer.char_id || luckOffer.char_id === myCharId}
-              busy={luckDecided || streaming}
-              onDecide={decideLuck}
-            />
-          )}
-          {streaming && (
-            <div className="chat-loading flex items-center gap-2">
-              <span className="dot-pulse" />
-              {(thinking || tailNote) && (
-                <span className="text-xs italic" style={{ color: 'var(--color-text-secondary)' }}>
-                  {tailNote || 'KP 正在思考……'}
-                </span>
-              )}
-              {/* 满 5 秒才出现：短回合不必看见秒表，长回合才需要「它还在跑」的凭据 */}
-              {waitSec >= 5 && (
-                <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-secondary)', opacity: 0.6 }}>
-                  {waitSec}s
-                </span>
-              )}
-              {showInterrupt && messages.some((m) => m.type === 'action') && (
-                <button
-                  onClick={regenerate}
-                  title="打断当前生成并用本轮既有输入重新生成（生成卡住时用）"
-                  className="ml-2 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded transition-colors hover:opacity-80"
-                  style={{ color: 'var(--color-danger)' }}
-                >
-                  <RotateCcw size={11} /> 打断并重新生成
-                </button>
-              )}
-            </div>
-          )}
+          {!vnOn && luckCard}
+          {!vnOn && streamTail}
           </div>
         </div>
 

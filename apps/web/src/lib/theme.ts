@@ -70,3 +70,29 @@ export function setSceneBackdropEnabled(on: boolean): void {
     localStorage.setItem(BACKDROP_KEY, on ? '1' : '0')
   } catch { /* 存不下就只在本次会话生效 */ }
 }
+
+/**
+ * 局内的显示方式：
+ * - 'chat'：聊天流（缺省）。场景图在流里清晰出现一次，此后糊成氛围底；
+ * - 'dialogue'：对话框（视觉小说式）。场景图清晰铺满，文字一段一段在底部对话框里读，
+ *   往回看走「历史」。只对玩家视角生效，KP 工作台一律是聊天流。
+ */
+export type GameDisplayMode = 'chat' | 'dialogue'
+const DISPLAY_KEY = 'trpg_game_display'
+/** 同一页里切换（顶栏按钮 ↔ 设置页）时广播，免得各处各读各的旧值 */
+export const DISPLAY_EVENT = 'trpg-game-display'
+
+export function getGameDisplayMode(): GameDisplayMode {
+  try {
+    return localStorage.getItem(DISPLAY_KEY) === 'dialogue' ? 'dialogue' : 'chat'
+  } catch {
+    return 'chat'
+  }
+}
+
+export function setGameDisplayMode(mode: GameDisplayMode): void {
+  try {
+    localStorage.setItem(DISPLAY_KEY, mode)
+  } catch { /* 存不下就只在本次会话生效 */ }
+  window.dispatchEvent(new Event(DISPLAY_EVENT))
+}

@@ -6165,10 +6165,10 @@ select.input option {
    会空出一圈 24px 的框（最显眼的是左侧那道竖白条）。把内边距从 .app-main 挪到布局本身，
    布局就填满整个内容区、背景随之满铺，而正文的呼吸空间分毫未减。
    只在氛围底开着时改，关掉完全走原来的盒模型。 */
-[data-scene-backdrop='on'] .game-session-shell .app-main { padding: 0; }
-[data-scene-backdrop='on'] .game-session-layout { padding: 1.5rem; }
+[data-scene-backdrop] .game-session-shell .app-main { padding: 0; }
+[data-scene-backdrop] .game-session-layout { padding: 1.5rem; }
 @media (max-width: 767px) {
-  [data-scene-backdrop='on'] .game-session-layout { padding: 0.75rem; }
+  [data-scene-backdrop] .game-session-layout { padding: 0.75rem; }
 }
 
 /* ── 前景「玻璃化」：让卡片和氛围底成为同一层 ──────────────────────────────
@@ -6187,7 +6187,7 @@ select.input option {
  * 作用域限定在 .game-session-layout 内：弹窗/下拉走 createPortal 挂在 body 层，
  * 拿不到这里的变量，仍是不透明——浮层要的就是挡住底下的东西。
  */
-[data-scene-backdrop='on'] .game-session-layout {
+[data-scene-backdrop] .game-session-layout {
   --surface-1: rgba(16, 28, 24, 0.72);
   --surface-2: rgba(20, 36, 32, 0.70);
   --surface-3: rgba(26, 46, 40, 0.72);
@@ -6196,7 +6196,7 @@ select.input option {
   --color-bg-card: rgba(16, 28, 24, 0.72);
   --color-bg-tertiary: rgba(20, 36, 32, 0.70);
 }
-:root[data-theme='parchment'][data-scene-backdrop='on'] .game-session-layout {
+:root[data-theme='parchment'][data-scene-backdrop] .game-session-layout {
   --surface-1: rgba(236, 226, 206, 0.72);
   --surface-2: rgba(227, 215, 192, 0.70);
   --surface-3: rgba(216, 202, 174, 0.72);
@@ -8071,3 +8071,276 @@ select.input option {
 .trace-target-ic { flex: none; align-self: center; color: var(--color-text-secondary); font-size: 0.8rem; }
 .trace-target { color: var(--color-text-primary); }
 .trace-content { font-family: var(--font-game); font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+
+/* ===== 对话框模式（视觉小说式，见 features/game-session/vn/VnStage.tsx） =================
+ *
+ * 场景图不再糊成氛围底，而是**清晰**铺满整个对局界面（复用 .scene-backdrop 那一层，
+ * 只把滤镜摘掉）；罩子只在顶部压一道（顶栏按钮要看得清）、底部压一道（对话框站得住），
+ * 中间留给画面本身。
+ */
+[data-scene-backdrop='clear'] .scene-backdrop__img { filter: none; opacity: 1; transform: none; }
+[data-scene-backdrop='clear'] .scene-backdrop::after {
+  background: linear-gradient(180deg, rgba(10, 17, 15, 0.9) 0%, rgba(10, 17, 15, 0.7) 9%, transparent 20%, transparent 50%, rgba(10, 17, 15, 0.75) 74%, rgba(10, 17, 15, 0.94) 100%);
+}
+/* 队伍条压在清晰画面上：每个名签自带一层底，读得清又不把画面整条盖住 */
+[data-scene-backdrop='clear'] .party-strip button { background-color: var(--surface-2); backdrop-filter: blur(6px); }
+:root[data-theme='parchment'][data-scene-backdrop='clear'] .scene-backdrop::after {
+  background: linear-gradient(180deg, rgba(244, 236, 218, 0.92) 0%, rgba(244, 236, 218, 0.7) 9%, transparent 20%, transparent 50%, rgba(244, 236, 218, 0.75) 74%, rgba(244, 236, 218, 0.94) 100%);
+}
+
+.vn-host { position: relative; }
+.vn-stage {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 0.25rem 0.5rem;
+}
+/* 画面空白处的点击层：在卡片与对话框之下 */
+.vn-hit { position: absolute; inset: 0; cursor: pointer; }
+
+/* 浮在对话框上方的卡片区：检定、掷骰、手书、幸运询价 */
+.vn-float {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  max-height: 58%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+  scrollbar-width: none;
+}
+.vn-card {
+  width: min(40rem, 100%);
+  pointer-events: auto;
+  flex-shrink: 0;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: var(--surface-1);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 30px var(--shadow-color-strong);
+}
+.vn-card--sticky { border-color: var(--color-accent); }
+
+/* 对话框本体：黑曜底 + 黄铜双线框，上沿一道淡金细线呼应全站的装饰艺术分隔 */
+.vn-box {
+  position: relative;
+  display: flex;
+  gap: 1.1rem;
+  min-height: 9.5rem;
+  margin-top: 1.4rem;
+  padding: 1.5rem 1.7rem 0.75rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(10, 17, 15, 0.8) 0%, rgba(10, 17, 15, 0.92) 100%);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 4px rgba(10, 17, 15, 0.55),
+    inset 0 0 0 5px rgba(200, 162, 90, 0.22),
+    0 16px 44px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  user-select: none;
+}
+.vn-box::before {
+  content: '';
+  position: absolute;
+  left: 1.5rem;
+  right: 1.5rem;
+  top: 9px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  opacity: 0.45;
+}
+.vn-box-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.vn-nameplate {
+  position: absolute;
+  top: -2.55rem;
+  left: -0.4rem;
+  padding: 0.22rem 1.25rem;
+  font-family: var(--font-title);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #1a1206;
+  background: linear-gradient(180deg, #e6c886 0%, #b48a3e 100%);
+  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.vn-box--player .vn-nameplate { background: linear-gradient(180deg, #8cc2b0 0%, #4f8875 100%); }
+.vn-portrait {
+  align-self: flex-end;
+  width: 6.5rem;
+  aspect-ratio: 3 / 4;
+  margin-top: -3.4rem;
+  object-fit: cover;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.vn-text {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-game);
+  font-size: 1.08rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  color: var(--color-text-primary);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.vn-box--kp .vn-text { color: color-mix(in srgb, var(--color-text-primary) 88%, var(--color-accent)); }
+.vn-empty { color: var(--color-text-secondary); font-style: italic; }
+.vn-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--color-accent);
+  animation: vnBlink 1s steps(2) infinite;
+}
+@keyframes vnBlink { 50% { opacity: 0; } }
+
+.vn-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 1.8rem;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  cursor: default;
+}
+.vn-meta .chat-loading { padding: 0; margin: 0; }
+.vn-status { display: inline-flex; align-items: center; gap: 0.35rem; }
+.vn-next { color: var(--color-accent); animation: vnBob 1.1s ease-in-out infinite; }
+@keyframes vnBob { 50% { transform: translateY(3px); } }
+.vn-tools { display: inline-flex; gap: 0.25rem; margin-left: auto; }
+.vn-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.vn-tool:hover:not(:disabled) { color: var(--color-text-accent); border-color: var(--color-border-strong); }
+.vn-tool.is-on, .vn-tool.is-on:hover:not(:disabled) { color: var(--color-on-accent); background: var(--color-accent); border-color: transparent; }
+.vn-tool:disabled { opacity: 0.35; cursor: default; }
+
+/* 历史记录：盖住舞台的一张卷轴，里面就是聊天流 */
+.vn-history {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  padding: 0.25rem 0 0.5rem;
+  background: rgba(5, 9, 8, 0.55);
+  backdrop-filter: blur(3px);
+}
+.vn-history-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(48rem, 100%);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-bg-primary) 94%, transparent);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.vn-history-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.6rem 0.6rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-title);
+  color: var(--color-text-accent);
+}
+.vn-history-hint { margin-left: auto; font-family: inherit; font-size: 0.72rem; color: var(--color-text-secondary); }
+.vn-history-list { flex: 1; overflow-y: auto; padding: 0.5rem 0.9rem 1rem; }
+.vn-history-row { position: relative; border-radius: 6px; }
+.vn-history-row[data-vn-current] { box-shadow: inset 2px 0 0 var(--color-accent); background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
+.vn-history-jump {
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-accent);
+  font-size: 0.7rem;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.vn-history-row:hover .vn-history-jump,
+.vn-history-jump:focus-visible { opacity: 1; }
+
+:root[data-theme='parchment'] .vn-box {
+  background: linear-gradient(180deg, rgba(246, 239, 222, 0.88) 0%, rgba(238, 228, 206, 0.95) 100%);
+  box-shadow:
+    inset 0 0 0 4px rgba(246, 239, 222, 0.6),
+    inset 0 0 0 5px rgba(139, 37, 0, 0.18),
+    0 16px 44px rgba(90, 60, 20, 0.25);
+}
+:root[data-theme='parchment'] .vn-text { text-shadow: none; }
+:root[data-theme='parchment'] .vn-history { background: rgba(120, 100, 70, 0.3); }
+
+@media (max-width: 767px) {
+  .vn-box { min-height: 7.5rem; padding: 1.3rem 1rem 0.6rem; gap: 0.7rem; }
+  .vn-text { font-size: 1rem; line-height: 1.8; }
+  .vn-portrait { width: 4.5rem; margin-top: -2.6rem; }
+  .vn-tool span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-caret, .vn-next { animation: none; }
+}
+
+/* 设置页「局内显示」的两张选项卡：各带一幅小示意（聊天流的气泡 / 对话框压在画面上） */
+.display-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.75rem; }
+.display-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  text-align: left;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: var(--color-input-bg);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.display-mode.is-on { border-color: var(--color-accent); background: rgba(212, 162, 78, 0.08); }
+.display-mode b { font-family: var(--font-title); font-size: 0.9rem; color: var(--color-text-primary); }
+.display-mode.is-on b { color: var(--color-text-accent); }
+.display-mode > span:last-child { font-size: 0.72rem; line-height: 1.5; color: var(--color-text-secondary); }
+.display-mode-art {
+  position: relative;
+  display: block;
+  height: 4.6rem;
+  margin-bottom: 0.25rem;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+.display-mode-art i { position: absolute; display: block; border-radius: 2px; }
+.display-mode-art--chat { background: var(--color-bg-secondary); }
+.display-mode-art--chat i { height: 0.55rem; background: var(--color-border-strong); }
+.display-mode-art--chat i:nth-child(1) { top: 0.6rem; left: 0.6rem; width: 62%; }
+.display-mode-art--chat i:nth-child(2) { top: 1.75rem; right: 0.6rem; width: 40%; background: var(--color-verdigris, #4f8875); opacity: 0.7; }
+.display-mode-art--chat i:nth-child(3) { top: 2.9rem; left: 0.6rem; width: 75%; }
+.display-mode-art--dialogue { background: linear-gradient(160deg, #3d5a52 0%, #24352f 45%, #6b5530 100%); }
+.display-mode-art--dialogue i:nth-child(1) { left: 0.4rem; right: 0.4rem; bottom: 0.4rem; height: 1.5rem; background: rgba(10, 17, 15, 0.85); border: 1px solid rgba(200, 162, 90, 0.5); }
+.display-mode-art--dialogue i:nth-child(2) { left: 0.9rem; bottom: 1.6rem; width: 2.2rem; height: 0.5rem; background: #c8a25a; }
+.display-mode-art--dialogue i:nth-child(3) { left: 0.9rem; bottom: 0.95rem; width: 55%; height: 0.25rem; background: rgba(231, 220, 196, 0.6); }
