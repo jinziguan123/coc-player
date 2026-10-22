@@ -84,7 +84,7 @@ class DirectorSignals:
             )
         if self.unresolved_threads:
             lines.append(
-                "- 待回收悬念（择机推进或回收，勿全部抛出）：\n    "
+                "- 待回收悬念（择机推进或回收，勿全部抛出；写了条件的须条件满足才可推进）：\n    "
                 + "\n    ".join(self.unresolved_threads)
             )
         return "\n".join(lines)
@@ -174,7 +174,11 @@ def compute_unresolved_threads(module: Any, world_state: dict) -> list[str]:
         if set_flags and all(f in active_flags for f in set_flags):
             continue  # 已触发
         desc = (trig.get("description") or trig.get("when") or "").strip()
-        if desc:
+        when = str(trig.get("when") or "").strip()
+        if desc and when and when != desc:
+            # 带上触发条件：只给「怪物苏醒」不给「何时」，规划器会把它当成随时可推的悬念
+            threads.append(f"（未触发，条件：{when}）{desc}")
+        elif desc:
             threads.append(f"（未触发）{desc}")
     ledger = world_state.get("clue_ledger") or {}
     clue_names = {c.get("id"): c.get("name", "") for c in (getattr(module, "clues", None) or [])}

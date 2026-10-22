@@ -23,7 +23,7 @@ import logging
 import math
 import re
 
-from app.services import hex_map
+from app.services import hex_map, scene_kind
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ def match_labels(detections: list[dict], scenes: list[dict]) -> list[tuple[str, 
     """
     by_norm: list[tuple[str, str]] = []
     for s in scenes:
-        if not isinstance(s, dict) or s.get("kind") == "chapter" or not s.get("id"):
+        if not scene_kind.is_location(s) or not s.get("id"):
             continue
         name = str(s.get("title") or s.get("name") or "").strip()
         if name:
@@ -320,7 +320,7 @@ async def locate_scenes_on_map(
     ]
     rest_scenes = [
         s for s in scenes
-        if isinstance(s, dict) and s.get("kind") != "chapter" and s.get("id")
+        if scene_kind.is_location(s) and s.get("id")
         and str(s["id"]) not in taken_ids
     ]
     extra = await pair_with_llm(rest_labels, rest_scenes, llm=pair_llm)

@@ -21,6 +21,7 @@ from app.services import (
     navigation_service,
     npc_identity,
     rule_options_service,
+    scene_kind,
     session_service,
     turn_context,
     turn_effects,
@@ -633,14 +634,18 @@ def _scene_label(scene: dict) -> str:
 
 
 def _find_scene(module: Module, ref: str) -> dict | None:
-    """按 id 或名字找场景。KP 表单里两种都可能填进来（下拉给 id，手打给名字）。"""
+    """按 id 或名字找地点。KP 表单里两种都可能填进来（下拉给 id，手打给名字）。
+
+    只认 location：公开、挪人、配战场底图的对象都必须是能去的地方，事件/章节不算。
+    """
     ref = str(ref or "").strip()
     if not ref:
         return None
-    for s in (module.scenes or []):
+    locs = scene_kind.location_scenes(module.scenes)
+    for s in locs:
         if str(s.get("id") or "") == ref:
             return s
-    for s in (module.scenes or []):
+    for s in locs:
         if _scene_label(s) == ref or str(s.get("name") or "") == ref:
             return s
     return None

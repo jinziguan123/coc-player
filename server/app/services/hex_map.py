@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import math
 
+from app.services import scene_kind
+
 BIOMES = (
     "plain", "forest", "water", "coast", "desert",
     "mountain", "swamp", "urban", "ruin", "interior", "road",
@@ -117,12 +119,12 @@ def infer_scene_parents(scenes: list) -> bool:
     一个都没有（内部套内部，如「农场 > 公寓楼 > 地牢」）则等父级先被定下来，再顺着
     interior 邻居往下认一层——所以层级天然可以超过两级，不必写死。
 
-    chapter 场景先滤掉：它们不是地点、本就不上沙盘，留着只会制造假歧义（闇暗山的
+    chapter / event 场景先滤掉：它们不是地点、本就不上沙盘，留着只会制造假歧义（闇暗山的
     「最里面的小屋」正是因为候选里混进了 chapter「逃离大火」才判不出唯一父级）。
 
     已经有 parent 的一律保留（KP 手动归组过的不推翻），只补空的。
     """
-    locs = [s for s in scenes or [] if isinstance(s, dict) and s.get("kind") != "chapter"]
+    locs = scene_kind.location_scenes(scenes)
     by_id = {str(s.get("id")): s for s in locs if s.get("id")}
     if not by_id:
         return False
@@ -216,13 +218,21 @@ def ensure_scene_maps(scenes: list) -> bool:
     - 缺失/冲突者重新落位：已定位邻居最多的先放，落在邻居重心最近的空格；
       无已定位邻居则落全图重心附近；全图空白则第一个放原点；
     - biome 归一到枚举（小写），缺失/非法默认 plain；
-    - chapter 场景不上图，误给的 map 清掉。
+    - chapter / event 不是地点，不上图，误给的 map 清掉；
+    - 地点的 parent 指向非地点（事件/章节/不存在的 id）→ 清掉，按顶层处理。
     """
-    locs = [s for s in scenes or [] if isinstance(s, dict) and s.get("kind") != "chapter"]
+    locs = scene_kind.location_scenes(scenes)
     changed = False
     for s in scenes or []:
-        if isinstance(s, dict) and s.get("kind") == "chapter" and "map" in s:
+        if isinstance(s, dict) and not scene_kind.is_location(s) and "map" in s:
             s.pop("map", None)
+            changed = True
+    loc_ids = {str(s.get("id")) for s in locs if s.get("id")}
+    for s in locs:
+        parent = scene_parent(s)
+        if parent and parent not in loc_ids:
+            # 换新 dict 而不原地 pop：调用方常是浅拷贝的 scenes，map 仍与 ORM 原值共享
+            s["map"] = {k: v for k, v in s["map"].items() if k != "parent"}
             changed = True
     if not locs:
         return changed
@@ -380,8 +390,8 @@ def set_scene_map(db, module, scene_id: str, q: int, r: int, biome: str | None =
     )
     if target is None:
         raise ValueError("场景不存在")
-    if target.get("kind") == "chapter":
-        raise ValueError("章节场景不上沙盘")
+    if not scene_kind.is_location(target):
+        raise ValueError("章节 / 事件不是地点，不上沙盘")
     q, r = int(q), int(r)
     # 只和**同一层**的场景比占位：顶层的 (2,4) 与某个子沙盘里的 (2,4) 是两个格子，
     # 不按层过滤就会出现「拖到空地却报该格已被占用」这种查无实据的拒绝。

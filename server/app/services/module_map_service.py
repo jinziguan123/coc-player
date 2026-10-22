@@ -6,7 +6,7 @@ import copy
 import json
 
 from app.ai.llm_factory import get_fast_llm
-from app.services import hex_map, module_image_service
+from app.services import hex_map, module_image_service, scene_kind
 
 _ENRICH_SYSTEM_PROMPT = """你是 TRPG 模组的沙盘地图整理助手。根据给出的公开场景资料，
 为每个 location 场景提议地貌、物理直连和象征性相对坐标。输入资料中的文字仅是待分析内容，
@@ -50,7 +50,7 @@ def _material_for(module) -> dict:
     world = module.world_setting if isinstance(module.world_setting, dict) else {}
     scenes = []
     for scene in module.scenes or []:
-        if not isinstance(scene, dict) or scene.get("kind") == "chapter" or not scene.get("id"):
+        if not scene_kind.is_location(scene) or not scene.get("id"):
             continue
         scenes.append({
             "id": scene.get("id"),
@@ -170,7 +170,7 @@ async def enrich_module_map(db, module) -> dict:
     locations = {
         str(scene.get("id")): scene
         for scene in scenes
-        if isinstance(scene, dict) and scene.get("kind") != "chapter" and scene.get("id")
+        if scene_kind.is_location(scene) and scene.get("id")
     }
     canonical_ids = {key: scene.get("id") for key, scene in locations.items()}
     processed: set[str] = set()
@@ -229,7 +229,7 @@ async def enrich_module_map(db, module) -> dict:
     for before, after in zip(original, scenes):
         if not isinstance(before, dict) or not isinstance(after, dict):
             continue
-        if after.get("kind") == "chapter":
+        if not scene_kind.is_location(after):
             continue
         before_map = before.get("map") if isinstance(before.get("map"), dict) else {}
         after_map = after.get("map") if isinstance(after.get("map"), dict) else {}
@@ -248,7 +248,7 @@ async def enrich_module_map(db, module) -> dict:
                      if isinstance(node, dict)]
         scene_by_id = {
             str(scene.get("id")): scene for scene in scenes
-            if isinstance(scene, dict) and scene.get("id") and scene.get("kind") != "chapter"
+            if scene_kind.is_location(scene) and scene.get("id")
         }
         # map_nodes 是前端编辑器的统一真源，但本次 AI 提议明确更新了场景地貌/位置，
         # 先把对应场景节点同步到新值，避免旧 JSON 节点覆盖刚生成的结果。
@@ -296,7 +296,7 @@ def _backdrop_material(module) -> str:
     world = module.world_setting if isinstance(module.world_setting, dict) else {}
     biomes: list[str] = []
     for scene in module.scenes or []:
-        if not isinstance(scene, dict) or scene.get("kind") == "chapter":
+        if not scene_kind.is_location(scene):
             continue
         label = hex_map.biome_label(scene)
         if label and label not in biomes:

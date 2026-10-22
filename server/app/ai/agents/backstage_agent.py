@@ -4,6 +4,10 @@
 幕后游标以来的事件摘要 + 当前场景；输出 0~2 条幕后事件
 ``{"npc_id", "action", "affected_scene", "suggest_flags"}``。
 
+事件闸门（确定性）：模组里 kind=event 的剧情事件按条件触发；**绑定在未触发事件上的
+NPC 处于蛰伏**——它不进 NPC 清单、不在合法 npc_id 集合里，模型就算编出它的动作也会在
+解析时被丢弃。全部主体都蛰伏时整轮不调模型（见 ``split_dormant``）。
+
 安全约束（最重要）：幕后事件绝不直接改 flags / world_state 的剧情状态——只落库
 （``visibility=["kp"]``，玩家永远不可见）+ 注入 KP 上下文；``suggest_flags`` 只是给
 KP 的建议，是否 ``[SET_FLAG]`` 由 KP 在后续叙事中决定。
@@ -21,7 +25,7 @@ from app.ai.agents.base import BaseAgent
 from app.ai.context import _active_flags
 from app.ai.provider import LLMProvider
 from app.ai.turn_planner import _extract_json_object
-from app.services import world_memory
+from app.services import scene_kind, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,16 @@ def npcs_with_secrets(module: Any) -> list[dict]:
         ):
             out.append(n)
     return out
+
+
+def split_dormant(
+    module: Any, secret_npcs: list[dict], flags: set[str],
+) -> tuple[list[dict], list[dict]]:
+    """把幕后主体分成 (可行动, 蛰伏)：蛰伏 = 绑定在未触发剧情事件上的 NPC。"""
+    dormant_ids = scene_kind.dormant_npcs(getattr(module, "scenes", None), flags)
+    active = [n for n in secret_npcs if n.get("id") not in dormant_ids]
+    dormant = [n for n in secret_npcs if n.get("id") in dormant_ids]
+    return active, dormant
 
 
 def _untriggered_triggers(module: Any, active_flags: set[str]) -> list[dict]:
@@ -100,12 +114,25 @@ def build_backstage_messages(
     """构建幕后推演的 LLM 消息（纯函数，不触数据库）。"""
     flags = _active_flags(session)
     ws = session.world_state or {}
+    all_scenes = getattr(module, "scenes", None) or []
+    # 只给地点：事件/章节不是 NPC 能去的地方（事件另列在 pending_events）
     scenes = [
         {"id": s.get("id", ""), "name": s.get("name") or s.get("title") or ""}
-        for s in (getattr(module, "scenes", None) or [])
+        for s in scene_kind.location_scenes(all_scenes)
     ]
+    # 闸门：调用方传进来的可能含蛰伏者，这里再滤一次，保证它们绝不作为可行动主体出现
+    dormant_map = scene_kind.dormant_npcs(all_scenes, flags)
+    secret_npcs = [n for n in secret_npcs if n.get("id") not in dormant_map]
+    npc_names = {
+        str(n.get("id")): n.get("name") or n.get("id")
+        for n in (getattr(module, "npcs", None) or []) if isinstance(n, dict) and n.get("id")
+    }
+    nav = getattr(session, "navigation", None)
+    visited = list(getattr(nav, "visited_scenes", None) or [])
     payload = {
         "current_scene_id": session.current_scene_id,
+        # 玩家（队伍）真正去过的地点：判断剧情事件条件是否满足的依据之一
+        "visited_scenes": visited,
         # 幕后真相：世界演进的总纲——NPC 的小步动作应与全局真相/时间线相符
         "truth": (getattr(module, "truth", "") or "").strip(),
         "scenes": scenes,
@@ -119,6 +146,22 @@ def build_backstage_messages(
                 "location": n.get("initial_location") or "",
             }
             for n in secret_npcs
+        ],
+        # 尚未触发的剧情事件：条件满足前，其涉及的 NPC 处于蛰伏（不在上面的 npcs 里）
+        "pending_events": [
+            {
+                "title": scene_kind.event_title(e),
+                "when": e.get("when", ""),
+                "npcs": [npc_names.get(n, n) for n in (e.get("npcs") or [])],
+            }
+            for e in scene_kind.pending_events(all_scenes, flags)
+        ],
+        "dormant_npcs": [
+            {
+                "name": npc_names.get(nid, nid),
+                "waiting_for": [scene_kind.event_title(e) for e in evs],
+            }
+            for nid, evs in dormant_map.items()
         ],
         "untriggered_triggers": _untriggered_triggers(module, flags),
         "active_flags": sorted(flags),
@@ -141,7 +184,11 @@ def build_backstage_messages(
                 "2. npc_id 必须取自资料里的 NPC 清单；affected_scene 尽量取 scenes 里的场景 id。\n"
                 "3. suggest_flags 只是「若剧情落实可考虑推进的标志」建议（优先取 "
                 "untriggered_triggers 里已有的 set_flags），世界状态不会因此直接改变。\n"
-                "4. 没有值得发生的事就返回 {\"events\":[]}——宁缺毋滥。"
+                "4. 没有值得发生的事就返回 {\"events\":[]}——宁缺毋滥。\n"
+                "5. **硬规则**：pending_events 是模组规定「满足条件才发生」的剧情事件。事件条件未满足前，"
+                "相关 NPC（dormant_npcs）只能蛰伏或准备，不得对玩家采取行动，你也不得为它们输出事件；"
+                "其他 NPC 的动作也不得替这些事件抢跑（不得让事件提前发生或逼近玩家去促成它）。"
+                "条件是否满足由 KP 在叙事中裁定，不由你推演。"
             ),
         },
         {

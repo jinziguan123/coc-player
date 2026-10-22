@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.session import GameSession
 from app.models.session_navigation import SessionNavigation
-from app.services import bgm, world_memory
+from app.services import bgm, scene_kind, world_memory
 from app.services.event_store import KP_ONLY_SENTINEL, get_session_events
 
 
@@ -248,7 +248,11 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
                 known.add(sid)
     for event in visible_events:
         known.update(_relative_carriage_mentions(by_id, event))
-    known = {sid for sid in known if sid in by_id}
+    # 只有地点才「已知可去」：事件/章节即便被提及、被建议，也不进地图与前往（正身处其中除外）
+    known = {
+        sid for sid in known
+        if sid in by_id and (scene_kind.is_location(by_id[sid]) or sid == session.current_scene_id)
+    }
     # **被点名建议**的子场景还要把父级链一并带出来，否则地图上无路可达：主沙盘只画顶层
     # 格子，子地点要点父级下钻才看得到；父级不在列表里，连那个下钻入口都不存在。
     #
@@ -272,8 +276,10 @@ def known_scene_ids(module, session: GameSession, events: list | None = None) ->
 def _scene_adjacency(module) -> dict[str, set[str]]:
     """场景连通图（``connections`` 的无向闭包）：作者单向填写也按双向通行。"""
     adj: dict[str, set[str]] = {}
-    ids = {s.get("id") for s in (module.scenes or []) if s.get("id")}
-    for s in (module.scenes or []):
+    # 只连地点：事件/章节的 connections 表示「发生在哪」，不是可走的通道
+    locs = scene_kind.location_scenes(module.scenes)
+    ids = {s.get("id") for s in locs if s.get("id")}
+    for s in locs:
         sid = s.get("id")
         if not sid:
             continue
@@ -393,7 +399,8 @@ def list_known_locations(
 ) -> list[dict]:
     """供「大地图/调查板/沙盘」渲染：已知地点列表（当前所在、已访问、相互连接、队友分布）。
 
-    - ``kind == "chapter"`` 的场景是叙事章节而非地点，不上图（当前正身处其中时除外）。
+    - 只有 location 是地点：chapter（叙事章节）/ event（条件触发的剧情事件）不上图、不可前往
+      （当前正身处其中时除外）。
     - ``connections`` 只回展示集合内的邻居——玩家侧未知地点绝不经边泄露。
     - ``char_names``（char_id → 名字）给定时，按 party_locations 归并各地点的在场成员。
     - ``reveal_all=True``（真人 KP 上帝视角）：返回全部 location 场景并附 ``known`` 标记，
@@ -421,11 +428,11 @@ def list_known_locations(
 
     known = {
         sid for sid in known_scene_ids(module, session, events)
-        if (by_id[sid].get("kind") != "chapter" or sid == cur) and _unlocked(sid)
+        if (scene_kind.is_location(by_id[sid]) or sid == cur) and _unlocked(sid)
     }
     if reveal_all:
         # KP 上帝视角看得见全部（含未解锁的子级），由 known 标记如实告诉他玩家看不看得见
-        shown = {sid for sid, s in by_id.items() if s.get("kind") != "chapter" or sid == cur}
+        shown = {sid for sid, s in by_id.items() if scene_kind.is_location(s) or sid == cur}
     else:
         shown = known
     # 队伍分布：各成员所在场景（party_locations 缺省回落主场景）

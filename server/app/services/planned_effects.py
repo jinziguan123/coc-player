@@ -17,8 +17,10 @@ from app.models.session_ledger import SessionLedger
 from app.services import (
     agent_trace,
     dice_runtime,
+    entity_state,
     inventory_service,
     kp_actions,
+    scene_kind,
     session_service,
     turn_context,
     turn_effects,
@@ -373,7 +375,14 @@ async def _ensure_planned_combat(
     if current and current.get("active"):
         return
 
-    enemies = "，".join(plan.combat.enemies)
+    # 事件闸门：蛰伏中的 NPC（绑定在未触发剧情事件上）不得被拉进战斗——规划器即便
+    # 无视提示把它列进 enemies，这里也确定性剔除；剔完一个不剩就不开战。
+    dormant = _dormant_npc_names(module, game_session)
+    names = [n for n in plan.combat.enemies if n.strip() not in dormant]
+    if plan.combat.enemies and not names:
+        logger.info("规划器裁定开战但敌方全是蛰伏 NPC，拦截: session=%s", session_id)
+        return
+    enemies = "，".join(names)
     trigger = plan.combat.trigger.strip() or plan.player_intent.strip() or "冲突升级为正面交战"
     if not enemies:
         logger.warning("规划器裁定开战但未给敌方名字，使用临场敌人兜底: session=%s", session_id)
@@ -618,13 +627,30 @@ def record_narrated_progress(
         logger.exception("叙事进度记账失败（忽略）：session=%s", session_id)
 
 
+def _dormant_npc_names(module: Module | None, game_session: GameSession) -> set[str]:
+    """蛰伏 NPC 的名字与别名（用于按名字拦截规划器的 enemies）。"""
+    if module is None:
+        return set()
+    dormant = scene_kind.dormant_npcs(module.scenes, entity_state.active_flags(game_session))
+    out: set[str] = set()
+    for npc in module.npcs or []:
+        if isinstance(npc, dict) and npc.get("id") in dormant:
+            for nm in [npc.get("name"), *(npc.get("aliases") or [])]:
+                if str(nm or "").strip():
+                    out.add(str(nm).strip())
+    return out
+
+
 def _npcs_present(module: Module | None, game_session: GameSession) -> list[dict]:
     """当前场景在场（或无固定位置）的存活 NPC 简况，供判定认名字、认动机。"""
     if module is None:
         return []
     scene_id = str(game_session.current_scene_id or "").strip()
+    dormant = scene_kind.dormant_npcs(module.scenes, entity_state.active_flags(game_session))
     present = []
     for npc in (module.npcs or []):
+        if npc.get("id") in dormant:  # 蛰伏者不算在场交战方
+            continue
         loc = str(npc.get("initial_location") or "").strip()
         if loc and scene_id and loc != scene_id:
             continue

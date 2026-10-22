@@ -10,7 +10,15 @@ from app.ai import story_summarizer
 from app.ai.agents import backstage_agent
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import agent_trace, event_recall, session_service, turn_context, world_memory
+from app.services import (
+    agent_trace,
+    entity_state,
+    event_recall,
+    scene_kind,
+    session_service,
+    turn_context,
+    world_memory,
+)
 from app.services.event_protocol import make_chunk
 from app.services.room_hub import room_hub
 
@@ -212,6 +220,12 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
         secret_npcs = backstage_agent.npcs_with_secrets(module)
         if not secret_npcs:
             return  # 模组无幕后主体：永不触发，零调用
+        # 事件闸门：绑定在未触发剧情事件上的 NPC 蛰伏，不进推演；全员蛰伏 → 本轮零调用
+        # （游标不动：事件触发后第一次评估就会把这段时间一并纳入）
+        flags = entity_state.active_flags(session)
+        secret_npcs, _ = backstage_agent.split_dormant(module, secret_npcs, flags)
+        if not secret_npcs:
+            return
         ws = session.world_state or {}
         bs = dict(ws.get("backstage") or {})
         if not bs:
@@ -255,7 +269,12 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
         # 连「正在推演幕后」这类信号都不外泄（见 test_backstage 的广播禁令）。收尾期的可读
         # 状态由 _maybe_roll_story_summary 的「整理笔记」承担；此处保持静默。
         agent = backstage_agent.BackstageAgent(llm)
-        valid_ids = {n.get("id") for n in (module.npcs or []) if n.get("id")}
+        # 合法主体剔除蛰伏者：它们的动作即便被编出来也在解析时丢弃
+        dormant_ids = set(scene_kind.dormant_npcs(module.scenes, flags))
+        valid_ids = {
+            n.get("id") for n in (module.npcs or [])
+            if n.get("id") and n.get("id") not in dormant_ids
+        }
         trace = agent_trace.start(session_id, "backstage", stage="幕后推演", db=db)
         try:
             bevents = await agent.infer(messages, valid_ids)

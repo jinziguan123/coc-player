@@ -11,6 +11,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_navigation import SessionNavigation
 from app.models.session_participant import SessionParticipant
+from app.services import scene_kind
 
 
 # ── 拆出的职责簇：本模块保留同名 re-export，旧导入路径继续可用 ──────────────
@@ -233,9 +234,12 @@ def create_session(
     primary = next(s for s in seats if s["is_primary"])
     primary_id = primary["character_id"]
 
-    first_scene_id = None
-    if module.scenes:
-        first_scene_id = module.scenes[0].get("id")
+    # 开局落在第一个地点：导入事件 / 章节排在前面也不能把人放进去
+    # （一个地点都没有的纯章节模组退回第一个场景）
+    first = next(iter(scene_kind.location_scenes(module.scenes)), None) or next(
+        (s for s in module.scenes or [] if isinstance(s, dict)), None,
+    )
+    first_scene_id = first.get("id") if first else None
 
     # **建局恒为建房**：一律落在 setup，由大厅统一开局。
     #

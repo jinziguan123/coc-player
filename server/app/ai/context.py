@@ -47,6 +47,7 @@ from app.services import (
     combat_service,
     entity_state,
     hex_map,
+    scene_kind,
     session_service,
     style_presets,
     world_memory,
@@ -506,6 +507,8 @@ def _has_plot_state(module: Module) -> bool:
     """模组是否定义了「随剧情改变」的内容（带 states 的场景/NPC，或 triggers）。"""
     if module.triggers:
         return True
+    if scene_kind.event_scenes(module.scenes):
+        return True
     if any(s.get("states") for s in (module.scenes or [])):
         return True
     if any(n.get("states") for n in (module.npcs or [])):
@@ -520,6 +523,9 @@ def _compact_scenes(scenes: list[dict] | None, current_scene_id: str | None) -> 
     result = []
     for s in scenes:
         sid = s.get("id", "")
+        # 剧情事件不是地点，不进场景清单（另有「剧情事件」小节，带触发条件与状态）
+        if scene_kind.scene_kind(s) == scene_kind.EVENT and sid != current_scene_id:
+            continue
         if sid == current_scene_id:
             result.append(s)
         else:
@@ -606,6 +612,11 @@ def _compact_npcs(
             item["attributes"] = n.get("attributes")
         if n.get("alive") is False:  # 剧情变体可将 NPC 标记为已死亡
             item["status"] = "已死亡（不可再开口或行动）"
+        elif n.get("dormant_until"):  # 绑定在未触发的剧情事件上：蛰伏，不得行动
+            item["status"] = (
+                f"蛰伏中：待剧情事件「{n['dormant_until']}」触发前，只能潜伏/准备，"
+                "不得现身、移动或对调查员采取任何行动，也不要描写它的形貌"
+            )
         if n.get("goals"):  # 行为动机：这个 NPC 此刻想干什么，决定它主动做什么而非只会应答
             item["goals"] = n.get("goals")
         if not hide_secrets:
@@ -1026,6 +1037,13 @@ def _collect_kp_facts(
     # 模组 NPC + 本会话已转正的临场 NPC（会话级卡，不写模组本体）——一并按 flags 解析后喂给 KP。
     all_npc_defs = (module.npcs or []) + world_memory.promoted_npc_cards(session.world_state or {})
     npcs = [_resolve_state(n, flags) for n in all_npc_defs]
+    # 事件闸门：绑定在未触发剧情事件上的 NPC 标注蛰伏（KP 与幕后推演同一口径）
+    dormant = scene_kind.dormant_npcs(module.scenes, flags)
+    npcs = [
+        {**n, "dormant_until": "、".join(scene_kind.event_title(e) for e in dormant[n["id"]])}
+        if n.get("id") in dormant and n.get("alive") is not False else n
+        for n in npcs
+    ]
     current_scene = _resolve_scene(scenes, scene_id, flags)
 
     teammates = teammates or []
@@ -1278,6 +1296,43 @@ def _sec_truth(c: _SectionCtx) -> str | None:
     return TRUTH_SECTION.format(truth=truth) if truth else None
 
 
+def _format_plot_events(module: Module, flags: set[str]) -> str:
+    """剧情事件（kind=event）：按条件触发的段落，不是地点。列出触发状态、条件与该置的标志。"""
+    events = scene_kind.event_scenes(module.scenes)
+    if not events:
+        return ""
+    npc_names = {
+        str(n.get("id")): n.get("name") or n.get("id")
+        for n in (module.npcs or []) if isinstance(n, dict) and n.get("id")
+    }
+    lines = [
+        "【剧情事件】（KP 专属——按条件触发的剧情段落，不是地点，不可前往）"
+    ]
+    for e in events:
+        title = scene_kind.event_title(e)
+        flag_txt = "、".join(scene_kind.event_flags(e))
+        who = "、".join(npc_names.get(n, n) for n in (e.get("npcs") or []))
+        desc = str(e.get("description") or "").strip()[:200]
+        if scene_kind.event_triggered(e, flags):
+            lines.append(f"- [已触发]「{title}」：{desc}")
+            continue
+        line = f"- [待触发]「{title}」——条件：{e.get('when') or '见描述'}"
+        if who:
+            line += f"；涉及：{who}"
+        line += f"；内容：{desc}；条件满足、叙述它发生的那一轮发 [SET_FLAG: {flag_txt}]"
+        lines.append(line)
+    lines.append(
+        "待触发事件的条件**未满足前**：绝不抢跑——不叙述、不暗示它已经发生，涉及的 NPC "
+        "保持蛰伏（不现身、不逼近、不行动，也不要描写其形貌）；条件满足时再让它发生并置标志。"
+    )
+    return "\n".join(lines)
+
+
+def _sec_plot_events(c: _SectionCtx) -> str | None:
+    text = _format_plot_events(c.module, c.facts.flags)
+    return "\n\n" + text if text else None
+
+
 def _sec_party_location(c: _SectionCtx) -> str | None:
     """队伍位置：**每轮无条件全量渲染**（开场除外，那时还没人动过）。
 
@@ -1442,6 +1497,7 @@ _SECTIONS: tuple[_Section, ...] = (
     # ── 半静态：模组数据随已访问场景/剧情推进而变，同一轮内稳定 ──
     _Section("module-data",       SYS_TIER_SEMI, 0, _sec_module_data),
     _Section("truth",             SYS_TIER_SEMI, 0, _sec_truth),
+    _Section("plot-events",       SYS_TIER_SEMI, 0, _sec_plot_events),
     # ── 易变：每轮都可能变，排在最后，不污染上面两块的缓存前缀 ──
     # 注意：**这里的先后就是最终拼接的先后**（_assemble_system 按 tier 分组后按本表顺序
     # 直接 join），不要为了「按 priority 排整齐」而调换——priority 只管超预算时谁先被丢。

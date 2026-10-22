@@ -20,7 +20,7 @@ from pydantic import (
 from app.ai import director_signals
 from app.ai.context import _active_flags, _resolve_state
 from app.models import Character, GameSession, Module
-from app.services import session_service, world_memory
+from app.services import scene_kind, session_service, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -555,6 +555,8 @@ def build_turn_plan_messages(
     # 模组 NPC + 已转正的临场 NPC 一并作为正典，进 visible_npcs / canonical_npcs
     _npc_defs = (module.npcs or []) + world_memory.promoted_npc_cards(session.world_state or {})
     resolved_npcs = [_resolve_state(npc, flags) for npc in _npc_defs]
+    # 事件闸门：绑定在未触发剧情事件上的 NPC 处于蛰伏，规划器不得让它行动/开战
+    dormant = scene_kind.dormant_npcs(module.scenes, flags)
 
     visible_ids = _visible_scene_ids(session)
     visible_clues = _filter_visible_items(module.clues, visible_ids)
@@ -592,6 +594,16 @@ def build_turn_plan_messages(
                 "description": (scene.get("description") or "")[:160],
             }
             for scene in resolved_scenes
+            if scene_kind.is_location(scene)
+        ],
+        # 剧情事件：按条件触发的段落（不是地点）。未触发的条件没满足前不得让它发生
+        "pending_events": [
+            {
+                "title": scene_kind.event_title(e),
+                "when": e.get("when", ""),
+                "npcs": e.get("npcs", []),
+            }
+            for e in scene_kind.pending_events(module.scenes, flags)
         ],
         # 幕后真相：全局裁定依据（线索该不该给、NPC 反应、危险判断都以真相为锚）
         "truth": (getattr(module, "truth", "") or "").strip(),
@@ -621,6 +633,12 @@ def build_turn_plan_messages(
                 # 也是判断「这东西此刻该不该动手」的唯一依据。此前只喂给幕后推演，
                 # 玩家在场的当轮反而看不到——于是怪物永远只会被动挨打。
                 "goals": npc.get("goals", []),
+                **(
+                    {"status": "蛰伏：待剧情事件「" + "、".join(
+                        scene_kind.event_title(e) for e in dormant[npc["id"]]
+                    ) + "」触发前不得行动、不得开战"}
+                    if npc.get("id") in dormant else {}
+                ),
             }
             for npc in visible_npcs
         ],
@@ -736,7 +754,9 @@ def build_turn_plan_messages(
                 "双方即刻进入敌对交锋；② **在场敌对 NPC 的开战条件被本轮行动满足**——照 visible_npcs 的 "
                 "goals / description 判断（如目标写着「攻击一切发出声音的活物」而玩家弄出了巨响、"
                 "写着「见到闯入者即扑杀」而玩家撞进了它的地盘）。**别等玩家先动手**：怪物有它自己的动机，"
-                "条件成立就该由它发起。"
+                "条件成立就该由它发起。**例外**：visible_npcs 里 status 标「蛰伏」的 NPC 绑定在"
+                "未触发的剧情事件上（见 pending_events），事件条件满足前它不行动、不开战，"
+                "也不得把它列进 enemies。"
                 "威胁、戒备、瞄准、谈判，或敌对 NPC 的条件并未被满足时，保持 false。开战时 enemies 必须列出本轮实际参战敌方的名字，"
                 "优先使用 visible_npcs 中的原名，trigger 用一句话说明开战原因。结构化战斗会自行结算攻击，"
                 "因此规划开战时不要再把本次攻击裁定为普通 dice_check。\n"

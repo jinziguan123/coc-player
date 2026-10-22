@@ -81,6 +81,8 @@ const EVENT_KINDS: { value: string; label: string }[] = [
   { value: 'note', label: '提示' },
 ]
 const eventKindLabel = (v?: string) => EVENT_KINDS.find((k) => k.value === v)?.label || '提示'
+// 只有 location（缺省/未知值同）是地点；chapter 章节、event 剧情事件不上图、不连线（与后端 scene_kind 同口径）
+const isLocationScene = (s: Scene) => s.kind !== 'chapter' && s.kind !== 'event'
 const eventValue = (e: SceneEvent) => e.kind === 'san_check' ? e.san_loss : e.kind === 'dice_check' ? e.skill : e.kind === 'damage' ? e.damage : ''
 
 const COC_ATTRS = ['STR', 'CON', 'SIZ', 'DEX', 'APP', 'INT', 'POW', 'EDU', 'LUCK']
@@ -202,7 +204,7 @@ function SceneConnectionEditor({ scene, scenes, targetId, onTargetChange, onAdd,
     选中一个场景节点后，可在这里编辑连接线。
   </div>
   const connections = scene.connections || []
-  const targets = scenes.filter((candidate) => candidate.kind !== 'chapter'
+  const targets = scenes.filter((candidate) => isLocationScene(candidate)
     && candidate.id !== scene.id && !connections.includes(candidate.id))
   return <section className="card p-3" aria-label="场景连接编辑">
     <div className="flex items-center gap-2 text-sm font-semibold"><Link2 size={15} /> 场景连接</div>
@@ -263,7 +265,7 @@ export function ModuleDetailPage() {
         const scenes = m.scenes || []
         const mapNodes = Array.isArray(m.map_nodes) && m.map_nodes.length
           ? m.map_nodes
-          : scenes.filter((s) => s.kind !== 'chapter' && s.map && Number.isFinite(s.map.q) && Number.isFinite(s.map.r))
+          : scenes.filter((s) => isLocationScene(s) && s.map && Number.isFinite(s.map.q) && Number.isFinite(s.map.r))
             .map((s) => ({ id: s.id, q: s.map!.q!, r: s.map!.r!, biome: s.map!.biome || 'plain', scene_id: s.id }))
         setData({
           ...BLANK, ...m, scenes, map_nodes: mapNodes,
@@ -464,7 +466,7 @@ export function ModuleDetailPage() {
 
   const graph = view === 'graph'
   const wide = (graph && !edit) || view === 'sandbox'
-  // 沙盘数据：模组视角=作者上帝视角（无迷雾）；chapter 章节不上图；未落位场景保存时由后端自动落位
+  // 沙盘数据：模组视角=作者上帝视角（无迷雾）；chapter 章节 / event 剧情事件不上图；未落位场景保存时由后端自动落位
   const sandboxLocs = data.map_nodes.map((node) => {
     const scene = node.scene_id ? data.scenes.find((s) => s.id === node.scene_id) : undefined
     return {
@@ -539,7 +541,7 @@ export function ModuleDetailPage() {
     ? selectedSandboxNodes[0].scene_id
     : ''
   const selectedSandboxScene = selectedSceneId
-    ? data.scenes.find((scene) => scene.id === selectedSceneId && scene.kind !== 'chapter')
+    ? data.scenes.find((scene) => scene.id === selectedSceneId && isLocationScene(scene))
     : undefined
   const selectedSandboxBiome = selectedSandboxNodes.length === 0
     ? undefined
@@ -567,7 +569,7 @@ export function ModuleDetailPage() {
     setData((current) => ({
       ...current,
       scenes: current.scenes.map((scene) => {
-        if (scene.kind === 'chapter') return scene
+        if (!isLocationScene(scene)) return scene
         if (scene.id !== sourceId && scene.id !== targetId) return scene
         const otherId = scene.id === sourceId ? targetId : sourceId
         const connections = new Set(scene.connections || [])

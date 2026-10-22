@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.llm_factory import get_fast_llm, get_llm, get_vision_llm
 from app.models.module import Module
+from app.services import scene_kind
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,10 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
       "danger": "该场景的危险等级，仅限四选一：calm（安全平静）/uneasy（隐隐不安）/dangerous（明确危险）/deadly（致命凶险）",
       "atmosphere": "一句话氛围基调，给 KP 渲染用：以感官（声/味/光/体感）+ 情绪基调描述，如『腐臭、低压、木板随时塌陷』。不要写成剧透或台词",
       "mood": "配乐氛围，仅限六选一：calm（安宁，歇脚/白天的安全处）/explore（调查，默认）/tense（不安）/horror（恐怖）/mythos（神话显现，直面超自然）/sorrow（悲伤）。按玩家**身处此地时**的主基调选，拿不准就 explore",
-      "kind": "二选一：location（一个真实存在的地点，默认）/ chapter（纯叙事章节或抽象阶段，如『委托与准备』『尾声』——它不是玩家能在地图上前往的地方）",
+      "kind": "三选一：location（一个真实存在、玩家能前往的地点，默认）/ chapter（纯叙事章节或抽象阶段，如『委托与准备』『尾声』）/ event（按条件触发的剧情段落，如『导入：困于帝王谷』『可怖之物苏醒』）——chapter 与 event 都不是地点，不上地图、不可前往",
+      "when": "仅 kind=event：触发条件，**照抄模组原文**（如『约30-40分钟后（调查员探索完前室和耳室时）』）；其他类型留空字符串",
+      "npcs": ["仅 kind=event：该事件中登场或采取行动的 NPC id（取自 npcs 清单）——事件触发前这些 NPC 处于蛰伏，不会对玩家采取行动；其他类型留空数组"],
+      "set_flags": ["仅 kind=event：事件触发后置上的剧情标志名，优先复用 triggers 里同一情节的 set_flags（如 monster_awake）；其他类型留空数组"],
       "keywords": ["解锁关键词：玩家在对话/行动里提到其中任意一个，大地图就解锁该地点，因此**每个词都必须是『这个地点的称呼』**。覆盖：完整地名、核心地名（去掉『废墟/遗址/旧址』等状态词，如『沉思礼拜堂废墟』→『沉思礼拜堂』）、通俗设施名（礼拜堂/图书馆）、专名（沉思/科比特/罗克斯伯里）、模组原文里的门牌地址或俗称/绰号，以及数字写法变体（『2号车厢』要含『二号车厢』）。**绝不要该场景的内容词**：场景里的物件（行李/钥匙/报纸）、人物或怪物（乘务员/循声者）、氛围描写（黑暗/血腥/喘息）都不是地点称呼——这类词一旦出现在任何叙述里就会误解锁该地点、提前剧透。2-6 个，每个≥2字；不要过泛的通用词（如『房间』『那边』『房子』『街区』）。chapter 类场景留空数组"],
       "connections": ["scene_2"],
       "map": {{"q": 0, "r": -2, "biome": "地貌，仅限十一选一：plain/forest/water/coast/desert/mountain/swamp/urban/ruin/interior/road"}},
@@ -143,6 +147,10 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     - triggers 列出"何时该置/清哪个标志"：when 用自然语言写触发条件，set_flags/clear_flags 写标志名。
     - **标志名必须前后一致呼应**：triggers.set_flags 用到的标志，要在某场景/NPC 的 states.when 里被消费；
       反之 states.when 引用的标志，应有某个 trigger 负责置上。没有任何随剧情变化的内容时，triggers 留空数组 []。
+    - **剧情事件（kind=event）不是地点**：模组里「某条件下发生某事」的段落（导入、怪物苏醒、NPC 归来、
+      风暴降临……）写成 kind=event 的场景，when 照抄原文的触发条件，npcs 列出事件里登场/行动的 NPC，
+      set_flags 写触发后置的标志（与 triggers 里同一情节呼应）；事件发生的地点用 connections 指向
+      对应的 location。事件不给 map、keywords，绝不能把事件写成 location。
 11. 每个 NPC 给出 attributes（CoC 九维 STR/CON/SIZ/DEX/APP/INT/POW/EDU/LUCK，0-90 整数，按身份合理估计）
     与 background（生平来历）：attributes 供战斗/属性对抗与派生值使用；background 写来历渊源，与 secrets 区分。
 12. handouts 只收模组原文**给出了完整正文**的文书（信件/报纸/日记/便条等「递给玩家看的实体道具」）：
@@ -154,7 +162,7 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     （『沉思礼拜堂废墟』要含『沉思礼拜堂』与『礼拜堂』）、门牌地址、俗称/绰号、数字写法变体
     （『2号车厢』要含『二号车厢』）。**绝不要该场景的内容词**——物件、人物/怪物、氛围描写
     （行李/钥匙/乘务员/怪物/黑暗/血腥等）都不是地点称呼，出现在任何叙述里就会误解锁、提前剧透；
-    也避免『房间』『房子』『街区』这类过泛通用词。chapter 类场景 keywords 留空数组 []。
+    也避免『房间』『房子』『街区』这类过泛通用词。chapter / event 类场景 keywords 留空数组 []。
 14. truth（幕后真相）**宁全勿缺**：模组的守秘人资讯是 KP 运转的根基，凡「真正发生了什么」的
     叙述都要收进去；它与 NPC 的 secrets 不冲突（secrets 是单个 NPC 的秘密，truth 是全局真相）。
 15. 场景 events 只收模组**明文规定**的机制点（原文写了「目睹 X 需 0/1d3 理智检定」「触碰 Y 受
@@ -164,7 +172,7 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     相对位置，不是测绘，无需比例尺）。依据模组文本的方位/空间语义落位：「镇北的教堂」放在
     城镇的北侧格、「沿河仓库」贴着水域格；相连（connections）的场景距离 1-3 格；坐标绝不重叠；
     线性结构（车厢/楼层/隧道）沿一条直线依次排开。biome 按场景环境十一选一（道路、街巷、桥梁
-    和主要交通路线用 road；室内房间/车厢用 interior）。chapter 类场景不给 map。文本没有任何
+    和主要交通路线用 road；室内房间/车厢用 interior）。chapter / event 类场景不给 map。文本没有任何
     方位线索时可按连通关系就近摆放。
 16. NPC/怪物给出 hp（原文数值；没有则按 (CON+SIZ)/10 估算）、armor（护甲值，无甲为 0）、
     weapon（主要攻击方式：人类用武器名，怪物用其攻击方式名如『撕咬』『触手』）——供战斗引擎
@@ -675,11 +683,13 @@ async def generate_npc_callings(
 
 def _ensure_scene_keywords(scenes: list) -> list:
     """给每个 location 场景补全解锁关键词：LLM 生成的 keywords ∪ 标题确定性派生（兜底），
-    归一（去空白、去重、≥2字）。chapter 类不需要（不上地图）。解析与手动编辑都经此归一。"""
+    归一（去空白、去重、≥2字）。chapter / event 不是地点，不需要。解析与手动编辑都经此归一。"""
     from app.services.session_service import derive_scene_keywords
 
     for s in scenes or []:
-        if not isinstance(s, dict) or s.get("kind") == "chapter":
+        if not scene_kind.is_location(s):
+            if isinstance(s, dict):
+                s["keywords"] = []
             continue
         title = s.get("title") or s.get("name") or ""
         given = {
@@ -690,11 +700,17 @@ def _ensure_scene_keywords(scenes: list) -> list:
     return scenes
 
 
-def _normalize_scenes(scenes: list) -> list:
-    """场景入库前的统一规整：解锁关键词补全 + 沙盘坐标校验修复（LLM 提议保留、缺失/冲突
-    确定性落位）。解析与手动编辑都经此归一。"""
+def _normalize_scenes(scenes: list, npcs: list | None = None) -> list:
+    """场景入库前的统一规整：kind 归一（未知值 → location，事件补齐 when/npcs/set_flags）+
+    解锁关键词补全 + 沙盘坐标校验修复（LLM 提议保留、缺失/冲突确定性落位）。
+    解析与手动编辑都经此归一。``npcs`` 给出时，事件的 npcs 只保留真实存在的 NPC id。"""
     from app.services import hex_map
 
+    npc_ids = (
+        {str(n.get("id")) for n in npcs if isinstance(n, dict) and n.get("id")}
+        if npcs is not None else None
+    )
+    scenes = scene_kind.normalize_scene_kinds(scenes, npc_ids)
     scenes = _ensure_scene_keywords(scenes)
     hex_map.ensure_scene_maps(scenes)
     return scenes
@@ -764,7 +780,7 @@ def _normalize_map_nodes(map_nodes: list | None, scenes: list) -> list:
     raw = [dict(n) for n in (map_nodes or []) if isinstance(n, dict)]
     scene_by_id = {
         str(s.get("id")): s for s in scenes
-        if s.get("id") and s.get("kind") != "chapter" and hex_map.scene_coord(s) is not None
+        if s.get("id") and scene_kind.is_location(s) and hex_map.scene_coord(s) is not None
     }
     by_scene: dict[str, dict] = {}
     # 键带层：各层坐标空间独立，只用 (q,r) 会让子沙盘的格子把顶层同坐标的挤掉。
@@ -960,7 +976,7 @@ def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
     if world_setting.get("difficulty") not in MODULE_DIFFICULTIES:
         world_setting["difficulty"] = ""
 
-    scenes = _normalize_scenes(data.get("scenes", []))
+    scenes = _normalize_scenes(data.get("scenes", []), data.get("npcs", []))
     module = Module(
         title=data.get("title", "未命名模组"),
         rule_system=data.get("rule_system", "coc"),
@@ -1002,7 +1018,8 @@ def update_module(db: Session, module_id: str, data: dict) -> Module | None:
             ws["difficulty"] = ""
         module.world_setting = ws
     if "scenes" in data and data["scenes"] is not None:
-        module.scenes = _normalize_scenes(data["scenes"])
+        npcs = data["npcs"] if data.get("npcs") is not None else module.npcs
+        module.scenes = _normalize_scenes(data["scenes"], npcs or [])
     if "map_nodes" in data and data["map_nodes"] is not None:
         module.map_nodes = _normalize_map_nodes(data["map_nodes"], module.scenes)
     else:

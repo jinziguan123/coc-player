@@ -18,6 +18,7 @@ from app.services import (
     npc_identity,
     rag_stats,
     rulebook_service,
+    scene_kind,
     session_service,
     session_stats,
     world_memory,
@@ -31,10 +32,11 @@ def _resolve_scene_ref(module: Module, ref: str) -> str | None:
     """把 SCENE_CHANGE 的引用（场景 id 或场景名，KP 有时会写错/写名字）解析成真实场景 id。
 
     依次尝试：精确 id → 精确名 → 名字互含 → id 互含。都不中返回 None（调用方据此不改场景，
-    避免写入脏 id 后地图回退到第一个场景）。
+    避免写入脏 id 后地图回退到第一个场景）。只认地点：事件/章节不是能去的地方，
+    KP 写 [SCENE_CHANGE: 可怖之物苏醒] 也不会把人搬进一个事件里。
     """
     ref = (ref or "").strip()
-    scenes = (module.scenes if module else []) or []
+    scenes = scene_kind.location_scenes(module.scenes if module else [])
     if not ref or not scenes:
         return None
     for s in scenes:
