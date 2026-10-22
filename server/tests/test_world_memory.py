@@ -950,11 +950,12 @@ def test_summarize_and_extract_merged_shape():
         llm, "既往摘要", _summ_events(), "- npc_butler：态度：中立",
     ))
     assert got is not None
-    summary, npc_updates, clue_notes, team_updates = got
+    summary, npc_updates, clue_notes, team_updates, thread_updates = got
     assert "审讯管家" in summary                       # 摘要文本正确产出，未因抽取回归
     assert npc_updates["npc_butler"]["attitude"] == "wary"
     assert clue_notes == {"clue_key": "管家回避提及钥匙"}
     assert team_updates == {}                          # 未给 team_updates 时归一为空 dict
+    assert thread_updates == {}                        # 未给 thread_updates 时同样归一
     # 合并调用是一次低温 json_object 调用
     assert llm.last_kw["temperature"] == 0
     assert llm.last_kw["response_format"] == {"type": "json_object"}

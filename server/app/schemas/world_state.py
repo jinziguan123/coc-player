@@ -28,6 +28,10 @@ class WorldStateSchema(BaseModel):
     npc_memory: dict = Field(default_factory=dict)          # NPC 记忆
     team_memory: dict = Field(default_factory=dict)         # 队伍记忆
     backstage: dict = Field(default_factory=dict)           # 幕后游标
+    # 剧情线台账：决定/承诺/悬念/待办（services/plot_threads；KP 专属，不下发玩家）
+    plot_threads: dict = Field(default_factory=dict)
+    # 最近一次压缩后自检的结论（services/summary_audit；便于观察漏检）
+    summary_audit: dict = Field(default_factory=dict)
     # 临场 NPC：**按名字建键的 dict**（world_memory.register_improvised_npc /
     # promote_service 都按 improvised_npcs[name] 读写）。曾误声明为 list——因为本 schema
     # 的校验是 fail-open（只告警不阻断），这个错声明一直没被任何用例照出来。

@@ -33,6 +33,7 @@ from app.services import (
     chat_event_writer,
     command_protocol,
     dice_runtime,
+    entity_state,
     event_protocol,
     event_recall,
     execution_scope,
@@ -47,6 +48,7 @@ from app.services import (
     npc_identity,
     npc_runtime,
     planned_effects,
+    plot_progress,
     combat_service,
     rule_options_service,
     rulebook_service,
@@ -433,6 +435,7 @@ async def _run_generation(
         planned_effects.enforce_plan_item_locations(
             plan, module, game_session.current_scene_id,
         )
+        plot_progress.sanitize_plan_flags(plan, module, entity_state.active_flags(game_session))
         # 世界记忆钩子 a：本轮裁定要揭示线索 → 写入线索台账（纯确定性，零额外 LLM 调用）
         if plan is not None:
             _record_clue_ledger_from_plan(
@@ -640,6 +643,13 @@ async def _run_generation(
 
     # 确定性战斗伤害守卫：战斗中非常规/范围攻击 → 挂成玩家 pending_roll 亲手掷、扣敌人 HP。
     async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
+        room_hub.broadcast(session_id, chunk)
+
+    # 剧情进度外置：规划器裁定本轮满足的剧情钩子 → 校验后确定性落标志（+ KP 专属事件）。
+    # 放在收尾之前：本轮收尾的幕后推演就以新进度为准。
+    async for chunk in plot_progress.apply_planned_flags(
+        db, session_id, game_session, module, plan,
+    ):
         room_hub.broadcast(session_id, chunk)
 
     # 叙事进度记账（放在全部守卫之后：场景守卫可能刚把队伍挪进新场景）：本轮演过的场景
@@ -1073,6 +1083,13 @@ async def _run_split_generation(
     async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
         room_hub.broadcast(session_id, chunk)
 
+    # 剧情进度外置：规划器裁定本轮满足的剧情钩子 → 校验后确定性落标志（+ KP 专属事件）。
+    # 放在收尾之前：本轮收尾的幕后推演就以新进度为准。
+    async for chunk in plot_progress.apply_planned_flags(
+        db, session_id, game_session, module, plan,
+    ):
+        room_hub.broadcast(session_id, chunk)
+
     # 叙事进度记账（放在全部守卫之后：场景守卫可能刚把队伍挪进新场景）：本轮演过的场景
     # 机制点 / 摆到玩家面前的线索 → 确定性写世界记忆，补规划器漏记的那些（详见守卫文档）。
     planned_effects.record_narrated_progress(
@@ -1257,6 +1274,7 @@ async def run_chat_generation(session_id: str) -> None:
             planned_effects.enforce_plan_item_locations(
                 plan, module, game_session.current_scene_id,
             )
+            plot_progress.sanitize_plan_flags(plan, module, entity_state.active_flags(game_session))
             logger.info(
                 "耗时|planner（队友后） %.1fs（%s）session=%s",
                 time.monotonic() - t_plan, usage_tracker.fmt(usage_tracker.delta(u_plan)), session_id,
@@ -1748,6 +1766,12 @@ async def _run_kp_turn(
         planned_effects.enforce_plan_item_locations(
             plan, module, game_session.current_scene_id,
         )
+        # 叙事后现跑的这次规划同样看得到刚发生的事：满足剧情钩子就落标志
+        plot_progress.sanitize_plan_flags(plan, module, entity_state.active_flags(game_session))
+        async for chunk in plot_progress.apply_planned_flags(
+            db, session_id, game_session, module, plan,
+        ):
+            room_hub.broadcast(session_id, chunk)
         if need_sanity:
             async for chunk in _ensure_planned_sanity(
                 db, session_id, game_session, player_char, party_others, plan, pre_gen_seq,

@@ -47,6 +47,7 @@ from app.services import (
     combat_service,
     entity_state,
     hex_map,
+    plot_threads,
     scene_kind,
     session_service,
     style_presets,
@@ -1419,6 +1420,17 @@ def _sec_clue_ledger(c: _SectionCtx) -> str | None:
     return "\n\n" + text if text else None
 
 
+def _sec_plot_threads(c: _SectionCtx) -> str | None:
+    """剧情线台账：未了结的决定/承诺/悬念/待办（KP 专属）。
+
+    滚动摘要把它们压成散文后最容易被概括掉；台账逐条外置，每轮注入，压缩丢不掉。
+    """
+    if c.facts.is_opening:
+        return None
+    text = plot_threads.format_threads_section(c.session.world_state or {})
+    return "\n\n" + text if text else None
+
+
 def _sec_scene_events(c: _SectionCtx) -> str | None:
     """当前场景机制点进度：events 逐条标已发生/未发生。
 
@@ -1515,6 +1527,7 @@ _SECTIONS: tuple[_Section, ...] = (
     # 发现桥段，玩家直接可感。
     _Section("clue-ledger",       SYS_TIER_VOLATILE, 5,  _sec_clue_ledger,     True),
     _Section("scene-events",      SYS_TIER_VOLATILE, 5,  _sec_scene_events,    True),
+    _Section("plot-threads",      SYS_TIER_VOLATILE, 8,  _sec_plot_threads,    True),
     _Section("mark-seen",         SYS_TIER_VOLATILE, 6,  _sec_mark_seen,       True),
     _Section("npc-memory",        SYS_TIER_VOLATILE, 10, _sec_npc_memory,      True),
     _Section("backstage",         SYS_TIER_VOLATILE, 30, _sec_backstage,       True),

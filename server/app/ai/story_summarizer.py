@@ -46,14 +46,16 @@ def _events_text(events: list[Any]) -> str:
 
 def build_memory_keeper_messages(
     prev_summary: str, events: list[Any], npc_memory_brief: str,
-    team_memory_brief: str = "",
+    team_memory_brief: str = "", threads_brief: str = "",
 ) -> list[dict]:
     """合并调用（v2）：一次低温 json_object 调用同时产出滚动摘要 + MemoryKeeper 差量。
 
     在同一批输入事件与既往摘要之上，额外喂入当前 npc_memory 摘要，让抽取器据
     「本轮新事件里 NPC 的言行变化」输出态度/承诺/谎言的差量。
     ``team_memory_brief`` 非空时（会话有 AI 队友）再抽取队友私有记忆差量（个人目标/心事）。
-    输出严格 JSON：{summary, npc_updates, clue_notes[, team_updates]}。
+    ``threads_brief`` 是剧情线台账里的未了结项（决定/承诺/悬念/待办），抽取器据此输出
+    thread_updates 差量（新增 + 已了结）——这些一句话的约束最容易在散文摘要里被概括掉。
+    输出严格 JSON：{summary, npc_updates, clue_notes, thread_updates[, team_updates]}。
     """
     body = _events_text(events)
     prev = (prev_summary or "").strip() or "（暂无既往摘要）"
@@ -68,6 +70,7 @@ def build_memory_keeper_messages(
         "对某 NPC 起了疑心），不是全队共同的剧情待办（那归 summary 管）。"
         "仅当本段事件确有依据时才写，没有就省略该队友或留空。绝不臆造。\n"
     )
+    threads = (threads_brief or "").strip() or "（暂无未了结的剧情线）"
     team_section = "" if not team else f"【当前队友私有记忆】\n{team}\n\n"
     team_key = "" if not team else ', "team_updates": {}'
     return [
@@ -101,11 +104,21 @@ def build_memory_keeper_messages(
                 "没有变化就省略该 NPC 或留空。绝不臆造。\n"
                 "【clue_notes 要求】对象，key 是线索 id，value 是一句话备注，"
                 "**只用于给已存在的线索补充观察备注，绝不涉及玩家是否已掌握**。无则空对象。\n"
+                "【thread_updates 要求】对象，形如 "
+                '{"new": [{"kind": "decision|promise|mystery|todo", "text": "..."}], '
+                '"resolved": [{"id": "t1", "how": "一句话：怎么了结的"}]}。'
+                "new 只收本段新事件里**新出现、且之后仍然有效**的：调查员做出的关键决定、"
+                "任何一方许下的承诺/约定（含期限与条件）、抛出而未解开的悬念、尚待去做的事；"
+                "text 用一句话，**原话保留关键约束**（谁、对谁、什么事、期限/条件，专名一字不改）。"
+                "resolved 只能取下面「未了结剧情线」里**已列出的 id**，且本段事件确实兑现/解开/"
+                "放弃了它。寒暄、已当场了结的小事不收；没有就给空数组。\n"
                 + team_task
                 + f"\n【既往剧情摘要】\n{prev}\n\n【当前 NPC 记忆】\n{mem}\n\n"
+                + f"【未了结剧情线】\n{threads}\n\n"
                 + team_section
                 + f"【本轮新发生的事件】\n{body}\n\n"
-                + '现在输出 JSON：{"summary": "...", "npc_updates": {}, "clue_notes": {}'
+                + '现在输出 JSON：{"summary": "...", "npc_updates": {}, "clue_notes": {}, '
+                + '"thread_updates": {"new": [], "resolved": []}'
                 + team_key + "}"
             ),
         },
@@ -139,21 +152,21 @@ def _extract_json_object(raw: Any) -> dict | None:
 
 async def summarize_and_extract(
     llm: Any, prev_summary: str, events: list[Any], npc_memory_brief: str,
-    team_memory_brief: str = "",
-) -> tuple[str, dict, dict, dict] | None:
+    team_memory_brief: str = "", threads_brief: str = "",
+) -> tuple[str, dict, dict, dict, dict] | None:
     """合并调用：一次 complete() 同时拿到滚动摘要与 MemoryKeeper 差量。
 
-    返回 ``(summary, npc_updates, clue_notes, team_updates)``；任何失败（无 LLM / 无事件 /
+    返回 ``(summary, npc_updates, clue_notes, team_updates, thread_updates)``；任何失败（无 LLM / 无事件 /
     调用异常 / 坏 JSON / 摘要为空）一律返回 None，由调用方保持原摘要与各记忆完全不变，
     绝不阻塞跑团。抽取的差量结构未经安全校验——落库前须经 ``world_memory.apply_memory_delta``
-    / ``world_memory.apply_team_memory_delta``。
+    / ``world_memory.apply_team_memory_delta`` / ``plot_threads.apply_thread_delta``。
     """
     if llm is None or not events:
         return None
     try:
         raw = await llm.complete(
             build_memory_keeper_messages(
-                prev_summary, events, npc_memory_brief, team_memory_brief,
+                prev_summary, events, npc_memory_brief, team_memory_brief, threads_brief,
             ),
             temperature=0,
             response_format={"type": "json_object"},
@@ -170,11 +183,13 @@ async def summarize_and_extract(
     npc_updates = data.get("npc_updates")
     clue_notes = data.get("clue_notes")
     team_updates = data.get("team_updates")
+    thread_updates = data.get("thread_updates")
     return (
         summary,
         npc_updates if isinstance(npc_updates, dict) else {},
         clue_notes if isinstance(clue_notes, dict) else {},
         team_updates if isinstance(team_updates, dict) else {},
+        thread_updates if isinstance(thread_updates, dict) else {},
     )
 
 

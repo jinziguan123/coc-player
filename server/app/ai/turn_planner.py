@@ -20,7 +20,7 @@ from pydantic import (
 from app.ai import director_signals
 from app.ai.context import _active_flags, _resolve_state
 from app.models import Character, GameSession, Module
-from app.services import scene_kind, session_service, world_memory
+from app.services import plot_progress, scene_kind, session_service, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +206,11 @@ class NpcPolicy(BaseModel):
 
 class ScenePolicy(BaseModel):
     scene_change: str | None = None
+    # 本轮满足了哪个剧情钩子（plot_hooks）的条件 → 该置/清的标志。叙事后由
+    # plot_progress.apply_planned_flags 校验（只认模组钩子里写明的标志）并落库。
     set_flags: StrList = Field(default_factory=list)
     clear_flags: StrList = Field(default_factory=list)
+    flag_reason: str = ""
 
 
 class EndingVerdict(BaseModel):
@@ -605,6 +608,8 @@ def build_turn_plan_messages(
             }
             for e in scene_kind.pending_events(module.scenes, flags)
         ],
+        # 尚未触发的剧情钩子（模组 triggers + 剧情事件）：判断本轮是否满足条件、该置哪个标志
+        "plot_hooks": plot_progress.pending_hooks(module, flags),
         # 幕后真相：全局裁定依据（线索该不该给、NPC 反应、危险判断都以真相为锚）
         "truth": (getattr(module, "truth", "") or "").strip(),
         # 结局分支：判「本轮是否已抵达终局」的唯一依据（空 = 该模组没写结局，永远不判）。
@@ -804,6 +809,12 @@ def build_turn_plan_messages(
                 "名字（只能取运行时资料里的 current_scene / 可见场景，解析不到就别填）——后端据此确定性"
                 "把角色位置与大地图切过去，不靠 KP 记得。**仅讨论/打算/建议去某地（『我们该先去X』）"
                 "绝不填**：那只是商量，人没动；留空表示本轮仍在原场景。"
+                "scene_policy.set_flags / clear_flags / flag_reason：plot_hooks 是模组写明的、"
+                "**尚未触发**的剧情钩子（when=触发条件）。本轮事件（含玩家行动与 recent_events 里"
+                "已发生的事）**确实满足**了某个钩子的 when 时，把它的 set_flags（及 clear_flags）"
+                "原样填进来，flag_reason 用一句话写明满足条件的依据（哪件事、谁做的）。"
+                "只能取 plot_hooks 里出现过的标志名，不得自造；条件只是可能/即将满足、玩家仅在"
+                "讨论或打算时一律不填——宁可晚一轮，不可抢跑。后端会据此确定性记录剧情进度。\n"
                 "scene_neighbors 非空时目标还须与当前场景**连通**（相邻可直达；更远的连通地点须玩家"
                 "实际走过去、叙事途经）——与之不连通的场景绝不填，系统也会拒绝这样的切换。\n"
                 "player_check_request：玩家本轮是否在**明确申请**做某个技能/属性检定"
@@ -1136,6 +1147,19 @@ def build_turn_plan_message(plan: TurnPlan) -> dict:
             "是否就此收桌由玩家自己决定（系统会给他们结束入口）。\n"
         )
 
+    # 剧情推进：规划器判定本轮满足了某个模组钩子（标志已过白名单，叙事后由后端落库）。
+    # 不告诉 KP 的话，标志落了、叙事里那件事却没发生——进度和故事就此脱节。
+    plot_block = ""
+    if plan.scene_policy.set_flags or plan.scene_policy.clear_flags:
+        plot_block = (
+            "\n\n【剧情推进——本轮满足了模组剧情钩子的条件】\n"
+            + (f"依据：{plan.scene_policy.flag_reason.strip()}\n"
+               if plan.scene_policy.flag_reason.strip() else "")
+            + "请在本轮叙事里让这一进展真实发生、被玩家感知到（按模组对应段落的内容来演）。"
+            "系统会在本轮结束时确定性记录这一剧情进度，你不必再为它调用 set_flag；"
+            "标志名是内部标识，绝不写进叙事。\n"
+        )
+
     combat_block = ""
     if plan.combat.should_start:
         enemies = "、".join(plan.combat.enemies) or "（必须填写实际敌方名字）"
@@ -1170,6 +1194,7 @@ def build_turn_plan_message(plan: TurnPlan) -> dict:
             # false_claim 放在 check_block 之前：check_block 靠「最末尾」的位置权重换取
             # 「照发 [DICE_CHECK] 收尾」的遵循率，不能被别的段落挤掉尾巴。
             + false_claim_block
+            + plot_block
             + check_block
             + auto_block
             + ending_block

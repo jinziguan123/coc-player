@@ -14,8 +14,10 @@ from app.services import (
     agent_trace,
     entity_state,
     event_recall,
+    plot_threads,
     scene_kind,
     session_service,
+    summary_audit,
     turn_context,
     world_memory,
 )
@@ -93,7 +95,13 @@ async def _maybe_merge_chapters(db: Session, session: GameSession, llm) -> None:
             merged = await story_summarizer.merge_chapters(llm, [c["text"] for c in head])
         if not merged:
             return
-        session.world_state = world_memory.replace_merged_chapters(ws, merged, len(head))
+        ws2 = world_memory.replace_merged_chapters(ws, merged, len(head))
+        # 二次压缩同样自检：合并后的首章对照台账，补回被合并掉的线索 / 人物原名
+        module = db.get(Module, session.module_id) if session.module_id else None
+        ws2, _ = summary_audit.audit_chapter(
+            ws2, module, entity_state.active_flags(session), chapter_index=0,
+        )
+        session.world_state = ws2
         db.commit()
         logger.info("剧情章节下沉合并：session=%s 合并 %s 章", session.id, len(head))
     except Exception:
@@ -153,16 +161,27 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
                 llm, world_memory.story_summary_text(ws), to_summ,
                 world_memory.format_npc_memory_all_brief(ws, npc_names),
                 team_memory_brief=team_brief,
+                threads_brief=plot_threads.format_threads_brief(ws),
             )
         if not result:
             return
-        new_chapter, npc_updates, clue_notes, team_updates = result
+        new_chapter, npc_updates, clue_notes, team_updates = result[:4]
+        thread_updates = result[4] if len(result) > 4 else {}
         # 追加一章而非重写整份：重写会让误差在每一次浓缩上复利累积，长局后开场细节必然模糊。
         ws2 = world_memory.append_story_chapter(
             dict(session.world_state or {}), new_chapter,
             from_seq=to_summ[0].sequence_num, to_seq=to_summ[-1].sequence_num,
         )
         ws2["story_summary_seq"] = to_summ[-1].sequence_num
+        # 剧情线台账：决定/承诺/悬念/待办的差量（经校验：只认已存在的 id 了结、新增截断去重）
+        ws2 = plot_threads.apply_thread_delta(
+            ws2, thread_updates,
+            from_seq=to_summ[0].sequence_num, to_seq=to_summ[-1].sequence_num,
+        )
+        # 压缩后自检：用台账对照新章节，漏掉的线索/人物按原名补记、漏掉的承诺补进台账（零 token）
+        ws2, _ = summary_audit.audit_chapter(
+            ws2, module, entity_state.active_flags(session), events=to_summ,
+        )
         session.world_state = ws2
         db.commit()
         # 章节攒够了才把最老的几章下沉合并一次（LSM 式）。合并失败保持原样：
