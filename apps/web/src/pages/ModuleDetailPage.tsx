@@ -16,6 +16,9 @@ import { type ModuleImageKind } from '../components/module/ModuleImage'
 import { ImageSlot } from '../components/module/ImageSlot'
 import { GenderPicker } from '../components/module/GenderPicker'
 import { NpcCombatFields } from '../components/module/NpcCombatFields'
+import { CsvInput, Row, TextInput } from '../components/module/ModuleFormParts'
+import { SceneEventFields } from '../components/module/SceneEventFields'
+import { csv } from '@/lib/csvList'
 import { CharacterGuidanceCard } from '../components/module/CharacterGuidanceCard'
 import { hasGuidance, type CharacterGuidance } from '@/stores/moduleStore'
 import { ModuleTimeline } from '../components/module/ModuleTimeline'
@@ -92,8 +95,6 @@ const sceneKindValue = (s: Scene) => (s.kind === 'chapter' || s.kind === 'event'
 const eventValue = (e: SceneEvent) => e.kind === 'san_check' ? e.san_loss : e.kind === 'dice_check' ? e.skill : e.kind === 'damage' ? e.damage : ''
 
 const COC_ATTRS = ['STR', 'CON', 'SIZ', 'DEX', 'APP', 'INT', 'POW', 'EDU', 'LUCK']
-const csv = (a?: string[]) => (a || []).join(', ')
-const parseCsv = (v: string) => v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
 
 const WS_FIELDS: { key: string; label: string }[] = [
   { key: 'era', label: '年代' },
@@ -1131,53 +1132,6 @@ function EventList({ events, edit, onAdd, onRemove, onUpd }: {
 }
 
 /** 剧情变体列表（场景/NPC 的 states）：每个变体一个「条件(when) + 覆盖字段」卡片。 */
-/** 剧情事件（kind=event）专属字段：触发条件、涉及 NPC（触发前蛰伏）、触发后置的标志。 */
-function SceneEventFields({ scene, npcs, edit, onChange }: {
-  scene: Scene
-  npcs: NPC[]
-  edit: boolean
-  onChange: (patch: Partial<Scene>) => void
-}) {
-  const involved = scene.npcs || []
-  const npcName = (id: string) => npcs.find((n) => n.id === id)?.name || id
-  const toggleNpc = (id: string) => onChange({
-    npcs: involved.includes(id) ? involved.filter((x) => x !== id) : [...involved, id],
-  })
-  return (
-    <div className="mt-1 mb-1 rounded" style={{ border: '1px dashed var(--color-text-accent)', padding: 8 }}>
-      <div className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-accent)' }}>
-        剧情事件（按条件触发，不是地点，不上地图）
-      </div>
-      <Row label="触发条件">{edit
-        ? <TextInput value={scene.when || ''} onChange={(v) => onChange({ when: v })} multiline
-            placeholder="照抄模组原文，如『约30-40分钟后（调查员探索完前室和耳室时）』" />
-        : <span className="whitespace-pre-wrap text-xs">{scene.when || '—'}</span>}</Row>
-      <Row label="涉及 NPC">{edit ? (
-        <div className="flex flex-wrap gap-1">
-          {npcs.filter((n) => n.id).map((n) => {
-            const on = involved.includes(n.id)
-            return (
-              <button key={n.id} type="button" onClick={() => toggleNpc(n.id)} aria-pressed={on}
-                className="chip text-xs"
-                style={on ? { color: 'var(--color-text-accent)', borderColor: 'var(--color-text-accent)' } : { opacity: 0.6 }}>
-                {n.name || n.id}
-              </button>
-            )
-          })}
-          {npcs.length === 0 && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>模组还没有 NPC</span>}
-        </div>
-      ) : <span className="text-xs">{involved.map(npcName).join('、') || '—'}</span>}</Row>
-      {edit && <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-        选中的 NPC 在事件触发前处于蛰伏：幕后推演不让它行动，KP 也不会让它提前现身。
-      </p>}
-      <Row label="触发标志">{edit
-        ? <CsvInput values={scene.set_flags} onChange={(v) => onChange({ set_flags: v })}
-            placeholder="触发后置的标志，逗号分隔；与剧情钩子呼应（留空则保存时自动生成）" />
-        : <span className="text-xs" style={{ color: 'var(--color-text-accent)' }}>{csv(scene.set_flags) || '—'}</span>}</Row>
-    </div>
-  )
-}
-
 function VariantList<T extends { when?: string[] }>({ states, edit, onAdd, onRemove, onWhen, renderFields }: {
   states?: T[]
   edit: boolean
@@ -1251,15 +1205,6 @@ function Section({ title, onAdd, children }: { title: string; onAdd?: () => void
 }
 
 /* 标签栏用点线与值区隔开，长文换行时左标签仍能对上——比纯留白更稳。 */
-function Row({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="module-row flex gap-3 py-1 text-sm items-start">
-      <span className="module-row-label flex-shrink-0 w-20 text-xs pt-1.5" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
-      <div className="flex-1 min-w-0">{children}</div>
-    </div>
-  )
-}
-
 function ItemCard({ onRemove, children }: { onRemove?: () => void; children: React.ReactNode }) {
   return (
     <div className="module-item-card relative rounded-md p-2.5 break-inside-avoid"
@@ -1298,28 +1243,6 @@ function ItemGrid({ children }: { children: React.ReactNode }) {
  *  长文本行（简介、导入、钩子）不要放进来，换行会把列撑歪。 */
 function RowGrid({ children }: { children: React.ReactNode }) {
   return <div className="row-grid grid gap-x-8 xl:grid-cols-2">{children}</div>
-}
-
-function TextInput({ value, onChange, multiline, placeholder }: { value: string; onChange: (v: string) => void; multiline?: boolean; placeholder?: string }) {
-  const cls = 'w-full px-2 py-1 rounded text-sm'
-  const style = { background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }
-  return multiline
-    ? <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={2} className={cls} style={style} />
-    : <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={cls} style={style} />
-}
-
-/**
- * 逗号分隔的列表输入。输入框里保留用户敲的原文（草稿），只把解析结果往上报——
- * 若每次按键都「解析 → 再 join 回填」，末尾的逗号/空格会立刻被吃掉，键盘上永远敲不出第二项。
- */
-function CsvInput({ values, onChange, placeholder }: { values?: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
-  const [draft, setDraft] = useState(() => csv(values))
-  // 外部改了值（撤销、换选中项等）且与草稿解析结果不一致时，以外部为准
-  const external = csv(values)
-  if (csv(parseCsv(draft)) !== external && draft !== external) {
-    setDraft(external)
-  }
-  return <TextInput value={draft} placeholder={placeholder} onChange={(v) => { setDraft(v); onChange(parseCsv(v)) }} />
 }
 
 function Empty() {

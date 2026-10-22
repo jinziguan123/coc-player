@@ -33,7 +33,7 @@ const GRANDFATHERED: Record<string, number> = {
   // 语音转文字 → useDictation；悬浮窗拖拽缩放 → ui/useDragResize；二级标签 → KpSubTabs；
   // 各动作的输入表单 → KpActionForm
   'components/game/HumanKpPanel.tsx': 1101,
-  'pages/ModuleDetailPage.tsx': 1261,
+  'pages/ModuleDetailPage.tsx': 1251,   // 表单件 → module/ModuleFormParts；剧情事件字段 → module/SceneEventFields
   'pages/RoomLobbyPage.tsx': 1019,
   'pages/SettingsPage.tsx': 695,
 }
