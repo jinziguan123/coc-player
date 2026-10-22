@@ -38,7 +38,7 @@ interface SceneState { when?: string[]; danger?: string; atmosphere?: string; de
 interface NpcState { when?: string[]; personality?: string; initial_location?: string; alive?: boolean }
 interface SceneEvent { trigger?: string; kind?: string; san_loss?: string; skill?: string; damage?: string; note?: string }
 interface SceneMap { q?: number; r?: number; biome: string; parent?: string }
-interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; kind?: string; connections?: string[]; events?: SceneEvent[]; states?: SceneState[]; image?: string; map?: SceneMap | null }
+interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; kind?: string; when?: string; npcs?: string[]; set_flags?: string[]; connections?: string[]; events?: SceneEvent[]; states?: SceneState[]; image?: string; map?: SceneMap | null }
 interface MapNode { id: string; q: number; r: number; biome: string; scene_id?: string | null; parent?: string }
 interface NPC { id: string; name?: string; gender?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; damage?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
 interface Clue { id: string; name?: string; description?: string; location?: string; trigger_condition?: string; image?: string }
@@ -83,6 +83,12 @@ const EVENT_KINDS: { value: string; label: string }[] = [
 const eventKindLabel = (v?: string) => EVENT_KINDS.find((k) => k.value === v)?.label || '提示'
 // 只有 location（缺省/未知值同）是地点；chapter 章节、event 剧情事件不上图、不连线（与后端 scene_kind 同口径）
 const isLocationScene = (s: Scene) => s.kind !== 'chapter' && s.kind !== 'event'
+const SCENE_KIND_OPTS = [
+  { value: 'location', label: '地点' },
+  { value: 'chapter', label: '叙事章节' },
+  { value: 'event', label: '剧情事件' },
+]
+const sceneKindValue = (s: Scene) => (s.kind === 'chapter' || s.kind === 'event' ? s.kind : 'location')
 const eventValue = (e: SceneEvent) => e.kind === 'san_check' ? e.san_loss : e.kind === 'dice_check' ? e.skill : e.kind === 'damage' ? e.damage : ''
 
 const COC_ATTRS = ['STR', 'CON', 'SIZ', 'DEX', 'APP', 'INT', 'POW', 'EDU', 'LUCK']
@@ -313,6 +319,16 @@ export function ModuleDetailPage() {
   const updateWS = (k: string, v: unknown) => setData((d) => ({ ...d, world_setting: { ...d.world_setting, [k]: v } }))
   const updScene = useCallback((i: number, patch: Partial<Scene>) =>
     setData((d) => ({ ...d, scenes: d.scenes.map((it, j) => (j === i ? { ...it, ...patch } : it)) })), [])
+  // 改成章节/事件：它不再是地点，沙盘上的节点一并撤掉（后端保存时也会规整掉）
+  const updSceneKind = (i: number, kind: string) => setData((d) => {
+    const sceneId = d.scenes[i]?.id
+    const isLoc = kind === 'location'
+    return {
+      ...d,
+      scenes: d.scenes.map((it, j) => (j === i ? { ...it, kind } : it)),
+      map_nodes: isLoc ? d.map_nodes : d.map_nodes.filter((n) => n.scene_id !== sceneId),
+    }
+  })
   const updSceneBiome = (i: number, biome: string) => setData((d) => {
     const sceneId = d.scenes[i]?.id
     return {
@@ -878,14 +894,24 @@ export function ModuleDetailPage() {
               <ItemHead
                 title={sceneName(s)}
                 chips={<>
+                  {!isLocationScene(s) && <span className="chip" style={{ color: 'var(--color-text-accent)', borderColor: 'var(--color-text-accent)' }}>
+                    {SCENE_KIND_OPTS.find((o) => o.value === sceneKindValue(s))?.label}
+                  </span>}
                   <span className="chip" style={{ color: dangerMeta(s.danger)?.color, borderColor: dangerMeta(s.danger)?.color }}>
                     {dangerMeta(s.danger)?.label || '平静'}
                   </span>
-                  <span className="chip">{BIOME_LABELS[s.map?.biome || 'plain'] || BIOME_LABELS.plain}</span>
+                  {isLocationScene(s) && <span className="chip">{BIOME_LABELS[s.map?.biome || 'plain'] || BIOME_LABELS.plain}</span>}
                 </>}
               />
             )}
             {edit && <Row label="名称"><TextInput value={sceneName(s) === '(未命名场景)' ? '' : sceneName(s)} onChange={(v) => updScene(i, { name: v })} /></Row>}
+            {edit && <Row label="类型">
+              <Select value={sceneKindValue(s)} onValueChange={(v) => updSceneKind(i, v)}>
+                <SelectTrigger className="w-28" aria-label={`类型：${sceneName(s)}`}><SelectValue /></SelectTrigger>
+                <SelectContent>{SCENE_KIND_OPTS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </Row>}
+            {sceneKindValue(s) === 'event' && <SceneEventFields scene={s} npcs={data.npcs} edit={edit} onChange={(patch) => updScene(i, patch)} />}
             <Row label="描述">{edit ? <TextInput value={s.description || ''} onChange={(v) => updScene(i, { description: v })} multiline /> : <span className="whitespace-pre-wrap">{s.description || '—'}</span>}</Row>
             {edit && <Row label="危险度">
               <Select value={s.danger || 'calm'} onValueChange={(v) => updScene(i, { danger: v })}>
@@ -893,14 +919,14 @@ export function ModuleDetailPage() {
                 <SelectContent>{DANGER_OPTS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
               </Select>
             </Row>}
-            {edit && <Row label="地貌">
+            {edit && isLocationScene(s) && <Row label="地貌">
               <Select value={s.map?.biome ?? 'plain'} onValueChange={(v) => updSceneBiome(i, v)}>
                 <SelectTrigger className="w-28" aria-label={`地貌：${sceneName(s)}`}><SelectValue /></SelectTrigger>
                 <SelectContent>{BIOMES.map((biome) => <SelectItem key={biome} value={biome}>{BIOME_LABELS[biome]}</SelectItem>)}</SelectContent>
               </Select>
             </Row>}
             <Row label="氛围">{edit ? <TextInput value={s.atmosphere || ''} onChange={(v) => updScene(i, { atmosphere: v })} placeholder="感官+情绪基调，如『腐臭、低压、随时塌方』" /> : <span style={{ color: 'var(--color-text-secondary)' }}>{s.atmosphere || '—'}</span>}</Row>
-            <Row label="连接">{edit ? <TextInput value={(s.connections || []).join(', ')} onChange={(v) => updScene(i, { connections: v.split(/[,，]/).map((x) => x.trim()).filter(Boolean) })} placeholder="目标场景 id，逗号分隔" /> : <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{(s.connections || []).join('、') || '—'}　id: {s.id}</span>}</Row>
+            <Row label="连接">{edit ? <CsvInput values={s.connections} onChange={(v) => updScene(i, { connections: v })} placeholder="目标场景 id，逗号分隔" /> : <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{(s.connections || []).join('、') || '—'}　id: {s.id}</span>}</Row>
             <EventList events={s.events} edit={edit}
               onAdd={() => updScene(i, { events: [...(s.events || []), { trigger: '', kind: 'san_check', san_loss: '' }] })}
               onRemove={(j) => updScene(i, { events: (s.events || []).filter((_, jj) => jj !== j) })}
@@ -1014,8 +1040,8 @@ export function ModuleDetailPage() {
         {data.triggers.map((t, i) => (
           <ItemCard key={t.id || i} onRemove={edit ? () => rmTrigger(i) : undefined}>
             <Row label="触发条件">{edit ? <TextInput value={t.when || ''} onChange={(v) => updTrigger(i, { when: v })} placeholder="自然语言，如『玩家弄塌地下室水管』" /> : <span>{t.when || '—'}</span>}</Row>
-            <Row label="置标志">{edit ? <TextInput value={csv(t.set_flags)} onChange={(v) => updTrigger(i, { set_flags: parseCsv(v) })} placeholder="标志名，逗号分隔" /> : <span className="text-xs" style={{ color: 'var(--color-text-accent)' }}>{csv(t.set_flags) || '—'}</span>}</Row>
-            <Row label="清标志">{edit ? <TextInput value={csv(t.clear_flags)} onChange={(v) => updTrigger(i, { clear_flags: parseCsv(v) })} placeholder="（可选）状态消退时清除的标志" /> : <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{csv(t.clear_flags) || '—'}</span>}</Row>
+            <Row label="置标志">{edit ? <CsvInput values={t.set_flags} onChange={(v) => updTrigger(i, { set_flags: v })} placeholder="标志名，逗号分隔" /> : <span className="text-xs" style={{ color: 'var(--color-text-accent)' }}>{csv(t.set_flags) || '—'}</span>}</Row>
+            <Row label="清标志">{edit ? <CsvInput values={t.clear_flags} onChange={(v) => updTrigger(i, { clear_flags: v })} placeholder="（可选）状态消退时清除的标志" /> : <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{csv(t.clear_flags) || '—'}</span>}</Row>
           </ItemCard>
         ))}
         {data.triggers.length === 0 && <Empty />}
@@ -1105,6 +1131,53 @@ function EventList({ events, edit, onAdd, onRemove, onUpd }: {
 }
 
 /** 剧情变体列表（场景/NPC 的 states）：每个变体一个「条件(when) + 覆盖字段」卡片。 */
+/** 剧情事件（kind=event）专属字段：触发条件、涉及 NPC（触发前蛰伏）、触发后置的标志。 */
+function SceneEventFields({ scene, npcs, edit, onChange }: {
+  scene: Scene
+  npcs: NPC[]
+  edit: boolean
+  onChange: (patch: Partial<Scene>) => void
+}) {
+  const involved = scene.npcs || []
+  const npcName = (id: string) => npcs.find((n) => n.id === id)?.name || id
+  const toggleNpc = (id: string) => onChange({
+    npcs: involved.includes(id) ? involved.filter((x) => x !== id) : [...involved, id],
+  })
+  return (
+    <div className="mt-1 mb-1 rounded" style={{ border: '1px dashed var(--color-text-accent)', padding: 8 }}>
+      <div className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-accent)' }}>
+        剧情事件（按条件触发，不是地点，不上地图）
+      </div>
+      <Row label="触发条件">{edit
+        ? <TextInput value={scene.when || ''} onChange={(v) => onChange({ when: v })} multiline
+            placeholder="照抄模组原文，如『约30-40分钟后（调查员探索完前室和耳室时）』" />
+        : <span className="whitespace-pre-wrap text-xs">{scene.when || '—'}</span>}</Row>
+      <Row label="涉及 NPC">{edit ? (
+        <div className="flex flex-wrap gap-1">
+          {npcs.filter((n) => n.id).map((n) => {
+            const on = involved.includes(n.id)
+            return (
+              <button key={n.id} type="button" onClick={() => toggleNpc(n.id)} aria-pressed={on}
+                className="chip text-xs"
+                style={on ? { color: 'var(--color-text-accent)', borderColor: 'var(--color-text-accent)' } : { opacity: 0.6 }}>
+                {n.name || n.id}
+              </button>
+            )
+          })}
+          {npcs.length === 0 && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>模组还没有 NPC</span>}
+        </div>
+      ) : <span className="text-xs">{involved.map(npcName).join('、') || '—'}</span>}</Row>
+      {edit && <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+        选中的 NPC 在事件触发前处于蛰伏：幕后推演不让它行动，KP 也不会让它提前现身。
+      </p>}
+      <Row label="触发标志">{edit
+        ? <CsvInput values={scene.set_flags} onChange={(v) => onChange({ set_flags: v })}
+            placeholder="触发后置的标志，逗号分隔；与剧情钩子呼应（留空则保存时自动生成）" />
+        : <span className="text-xs" style={{ color: 'var(--color-text-accent)' }}>{csv(scene.set_flags) || '—'}</span>}</Row>
+    </div>
+  )
+}
+
 function VariantList<T extends { when?: string[] }>({ states, edit, onAdd, onRemove, onWhen, renderFields }: {
   states?: T[]
   edit: boolean
@@ -1125,7 +1198,7 @@ function VariantList<T extends { when?: string[] }>({ states, edit, onAdd, onRem
       {list.map((st, j) => (
         <div key={j} className="rounded p-1.5 mb-1 relative" style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)' }}>
           {edit && <button onClick={() => onRemove(j)} className="absolute top-1 right-1 p-0.5" style={{ color: 'var(--color-danger)' }} title="删除变体"><Trash2 size={11} /></button>}
-          <Row label="条件">{edit ? <TextInput value={csv(st.when)} onChange={(v) => onWhen(j, parseCsv(v))} placeholder="标志名，逗号分隔（全部激活才生效）" /> : <span className="text-xs">{csv(st.when) || '（恒生效）'}</span>}</Row>
+          <Row label="条件">{edit ? <CsvInput values={st.when} onChange={(v) => onWhen(j, v)} placeholder="标志名，逗号分隔（全部激活才生效）" /> : <span className="text-xs">{csv(st.when) || '（恒生效）'}</span>}</Row>
           {renderFields(st, j)}
         </div>
       ))}
@@ -1233,6 +1306,20 @@ function TextInput({ value, onChange, multiline, placeholder }: { value: string;
   return multiline
     ? <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={2} className={cls} style={style} />
     : <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={cls} style={style} />
+}
+
+/**
+ * 逗号分隔的列表输入。输入框里保留用户敲的原文（草稿），只把解析结果往上报——
+ * 若每次按键都「解析 → 再 join 回填」，末尾的逗号/空格会立刻被吃掉，键盘上永远敲不出第二项。
+ */
+function CsvInput({ values, onChange, placeholder }: { values?: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
+  const [draft, setDraft] = useState(() => csv(values))
+  // 外部改了值（撤销、换选中项等）且与草稿解析结果不一致时，以外部为准
+  const external = csv(values)
+  if (csv(parseCsv(draft)) !== external && draft !== external) {
+    setDraft(external)
+  }
+  return <TextInput value={draft} placeholder={placeholder} onChange={(v) => { setDraft(v); onChange(parseCsv(v)) }} />
 }
 
 function Empty() {
