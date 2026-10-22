@@ -160,47 +160,142 @@ async def _apply_map_grounding(job_id: str, parsed: dict, images: list) -> None:
         _job_update(job_id, stage=f"已按模组地图定位 {applied} 个场景", percent=76)
 
 
+#: 文本解析时，单独上传的图片最多 OCR 几张接进原文。用户特意传上来的图（手书、日记、地图）
+#: 通常只有几张；设上限只是防有人把一整本扫描页当散图传上来，那种情况本就该走视觉解析。
+MAX_ATTACHED_OCR = 8
+
+
+class _ParseFailure(Exception):
+    """解析链路已经想清楚失败原因的终态：detail 原样作为任务失败说明。"""
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _truncated_detail(route: dict, raw_text: str) -> str:
+    """输出被截断（坏 JSON）时，按实际走过的路径说清楚失败在哪、下一步怎么办。"""
+    n = len((raw_text or "").strip())
+    split_hint = "可把模组拆成几个文件分批导入"
+    if route.get("path") == "vision_ocr":
+        hit, total = route.get("ocr", (0, 0))
+        return (
+            f"图片解析输出过长被截断；已回落为 OCR（{hit}/{total} 张图识出文字）后按文字解析，"
+            f"断点续写一次后输出仍不完整（原文约 {n} 字）。{split_hint}，或改传含文字层的版本。"
+        )
+    if route.get("path") == "vision":
+        return (
+            "图片解析输出不完整（可能被截断），且没有可回落的图片。"
+            "请改传含文字层的 PDF / 文字版模组后重试。"
+        )
+    lead = "OCR 前置后按文字解析" if route.get("path") == "ocr_prepass" else "文字解析"
+    return (
+        f"{lead}：模组输出过长被截断，断点续写一次后仍不完整（原文约 {n} 字）。"
+        f"{split_hint}，或换单次输出上限更大的模型。"
+    )
+
+
 async def _run_upload_job(
     job_id: str, raw_text: str, images: list[tuple[bytes, str]], rule_system: str,
-    ocr_prepass: bool = False,
+    ocr_prepass: bool = False, *,
+    attached: list[tuple[bytes, str]] | None = None, text_rich: bool | None = None,
 ) -> None:
     """后台执行模组解析全流程（首轮解析 → 查漏自检 → 入库 → 触发原文索引），逐段汇报进度。
 
-    ``ocr_prepass``：先把图片逐张 OCR 成文字，然后**当纯文本模组解析**。图片路径是一次性
-    调用，而文本路径有断点续写与对照原文的查漏自检——后者对图文模组此前根本没机会生效
-    （没有原文可对照，supplement_parse 直接原样返回）。开关默认关，便于同一份文件 A/B。
+    **分流**：文字层充足（``text_rich``，由抽取阶段按字数判定）走文本解析——它有断点续写与
+    对照原文的查漏自检；图片只留给地图定位，单独上传的图片（``attached``）OCR 后接进原文。
+    文字稀少的扫描件才走一次性视觉解析；视觉解析输出被截断时，自动回落为逐张 OCR + 文本解析。
+    ``text_rich=None``（旧调用方）按原文总字数判定。
 
-    异常不外抛：一律落成 job 的 failed 状态 + 可读 detail（沿用旧同步端点的错误文案）。
+    ``ocr_prepass``：实验开关，图片先逐张 OCR 成文字，然后**当纯文本模组解析**，便于 A/B。
+
+    异常不外抛：一律落成 job 的 failed 状态 + 可读 detail（说明走的哪条路、为何失败、怎么办）。
     """
+    attached = list(attached or [])
+    if text_rich is None:
+        text_rich = module_extract.is_text_rich(len((raw_text or "").strip()))
+    # 走过哪条解析路径：失败时据此给出对症的说明，而不是笼统一句「换个模型」
+    route: dict = {"path": "text"}
     try:
-        # OCR 前置会把 images 清空（整本已转成文字），但地图 grounding 还要用原图，
-        # 所以先留一份。两件事看的是同一批图，只是一个读字、一个读几何。
-        map_images = list(images)
-        if images and ocr_prepass:
-            _job_update(job_id, stage=f"OCR 识别图片文字（{len(images)} 张）", percent=8)
-            pages = await module_ocr.ocr_images(images)
+        # 地图定位看的是同一批图，只是读几何不读字：单独上传的图优先（用户特意传的楼层图/
+        # 地图），PDF 内嵌图按体积降序（地图通常是最大那张；扫描件抽出来是页序，这里重排）。
+        map_images = attached + sorted(images, key=lambda im: len(im[0]), reverse=True)
+        parse_images = attached + list(images)
+        if parse_images and ocr_prepass:
+            route["path"] = "ocr_prepass"
+            _job_update(job_id, stage=f"OCR 识别图片文字（{len(parse_images)} 张）", percent=8)
+            pages = await module_ocr.ocr_images(parse_images)
             hit, total = module_ocr.ocr_coverage(pages)
             if hit:
                 raw_text = module_ocr.merge_ocr_text(pages, raw_text)
-                images = []          # 已转成文字，后面完全走文本链路
+                parse_images = []          # 已转成文字，后面完全走文本链路
                 _job_update(job_id, stage=f"OCR 完成（{hit}/{total} 页识出文字）", percent=14)
             else:
                 # 一张都没认出来（没有视觉模型 / 全部失败）→ 回落原来的图片路径，
                 # 别让一个实验开关把本来能解析的模组变成解析不了。
                 logger.warning("OCR 前置未识出任何文字，回落图片解析路径：job=%s", job_id)
-        _job_update(job_id, stage="AI 解析模组结构（大模组需数分钟）", percent=15)
-        if images:
-            # 图文/扫描件模组：用视觉模型据图片（+ 任何文字）识别提取。
+                route["path"] = "text"
+        elif text_rich and parse_images:
+            # 文字层充足：PDF 内嵌图（插画/装饰）不进解析；单独上传的图多半是手书/日记，
+            # OCR 后接到原文末尾，免得走了文本解析反而丢掉它们的正文。
+            if attached:
+                todo = attached[:MAX_ATTACHED_OCR]
+                _job_update(job_id, stage=f"OCR 识别单独上传的图片（{len(todo)} 张）", percent=8)
+                pages = await module_ocr.ocr_images(todo)
+                texts = [t.strip() for t in pages if t.strip()]
+                if texts:
+                    raw_text = "\n\n".join([
+                        raw_text.strip(),
+                        *(f"=== 附图 {i} ===\n{t}" for i, t in enumerate(texts, start=1)),
+                    ])
+                _job_update(
+                    job_id, percent=14, stage=f"附图 OCR 完成（{len(texts)}/{len(todo)} 张识出文字）",
+                )
+            parse_images = []
+
+        if parse_images and not text_rich:
+            # 扫描件 / 纯图片模组：用视觉模型据图片（+ 任何文字）识别提取。
             # 这是**一次**调用、图全在同一个请求体里，所以只带前几张——抽图上限管的是
             # 「一共抽多少备用」，不是「一次发多少」，两者混同会直接把请求撑到读超时。
-            for_parse = images[:MAX_IMAGES_PER_VISION_PARSE]
-            if len(images) > len(for_parse):
+            route["path"] = "vision"
+            _job_update(job_id, stage="AI 解析模组结构（图片解析，大模组需数分钟）", percent=15)
+            for_parse = parse_images[:MAX_IMAGES_PER_VISION_PARSE]
+            if len(parse_images) > len(for_parse):
                 logger.info(
                     "视觉解析取 %s/%s 张（单次请求体上限）；其余仍供地图定位使用",
-                    len(for_parse), len(images),
+                    len(for_parse), len(parse_images),
                 )
-            parsed = await module_service.parse_module_images(for_parse, rule_system, raw_text)
+            try:
+                parsed = await module_service.parse_module_images(for_parse, rule_system, raw_text)
+            except json.JSONDecodeError:
+                # 视觉解析是单次调用、无断点续写：输出一长就被截断。回落到「逐张 OCR → 文本解析」，
+                # 后者有续写与查漏，且每张图独立调用、不受单次输出上限所限。
+                logger.warning("视觉解析输出不完整，回落 OCR + 文本解析：job=%s", job_id)
+                route["path"] = "vision_ocr"
+                _job_update(
+                    job_id, percent=25,
+                    stage=f"图片解析输出过长被截断，正在回落：OCR 识别 {len(parse_images)} 张图…",
+                )
+                pages = await module_ocr.ocr_images(parse_images)
+                hit, total = module_ocr.ocr_coverage(pages)
+                route["ocr"] = (hit, total)
+                if not hit and not (raw_text or "").strip():
+                    raise _ParseFailure(
+                        f"图片解析输出过长被截断；OCR 回落未从 {total} 张图中识出任何文字"
+                        "（视觉模型不可用或调用全部失败），无法改走文字解析。"
+                        "请检查设置页的「视觉模型」配置，或改传含文字层的 PDF / 文字版模组。"
+                    ) from None
+                raw_text = module_ocr.merge_ocr_text(pages, raw_text)
+                _job_update(
+                    job_id, percent=35,
+                    stage=f"OCR 回落完成（{hit}/{total} 张识出文字），改按文字解析",
+                )
+                parsed = await module_service.parse_module_text(
+                    raw_text, rule_system,
+                    on_progress=lambda note: _job_update(job_id, stage=note, percent=45),
+                )
         else:
+            _job_update(job_id, stage="AI 解析模组结构（文字解析，大模组需数分钟）", percent=15)
             parsed = await module_service.parse_module_text(
                 raw_text, rule_system,
                 on_progress=lambda note: _job_update(job_id, stage=note, percent=45),
@@ -268,9 +363,11 @@ async def _run_upload_job(
         finally:
             db.close()
         _job_update(job_id, status="done", stage="完成", percent=100, result=result)
+    except _ParseFailure as e:
+        _job_update(job_id, status="failed", detail=e.detail)
     except json.JSONDecodeError:
-        _job_update(job_id, status="failed",
-                    detail="模型解析返回不完整（可能被截断），请重试；若反复失败可换更稳定的模型")
+        logger.warning("模组解析输出不完整：job=%s route=%s", job_id, route)
+        _job_update(job_id, status="failed", detail=_truncated_detail(route, raw_text))
     except httpx.HTTPError as e:
         # 用 repr 而不是 str：httpx 的超时类异常（ReadTimeout/ConnectTimeout…）多数由传输层
         # 直接抛出、不带 message，str() 就是空串——日志只剩「连接失败：」，等于什么都没说。
@@ -335,7 +432,7 @@ async def _run_upload_pipeline(
     """抽取上传文件 → 解析全流程。抽取失败（扫描件无字、编码不明……）落成 job 的 failed。"""
     _job_update(job_id, stage="读取文件内容（大 PDF 抽图需要一会儿）", percent=3)
     try:
-        parts, images = await module_extract.run_extract(uploads, vision, ocr_prepass)
+        ex = await module_extract.run_extract(uploads, vision, ocr_prepass)
     except ExtractError as e:
         _job_update(job_id, status="failed", detail=e.detail)
         return
@@ -343,7 +440,10 @@ async def _run_upload_pipeline(
         logger.exception("模组文件抽取失败: job=%s", job_id)
         _job_update(job_id, status="failed", detail="读取文件失败，请确认文件未损坏后重试")
         return
-    await _run_upload_job(job_id, "\n\n".join(parts), images, rule_system, ocr_prepass)
+    await _run_upload_job(
+        job_id, "\n\n".join(ex.parts), ex.images, rule_system, ocr_prepass,
+        attached=ex.attached, text_rich=ex.text_rich,
+    )
 
 
 @router.get("/upload/jobs")

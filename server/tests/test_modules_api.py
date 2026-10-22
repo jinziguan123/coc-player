@@ -407,7 +407,7 @@ def test_upload_endpoint_returns_job_id_and_status(client, monkeypatch):
     """上传端点立即返回 job_id；状态端点可轮询；未知任务 404。"""
     import app.api.modules as mod
 
-    async def noop_job(job_id, raw_text, images, rule_system, ocr_prepass=False):
+    async def noop_job(job_id, raw_text, images, rule_system, ocr_prepass=False, **kw):
         return None
 
     monkeypatch.setattr(mod, "_run_upload_job", noop_job)
@@ -518,7 +518,7 @@ def test_upload_jobs_list_and_dismiss(client, monkeypatch):
     """刷新页面后前端靠任务列表找回进行中的解析；已结束的可移除，进行中的不许删。"""
     import app.api.modules as mod
 
-    async def noop_job(job_id, raw_text, images, rule_system, ocr_prepass=False):
+    async def noop_job(job_id, raw_text, images, rule_system, ocr_prepass=False, **kw):
         return None
 
     monkeypatch.setattr(mod, "_run_upload_job", noop_job)

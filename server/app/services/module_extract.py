@@ -14,6 +14,7 @@ import logging
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +45,32 @@ def _decode_text(content: bytes) -> str:
     raise ExtractError(422, "无法识别文件编码（可能是二进制文件）。请上传 PDF / Word(.docx) / 纯文本(UTF-8 或 GBK)")
 
 
-def _read_pdf_text(content: bytes) -> str:
-    """提取 PDF 文字层（扫描件可能为空）。"""
+def _read_pdf(content: bytes) -> tuple[str, int]:
+    """提取 PDF 文字层（扫描件可能为空）与页数。"""
     import io
 
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(content))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    return "\n".join(page.extract_text() or "" for page in reader.pages), len(reader.pages)
+
+
+def _read_pdf_text(content: bytes) -> str:
+    return _read_pdf(content)[0]
+
+
+#: 「文字层够不够走文本解析」的两道门槛，两条都满足才算够。
+#: 依据是本机 15 本真实模组 PDF 的实测：文字最稀的一本平均每页 668 字、总字数最少的一本
+#: 5845 字，而扫描件的文字层接近 0。每页 200 字留了约 3 倍余量；总字数 1500 挡住的是
+#: 「每页只有页眉/水印/页码」的扫描件——页数一多，光靠每页均值会被这些碎字凑过线。
+MIN_TEXT_CHARS = 1500
+MIN_CHARS_PER_PAGE = 200
+
+
+def is_text_rich(chars: int, pages: int = 0) -> bool:
+    """文字层是否充足到可以走文本解析。``pages=0`` 表示来源没有页的概念（docx/txt），只看总字数。"""
+    if chars < MIN_TEXT_CHARS:
+        return False
+    return pages <= 0 or chars / pages >= MIN_CHARS_PER_PAGE
 
 
 #: JPEG2000 降档解码后最短也要保住的长边像素（降一档后低于它就不降）
@@ -235,25 +255,45 @@ def _extract_doc_text(content: bytes, filename: str) -> str:
         raise ExtractError(e.status_code, f"「{filename}」{e.detail}")
 
 
+@dataclass
+class Extracted:
+    """一次上传的抽取结果（要跨进程 pickle，所以是模块级的纯数据类）。"""
+
+    #: 文字段落（多文件时各带文件名小标题）
+    parts: list[str] = field(default_factory=list)
+    #: PDF 内嵌图 (bytes, mime)。文字充足时按体积降序（只供地图定位）；
+    #: 文字稀少（扫描件）或 OCR 前置时按页序（供视觉解析，截断时还要逐页 OCR 回落）。
+    images: list[tuple[bytes, str]] = field(default_factory=list)
+    #: 用户单独上传的图片文件（地图、手书……），与 PDF 内嵌图分开：文本解析时要单独 OCR 接进原文。
+    attached: list[tuple[bytes, str]] = field(default_factory=list)
+    #: 文字层是否充足到走文本解析（见 is_text_rich）。有任何一份文字稀少的 PDF 即为 False。
+    text_rich: bool = False
+
+
 def _extract_uploads(
     uploads: list[tuple[str, str, bytes]], vision: bool, ocr_prepass: bool,
-) -> tuple[list[str], list[tuple[bytes, str]]]:
+) -> Extracted:
     """把上传的文件抽成文字段落与图片（同步、CPU 密集，调用方放线程里跑）。"""
     _IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
     multi = len(uploads) > 1
-    parts: list[str] = []
-    images: list[tuple[bytes, str]] = []   # (bytes, mime) —— 图片走多模态视觉解析
+    out = Extracted()
+    parts, images = out.parts, out.images
+    all_pdfs_rich = True
     for filename, ct, content in uploads:
         fn = filename.lower()
         if ct.startswith("image/") or fn.endswith(_IMG_EXT):
-            images.append((content, ct or "image/png"))
+            out.attached.append((content, ct or "image/png"))
         elif fn.endswith(".pdf") or ct == "application/pdf":
-            text = _read_pdf_text(content)
-            # OCR 前置要页序、要全本；否则按体积降序抽到上限，供解析/地图定位各取所需。
+            text, n_pages = _read_pdf(content)
+            rich = is_text_rich(len(text.strip()), n_pages)
+            all_pdfs_rich = all_pdfs_rich and rich
+            # 文字稀少（扫描件）或 OCR 前置：要页序、要全本——视觉解析截断时得逐页 OCR 回落，
+            # 按体积挑会丢页乱序。文字充足：图只给地图定位用，按体积降序（地图通常最大）。
+            page_order = ocr_prepass or not rich
             pdf_imgs = _extract_pdf_images(
                 content,
-                max_images=OCR_MAX_PAGES if ocr_prepass else MAX_EMBEDDED_IMAGES,
-                keep_page_order=ocr_prepass,
+                max_images=OCR_MAX_PAGES if page_order else MAX_EMBEDDED_IMAGES,
+                keep_page_order=page_order,
             ) if vision else []
             if text.strip():
                 parts.append(f"=== 文件：{filename} ===\n{text}" if multi else text)
@@ -268,7 +308,9 @@ def _extract_uploads(
         else:
             text = _extract_doc_text(content, filename)
             parts.append(f"=== 文件：{filename} ===\n{text}" if multi else text)
-    return parts, images
+    total = sum(len(p.strip()) for p in parts)
+    out.text_rich = all_pdfs_rich and is_text_rich(total)
+    return out
 
 
 # ── 子进程执行 ─────────────────────────────────────────────────────────────
@@ -301,7 +343,7 @@ def _needs_process(uploads: list[tuple[str, str, bytes]]) -> bool:
 
 async def run_extract(
     uploads: list[tuple[str, str, bytes]], vision: bool, ocr_prepass: bool,
-) -> tuple[list[str], list[tuple[bytes, str]]]:
+) -> Extracted:
     """异步抽取上传文件：PDF 进子进程，其余进线程。子进程不可用（池崩溃等）时回落线程。"""
     global _pool
     if not _needs_process(uploads):
