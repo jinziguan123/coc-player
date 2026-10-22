@@ -1,11 +1,18 @@
 // 重拍介绍页（site/）用的应用截图。
 //
-//     pnpm site:shots            # 需要 dev server 已在跑（pnpm dev）
-//     pnpm site:shots --base=http://127.0.0.1:5173
+//     server/.venv/bin/python scripts/stage_site_demo.py     # ① 建干净演示库 tmp/site-demo/
+//     （起沙箱后端，见 site/README.md「重新生成截图」）       # ② 后端同源托管前端产物
+//     pnpm site:shots                                         # ③ 两套主题各拍一遍
+//     pnpm site:shots --only=game,game-vn                     # 只重拍其中几张
+//     pnpm site:shots --base=http://127.0.0.1:8011 --demo=tmp/site-demo
 //
 // 为什么要有这个脚本：site/assets/shots 里那些图（gothic / parchment 各一套）每次界面
 // 一动就过时，而介绍页上摆着过时截图，比文案有 AI 味更容易被人一眼看穿。手动截十几张要
-// 切两次主题、跑六个页面、再逐张转 webp，做一次就不想做第二次——所以固化成脚本。
+// 切两次主题、跑十来个页面、再逐张转 webp，做一次就不想做第二次——所以固化成脚本。
+//
+// **只对着演示库拍。** 介绍页要上公网，而日常开发库 server/trpg.db 里有商业模组与规则书
+// 原文。会话 id 与各席 token 都从 stage_site_demo.py 写下的 <演示库>/demo.json 读，
+// 不再去开发库里挑「最近动过的那局」。
 //
 // 主题只从 localStorage 的 trpg_theme 读（见 apps/web/index.html 的首帧内联脚本），
 // 没有 URL 开关，所以无头浏览器必须在页面加载前把它写进去。Playwright 的 addInitScript
@@ -14,7 +21,7 @@
 // 依赖用 playwright-core 而不是 playwright：后者的 postinstall 会拉三套浏览器（几百 MB），
 // 而这里用 channel: 'chrome' 驱动系统已装的 Chrome，那些一个都用不上，CI 装依赖不必替它买单。
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,107 +30,87 @@ import { chromium } from 'playwright-core'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, 'site/assets/shots')
 
-const argBase = process.argv.find((a) => a.startsWith('--base='))
-const BASE = argBase ? argBase.slice('--base='.length) : 'http://127.0.0.1:5177'
+function arg(name, fallback) {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
+  return hit ? hit.slice(name.length + 3) : fallback
+}
+const BASE = arg('base', process.env.SITE_SHOTS_BASE || 'http://127.0.0.1:8011')
+const DEMO_DIR = path.resolve(ROOT, arg('demo', process.env.SITE_DEMO_DIR || 'tmp/site-demo'))
+const ONLY = arg('only', '').split(',').filter(Boolean)
 
-/**
- * 游戏页要 token 才进得去：会话按 `X-Player-Token` 授权（server/app/api/deps.py），
- * 没有它 `/api/sessions` 只会返回空。前端把这串 UUID 存在 localStorage 的
- * `trpg_player_token` 下，值就落在房主席位的 `owner_token` 列里——从本机库里取出来
- * 注入，等价于「你自己在自己机器上打开了这一局」，不伪造任何东西。
- *
- * 不写死某个会话 id：那是这台机器上的存档，随时会被删。挑最近动过的一局，谁跑都能
- * 截到自己的桌。
- */
-function hostSeat() {
-  const sql = `SELECT s.id || '|' || p.owner_token
-    FROM game_sessions s JOIN session_participants p ON p.session_id = s.id
-    WHERE p.role = 'human' AND p.owner_token IS NOT NULL AND s.status = 'active'
-    ORDER BY s.updated_at DESC LIMIT 1;`
-  try {
-    const out = execFileSync('sqlite3', [path.join(ROOT, 'server/trpg.db'), sql], {
-      encoding: 'utf8',
-    }).trim()
-    if (!out) return null
-    const [sessionId, token] = out.split('|')
-    return { sessionId, token }
-  } catch {
-    return null                       // 没装 sqlite3 或库还没建，跳过游戏页
+const demoFile = path.join(DEMO_DIR, 'demo.json')
+if (!existsSync(demoFile)) {
+  console.error(`找不到 ${demoFile}。先跑 server/.venv/bin/python scripts/stage_site_demo.py 建演示库。`)
+  process.exit(1)
+}
+const demo = JSON.parse(readFileSync(demoFile, 'utf8'))
+const { tokens, sessions } = demo
+
+// 后端必须开在演示库上：问一下 /api/modules，库里只该有那一份原创模组。开错库（比如顺手
+// 起了开发库）截出来的就是商业模组，宁可直接停下。
+async function assertDemoBackend() {
+  const list = await fetch(`${BASE}/api/modules`).then((r) => r.json())
+  const titles = list.map((m) => m.title)
+  if (titles.length !== 1 || titles[0] !== '雾港失灯事件') {
+    throw new Error(`${BASE} 后面不是演示库（模组：${titles.join('、') || '无'}）。按 site/README.md 用 DB_PATH 指向演示库再起后端。`)
   }
 }
 
-/** 真人 KP 那一局的 KP 席。介绍页要展示「AI 退到副手位」是什么样子，而 KP 席的
- *  role 是 'kp' 不是 'human'，跟上面那条挑不到一块儿去。 */
-function kpSeat() {
-  const sql = `SELECT s.id || '|' || p.owner_token
-    FROM game_sessions s JOIN session_participants p ON p.session_id = s.id
-    WHERE p.role = 'kp' AND p.owner_token IS NOT NULL
-      AND s.kp_mode = 'human' AND s.status = 'active'
-    ORDER BY s.updated_at DESC LIMIT 1;`
-  try {
-    const out = execFileSync('sqlite3', [path.join(ROOT, 'server/trpg.db'), sql], {
-      encoding: 'utf8',
-    }).trim()
-    if (!out) return null
-    const [sessionId, token] = out.split('|')
-    return { sessionId, token }
-  } catch {
-    return null
-  }
-}
+// 游戏页的 SSE 长连接一直开着，networkidle 永远等不到——只等 DOM，再靠 settle 兜住
+// 历史消息渲染、角色卡雷达图这些异步的部分。
+//
+// 出图 2000×1250，但按 1333×833 的逻辑视口排版再 1.5× 放大。介绍页把图缩到千把像素宽
+// 显示，1× 的 2000 宽图缩一半，字就只有真实大小的一半。倍率不能再往上抬：2× 意味着
+// 1000px 的逻辑宽度，那时侧边栏和角色卡把消息区挤成一条，叙述只剩几行。
+const GAME = { w: 2000, h: 1250, dpr: 1.5, waitUntil: 'domcontentloaded', settle: 4500, collapseSidebar: true }
 
-const seat = hostSeat()
-const kp = kpSeat()
+// 演示库里没配模型，AI KP 局会挂一条「尚未配置可用的 AI 模型」横幅——真实用户跑到这一步
+// 早就配好了，那条提示不属于「对局长什么样」。只拦这一个状态接口，模型列表一概不碰。
+const AI_READY = { '**/api/settings/ai/status': { configured: true } }
 
 /**
- * 介绍页里按 data-shot 引用的每一张。宽高与页面上写的 width/height 一一对应，
- * 改这里要同步改 index.html。
- *
- * **一律 16:10**，跟真实窗口一个比例。曾经试过「按各页内容量单独定高」，想把留白裁掉，
- * 结果每张图比例都不一样（3.8:1、2.9:1、2.1:1），一张都不像应用窗口——留白多是内容
- * 本身的事，不该靠压扁窗口去掩盖。
+ * 介绍页里按 data-shot 引用的每一张。**一律 16:10**，跟真实窗口一个比例。曾经试过「按各页
+ * 内容量单独定高」，想把留白裁掉，结果每张图比例都不一样，一张都不像应用窗口——留白多是
+ * 内容本身的事，不该靠压扁窗口去掩盖。
  *
  * 有几张要先点进去才到得了：介绍页的 alt 写明了它们是「模组沙盘视图」「创建角色向导」，
  * 不是模组列表和角色名录。截错页面比截图过时更糟，所以这里带上到达路径。
  */
 const PAGES = [
-  { shot: 'home', path: '/', w: 2000, h: 1250 },
+  // 首页卷宗。玩家 token 下有两局开着的桌，最近动过的那局（港务所）挂在「继续上次的桌」。
+  { shot: 'home', path: '/', w: 2000, h: 1250, token: tokens.player },
 
-  // 游戏页是这东西跑起来的样子，介绍页最该有的一张。
-  seat && {
-    shot: 'game', path: `/game/${seat.sessionId}`, w: 2000, h: 1250,
-    token: seat.token,
-    // 游戏页的 SSE 长连接一直开着，networkidle 永远等不到——只等 DOM，再靠 settle 兜住
-    // 历史消息渲染、角色卡雷达图这些异步的部分。
-    waitUntil: 'domcontentloaded',
-    settle: 4000,
-    // 出图 2000×1250，但按 1333×833 的逻辑视口排版再 1.5× 放大。介绍页把图缩到千把
-    // 像素宽显示，1× 的 2000 宽图缩一半，字就只有真实大小的一半。倍率不能再往上抬：
-    // 2× 意味着 1000px 的逻辑宽度，那时侧边栏和角色卡把消息区挤成一条，叙述只剩几行。
-    dpr: 1.5,
-    // 侧边栏收起。展开时它占掉 1/5 的宽，而截图要展示的是对局本身，不是导航。
-    collapseSidebar: true,
+  // 游戏页是这东西跑起来的样子，介绍页最该有的一张：聊天流、右侧角色卡展开。
+  { shot: 'game', path: `/game/${sessions.game}`, ...GAME, token: tokens.player, mock: AI_READY },
+
+  // 同一局切成对话框模式：场景图清晰铺满，对话框停在林恩那句台词上（它是最后一站，
+  // 游标缺省就落在那里）。reducedMotion 让打字机整页出现，不用赌等多久。
+  {
+    shot: 'game-vn', path: `/game/${sessions.game}`, ...GAME, token: tokens.player, mock: AI_READY,
+    display: 'dialogue', ready: '.vn-nameplate',
   },
 
-  // 真人 KP 视角：同一个游戏页，右边多一条工作台，AI 退到副手位。
-  // 挑最近动过的那局——它多半就是你正在带的，消息流也才有内容可看。
-  kp && {
-    // 只截工作台本身，不截整页：这张图要说的是「KP 的操作台长什么样」，而消息流有没有
-    // 内容全看这局跑到哪儿了——刚开的局截出来就是大半张空背景。
-    shot: 'kp-console', path: `/game/${kp.sessionId}`, w: 1400, h: 900,
-    token: kp.token,
-    waitUntil: 'domcontentloaded',
-    settle: 4000,
-    collapseSidebar: true,
-    element: '.kp-console-pane',
-    // 只要上半截到「发布叙事」为止。整条八百多像素高，配在文字旁边会瘦得像根柱子。
-    clipHeight: 400,
-    dpr: 1.5,
+  // 灯室里的战斗轮：方格战场、先攻轨，轮到玩家行动。
+  { shot: 'combat', path: `/game/${sessions.combat}`, ...GAME, token: tokens.player, mock: AI_READY },
+
+  // 真人 KP 的 KP 席：普通场景下的值班台。
+  { shot: 'kp-desk', path: `/game/${sessions.kp_desk}`, ...GAME, token: tokens.kp },
+
+  // 另一局真人 KP 局已切进战斗：KP 观局台。
+  { shot: 'kp-combat', path: `/game/${sessions.kp_combat}`, ...GAME, token: tokens.kp },
+
+  // 许闻舟的整张角色卡：角色名录里点开详情。
+  {
+    shot: 'charcard', path: '/characters', ...GAME, waitUntil: 'networkidle', settle: 1500,
+    token: tokens.player, ready: '.archive-title',
+    after: async (page) => {
+      await page.getByText('许闻舟').first().click()
+      await page.waitForTimeout(1200)
+    },
   },
 
   {
     shot: 'sandbox', w: 1440, h: 900,
-    // 优先挑 alt 里点名的那个本子，找不到就用第一个
     path: async (page, base) => {
       const list = await page.evaluate((b) => fetch(b + '/api/modules').then((r) => r.json()), base)
       const m = list.find((x) => (x.title || '').includes('雾港失灯')) || list[0]
@@ -149,19 +136,19 @@ const PAGES = [
   {
     shot: 'settings', path: '/settings', w: 1440, h: 900,
     // 这张配的是介绍页「接一个模型」那一步，读者正是还没配过的人——空状态才对题。
-    // 而且本机那份配置列表里是真实的接口地址（含第三方中转站），介绍页是要公开发布的，
-    // 不该把它截进去。拦掉这个接口拿到的就是新装那天的样子，既贴题又不外泄。
+    // 演示库本来就没有模型配置；照样拦一道，万一有人在演示库上手动配过也不会截出接口地址。
     mock: { '**/settings/ai/profiles': [], '**/settings/ai/image-profiles': [] },
   },
-].filter(Boolean)
+].filter((p) => !ONLY.length || ONLY.includes(p.shot))
 
 const THEMES = ['gothic', 'parchment']
 
 function toWebp(png, webp) {
-  // 质量 85 与 scripts/generate-terrain.sh 一致；现有几张也在 100KB 上下
+  // 质量 85 与 scripts/generate-terrain.sh 一致
   execFileSync('cwebp', ['-q', '85', png, '-o', webp], { stdio: 'ignore' })
 }
 
+await assertDemoBackend()
 const browser = await chromium.launch({ channel: 'chrome' })
 const tmp = mkdtempSync(path.join(tmpdir(), 'coc-shots-'))
 let made = 0
@@ -169,20 +156,23 @@ let made = 0
 try {
   for (const theme of THEMES) {
     for (const p of PAGES) {
-      // 视口＝目标尺寸，1× 出图。别用「半尺寸 ＋ 2×」——那样内容是按一半的逻辑宽度
-      // 排版的，宽屏才有的三列布局根本不会出现，截出来是窄窗口的样子。
-      // 页面上这些图按 1440/2000 宽声明、实际显示到千把像素，本身就相当于 2× 了。
+      // 视口＝目标尺寸 / dpr。别用「半尺寸 ＋ 2×」——那样内容是按一半的逻辑宽度排版的，
+      // 宽屏才有的三列布局根本不会出现，截出来是窄窗口的样子。
       const dpr = p.dpr ?? 1
       const ctx = await browser.newContext({
         viewport: { width: Math.round(p.w / dpr), height: Math.round(p.h / dpr) },
         deviceScaleFactor: dpr,
         colorScheme: 'dark',
+        // 进场动画、打字机一律直接落到终态：截图要的是界面停稳之后的样子
+        reducedMotion: 'reduce',
       })
-      // 必须在页面脚本跑之前写：首帧内联脚本就是靠它决定 data-theme 的
-      await ctx.addInitScript(([t, tok, collapse]) => {
+      // 必须在页面脚本跑之前写：首帧内联脚本就是靠它决定 data-theme 的。
+      // 没指定 token 的页面也给一个固定的「路人」token，免得每次随机一个、首页内容飘忽。
+      await ctx.addInitScript(([t, tok, collapse, display]) => {
         try {
           localStorage.setItem('trpg_theme', t)
-          if (tok) localStorage.setItem('trpg_player_token', tok)
+          localStorage.setItem('trpg_player_token', tok)
+          localStorage.setItem('trpg_game_display', display)
           // 新手引导（features/tour/）会蒙一层挖洞遮罩，整页被压暗，截出来是张灰片。
           // 标成看过——截图要的是界面本身，不是第一次进来的教学态。
           localStorage.setItem('coc_game_tour_seen_v1', '1')
@@ -191,7 +181,7 @@ try {
             localStorage.setItem('coc_hint_seen::' + k, '1')
           }
         } catch { /* 隐私模式，忽略 */ }
-      }, [theme, p.token || null, p.collapseSidebar || false])
+      }, [theme, p.token || 'site-demo-visitor', p.collapseSidebar || false, p.display || 'chat'])
 
       const page = await ctx.newPage()
       for (const [pattern, body] of Object.entries(p.mock || {})) {
@@ -202,22 +192,15 @@ try {
       await page.goto(BASE + '/', { waitUntil: 'networkidle' })
       const target = typeof p.path === 'function' ? await p.path(page, BASE) : p.path
       await page.goto(BASE + target, { waitUntil: p.waitUntil ?? 'networkidle' })
-      if (p.ready) await page.waitForSelector(p.ready, { timeout: 10_000 })
+      if (p.ready) await page.waitForSelector(p.ready, { timeout: 15_000 })
       // 列表进场动画有错峰延迟，等它们落定，否则截到半透明的中间态
       await page.waitForTimeout(p.settle ?? 1200)
       if (p.after) await p.after(page)
+      // 截之前把鼠标挪开，免得停在哪个按钮上留下悬停态
+      await page.mouse.move(0, 0)
 
       const png = path.join(tmp, `${theme}-${p.shot}.png`)
-      if (p.element) {
-        const box = await page.locator(p.element).boundingBox()
-        if (!box) throw new Error(`截不到 ${p.element}：页面上没有这个元素`)
-        await page.screenshot({
-          path: png,
-          clip: { ...box, height: Math.min(box.height, p.clipHeight ?? box.height) },
-        })
-      } else {
-        await page.screenshot({ path: png })
-      }
+      await page.screenshot({ path: png })
       toWebp(png, path.join(OUT, `${theme}-${p.shot}.webp`))
       await ctx.close()
       made += 1
@@ -230,6 +213,3 @@ try {
 }
 
 console.log(`\n共 ${made} 张，已写入 site/assets/shots/`)
-console.log('注意：截到的是这台机器上的真实数据。首页的「接着玩」只有本机存档里有开着的桌时才会出现。')
-if (!seat) console.log('跳过了游戏页：本机没有进行中的对局，或读不到 server/trpg.db。')
-if (!kp) console.log('跳过了真人 KP 页：本机没有进行中的真人 KP 对局。')

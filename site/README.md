@@ -9,7 +9,7 @@ site/
 ├── assets/
 │   ├── favicon.svg
 │   ├── fonts/                ZCOOL XiaoWei 拉丁子集（14 KB）+ 其 OFL 许可证
-│   └── shots/                界面截图，两套主题各 5 张（WebP，共约 485 KB）
+│   └── shots/                界面截图，两套主题各 11 张（WebP，共约 2 MB）
 └── README.md                 本文件
 ```
 
@@ -78,34 +78,56 @@ window.COC_DOWNLOADS = {
 ## 重新生成截图
 
 截图必须来自**内容干净的库**，不能用日常开发库 —— 后者含商业模组与规则书原文，
-放到公网上等于对外分发受版权保护的内容。干净库的建法：
+放到公网上等于对外分发受版权保护的内容。整个流程三步，都在仓库根目录跑：
 
 ```bash
-mkdir -p tmp/shotdata
-DB_PATH=$PWD/tmp/shotdata/trpg.db server/.venv/bin/python - <<'PY'
-import sys, os; sys.path.insert(0, "server"); os.chdir("server")
-from app.database import run_migrations, SessionLocal
-run_migrations()
-from app.services.onboarding_service import _ensure_module, _ensure_character
-db = SessionLocal(); m = _ensure_module(db); _ensure_character(db, m, "demo-token-0001"); db.commit()
-PY
+# ① 从零建演示库 tmp/site-demo/（会先清空重建），并摆好四局演示对局
+server/.venv/bin/python scripts/stage_site_demo.py
+
+# ② 前端打包，再用演示库起沙箱后端（由后端同源托管前端产物）
+pnpm --filter web build
+cd server && D=$PWD/../tmp/site-demo && \
+  DB_PATH=$D/trpg.db LOG_DIR=$D/logs PLUGINS_DIR=$D/plugins \
+  .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
+
+# ③ 另开一个终端，两套主题各拍一遍（需要系统装了 Chrome 与 cwebp）
+pnpm site:shots                       # 全部
+pnpm site:shots --only=game,game-vn   # 只重拍几张
 ```
 
-这样建出来的库只有项目原创的《雾港失灯事件》和预设调查员，且 `ai_settings.json`
-跟随 `DB_PATH` 落在同一目录，截图里不会带出真实密钥。
+演示库里只有项目原创的《雾港失灯事件》（`server/app/content/onboarding.py`）、预设调查员
+许闻舟，以及从 `server/images/` 拷来的三张为这份模组生成的配图（港务所、雾中栈桥、林恩立绘）。
+`ai_settings.json` 跟随 `DB_PATH` 落在演示库目录，里面没有任何模型配置，截图不会带出密钥或接口地址。
+`shoot-site-shots.mjs` 开拍前会核对后端背后的库里只有这一份模组，开错库直接停。
 
-再用它起后端（前端产物由后端同源托管，先跑一次 `pnpm --filter web build`）：
+`stage_site_demo.py` 摆的四局（叙事、台词、玩家行动都是为这份模组手写的，不调用模型；
+建局、入座、真人 KP 动作、战斗结算都走真实服务层，战斗随机性用固定种子钉住）：
 
-```bash
-cd server && DB_PATH=$PWD/../tmp/shotdata/trpg.db .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8011
-```
+| 会话 | 用在 | 内容 |
+|---|---|---|
+| `game` | `home`、`game`、`game-vn` | AI KP 局，港务所 → 雾中栈桥，最后一句是林恩的台词 |
+| `combat` | `combat` | AI KP 局，灯室里对深潜者幼体的战斗轮，停在玩家选反击 / 闪避 |
+| `kp_desk` | `kp-desk` | 真人 KP 局的 KP 席，港务所，待办里挂着一张等玩家投的聆听 |
+| `kp_combat` | `kp-combat` | 另一局真人 KP 局，灯室开战后的 KP 观局台 |
 
-浏览器里把 `localStorage['trpg_player_token::']` 设为 `demo-token-0001`，就能看到预设调查员；
-再把 `localStorage['trpg_theme']` 设成 `gothic` 或 `parchment`，**两套主题各抓一遍**。
+会话 id 与各席 token 写在 `tmp/site-demo/demo.json`，截图脚本从那里读；想换个目录，
+两个脚本分别用 `--out=` / `--demo=` 指过去。
 
-截完图用 `Pillow` 缩到 1600–2000 px 宽再转 WebP（quality 82），按
-`<主题>-<名字>.webp` 命名放进 `assets/shots/`。改名或加图后记得两套都在，
-切主题时缺哪张就会 404。
+截出来的图（`<主题>-<名字>.webp`，`gothic` 与 `parchment` 各一套，一律 16:10）：
+
+| 名字 | 尺寸 | 画面 |
+|---|---|---|
+| `home` | 2000×1250 | 首页卷宗，「继续上次的桌」 |
+| `game` | 2000×1250（1.5×） | 玩家视角聊天流，右侧角色卡展开 |
+| `game-vn` | 2000×1250（1.5×） | 同一局的对话框模式，场景图铺满 |
+| `combat` | 2000×1250（1.5×） | 玩家视角的战斗轮：战场、先攻轨、反应选择 |
+| `kp-desk` | 2000×1250（1.5×） | 真人 KP 值班台 |
+| `kp-combat` | 2000×1250（1.5×） | 真人 KP 观局台 |
+| `charcard` | 2000×1250（1.5×） | 角色名录里许闻舟的完整角色卡 |
+| `sandbox` / `rulebooks` / `char-wizard` / `settings` | 1440×900 | 模组沙盘、规则书页、建卡向导、AI 配置空状态 |
+
+改名或加图后记得两套都在，切主题时缺哪张就会 404。拍完关掉第 ② 步的后端；
+`tmp/site-demo/` 已在 `.gitignore` 里，可随时删掉重建。
 
 ## 页面文案的硬约束
 

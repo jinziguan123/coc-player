@@ -57,3 +57,6 @@ server/trpg.db.bak-*
 .agents/skills/
 # pytest 覆盖率产物
 server/.coverage
+
+# 介绍页截图用的演示库（scripts/stage_site_demo.py 生成）
+tmp/site-demo/
