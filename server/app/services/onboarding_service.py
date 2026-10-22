@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from copy import deepcopy
 
 from sqlalchemy.orm import Session
@@ -72,11 +73,21 @@ def _ensure_character(db: Session, module: Module, token: str) -> Character:
     return character
 
 
+# 「查有没有 → 没有就建」必须串行：两个并发请求（开发态 React StrictMode 会把页面的自动
+# 启动跑两遍、或用户连点）都查到「没有」，就会各建一套示例模组 + 角色 + 会话。
+# 端点是同步函数、跑在线程池里，单进程服务用一把进程内锁即可。
+_START_LOCK = threading.Lock()
+
+
 def start_onboarding(db: Session, token: str) -> tuple[GameSession, bool]:
-    """创建或复用当前玩家的原创示例单人会话。"""
+    """创建或复用当前玩家的原创示例单人会话（并发调用只建一套）。"""
     if not token:
         raise ValueError("缺少玩家身份")
+    with _START_LOCK:
+        return _start_onboarding_locked(db, token)
 
+
+def _start_onboarding_locked(db: Session, token: str) -> tuple[GameSession, bool]:
     try:
         module = _sample_module(db)
         if module is not None:

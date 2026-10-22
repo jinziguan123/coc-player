@@ -89,3 +89,59 @@ def test_start_rolls_back_everything_when_session_creation_fails(db, monkeypatch
     assert db.query(Module).count() == 0
     assert db.query(Character).count() == 0
     assert db.query(GameSession).count() == 0
+
+
+def test_concurrent_starts_create_only_one_set(tmp_path):
+    """开发态 StrictMode 会把自动启动跑两遍：两个并发请求只能建出一套模组/角色/会话。"""
+    import threading
+
+    from app.services import onboarding_service
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'race.db'}", connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    SessionFactory = sessionmaker(bind=engine)
+
+    # 放大竞态窗口：建模组时停一下，让另一个请求有机会插进来
+    real_ensure = onboarding_service._ensure_module
+    barrier = threading.Event()
+
+    def slow_ensure(db):
+        barrier.wait(0.3)
+        return real_ensure(db)
+
+    results, errors = [], []
+
+    def worker():
+        db = SessionFactory()
+        try:
+            game, reused = onboarding_service.start_onboarding(db, "player-a")
+            results.append((game.id, reused))
+        except Exception as e:  # pragma: no cover - 失败时把异常带回主线程
+            errors.append(e)
+        finally:
+            db.close()
+
+    onboarding_service._ensure_module = slow_ensure
+    try:
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        barrier.set()
+        for t in threads:
+            t.join()
+    finally:
+        onboarding_service._ensure_module = real_ensure
+
+    assert not errors
+    db = SessionFactory()
+    try:
+        assert db.query(Module).count() == 1
+        assert db.query(Character).count() == 1
+        assert db.query(GameSession).count() == 1
+        assert {gid for gid, _ in results} == {db.query(GameSession).one().id}
+        assert sorted(reused for _, reused in results) == [False, True]
+    finally:
+        db.close()
+        engine.dispose()
