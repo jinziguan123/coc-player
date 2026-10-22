@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CoC Player：AI 当守秘人的本地跑团桌面应用</title>
-<meta name="description" content="CoC Player 是一个跑团桌面应用，AI 当守秘人和 NPC，一个人也能开团，也能叫上朋友一起。模组、角色卡和存档都留在你自己的电脑上。">
+<meta name="description" content="CoC Player 是一个克苏鲁的呼唤跑团桌面应用。AI 当守秘人和 NPC，一个人也能开团；也能叫上朋友，或者你自己当守秘人、AI 当副手。模组、角色卡和存档都留在你自己的电脑上。">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:title" content="CoC Player：AI 当守秘人的本地跑团桌面应用">
-<meta property="og:description" content="AI 当守秘人和 NPC，一个人也能开团。数据都留在自己电脑上。macOS / Windows 桌面应用。">
-<!-- 部署到正式域名后，把下面两行换成绝对地址，否则部分平台抓不到预览图 -->
-<meta property="og:image" content="assets/shots/gothic-home.webp">
+<meta property="og:description" content="AI 当守秘人和 NPC，一个人也能开团；你也可以自己当守秘人。数据都留在自己电脑上。macOS / Windows 桌面应用。">
+<!-- 部署到正式域名后，把下面这行换成绝对地址，否则部分平台抓不到预览图 -->
+<meta property="og:image" content="assets/shots/gothic-game-vn.webp">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#0c0e13">
+<meta name="theme-color" content="#0a110f">
 
 <!-- 首帧防白闪：必须在 body 之前跑，否则会先按默认主题画一帧再跳。
-     与应用一致用 data-theme='parchment'，默认（哥特）不写属性。 -->
+     与应用一致：默认「密大装饰」不写属性（键名沿用 gothic），羊皮纸写 data-theme='parchment'。 -->
 <script>
   (function () {
     try {
@@ -58,354 +58,384 @@
       U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
   }
 
-  /* ===== 暗夜哥特（默认，与应用的 :root 基线同源） ===== */
+  /* ===== 密大装饰（默认，色值取自应用 apps/web/src/index.css 的 :root） ===== */
   :root {
-    --bg: #0c0e13;
-    --bg-2: #14171f;
-    --surface-1: #171b24;
-    --surface-2: #1c212c;
-    --text: #e8dcc0;
-    --text-dim: #98a2ad;
-    --accent: #d4a24e;
-    --accent-hover: #e2b566;
-    --on-accent: #191307;
-    --border: rgba(212, 162, 78, 0.14);
-    --border-strong: rgba(212, 162, 78, 0.32);
-    --danger: #c05e66;
-    --success: #7da36b;
-    --radius: 8px;
+    --bg: #0a110f;
+    --bg-2: #101c18;
+    --bg-3: #142420;
+    --text: #ece3cf;
+    --text-2: #ada692;
+    --accent: #c8a25a;
+    --accent-hi: #e0c07e;
+    --accent-text: #d6b06a;
+    --on-accent: #15110a;
+    --brass-dim: #8a7040;
+    --verdigris: #6fa898;
+    --danger: #c4545c;
+    --border: rgba(200, 162, 90, 0.16);
+    --border-strong: rgba(200, 162, 90, 0.36);
+    --card-bg: linear-gradient(180deg, rgba(20, 36, 32, 0.72), rgba(14, 25, 22, 0.72));
+    --topbar-bg: rgba(10, 17, 15, 0.78);
+    --code-bg: rgba(0, 0, 0, 0.32);
+    --shot-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+    --warn-border: rgba(196, 84, 92, 0.5);
+    --glow-1: rgba(200, 162, 90, 0.11);
+    --glow-2: rgba(111, 168, 152, 0.07);
+    --ray: rgba(200, 162, 90, 0.045);
+    --title-grad: linear-gradient(180deg, #f3dfae 0%, #c8a25a 55%, #8a7040 100%);
     --font-ui: 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
     --font-display: 'ZCOOL XiaoWei', 'Noto Serif SC', 'Songti SC', serif;
     --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
-
-    /* 此前散落在规则里的硬编码深色，抽成 token —— 不抽的话切到羊皮纸会破面：
-       顶栏仍是墨蓝、代码底仍是黑、截图投影仍是浓黑。 */
-    --topbar-bg: rgba(12, 14, 19, 0.82);
-    --rule-color: rgba(212, 162, 78, 0.07);
-    --code-bg: rgba(0, 0, 0, 0.3);
-    --shot-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-    --warn-border: rgba(192, 94, 102, 0.35);
-
-    /* 背景由 body::before 那一层铺，滚动时做视差；这里只留三层的取色。 */
-    --glow-1: rgba(212, 162, 78, 0.075);
-    --glow-2: rgba(4, 5, 8, 0.85);
-    --page-base: linear-gradient(180deg, #0e1118 0%, #0c0e13 55%, #0a0c10 100%);
-    --paper-grid: none;
     color-scheme: dark;
   }
 
-  /* ===== 羊皮纸暖褐（值取自应用 index.css 的 [data-theme="parchment"]） ===== */
-  :root[data-theme="parchment"] {
+  /* ===== 羊皮纸（值取自应用 index.css 的 [data-theme="parchment"]） ===== */
+  :root[data-theme='parchment'] {
     --bg: #f0e6d3;
     --bg-2: #e8dcc8;
-    --surface-1: #ece2ce;
-    --surface-2: #e3d7c0;
+    --bg-3: #ddd0b8;
     --text: #3a2e1e;
-    --text-dim: #6b5c4a;
+    --text-2: #6b5c4a;
     --accent: #8b2500;
-    --accent-hover: #a03000;
+    --accent-hi: #a03000;
+    --accent-text: #8b2500;
     --on-accent: #f0e6d3;
+    --brass-dim: #a8926a;
+    --verdigris: #3f6f5f;
+    --danger: #8b0000;
     --border: #c4b394;
     --border-strong: #a8926a;
-    --danger: #8b0000;
-    --success: #2d5a1e;
-
-    --topbar-bg: rgba(240, 230, 211, 0.86);
-    --rule-color: rgba(139, 37, 0, 0.12);
-    --code-bg: rgba(120, 92, 48, 0.12);
-    --shot-shadow: 0 18px 44px rgba(90, 60, 20, 0.16);
-    --warn-border: rgba(139, 0, 0, 0.32);
-
-    --glow-1: rgba(245, 234, 213, 0.9);
-    --glow-2: rgba(221, 208, 181, 0.75);
-    --page-base: linear-gradient(180deg, #f0e6d3 0%, #e5d8c0 50%, #ddd0b5 100%);
-    /* 纸纹：应用羊皮纸主题里那两道 28px 的细网格，浅色下没有它会显得太空。 */
-    --paper-grid:
-      repeating-linear-gradient(0deg, transparent, transparent 28px,
-        rgba(139, 37, 0, 0.03) 28px, rgba(139, 37, 0, 0.03) 29px),
-      repeating-linear-gradient(90deg, transparent, transparent 28px,
-        rgba(139, 37, 0, 0.02) 28px, rgba(139, 37, 0, 0.02) 29px);
+    --card-bg: linear-gradient(180deg, rgba(246, 239, 222, 0.75), rgba(236, 226, 206, 0.75));
+    --topbar-bg: rgba(240, 230, 211, 0.85);
+    --code-bg: rgba(139, 37, 0, 0.06);
+    --shot-shadow: 0 24px 60px rgba(90, 60, 20, 0.22), 0 0 0 1px rgba(90, 60, 20, 0.15);
+    --warn-border: rgba(139, 0, 0, 0.45);
+    --glow-1: rgba(139, 37, 0, 0.07);
+    --glow-2: rgba(168, 146, 106, 0.12);
+    --ray: rgba(139, 37, 0, 0.035);
+    --title-grad: linear-gradient(180deg, #a03000 0%, #8b2500 60%, #5e1a00 100%);
     color-scheme: light;
   }
 
   * { box-sizing: border-box; }
-
-  html { scroll-behavior: smooth; }
-
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: var(--font-ui);
-    font-size: 16px;
-    line-height: 1.85;
+    font: 16px/1.85 var(--font-ui);
     -webkit-font-smoothing: antialiased;
-    transition: background-color .35s ease, color .35s ease;
+    transition: background-color .4s ease, color .4s ease;
   }
+  a { color: var(--accent-text); text-decoration: none; border-bottom: 1px solid var(--border-strong); transition: color .2s, border-color .2s; }
+  a:hover { color: var(--accent-hi); border-color: currentColor; }
+  code { font-family: var(--font-mono); font-size: .88em; padding: 1px 6px; border-radius: 3px; background: var(--code-bg); }
+  strong { color: var(--text); }
+  .icon { width: 18px; height: 18px; flex: none; }
+  .wrap { width: min(1160px, 100% - 48px); margin: 0 auto; }
 
-  /* ---------- 背景：跟着滚动走的三层 ----------
-     铺在固定层里而不是 body 的 background-attachment: fixed —— 后者在 iOS Safari 上
-     会整层不动甚至闪，而且没法让不同层按不同速度走。
-     --sy 由脚本按滚动进度写（0 → 1），三层各乘不同系数，就有了远近差。 */
-  .bg-layer {
-    position: fixed; inset: -20vh 0; z-index: -1; pointer-events: none;
-    background: var(--page-base);
-    transition: background .35s ease;
-  }
-  .bg-layer::before,
-  .bg-layer::after {
-    content: ''; position: absolute; inset: 0;
-    will-change: transform;
-  }
-  /* 上方那团光：滚动时缓慢下沉，速度比正文慢 —— 视差里的「远景」。 */
+  /* ---------- 背景：日芒 + 两团光，滚动时视差 ----------
+     铺在固定层里而不是 background-attachment: fixed —— 后者在 iOS Safari 上会整层不动甚至闪。
+     --sy 由脚本按滚动进度写（0 → 1）。 */
+  .bg-layer { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+  .bg-layer::before, .bg-layer::after { content: ''; position: absolute; inset: -20% -10%; }
   .bg-layer::before {
     background:
-      radial-gradient(ellipse 90% 55% at 50% 8%, var(--glow-1) 0%, transparent 60%),
-      var(--paper-grid);
-    transform: translate3d(0, calc(var(--sy, 0) * 14vh), 0);
+      repeating-conic-gradient(from -90deg at 50% 0%, var(--ray) 0deg 1.2deg, transparent 1.2deg 7.5deg),
+      radial-gradient(ellipse 70% 50% at 50% 0%, var(--glow-1) 0%, transparent 70%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 0%, #000 0%, transparent 75%);
+            mask-image: radial-gradient(ellipse 80% 70% at 50% 0%, #000 0%, transparent 75%);
+    transform: translateY(calc(var(--sy, 0) * 12%));
   }
-  /* 下方的暗角（羊皮纸下是暖褐晕）：反向上浮，两层错开才看得出景深。 */
   .bg-layer::after {
-    background: radial-gradient(ellipse 130% 90% at 50% 104%, var(--glow-2) 0%, transparent 55%);
-    transform: translate3d(0, calc(var(--sy, 0) * -10vh), 0);
+    background: radial-gradient(ellipse 60% 45% at 85% 100%, var(--glow-2) 0%, transparent 70%);
+    transform: translateY(calc(var(--sy, 0) * -10%));
   }
-
-  /* ---------- 滚动进场 ----------
-     统一「从上方落下一点点 + 淡入」：与「页面从上往下滚」的方向一致，
-     不是常见的从下往上顶。同一组内按 --i 递增错开，读起来像依次落位。
-
-     初始态**直接由 CSS 给**，不靠 JS 加 class —— 否则元素会先以可见状态画一帧，
-     等脚本跑完再突然变透明，反而闪一下。
-     作用域挂在 .js-anim 上（由 head 内联脚本加），没有 JS 时全部照常显示。 */
-  .js-anim :is(
-    section:not(.hero) :is(.eyebrow, h2, .section-lede, .card, .notice,
-                           .step, .ledger-row, .feature-text, .shot, .shot-cap),
-    .hero .shot,
-    footer .foot-grid > div,
-    footer .colophon
-  ) {
-    opacity: 0;
-    transform: translate3d(0, -22px, 0);
-    transition:
-      opacity .62s cubic-bezier(.22, .61, .36, 1),
-      transform .62s cubic-bezier(.22, .61, .36, 1);
-    transition-delay: calc(var(--i, 0) * 70ms);
-  }
-  /* 截图落位幅度大一点，突出它是「一整块内容」。 */
-  .js-anim .shot { transform: translate3d(0, -30px, 0) scale(.985); }
-
-  .js-anim .is-in { opacity: 1 !important; transform: none !important; }
-
-  /* Hero 随滚动淡出上移：--hero 是首屏滚动进度（0 → 1）。 */
-  .hero-inner {
-    opacity: calc(1 - var(--hero, 0) * 1.15);
-    transform: translate3d(0, calc(var(--hero, 0) * -40px), 0);
-    will-change: opacity, transform;
-  }
-
-  /* 用户要求减少动效时，一律静态呈现：不位移、不淡入、不视差。 */
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    .js-anim :is(section, .hero, footer) * { opacity: 1 !important; transform: none !important; transition: none !important; }
-    .bg-layer::before, .bg-layer::after { transform: none; }
-    .hero-inner { opacity: 1; transform: none; }
-  }
-
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
-
-  .icon { width: 1em; height: 1em; flex: none; vertical-align: -0.125em; }
-
-  .wrap { width: min(1100px, calc(100% - 48px)); margin-inline: auto; }
 
   /* ---------- 顶栏 ---------- */
   .topbar {
     position: sticky; top: 0; z-index: 20;
-    backdrop-filter: blur(12px);
     background: var(--topbar-bg);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border);
   }
-  .topbar .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+  .topbar .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
   .wordmark {
-    font-family: var(--font-display);
-    font-size: 20px; letter-spacing: 0.06em;
-    color: var(--accent); white-space: nowrap;
+    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--font-display); font-size: 21px; letter-spacing: .06em;
+    color: var(--accent-text); border: 0;
   }
-  .wordmark:hover { text-decoration: none; }
-  .topnav { display: flex; gap: 22px; margin-left: auto; align-items: center; font-size: 14px; }
-  .topnav a { color: var(--text-dim); }
-  .topnav a:hover { color: var(--text); text-decoration: none; }
-  .topnav .gh { display: inline-flex; align-items: center; gap: 7px; }
+  .wordmark svg { width: 34px; height: 18px; }
+  .topnav { margin-left: auto; display: flex; align-items: center; gap: 22px; font-size: 14px; white-space: nowrap; }
+  .topnav a { color: var(--text-2); border: 0; }
+  .topnav a:hover { color: var(--accent-text); }
+  .topnav .gh { display: inline-flex; align-items: center; gap: 6px; }
   .theme-btn {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 6px 13px; border-radius: 999px;
-    border: 1px solid var(--border-strong);
-    background: var(--surface-2); color: var(--text-dim);
-    font-family: var(--font-ui); font-size: 13px; line-height: 1;
-    cursor: pointer; transition: color .15s, border-color .15s, background .15s;
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    padding: 5px 12px; border-radius: 999px; font: inherit; font-size: 13px;
+    color: var(--text-2); background: transparent; border: 1px solid var(--border-strong);
+    transition: color .2s, border-color .2s;
   }
-  .theme-btn:hover { color: var(--text); border-color: var(--accent); }
+  .theme-btn:hover { color: var(--accent-text); border-color: var(--accent); }
   .theme-btn .icon { width: 15px; height: 15px; }
 
+  /* ---------- 装饰艺术纹饰 ---------- */
+  .deco-rule { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 26px auto; color: var(--accent); max-width: 420px; }
+  .deco-rule::before, .deco-rule::after {
+    content: ''; flex: 1; height: 5px;
+    border-top: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong);
+  }
+  .deco-rule i { width: 7px; height: 7px; background: currentColor; transform: rotate(45deg); }
+  .corners { position: absolute; inset: 0; pointer-events: none; color: var(--accent); }
+  .corners svg { position: absolute; width: 22px; height: 22px; }
+  .corners .tl { top: -1px; left: -1px; }
+  .corners .tr { top: -1px; right: -1px; transform: scaleX(-1); }
+  .corners .bl { bottom: -1px; left: -1px; transform: scaleY(-1); }
+  .corners .br { bottom: -1px; right: -1px; transform: scale(-1, -1); }
+
   /* ---------- 通用区块 ---------- */
-  section { padding: 76px 0; }
-  section + section { border-top: 1px solid var(--rule-color); }
-  h2 {
-    font-size: 27px; line-height: 1.5; margin: 0 0 10px;
-    font-weight: 600; letter-spacing: 0.01em;
-  }
-  /* 行宽用 px 而不是 ch：ch 以「0」的宽度为准，中文字符约合 2ch，
-     按 62ch 排出来一行只有 30 来个汉字，在 1100px 的容器里显得像断错了行。 */
-  .section-lede { color: var(--text-dim); margin: 0 0 40px; max-width: 840px; }
+  section { padding: 104px 0; position: relative; }
   .eyebrow {
-    font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
-    color: var(--accent); font-family: var(--font-mono); margin: 0 0 12px;
+    display: flex; align-items: center; gap: 12px; margin: 0 0 10px;
+    font-family: var(--font-display); font-size: 13px; letter-spacing: .32em; text-transform: uppercase;
+    color: var(--accent-text);
   }
+  .eyebrow::before { content: ''; width: 28px; height: 1px; background: currentColor; opacity: .7; }
+  h2 { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.3; margin: 0 0 16px; font-weight: 700; letter-spacing: .04em; }
+  h3 { font-size: 18px; margin: 0 0 8px; line-height: 1.5; }
+  /* 行宽用 px 而不是 ch：中文字符约合 2ch，按 ch 排出来一行只有 30 来个汉字。 */
+  .section-lede { max-width: 720px; margin: 0 0 40px; color: var(--text-2); font-size: 17px; }
+  .center { text-align: center; }
+  .center .eyebrow { justify-content: center; }
+  .center .eyebrow::after { content: ''; width: 28px; height: 1px; background: currentColor; opacity: .7; }
+  .center .section-lede { margin-left: auto; margin-right: auto; }
 
   /* ---------- Hero ---------- */
-  .hero { padding: 80px 0 64px; text-align: center; }
+  .hero { padding: 72px 0 96px; text-align: center; }
+  .hero-inner { opacity: calc(1 - var(--hero, 0) * .9); transform: translateY(calc(var(--hero, 0) * -40px)); }
+  .emblem { width: 120px; height: 64px; color: var(--accent); margin: 0 auto 18px; display: block; }
+  .emblem path { stroke-dasharray: 160; stroke-dashoffset: 0; }
+  .hero .eyebrow { justify-content: center; }
+  .hero .eyebrow::after { content: ''; width: 28px; height: 1px; background: currentColor; opacity: .7; }
   .hero h1 {
-    font-family: var(--font-display);
-    font-size: clamp(40px, 7vw, 66px);
-    letter-spacing: 0.05em;
-    margin: 0 0 6px; color: var(--accent); line-height: 1.2;
+    margin: 4px 0 0; font-family: var(--font-display); font-weight: 400;
+    font-size: clamp(56px, 9vw, 104px); line-height: 1.05; letter-spacing: .04em;
+    background: var(--title-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  .hero .sub { font-size: clamp(17px, 2.4vw, 21px); margin: 0 0 20px; }
-  .hero .pitch { color: var(--text-dim); max-width: 700px; margin: 0 auto 36px; }
-
-  .dl-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .hero .sub { margin: 14px 0 0; font-size: clamp(20px, 2.4vw, 26px); letter-spacing: .18em; color: var(--text); }
+  .pitch { max-width: 680px; margin: 0 auto; color: var(--text-2); font-size: 17px; }
+  .dl-row { display: flex; justify-content: center; flex-wrap: wrap; gap: 14px; margin-top: 34px; }
   .btn {
-    display: inline-flex; align-items: center; gap: 10px;
-    padding: 13px 26px; border-radius: var(--radius);
-    border: 1px solid var(--border-strong);
-    font-family: var(--font-ui); font-size: 16px;
-    background: var(--surface-2); color: var(--text);
-    cursor: pointer; transition: background .15s, border-color .15s, transform .15s;
+    display: inline-flex; align-items: center; gap: 12px; min-width: 260px; padding: 12px 22px;
+    border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text);
+    background: var(--card-bg); text-align: left; transition: transform .25s, border-color .25s, box-shadow .25s;
   }
-  .btn:hover { background: var(--surface-1); border-color: var(--accent); text-decoration: none; transform: translateY(-1px); }
-  .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
-  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
-  .btn .plat { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.35; }
-  .btn .plat small { font-size: 11.5px; opacity: .72; font-family: var(--font-mono); }
-  /* 「链接待填」态：不要用 opacity 压——羊皮纸是浅底，半透明会把字冲淡到看不见
-     （与应用里「取消」按钮踩过的是同一个坑）。改用虚线边框表达「还不能点」，
-     文字与边框各自走 token，两个主题下都保持可读。 */
-  .btn[aria-disabled="true"] {
-    cursor: not-allowed; transform: none;
-    background: transparent; color: var(--text-dim);
-    border-color: var(--border-strong); border-style: dashed;
-  }
-  .btn[aria-disabled="true"]:hover { background: transparent; border-color: var(--border-strong); }
-  .dl-meta { color: var(--text-dim); font-size: 13px; font-family: var(--font-mono); margin: 0 0 8px; }
-  .dl-caveat { color: var(--text-dim); font-size: 14px; margin: 0 auto; max-width: 660px; }
-  .dl-caveat strong { color: var(--text); font-weight: 600; }
+  .btn:hover { transform: translateY(-2px); border-color: var(--accent); color: var(--text); box-shadow: 0 10px 30px rgba(0, 0, 0, .25); }
+  .btn-primary { background: linear-gradient(180deg, var(--accent-hi), var(--accent)); color: var(--on-accent); border-color: transparent; }
+  .btn-primary:hover { color: var(--on-accent); border-color: transparent; }
+  .btn .plat { display: flex; flex-direction: column; line-height: 1.35; font-weight: 700; }
+  .btn small { font-weight: 400; font-size: 12px; opacity: .8; }
+  /* 「链接待填」态：不用 opacity 压（羊皮纸浅底上会把字冲淡），改用虚线边框表达「还不能点」 */
+  .btn[aria-disabled='true'] { cursor: not-allowed; background: transparent; color: var(--text-2); border: 1px dashed var(--border-strong); transform: none; box-shadow: none; }
+  .dl-meta { margin: 14px 0 0; font-size: 13px; color: var(--text-2); font-family: var(--font-display); letter-spacing: .06em; }
+  .dl-caveat { max-width: 640px; margin: 14px auto 0; font-size: 14px; color: var(--text-2); }
 
-  .shot {
-    margin-top: 52px; border: 1px solid var(--border);
-    border-radius: 10px; overflow: hidden;
-    box-shadow: var(--shot-shadow);
-    background: var(--bg-2);
+  /* ---------- 镶框截图 ---------- */
+  .frame {
+    position: relative; margin: 56px 0 0; padding: 10px;
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--card-bg); box-shadow: var(--shot-shadow);
   }
-  .shot img { display: block; width: 100%; height: auto; }
-  .shot-cap { color: var(--text-dim); font-size: 13px; text-align: center; margin-top: 14px; }
+  .frame::before { content: ''; position: absolute; inset: 4px; border: 1px solid var(--border); border-radius: 4px; pointer-events: none; }
+  .frame img { display: block; width: 100%; height: auto; border-radius: 3px; }
+  .shot-cap { margin: 14px auto 0; max-width: 760px; font-size: 14px; color: var(--text-2); text-align: center; }
+  /* 叠放的几张截图（页签切换）：只有当前那张占位，其余叠在上面淡入淡出 */
+  .stack { position: relative; }
+  .stack img { transition: opacity .55s ease, transform .9s cubic-bezier(.22, .61, .36, 1); }
+  .stack img + img { position: absolute; inset: 0; }
+  .stack img:not(.is-on) { opacity: 0; transform: scale(1.012); pointer-events: none; }
 
-  /* ---------- 提示条 ---------- */
-  .notice {
-    display: flex; gap: 14px; align-items: flex-start;
-    padding: 18px 20px; border-radius: var(--radius);
-    border: 1px solid var(--border); background: var(--surface-1);
+  /* Hero 截图：像两扇门从中间推开 */
+  .hero .frame { margin-top: 64px; }
+  .js-anim .hero .frame .stack { clip-path: inset(0 50% 0 50%); }
+  .hero.is-open .frame .stack { clip-path: inset(0 0 0 0); transition: clip-path 1.25s cubic-bezier(.7, 0, .2, 1) .35s; }
+  .hero .frame .doors { position: absolute; inset: 10px; pointer-events: none; display: flex; justify-content: center; }
+  .hero .frame .doors::before {
+    content: ''; width: 2px; background: linear-gradient(180deg, transparent, var(--accent-hi), transparent);
+    box-shadow: 0 0 24px 4px var(--glow-1); opacity: 0;
   }
-  .notice + .notice { margin-top: 14px; }
-  .notice .icon { width: 20px; height: 20px; margin-top: 5px; color: var(--accent); }
-  .notice.warn { border-color: var(--warn-border); }
-  .notice.warn .icon { color: var(--danger); }
-  .notice h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
-  .notice p { margin: 0; color: var(--text-dim); font-size: 14.5px; }
-  .notice code {
-    font-family: var(--font-mono); font-size: 13px;
-    background: var(--code-bg); padding: 1px 6px; border-radius: 3px; color: var(--text);
+  .js-anim .hero .frame .doors::before { opacity: 1; }
+  .hero.is-open .frame .doors::before { opacity: 0; transition: opacity .6s ease 1.2s; }
+
+  /* ---------- 三种坐法 ---------- */
+  .seats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .seat {
+    position: relative; padding: 46px 28px 30px; text-align: center;
+    border: 1px solid var(--border-strong); border-radius: 220px 220px 6px 6px;
+    background: var(--card-bg); transition: transform .35s cubic-bezier(.22, .61, .36, 1), border-color .35s;
   }
+  .seat::before { content: ''; position: absolute; inset: 6px; border: 1px solid var(--border); border-radius: 214px 214px 3px 3px; pointer-events: none; }
+  .seat:hover { transform: translateY(-4px); border-color: var(--accent); }
+  .seat .medal {
+    width: 58px; height: 58px; margin: 0 auto 16px; display: grid; place-items: center;
+    border-radius: 50%; color: var(--accent-text); border: 1px solid var(--border-strong);
+    background: radial-gradient(circle, var(--glow-1), transparent 70%);
+  }
+  .seat .medal .icon { width: 26px; height: 26px; }
+  .seat .who { font-family: var(--font-display); font-size: 12px; letter-spacing: .3em; color: var(--accent-text); }
+  .seat h3 { font-size: 21px; margin: 6px 0 10px; }
+  .seat p { margin: 0; color: var(--text-2); font-size: 15px; }
+
+  /* ---------- 展示区：标题 + 页签 + 大截图 ---------- */
+  .show-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; flex-wrap: wrap; }
+  .show-head .section-lede { margin-bottom: 0; }
+  .tabs {
+    position: relative; display: inline-flex; padding: 4px; gap: 2px; flex: none;
+    border: 1px solid var(--border-strong); border-radius: 999px; background: var(--code-bg);
+  }
+  .tabs button {
+    position: relative; z-index: 1; padding: 7px 18px; border: 0; border-radius: 999px; cursor: pointer;
+    background: transparent; color: var(--text-2); font: inherit; font-size: 14px; letter-spacing: .06em;
+    transition: color .3s;
+  }
+  .tabs button[aria-selected='true'] { color: var(--on-accent); }
+  .tabs .pill {
+    position: absolute; z-index: 0; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 999px;
+    background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+    transform: translateX(var(--x, 4px)); width: var(--w, 0);
+    transition: transform .45s cubic-bezier(.22, 1.2, .36, 1), width .45s cubic-bezier(.22, 1.2, .36, 1);
+  }
+  .tab-caps { position: relative; min-height: 3.6em; }
+  .tab-caps p { margin: 0; transition: opacity .4s; }
+  .tab-caps p + p { position: absolute; inset: 0; }
+  .tab-caps p:not(.is-on) { opacity: 0; pointer-events: none; }
+  .points { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 28px; margin: 30px 0 0; padding: 0; list-style: none; }
+  .points li { display: flex; gap: 10px; color: var(--text-2); font-size: 15px; }
+  .points .icon { color: var(--accent-text); margin-top: 5px; width: 16px; height: 16px; }
 
   /* ---------- 功能网格 ---------- */
-  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 1100px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid-4 { grid-template-columns: 1fr; } }
   .card {
-    padding: 24px; border-radius: var(--radius);
-    border: 1px solid var(--border); background: var(--surface-1);
+    position: relative; padding: 26px 24px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card-bg); transition: border-color .3s, transform .3s;
   }
-  .card .icon { width: 22px; height: 22px; color: var(--accent); }
-  .card h3 { margin: 12px 0 8px; font-size: 17px; font-weight: 600; }
-  .card p { margin: 0; color: var(--text-dim); font-size: 14.5px; line-height: 1.8; }
+  .card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+  .card .corners { opacity: 0; transition: opacity .3s; }
+  .card:hover .corners { opacity: 1; }
+  .card > .icon { width: 26px; height: 26px; color: var(--accent-text); margin-bottom: 12px; }
+  .card p { margin: 0; color: var(--text-2); font-size: 15px; }
 
   /* ---------- 图文交替 ---------- */
-  /* 交替左右时同时把列宽也交换，否则翻转行的截图会落进窄列、和上一行不等宽。 */
-  .feature { display: grid; grid-template-columns: 1fr 1.25fr; gap: 44px; align-items: center; }
-  .feature.flip { grid-template-columns: 1.25fr 1fr; }
-  .feature + .feature { margin-top: 72px; }
+  .feature { display: grid; grid-template-columns: 5fr 7fr; gap: 56px; align-items: center; margin-top: 88px; }
+  .feature:first-child { margin-top: 0; }
+  .feature.flip { grid-template-columns: 7fr 5fr; }
   .feature.flip .feature-text { order: 2; }
-  .feature h3 { font-size: 21px; margin: 0 0 12px; font-weight: 600; }
-  .feature p { color: var(--text-dim); margin: 0 0 14px; }
-  .feature ul { margin: 0; padding-left: 0; list-style: none; color: var(--text-dim); font-size: 14.5px; }
-  .feature li { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 7px; }
-  .feature li .icon { width: 16px; height: 16px; margin-top: 6px; color: var(--success); }
+  .feature .frame { margin: 0; }
+  .feature-text h3 { font-size: 24px; margin-bottom: 12px; }
+  .feature-text p { color: var(--text-2); margin: 0; }
+  .feature-text .points { grid-template-columns: 1fr; gap: 10px; margin-top: 20px; }
+
+  /* ---------- 提示条 ---------- */
+  .notices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .notice { display: flex; gap: 16px; padding: 22px 22px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--card-bg); }
+  .notice.warn { border-left-color: var(--danger); }
+  .notice > .icon { width: 22px; height: 22px; color: var(--accent-text); margin-top: 4px; }
+  .notice.warn > .icon { color: var(--danger); }
+  .notice h3 { font-size: 17px; margin-bottom: 4px; }
+  .notice p { margin: 0; color: var(--text-2); font-size: 15px; }
 
   /* ---------- 步骤 ---------- */
-  .steps { counter-reset: step; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-  .step {
-    position: relative; padding: 24px 24px 24px 62px;
-    border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1);
-  }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; counter-reset: step; }
+  .step { position: relative; padding: 30px 24px 24px; border-top: 1px solid var(--border-strong); }
   .step::before {
-    counter-increment: step; content: counter(step);
-    position: absolute; left: 22px; top: 24px;
-    width: 26px; height: 26px; border-radius: 50%;
-    display: grid; place-items: center;
-    background: var(--accent); color: var(--on-accent);
-    font-family: var(--font-mono); font-size: 13px; font-weight: 700;
+    counter-increment: step; content: counter(step, upper-roman);
+    position: absolute; top: -21px; left: 24px; width: 42px; height: 42px; display: grid; place-items: center;
+    font-family: var(--font-display); font-size: 17px; color: var(--accent-text);
+    background: var(--bg); border: 1px solid var(--border-strong); transform: rotate(45deg);
   }
-  .step h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
-  .step p { margin: 0; color: var(--text-dim); font-size: 14.5px; }
+  .step h3 { margin-top: 12px; }
+  .step p { margin: 0; color: var(--text-2); font-size: 15px; }
 
-  /* ---------- 表格式清单 ---------- */
-  .ledger { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-  .ledger-row { display: grid; grid-template-columns: 168px 1fr; gap: 20px; padding: 18px 22px; }
-  .ledger-row + .ledger-row { border-top: 1px solid rgba(212, 162, 78, .08); }
-  .ledger-row > div:first-child { color: var(--text); font-weight: 600; font-size: 15px; }
-  .ledger-row > div:last-child { color: var(--text-dim); font-size: 14.5px; }
-  .ledger-row strong { color: var(--text); font-weight: 600; }
-  .notice p strong, .dl-caveat strong { color: var(--text); font-weight: 600; }
+  /* ---------- 边界账页 ---------- */
+  .ledger { border-top: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); }
+  .ledger-row { display: grid; grid-template-columns: 180px 1fr; gap: 28px; padding: 20px 4px; border-top: 1px solid var(--border); }
+  .ledger-row:first-child { border-top: 0; }
+  .ledger-row > div:first-child { font-weight: 700; }
+  .ledger-row > div:last-child { color: var(--text-2); font-size: 15px; }
   .tag {
-    display: inline-block; font-size: 11.5px; font-family: var(--font-mono);
-    padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border-strong);
-    color: var(--accent); margin-right: 8px; vertical-align: 2px;
+    display: inline-block; margin-right: 8px; padding: 0 9px; border-radius: 999px; font-size: 12px; line-height: 21px;
+    color: var(--on-accent); background: var(--accent); vertical-align: 1px;
   }
-  .tag.muted { color: var(--text-dim); border-color: var(--border); }
+  .tag.muted { color: var(--text-2); background: transparent; border: 1px solid var(--border-strong); }
 
   /* ---------- 页脚 ---------- */
-  footer { border-top: 1px solid var(--border); padding: 48px 0 64px; color: var(--text-dim); font-size: 14px; }
-  .foot-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 36px; }
-  .foot-grid h4 { margin: 0 0 12px; font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--text); font-family: var(--font-mono); font-weight: 600; }
-  .foot-grid ul { list-style: none; margin: 0; padding: 0; }
-  .foot-grid li { margin-bottom: 8px; }
-  .colophon { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--rule-color); font-size: 13px; line-height: 1.9; }
+  footer { padding: 64px 0 48px; border-top: 1px solid var(--border); font-size: 14px; color: var(--text-2); }
+  .foot-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 36px; }
+  footer h4 { margin: 0 0 10px; font-size: 14px; color: var(--text); letter-spacing: .1em; }
+  footer ul { margin: 0; padding: 0; list-style: none; line-height: 2.1; }
+  footer a { color: var(--text-2); border: 0; }
+  footer a:hover { color: var(--accent-text); }
+  .colophon { margin-top: 40px; padding-top: 22px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.9; }
 
-  @media (max-width: 820px) {
-    section { padding: 56px 0; }
-    /* .feature.flip 的特指度高于 .feature，这里必须同样带 .flip 才压得住，
-       否则窄屏上翻转行仍是两列、截图被挤成一条。 */
-    .feature, .feature.flip, .foot-grid { grid-template-columns: 1fr; gap: 28px; }
-    .feature.flip .feature-text { order: 0; }
-    .ledger-row { grid-template-columns: 1fr; gap: 4px; }
-    .topnav .hide-sm { display: none; }
+  /* ---------- 滚动进场 ----------
+     「从上方落下一点点 + 淡入」，只触发一次。初始态直接由 CSS 给，作用域挂在 .js-anim 上
+     （head 内联脚本加），没有 JS 时全部照常显示。 */
+  .js-anim .reveal { opacity: 0; transform: translateY(-14px); }
+  .js-anim .reveal.frame { transform: translateY(-22px) scale(.985); }
+  .reveal.is-in {
+    opacity: 1; transform: none;
+    transition: opacity .7s cubic-bezier(.22, .61, .36, 1) calc(var(--i, 0) * 90ms),
+                transform .8s cubic-bezier(.22, .61, .36, 1) calc(var(--i, 0) * 90ms);
+  }
+  /* Hero 首屏：日芒描出、字依次落下 */
+  .js-anim .hero .emblem path { stroke-dashoffset: 160; }
+  .js-anim .hero .lift { opacity: 0; transform: translateY(-12px); }
+  .hero.is-open .emblem path { stroke-dashoffset: 0; transition: stroke-dashoffset 1.4s cubic-bezier(.65, 0, .35, 1); }
+  .hero.is-open .lift { opacity: 1; transform: none; transition: opacity .8s ease calc(.15s + var(--i, 0) * 110ms), transform .9s cubic-bezier(.22, .61, .36, 1) calc(.15s + var(--i, 0) * 110ms); }
+
+  /* 用户要求减少动效时，一律静态呈现 */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .js-anim .reveal, .js-anim .hero .lift { opacity: 1 !important; transform: none !important; }
+    .js-anim .hero .frame .stack { clip-path: none !important; }
+    .js-anim .hero .frame .doors::before { display: none; }
+    .js-anim .hero .emblem path { stroke-dashoffset: 0 !important; }
+    .bg-layer::before, .bg-layer::after, .hero-inner { transform: none !important; }
+    .stack img, .tabs .pill, .seat, .card, .btn { transition: none !important; }
   }
 
-  @media (max-width: 520px) {
-    /* 两个下载按钮的说明行长短不一，靠内容撑宽会一宽一窄；窄屏直接铺满对齐。 */
-    .dl-row { flex-direction: column; }
-    .dl-row .btn { width: 100%; justify-content: center; }
-    .btn .plat { align-items: center; }
+  @media (max-width: 900px) {
+    .seats, .steps, .notices { grid-template-columns: 1fr; }
+    .steps { gap: 40px; }
+    .feature, .feature.flip { grid-template-columns: 1fr; gap: 28px; }
+    .feature.flip .feature-text { order: 0; }
+    .foot-grid { grid-template-columns: 1fr 1fr; }
+    .foot-grid > div:first-child { grid-column: 1 / -1; }
+    .ledger-row { grid-template-columns: 1fr; gap: 6px; }
+    .hide-sm { display: none; }
+    section { padding: 76px 0; }
+  }
+  @media (max-width: 560px) {
+    .wrap { width: calc(100% - 32px); }
+    .btn { min-width: 0; width: 100%; }
+    .topnav { gap: 14px; }
+    .topnav .gh span { display: none; }
+    .topnav a:not(.gh) { display: none; }
+    #theme-label { display: none; }
+    .theme-btn { padding: 6px 8px; }
+    .wordmark { font-size: 18px; }
+    .eyebrow { font-size: 11px; letter-spacing: .18em; }
+    .eyebrow::before, .eyebrow::after { width: 16px !important; }
+    .frame { padding: 5px; }
+    .seat { border-radius: 160px 160px 6px 6px; }
   }
 </style>
 </head>
+
 <body>
 
 <!-- 图标精灵：线性矢量图标，全站不使用 emoji -->
@@ -473,21 +503,54 @@
     <path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/>
     <path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
   </symbol>
+  <symbol id="i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+  </symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>
+  </symbol>
+  <symbol id="i-swords" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/>
+  </symbol>
+  <symbol id="i-message" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/>
+  </symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>
+  </symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>
+  </symbol>
+  <symbol id="i-quill" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 20h9"/><path d="M16.38 3.62a1 1 0 0 1 3 3L7.37 18.64a2 2 0 0 1-.86.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.86z"/>
+  </symbol>
+  <symbol id="i-sunburst" viewBox="0 0 64 34" fill="none">
+    <path d="M2 33 A30 30 0 0 1 62 33" stroke="currentColor" stroke-width="1.2"/>
+    <path d="M10 33 A22 22 0 0 1 54 33" stroke="currentColor" stroke-width="1"/>
+    <path d="M32 33 L32 3 M32 33 L13 10 M32 33 L51 10 M32 33 L5 22 M32 33 L59 22" stroke="currentColor" stroke-width="1"/>
+    <path d="M26 33 A6 6 0 0 1 38 33 Z" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-corner" viewBox="0 0 26 26">
+    <path d="M1 25 V1 H25" fill="none" stroke="currentColor" stroke-width="2"/>
+    <path d="M6 25 V6 H25" fill="none" stroke="currentColor" stroke-width="1"/>
+    <rect x="10" y="10" width="5" height="5" fill="currentColor"/>
+  </symbol>
 </svg>
 
 <div class="bg-layer" aria-hidden="true"></div>
 
 <header class="topbar">
   <div class="wrap">
-    <a class="wordmark" href="#top">CoC Player</a>
+    <a class="wordmark" href="#top"><svg aria-hidden="true"><use href="#i-sunburst"/></svg>CoC Player</a>
     <nav class="topnav">
-      <a href="#before" class="hide-sm">下载前先看</a>
+      <a href="#seats" class="hide-sm">三种坐法</a>
+      <a href="#reading" class="hide-sm">对局</a>
+      <a href="#keeper" class="hide-sm">真人 KP</a>
       <a href="#features" class="hide-sm">能做什么</a>
-      <a href="#coop" class="hide-sm">一起玩</a>
       <a href="#start">怎么开跑</a>
       <a href="#limits" class="hide-sm">边界</a>
       <a class="gh" href="https://github.com/jinziguan123/coc-player" target="_blank" rel="noopener">
-        <svg class="icon"><use href="#i-github"/></svg>GitHub
+        <svg class="icon"><use href="#i-github"/></svg><span>GitHub</span>
       </a>
       <button id="theme-toggle" class="theme-btn" type="button" aria-live="polite">
         <svg class="icon"><use href="#i-sun" id="theme-icon"/></svg>
@@ -498,228 +561,284 @@
 </header>
 
 <main id="top">
-
   <!-- ================= Hero ================= -->
   <section class="hero">
     <div class="wrap">
       <div class="hero-inner">
-      <h1>CoC Player</h1>
-      <p class="sub">AI 当守秘人的本地跑团桌面应用</p>
-      <p class="pitch">
-        AI 当守秘人（KP），顺带演所有 NPC，所以一个人也开得了团。
-        叫上朋友也行，坐不满的席位给 AI 队友。
-        想自己带团就反过来，你当守秘人，AI 在旁边递草稿。
-        模组、角色卡和游戏记录都留在你自己的电脑上。
-      </p>
-
-      <div class="dl-row">
-        <a class="btn btn-primary" id="dl-mac" href="#" data-plat="mac">
-          <svg class="icon" style="width:20px;height:20px"><use href="#i-download"/></svg>
-          <span class="plat"><span>下载 macOS 版</span><small data-role="note"></small></span>
-        </a>
-        <a class="btn" id="dl-win" href="#" data-plat="win">
-          <svg class="icon" style="width:20px;height:20px"><use href="#i-download"/></svg>
-          <span class="plat"><span>下载 Windows 版</span><small data-role="note"></small></span>
-        </a>
+        <svg class="emblem lift" viewBox="0 0 64 34" fill="none" aria-hidden="true">
+          <path d="M2 33 A30 30 0 0 1 62 33" stroke="currentColor" stroke-width="1"/>
+          <path d="M10 33 A22 22 0 0 1 54 33" stroke="currentColor" stroke-width=".8"/>
+          <path d="M32 33 L32 3 M32 33 L13 10 M32 33 L51 10 M32 33 L5 22 M32 33 L59 22" stroke="currentColor" stroke-width=".8"/>
+          <path d="M26 33 A6 6 0 0 1 38 33 Z" fill="currentColor"/>
+        </svg>
+        <p class="eyebrow lift" style="--i:1">Call of Cthulhu · 7th Edition</p>
+        <h1 class="lift" style="--i:2">CoC Player</h1>
+        <p class="sub lift" style="--i:3">一张随时开得了的跑团桌</p>
+        <div class="deco-rule lift" style="--i:4" aria-hidden="true"><i></i></div>
+        <p class="pitch lift" style="--i:5">
+          AI 当守秘人（KP），顺带演所有 NPC，一个人也开得了团。叫上朋友也行，坐不满的席位给 AI 队友。想自己带团，就换你当守秘人，AI 在旁边递草稿。模组、角色卡和游戏记录都留在你自己的电脑上。
+        </p>
+        <div class="dl-row lift" style="--i:6">
+          <a class="btn btn-primary" id="dl-mac" href="#" data-plat="mac">
+            <svg class="icon" style="width:20px;height:20px"><use href="#i-download"/></svg>
+            <span class="plat"><span>下载 macOS 版</span><small data-role="note"></small></span>
+          </a>
+          <a class="btn" id="dl-win" href="#" data-plat="win">
+            <svg class="icon" style="width:20px;height:20px"><use href="#i-download"/></svg>
+            <span class="plat"><span>下载 Windows 版</span><small data-role="note"></small></span>
+          </a>
+        </div>
+        <p class="dl-meta lift" style="--i:6" id="dl-meta"></p>
+        <p class="dl-caveat lift" style="--i:7">
+          <strong>装好还不能直接玩：</strong>得自己有一个 AI 模型接口（OpenAI 兼容或 Anthropic 协议，Gemini 走它的 OpenAI 兼容接口），在「设置 → AI 配置」里填好、测通。本项目不提供模型，也不经手费用。
+        </p>
       </div>
-      <p class="dl-meta" id="dl-meta"></p>
-      <p class="dl-caveat">
-        <strong>装好还不能直接玩：</strong>得自己有一个 AI 模型接口（OpenAI 兼容或 Anthropic 协议都行），
-        在应用的「设置 → AI 配置」里填好、测通。本项目不提供模型，也不经手费用。
-      </p>
-      </div>
-
-      <figure class="shot" style="margin-bottom:0">
-        <img src="assets/shots/gothic-home.webp" data-shot="home" width="2000" height="1250"
-             alt="CoC Player 首页：体验新手团、开始游戏、上传模组三个入口，底部是一条可展开的新人速览">
+      <figure class="frame" style="margin-bottom:0">
+        <div class="stack">
+          <img class="is-on" src="assets/shots/gothic-game-vn.webp" data-shot="game-vn" width="2000" height="1250" fetchpriority="high"
+               alt="对话框模式下的对局：雾中栈桥与灯塔的场景图清晰铺满画面，底部黄铜框对话框里，林恩港务员挂着名牌和立绘说：那口钟三年前就锈死了，昨夜它响了三下；右侧是调查员角色卡">
+        </div>
+        <span class="doors" aria-hidden="true"></span>
+        <span class="corners" data-corners></span>
       </figure>
-      <p class="shot-cap">首页。第一次跑团的人可以直接从「体验新手团」进入原创示例短团《雾港失灯事件》。</p>
+      <p class="shot-cap">原创示例短团《雾港失灯事件》的一幕，对话框模式。第一次跑团的人可以从首页「体验新手团」直接进来。</p>
     </div>
   </section>
 
-  <!-- ================= 下载前先看 ================= -->
-  <section id="before">
+  <!-- ================= 三种坐法 ================= -->
+  <section id="seats">
     <div class="wrap">
-      <p class="eyebrow">Before you download</p>
-      <h2>下载前先看这四件事</h2>
-      <p class="section-lede">
-        装上之后还有两件事得你自己做：接一个模型，准备一个本子。另外两条是安全上的提醒。
-        有一条接受不了，就先别下。
-      </p>
-
-      <div class="notice">
-        <svg class="icon"><use href="#i-key"/></svg>
-        <div>
-          <h3>要自备 AI 模型接口</h3>
-          <p>
-            OpenAI 兼容协议和 Anthropic 协议都行，模型、接口地址、上下文窗口自己填。
-            密钥只存在本机的 <code>ai_settings.json</code> 里，不会传到任何地方。调用模型花的钱，你直接付给模型服务商，跟本项目没关系。
-          </p>
+      <div class="center">
+        <p class="eyebrow reveal">Three ways to sit</p>
+        <h2 class="reveal">谁坐守秘人那把椅子，你来定</h2>
+        <p class="section-lede reveal">建房时定一次。席位坐不满没关系，空位交给 AI 队友，他们会自己行动、自己掷骰。</p>
+      </div>
+      <div class="seats">
+        <div class="seat reveal">
+          <div class="medal"><svg class="icon"><use href="#i-user"/></svg></div>
+          <div class="who">Solo</div>
+          <h3>一个人开团</h3>
+          <p>AI 当守秘人、演所有 NPC，队友也由 AI 扮。深夜想跑一场，不用约人。</p>
+        </div>
+        <div class="seat reveal">
+          <div class="medal"><svg class="icon"><use href="#i-users"/></svg></div>
+          <div class="who">Table</div>
+          <h3>叫上朋友</h3>
+          <p>房主建房发房间码，朋友进大厅认领席位。只有房主需要配模型，其他人接上就能玩。</p>
+        </div>
+        <div class="seat reveal">
+          <div class="medal"><svg class="icon"><use href="#i-quill"/></svg></div>
+          <div class="who">Keeper</div>
+          <h3>你来当守秘人</h3>
+          <p>AI 退到副手位：拟旁白草稿、给裁定建议、翻模组和规则书。发不发、怎么改你说了算。</p>
         </div>
       </div>
+    </div>
+  </section>
 
-      <div class="notice warn">
-        <svg class="icon"><use href="#i-alert"/></svg>
+  <!-- ================= 两种读法 ================= -->
+  <section id="reading">
+    <div class="wrap">
+      <div class="show-head">
         <div>
-          <h3>安装包没有做代码签名和公证</h3>
-          <p>
-            所以第一次打开会被系统拦下。macOS：在应用上<strong>右键 → 打开</strong>，再确认一次就行；
-            Windows：SmartScreen 弹窗里点<strong>「更多信息」→「仍要运行」</strong>。
-            不放心的话，照仓库文档自己从源码构建一份。
-          </p>
+          <p class="eyebrow reveal">At the table</p>
+          <h2 class="reveal">两种读法，一键切换</h2>
+          <div class="section-lede tab-caps reveal" data-caps="reading">
+            <p class="is-on" data-for="vn">对话框模式：场景图清晰铺满整个画面，文字在底部一段段打出来，点一下翻一页，也能自动播放。检定和掷骰浮在对话框上方，往回看点「历史」。</p>
+            <p data-for="chat">聊天流：消息一条条往下排，场景图在流里出现一次，之后糊成背景色调。角色卡常驻右侧，HP、SAN、技能随手可查。</p>
+          </div>
+        </div>
+        <div class="tabs reveal" role="tablist" aria-label="对局读法" data-tabs="reading">
+          <span class="pill" aria-hidden="true"></span>
+          <button role="tab" aria-selected="true" data-key="vn">对话框</button>
+          <button role="tab" aria-selected="false" data-key="chat">聊天流</button>
         </div>
       </div>
+      <figure class="frame reveal">
+        <div class="stack" data-stack="reading">
+          <img class="is-on" data-key="vn" src="assets/shots/gothic-game-vn.webp" data-shot="game-vn" width="2000" height="1250" loading="lazy"
+               alt="对话框模式：清晰的场景图上，底部对话框显示 NPC 的名牌、立绘与台词，下方有自动、最新、历史三个按钮">
+          <img data-key="chat" src="assets/shots/gothic-game.webp" data-shot="game" width="2000" height="1250" loading="lazy"
+               alt="聊天流模式：守秘人的叙事、NPC 带立绘的台词、队友行动与一次检定结果依次排列，右侧常驻角色卡">
+        </div>
+        <span class="corners" data-corners></span>
+      </figure>
+      <ul class="points">
+        <li class="reveal"><svg class="icon"><use href="#i-dice"/></svg><span>骰子是程序掷的，屏幕上的 3D 骰子会滚到算好的那个数上，检定结果用黄铜表盘显示成败</span></li>
+        <li class="reveal"><svg class="icon"><use href="#i-message"/></svg><span>发言框里打 @ 就能点名队友、已知地点和自己的技能，NPC 记得你跟他们说过的话</span></li>
+        <li class="reveal"><svg class="icon"><use href="#i-music"/></svg><span>场景换了，配乐也跟着换。守秘人只挑氛围，曲子从曲库里配，也可以放自己的曲子</span></li>
+      </ul>
+    </div>
+  </section>
 
-      <div class="notice warn">
-        <svg class="icon"><use href="#i-shield"/></svg>
+  <!-- ================= 真人 KP 值班台 ================= -->
+  <section id="keeper">
+    <div class="wrap">
+      <div class="show-head">
         <div>
-          <h3>只适用于本机和可信网络</h3>
-          <p>
-            装好之后它只听本机，同一个 Wi-Fi 下的别的设备也连不上。要让朋友进来，房主得去「设置 → 联机」
-            里手动打开，再重启应用。它<strong>没有账号，也不加密传输</strong>，
-            别放到公网上，也别做端口转发。
-          </p>
+          <p class="eyebrow reveal">The keeper's desk</p>
+          <h2 class="reveal">换你当守秘人，桌上有一张值班台</h2>
+          <div class="section-lede tab-caps reveal" data-caps="keeper">
+            <p class="is-on" data-for="scene">普通场景：左侧常驻全队的生命、理智与待办，中间是对局本身，底下一条写作台：旁白、NPC 台词、检定、切场景、发手书都从这里发给全桌。</p>
+            <p data-for="combat">战斗轮：左边先攻梯与双方体征，中间战场，右边「桌边记录」把发言、掷骰与结算排成一条时间线。敌人的回合由你出手，也可以打开「敌人自动行动」交给 AI。玩家还没认出来的敌人，桌上只显示「不明存在」。</p>
+          </div>
+        </div>
+        <div class="tabs reveal" role="tablist" aria-label="值班台场景" data-tabs="keeper">
+          <span class="pill" aria-hidden="true"></span>
+          <button role="tab" aria-selected="true" data-key="scene">普通场景</button>
+          <button role="tab" aria-selected="false" data-key="combat">战斗轮</button>
         </div>
       </div>
+      <figure class="frame reveal">
+        <div class="stack" data-stack="keeper">
+          <img class="is-on" data-key="scene" src="assets/shots/gothic-kp-desk.webp" data-shot="kp-desk" width="2000" height="1250" loading="lazy"
+               alt="真人守秘人的值班台：左侧是调查员体征与信号，中间是检定结果与叙事，底部写作台按说、骰、场景、局势分组排着叙事、NPC 台词、检定、切场景、开战等动作，最下面是待办「等许闻舟投聆听」">
+          <img data-key="combat" src="assets/shots/gothic-kp-combat.webp" data-shot="kp-combat" width="2000" height="1250" loading="lazy"
+               alt="真人守秘人的战斗观局台：左侧先攻梯与双方生命值，中间方格战场上调查员与「不明存在」对峙，右侧桌边记录列出伤害结算与守秘人旁白，底部是敌人自动行动开关与发布框">
+        </div>
+        <span class="corners" data-corners></span>
+      </figure>
+      <ul class="points">
+        <li class="reveal"><svg class="icon"><use href="#i-sparkles"/></svg><span>卡住时让 AI 拟一段旁白或给条裁定建议，采不采用你说了算</span></li>
+        <li class="reveal"><svg class="icon"><use href="#i-book"/></svg><span>模组原文和规则书就地检索，场景、手书、配乐按名字挑，不用记编号</span></li>
+        <li class="reveal"><svg class="icon"><use href="#i-shield"/></svg><span>暗骰只有你看得见；你占的是守秘人席，不占玩家席，也不掷自己的骰</span></li>
+        <li class="reveal"><svg class="icon"><use href="#i-swords"/></svg><span>开战、追逐都有专门的台面：选参战方、推进轮次、结算伤害与脱身</span></li>
+      </ul>
+    </div>
+  </section>
 
-      <div class="notice">
-        <svg class="icon"><use href="#i-info"/></svg>
+  <!-- ================= 战斗与角色卡 ================= -->
+  <section id="combat">
+    <div class="wrap">
+      <div class="show-head">
         <div>
-          <h3>规则书和模组要你自己准备</h3>
-          <p>
-            安装包里只带了一个项目自己写的示例短团。规则书 PDF、模组、角色卡都得你自己导入，
-            有没有权用也是你自己的事，详见
-            <a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
-          </p>
+          <p class="eyebrow reveal">Dice, steel and sanity</p>
+          <h2 class="reveal">战斗按规则算，角色卡一眼看全</h2>
+          <div class="section-lede tab-caps reveal" data-caps="combat">
+            <p class="is-on" data-for="fight">战斗轮：先攻、命中、闪避、反击、伤害加值、贯穿、重伤与濒死都由规则引擎结算。战场上是微缩棋子，对抗双方的骰值并排摆出来；被攻击时直接问你反击还是闪避。</p>
+            <p data-for="sheet">角色卡：HP、SAN、MP 一眼看清，八项属性下标出困难与极难门槛，派生值旁边是属性雷达图；技能、道具、档案各占一页。对局里同一张卡收在右栏，跟着结算实时变化。</p>
+          </div>
+        </div>
+        <div class="tabs reveal" role="tablist" aria-label="战斗与角色卡" data-tabs="combat">
+          <span class="pill" aria-hidden="true"></span>
+          <button role="tab" aria-selected="true" data-key="fight">战斗</button>
+          <button role="tab" aria-selected="false" data-key="sheet">角色卡</button>
         </div>
       </div>
+      <figure class="frame reveal">
+        <div class="stack" data-stack="combat">
+          <img class="is-on" data-key="fight" src="assets/shots/gothic-combat.webp" data-shot="combat" width="2000" height="1250" loading="lazy"
+               alt="玩家视角的战斗轮：方格战场上的棋子、先攻序、正在行动的深潜者幼体，右侧是斗殴对闪避的对抗判定与伤害结算，底部问玩家反击还是闪避">
+          <img data-key="sheet" src="assets/shots/gothic-charcard.webp" data-shot="charcard" width="2000" height="1250" loading="lazy"
+               alt="调查员许闻舟的角色卡：拱门头像、HP / SAN / MP 进度条、幸运与派生值、属性雷达图，以及八项属性和它们的困难与极难门槛">
+        </div>
+        <span class="corners" data-corners></span>
+      </figure>
     </div>
   </section>
 
   <!-- ================= 能做什么 ================= -->
   <section id="features">
     <div class="wrap">
-      <p class="eyebrow">What it does</p>
-      <h2>能做什么</h2>
-      <p class="section-lede">
-        目前规则引擎只做了 CoC 七版。下面这些都是已经能跑起来的功能。
-      </p>
-
-      <div class="grid">
-        <div class="card">
+      <div class="center">
+        <p class="eyebrow reveal">What it does</p>
+        <h2 class="reveal">能做什么</h2>
+        <p class="section-lede reveal">目前规则引擎只做了克苏鲁的呼唤第七版。下面这些都是已经能跑起来的功能。</p>
+      </div>
+      <div class="grid grid-4">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-sparkles"/></svg>
           <h3>AI 主持与 NPC</h3>
-          <p>AI 描述场景、扮演所有 NPC、决定什么时候该掷骰。文字是一个词一个词出来的，不用等整段。局跑长了会自动写剧情摘要，免得模型忘了前面发生过什么。</p>
+          <p>AI 描述场景、扮演所有 NPC、决定什么时候该掷骰。文字边生成边出现；局跑长了自动写剧情摘要，免得模型忘了前面的事。</p>
         </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-dice"/></svg>
           <h3>骰子不交给模型猜</h3>
-          <p>掷出多少点是程序算的，不是模型编的。检定、理智、战斗、追逐都走规则引擎结算，AI 只决定「这里要不要检定、难度多少」。屏幕上的 3D 骰子会滚到算好的那个数上。</p>
+          <p>点数是程序算的，不是模型编的。检定、理智、战斗、追逐都走规则引擎，AI 只决定「这里要不要检定、难度多少」。</p>
         </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
+          <svg class="icon"><use href="#i-sliders"/></svg>
+          <h3>本桌规则可以改</h3>
+          <p>大成功阈值、奖惩骰上限、幸运能不能花、建卡上限……每条村规都能调，数据表也能改，改好的整套规则可以导出发给别人。</p>
+        </div>
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-scroll"/></svg>
           <h3>模组导入与 AI 解析</h3>
-          <p>文本、PDF、Word、图片都能传，图片要接视觉模型。AI 把本子拆成场景、NPC、线索和时间线，地图画成六边形沙盘。</p>
+          <p>文本、PDF、Word、图片都能传。AI 把本子拆成场景、NPC、线索和时间线，地点画成六边形沙盘，玩家只看得见已知的那部分。</p>
         </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-users"/></svg>
           <h3>车卡与角色管理</h3>
-          <p>CoC 七版车卡向导：掷骰或手填属性、112 个职业、技能加点、背景与随身物品。有现成的卡就导 Excel，懒得动手就让 AI 生成一张。</p>
+          <p>七版六步车卡向导：112 个职业、技能加点、背景与随身物品；有现成的卡就导 Excel，懒得动手就让 AI 捏一张。</p>
         </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-book"/></svg>
           <h3>规则书按需检索</h3>
-          <p>把规则书 PDF 拖进来，它在本机建索引。AI 守秘人碰到拿不准的规则，先翻原文再裁定。建索引用的模型也跑在本机。</p>
+          <p>把规则书 PDF 拖进来，它在本机建索引。守秘人碰到拿不准的规则先翻原文再裁定，建索引的模型也跑在本机。</p>
         </div>
-        <div class="card">
-          <svg class="icon"><use href="#i-network"/></svg>
-          <h3>多人同桌</h3>
-          <p>建房拿房间码，朋友进大厅认领席位，没人坐的位子给 AI 队友。在同一个 Wi-Fi 下直接连；不在一块儿就用内置直连，发个邀请码过去。</p>
+        <div class="card reveal"><span class="corners" data-corners></span>
+          <svg class="icon"><use href="#i-music"/></svg>
+          <h3>场景配图与配乐</h3>
+          <p>接上生图模型，场景和 NPC 会有配图（可选）。配乐按氛围自动换，内置曲目都附署名，也能放自己的曲库。</p>
         </div>
-        <div class="card">
-          <svg class="icon"><use href="#i-scroll"/></svg>
-          <h3>也可以你来当守秘人</h3>
-          <p>建房时选真人 KP，AI 就退到副手位：替你拟旁白草稿、给裁定建议、翻模组原文和规则书，发不发、怎么改由你定。</p>
-        </div>
-      </div>
-
-      <figure class="shot">
-        <img src="assets/shots/gothic-game.webp" data-shot="game" width="2000" height="1250" loading="lazy"
-             alt="对局界面：顶部是四个席位和分头行动的两条支线，中间依次是两名 AI 队友各自的行动、守秘人的场景叙述、一次「侦查」检定掷出 71 未过 55 的结果，以及花 16 点幸运补上还是放弃的询价；右侧常驻角色卡，显示 HP、SAN、MP、属性与雷达图">
-      </figure>
-      <p class="shot-cap">对局界面。空着的席位交给 AI 队友，各自行动、各自掷骰；队伍分头行动时，两条线分栏并排推进。</p>
-
-      <div class="feature flip" style="margin-top:44px">
-        <figure class="shot" style="margin-top:0">
-          <img src="assets/shots/gothic-kp-console.webp" data-shot="kp-console" width="450" height="600" loading="lazy"
-               alt="真人 KP 的工作台：顶部是主持与资料两个标签，下面是「待回收 1」和开放行动，再往下是叙事、NPC 台词、检定三个直达按钮加一个「更多」下拉，最下面是旁白输入框与发布按钮">
-        </figure>
-        <div class="feature-text">
-        <h3>换你来当守秘人，AI 退到副手位</h3>
-        <p>
-          上面那张是玩家视角。建房时把守秘人选成真人，界面右边会多出一条工作台：旁白、NPC 台词、
-          各类检定、切场景、发手书、结算 HP、开战斗，都从那儿发给全桌。你占的是守秘人席，
-          不占玩家席，也不掷自己的骰。
-        </p>
-        <ul>
-          <li><svg class="icon"><use href="#i-check"/></svg><span>卡住时让 AI 拟一段旁白草稿或给条裁定建议，采不采用你说了算</span></li>
-          <li><svg class="icon"><use href="#i-check"/></svg><span>模组原文和规则书就地检索，不用切窗口翻本子</span></li>
-          <li><svg class="icon"><use href="#i-check"/></svg><span>玩家席可以全交给 AI 队友，一个人先把本子跑一遍也行</span></li>
-          <li><svg class="icon"><use href="#i-check"/></svg><span>暗骰结果只有你看得见，玩家那侧只知道「掷过了」</span></li>
-        </ul>
+        <div class="card reveal"><span class="corners" data-corners></span>
+          <svg class="icon"><use href="#i-phone"/></svg>
+          <h3>手机上也能坐下</h3>
+          <p>界面适配了手机屏幕：底部导航、紧凑的角色卡与操作区。同一网络里的朋友用手机浏览器就能进房。</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ================= 图文细节 ================= -->
+  <!-- ================= 模组 / 规则 / 车卡 ================= -->
   <section>
     <div class="wrap">
       <div class="feature">
-        <div class="feature-text">
+        <div class="feature-text reveal">
           <h3>把本子交给 AI，拆成能跑的结构</h3>
-          <p>AI 把导入的模组拆成场景、NPC、线索和时间线，地点之间怎么走画成一张六边形沙盘。开局后玩家只看得见自己已经知道的那部分。</p>
-          <ul>
+          <p>导入的模组拆成场景、NPC、线索和时间线，地点之间怎么走画成一张六边形沙盘。开局后玩家只看得见自己已经知道的那部分。</p>
+          <ul class="points">
             <li><svg class="icon"><use href="#i-check"/></svg><span>详情 / 关系图 / 时间线 / 沙盘 四种视图</span></li>
             <li><svg class="icon"><use href="#i-check"/></svg><span>含 NPC 秘密与真相的视图有剧透警告</span></li>
-            <li><svg class="icon"><use href="#i-check"/></svg><span>守秘人视角是上帝视角，玩家侧带迷雾</span></li>
+            <li><svg class="icon"><use href="#i-check"/></svg><span>守秘人是上帝视角，玩家侧带迷雾</span></li>
           </ul>
         </div>
-        <figure class="shot" style="margin-top:0">
+        <figure class="frame reveal">
           <img src="assets/shots/gothic-sandbox.webp" data-shot="sandbox" width="1440" height="900" loading="lazy"
-               alt="模组沙盘视图：示例模组《雾港失灯事件》的地点以六边形网格排布，标出港务所、雾中栈桥、灯塔底层、灯室、退潮阶梯与黎明港口之间的通路">
+               alt="模组沙盘视图：示例模组《雾港失灯事件》的地点以六边形网格排布，标出港务所、雾中栈桥、灯塔底层等地点之间的通路">
+          <span class="corners" data-corners></span>
         </figure>
       </div>
-
       <div class="feature flip">
-        <div class="feature-text">
-          <h3>这一桌的规矩，写下来给 AI 守秘人看</h3>
-          <p>这些「村规」每条都能改：大成功阈值、大失败口径、奖惩骰上限、临时疯狂门槛、要不要做成长检定。改动对所有用这套规则的房间生效。</p>
-          <ul>
+        <div class="feature-text reveal">
+          <h3>这一桌的规矩，写下来给守秘人看</h3>
+          <p>规则拆成一个个组件：参数、数据表、钩子各管一摊。改动只对用这套规则的房间生效，官方规则就是一份默认预设。</p>
+          <ul class="points">
             <li><svg class="icon"><use href="#i-check"/></svg><span>改参数的项直接影响骰子结算</span></li>
             <li><svg class="icon"><use href="#i-check"/></svg><span>「桌面约定」是自由文本，只影响怎么演</span></li>
             <li><svg class="icon"><use href="#i-check"/></svg><span>规则书 PDF 在本地建索引，纯扫描件不行，得能选中文字</span></li>
           </ul>
         </div>
-        <figure class="shot" style="margin-top:0">
+        <figure class="frame reveal">
           <img src="assets/shots/gothic-rulebooks.webp" data-shot="rulebooks" width="1440" height="900" loading="lazy"
-               alt="规则书页面：左侧是可逐项调整的村规参数与桌面约定文本框，右侧是已装载规则书的上传区">
+               alt="规则页：本桌规则工作台与规则书书架">
+          <span class="corners" data-corners></span>
         </figure>
       </div>
-
       <div class="feature">
-        <div class="feature-text">
+        <div class="feature-text reveal">
           <h3>六步车卡，或者让 AI 替你捏一个</h3>
-          <p>按 CoC 七版流程走完基本信息、属性、职业、技能、背景与随身物品；中途可以先存着，下次接着填。已经有卡的话，直接导入 Excel 角色卡。</p>
-          <ul>
+          <p>按七版流程走完基本信息、属性、职业、技能、背景与随身物品；中途可以先存着，下次接着填。</p>
+          <ul class="points">
             <li><svg class="icon"><use href="#i-check"/></svg><span>112 个职业、52 件装备、106 件武器</span></li>
             <li><svg class="icon"><use href="#i-check"/></svg><span>年龄档修正、教育增强、派生值自动结算</span></li>
-            <li><svg class="icon"><use href="#i-check"/></svg><span>选定模组后会给出这个本子的车卡建议</span></li>
+            <li><svg class="icon"><use href="#i-check"/></svg><span>选定模组后右栏常驻这个本子的车卡建议</span></li>
           </ul>
         </div>
-        <figure class="shot" style="margin-top:0">
+        <figure class="frame reveal">
           <img src="assets/shots/gothic-char-wizard.webp" data-shot="char-wizard" width="1440" height="900" loading="lazy"
-               alt="创建角色向导：顶部是基本信息、属性设定、职业选择、技能加点、背景故事、随身物品六个步骤，页面提供 Excel 导入与 AI 生成角色卡入口">
+               alt="创建角色向导：基本信息、属性设定、职业选择、技能加点、背景故事、随身物品六个步骤">
+          <span class="corners" data-corners></span>
         </figure>
       </div>
     </div>
@@ -728,84 +847,111 @@
   <!-- ================= 联机 ================= -->
   <section id="coop">
     <div class="wrap">
-      <p class="eyebrow">Play together</p>
-      <h2>和朋友一起玩</h2>
-      <p class="section-lede">
+      <p class="eyebrow reveal">Play together</p>
+      <h2 class="reveal">和朋友一起玩</h2>
+      <p class="section-lede reveal">
         房主的电脑就是主机。没有账号，也没有服务器，存档和角色卡都留在那台机器上；
-        AI 也只从房主那端调用，所以只有房主需要配模型，其他人接上就能玩。
+        AI 只从房主那端调用，所以只有房主需要配模型。
       </p>
-
       <div class="grid">
-        <div class="card">
-          <svg class="icon"><use href="#i-sparkles"/></svg>
-          <h3>一个人也能开</h3>
-          <p>空着的席位交给 AI 队友，不必等人凑齐。每个队友有自己的性格，会自己行动、自己掷骰，你跟他们说过的话，他们记得。</p>
-        </div>
-        <div class="card">
-          <svg class="icon"><use href="#i-scroll"/></svg>
-          <h3>谁当守秘人，建房时定</h3>
-          <p>交给 AI，或者你自己来。选真人 KP 的话，你只占守秘人席，朋友用房间码进来坐玩家席，你卡住了 AI 递草稿。</p>
-        </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-network"/></svg>
           <h3>同一个网络</h3>
-          <p>房主在「设置 → 联机」打开「允许局域网加入」，其他人填主机地址和房间码就能进。这个开关默认是关的，打开后要重启应用才生效。只在自家或朋友的网络里开。</p>
+          <p>房主在「设置 → 联机」打开「允许局域网加入」，其他人填主机地址和房间码就能进，电脑和手机浏览器都行。这个开关默认关，打开后要重启应用。</p>
         </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-laptop"/></svg>
           <h3>隔着网络</h3>
-          <p>房主开「内置直连」发一条邀请码，对方粘进「加入房间」就行，不用另外装联网工具，也不必做端口转发。双方都得用桌面版，在浏览器里打开的那份没有这个功能。</p>
+          <p>房主开「内置直连」发一条邀请码，对方粘进「加入房间」就行，不用另装联网工具，也不必做端口转发。双方都得用桌面版。</p>
+        </div>
+        <div class="card reveal"><span class="corners" data-corners></span>
+          <svg class="icon"><use href="#i-sparkles"/></svg>
+          <h3>坐不满就补 AI</h3>
+          <p>空着的席位交给 AI 队友。每个队友有自己的性格和记忆，会自己行动、自己掷骰，不必等人凑齐。</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ================= 怎么开跑 ================= -->
+  <!-- ================= 下载前先看 + 怎么开跑 ================= -->
   <section id="start">
     <div class="wrap">
-      <p class="eyebrow">Get started</p>
-      <h2>三步开跑</h2>
-      <p class="section-lede">从下载到第一次掷骰，大约十分钟。</p>
-      <div class="steps">
-        <div class="step">
-          <h3>装上并首次打开</h3>
-          <p>macOS 右键 → 打开；Windows 在 SmartScreen 里选「仍要运行」。数据会写到系统的应用数据目录，卸载前都在。</p>
+      <p class="eyebrow reveal">Before you download</p>
+      <h2 class="reveal">下载前先看这四件事</h2>
+      <p class="section-lede reveal">装上之后还有两件事得你自己做：接一个模型，准备一个本子。另外两条是安全上的提醒。有一条接受不了，就先别下。</p>
+      <div class="notices">
+        <div class="notice reveal">
+          <svg class="icon"><use href="#i-key"/></svg>
+          <div>
+            <h3>要自备 AI 模型接口</h3>
+            <p>OpenAI 兼容或 Anthropic 协议都行（Gemini 走它的 OpenAI 兼容接口），模型、接口地址、上下文窗口自己填。密钥只存在本机的 <code>ai_settings.json</code> 里；调用模型的钱你直接付给服务商，跟本项目没关系。</p>
+          </div>
         </div>
-        <div class="step">
-          <h3>接一个模型</h3>
-          <p>在「设置 → AI 配置」新增一个 OpenAI 兼容或 Anthropic 配置，填接口地址、密钥和模型名，点「测试」，通了再启用。</p>
+        <div class="notice warn reveal">
+          <svg class="icon"><use href="#i-alert"/></svg>
+          <div>
+            <h3>安装包没有做代码签名和公证</h3>
+            <p>第一次打开会被系统拦下。macOS 在应用上<strong>右键 → 打开</strong>再确认一次；Windows 在 SmartScreen 弹窗里点<strong>「更多信息」→「仍要运行」</strong>。不放心就照仓库文档自己从源码构建。</p>
+          </div>
         </div>
-        <div class="step">
-          <h3>开第一场团</h3>
-          <p>回首页点「体验新手团」，跟着走完一个小短团；或者进「开始游戏」，用自己的模组和角色建房，把房间码发给朋友。建房时还要选谁当守秘人，交给 AI 或者你自己上。</p>
+        <div class="notice warn reveal">
+          <svg class="icon"><use href="#i-shield"/></svg>
+          <div>
+            <h3>只适用于本机和可信网络</h3>
+            <p>装好之后它只听本机。要让朋友进来，房主得去「设置 → 联机」手动打开再重启。它<strong>没有账号，也不加密传输</strong>，别放到公网上，也别做端口转发。</p>
+          </div>
+        </div>
+        <div class="notice reveal">
+          <svg class="icon"><use href="#i-info"/></svg>
+          <div>
+            <h3>规则书和模组要你自己准备</h3>
+            <p>安装包里只带了一个项目自己写的示例短团。规则书 PDF、模组、角色卡都得自己导入，有没有权用也是你自己的事，详见<a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。</p>
+          </div>
         </div>
       </div>
 
-      <figure class="shot">
+      <div style="height:104px"></div>
+      <div class="center">
+        <p class="eyebrow reveal">Get started</p>
+        <h2 class="reveal">三步开跑</h2>
+        <p class="section-lede reveal">从下载到第一次掷骰，大约十分钟。</p>
+      </div>
+      <div class="steps" style="margin-top:20px">
+        <div class="step reveal">
+          <h3>装上并首次打开</h3>
+          <p>macOS 右键 → 打开；Windows 在 SmartScreen 里选「仍要运行」。数据写在系统的应用数据目录，卸载前都在。</p>
+        </div>
+        <div class="step reveal">
+          <h3>接一个模型</h3>
+          <p>「设置 → AI 配置」新增一个配置，填接口地址、密钥和模型名，点「测试」，通了再启用。生图模型可选。</p>
+        </div>
+        <div class="step reveal">
+          <h3>开第一场团</h3>
+          <p>回首页点「体验新手团」跑完一个小短团；或者进「开始游戏」用自己的模组和角色建房，选好谁当守秘人，把房间码发给朋友。</p>
+        </div>
+      </div>
+      <figure class="frame reveal">
         <img src="assets/shots/gothic-settings.webp" data-shot="settings" width="1440" height="900" loading="lazy"
              alt="设置页的 AI 配置面板：分对话模型与生图模型两个标签页，提示还没有启用任何配置，右上角是新增配置按钮">
+        <span class="corners" data-corners></span>
       </figure>
-      <p class="shot-cap">AI 配置面板。对话模型负责叙述、NPC 与裁定；生图模型是可选的，用来给场景和角色配图。</p>
+      <p class="shot-cap reveal">AI 配置面板。对话模型负责叙述、NPC 与裁定；生图模型是可选的，用来给场景和角色配图。</p>
     </div>
   </section>
 
   <!-- ================= 边界 ================= -->
   <section id="limits">
     <div class="wrap">
-      <p class="eyebrow">Where it stops</p>
-      <h2>能力边界，先说清楚</h2>
-      <p class="section-lede">
-        下面是这一版做不到、或者还不稳的地方，下载之前先看一眼。
-      </p>
-
-      <div class="ledger">
+      <p class="eyebrow reveal">Where it stops</p>
+      <h2 class="reveal">能力边界，先说清楚</h2>
+      <p class="section-lede reveal">下面是这一版做不到、或者还不稳的地方，下载之前先看一眼。</p>
+      <div class="ledger reveal">
         <div class="ledger-row">
           <div>CoC 七版覆盖度</div>
           <div>
             <span class="tag">部分</span>
-            属性、建卡、技能与对抗检定、理智与疯狂发作、战斗、追逐、成长都由引擎按规则算；
-            <strong>孤注一掷、花费幸运目前只靠 AI 判断，引擎不管</strong>；不定性疯狂和魔法还没做。
-            逐项对照见<a href="https://github.com/jinziguan123/coc-player/blob/master/docs/coc-rule-coverage.md" target="_blank" rel="noopener">规则覆盖矩阵</a>。
+            属性、建卡、技能与对抗检定、理智与疯狂发作、战斗、追逐、成长都由引擎按规则算，花费幸运（可选规则）也由引擎结算；
+            <strong>孤注一掷目前只靠 AI 判断，引擎不管</strong>；不定性疯狂和魔法还没做。逐项对照见<a href="https://github.com/jinziguan123/coc-player/blob/master/docs/coc-rule-coverage.md" target="_blank" rel="noopener">规则覆盖矩阵</a>。
           </div>
         </div>
         <div class="ledger-row">
@@ -826,52 +972,44 @@
         </div>
         <div class="ledger-row">
           <div>音频</div>
-          <div><span class="tag muted">没有</span>目前没有 BGM 与音效。拿到有明确授权的素材之前保持静音。</div>
+          <div><span class="tag muted">只有配乐</span>有按氛围切换的背景音乐，内置曲目都有明确授权并附署名；还没有音效。</div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ================= 开源 ================= -->
-  <section id="open">
+  <!-- ================= 源码与许可 ================= -->
+  <section id="source">
     <div class="wrap">
-      <p class="eyebrow">Open source</p>
-      <h2>源码、架构与许可</h2>
-      <p class="section-lede">
-        全部代码开源。前端 React + TypeScript + Vite，后端 FastAPI + SQLAlchemy + SQLite，
-        桌面外壳 Tauri，后端以 PyInstaller sidecar 随包分发。
-      </p>
-
+      <p class="eyebrow reveal">Under the hood</p>
+      <h2 class="reveal">源码、架构与许可</h2>
+      <p class="section-lede reveal">前端 React + TypeScript，后端 FastAPI + SQLite，桌面壳是 Tauri。规则引擎是一套可插拔的组件，AI 调用走统一的 Provider 抽象。</p>
       <div class="grid">
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-github"/></svg>
           <h3>GitHub 仓库</h3>
           <p>源码、开发文档、架构决策记录（ADR）和构建流程都在这里。欢迎提 issue。</p>
           <p style="margin-top:12px"><a href="https://github.com/jinziguan123/coc-player" target="_blank" rel="noopener">jinziguan123/coc-player</a></p>
         </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-map"/></svg>
           <h3>代码地图</h3>
           <p>一张能点的架构图：从玩家动作到回合编排、规则引擎、AI 代理、模型调用，每个节点都能跳到对应源码。</p>
           <p style="margin-top:12px"><a href="arch.html">查看架构图</a></p>
         </div>
-        <div class="card">
+        <div class="card reveal"><span class="corners" data-corners></span>
           <svg class="icon"><use href="#i-laptop"/></svg>
           <h3>自己构建</h3>
           <p>需要 Node 20.19+、pnpm、Python 3.10+ 和 Rust。Windows 包必须在 Windows 上构建。</p>
           <p style="margin-top:12px"><a href="https://github.com/jinziguan123/coc-player/blob/master/docs/packaging.md" target="_blank" rel="noopener">打包文档</a></p>
         </div>
       </div>
-
-      <div class="notice" style="margin-top:28px">
+      <div class="notice reveal" style="margin-top:28px">
         <svg class="icon"><use href="#i-scroll"/></svg>
         <div>
           <h3>许可证与内容边界</h3>
           <p>
-            项目代码采用 <a href="https://github.com/jinziguan123/coc-player/blob/master/LICENSE" target="_blank" rel="noopener">Apache License 2.0</a>。
-            许可只管代码，不包括规则书、商业模组、你上传的内容、字体、模型权重这些第三方素材，
-            范围见<a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。
-            导进来的东西版权归谁还归谁，有没有权用是你自己的事；应用帮你解析、索引、生成，不会因此改变它的归属。
+            项目代码采用 <a href="https://github.com/jinziguan123/coc-player/blob/master/LICENSE" target="_blank" rel="noopener">Apache License 2.0</a>。许可只管代码，不包括规则书、商业模组、你上传的内容、字体、模型权重这些第三方素材，范围见<a href="https://github.com/jinziguan123/coc-player/blob/master/CONTENT_NOTICE.md" target="_blank" rel="noopener">内容与素材声明</a>。导进来的东西版权归谁还归谁，有没有权用是你自己的事；应用帮你解析、索引、生成，不会因此改变它的归属。
           </p>
         </div>
       </div>
@@ -882,14 +1020,13 @@
 <footer>
   <div class="wrap">
     <div class="foot-grid">
-      <div>
-        <div class="wordmark" style="font-size:18px">CoC Player</div>
-        <p style="margin:10px 0 0;max-width:340px">
-          AI 当守秘人的跑团桌面应用，数据都在本机。自己玩、和朋友联机都行，
-          但它没有账号，也不加密传输，别放到公网上。
+      <div class="reveal">
+        <a class="wordmark" href="#top"><svg aria-hidden="true"><use href="#i-sunburst"/></svg>CoC Player</a>
+        <p style="margin:10px 0 0;max-width:360px">
+          AI 当守秘人的跑团桌面应用，数据都在本机。自己玩、和朋友联机都行，但它没有账号，也不加密传输，别放到公网上。
         </p>
       </div>
-      <div>
+      <div class="reveal">
         <h4>下载</h4>
         <ul>
           <li><a href="#top">macOS 版</a></li>
@@ -897,7 +1034,7 @@
           <li><a href="https://github.com/jinziguan123/coc-player/blob/master/docs/packaging.md" target="_blank" rel="noopener">从源码构建</a></li>
         </ul>
       </div>
-      <div>
+      <div class="reveal">
         <h4>文档</h4>
         <ul>
           <li><a href="https://github.com/jinziguan123/coc-player" target="_blank" rel="noopener">GitHub 仓库</a></li>
@@ -908,14 +1045,13 @@
       </div>
     </div>
     <div class="colophon">
-      代码以 Apache-2.0 授权；规则书、商业模组与用户上传内容不在授权范围内。
-      「克苏鲁的呼唤」（Call of Cthulhu）及相关名称为 Chaosium Inc. 的商标，本项目与之无隶属或背书关系。
-      页面字体 ZCOOL XiaoWei 以 SIL Open Font License 1.1 分发。
+      代码以 Apache-2.0 授权；规则书、商业模组与用户上传内容不在授权范围内。「克苏鲁的呼唤」（Call of Cthulhu）及相关名称为 Chaosium Inc. 的商标，本项目与之无隶属或背书关系。页面字体 ZCOOL XiaoWei 以 SIL Open Font License 1.1 分发。
     </div>
   </div>
 </footer>
 
 <script>
+  /* ---------- 下载按钮 ---------- */
   (function () {
     var D = window.COC_DOWNLOADS || {}
 
@@ -948,13 +1084,20 @@
     meta.textContent = bits.join(' · ')
   })();
 
+  /* ---------- 四角回纹：纯装饰，由脚本补，免得每张卡都抄一遍 SVG ---------- */
+  (function () {
+    var svg = '<svg class="POS" aria-hidden="true"><use href="#i-corner"/></svg>'
+    document.querySelectorAll('[data-corners]').forEach(function (el) {
+      el.innerHTML = ['tl', 'tr', 'bl', 'br'].map(function (p) { return svg.replace('POS', p) }).join('')
+    })
+  })();
+
   /* ---------- 主题切换 ----------
-     与应用同构：默认哥特走 :root 基线，羊皮纸写 data-theme='parchment'。
-     键用 coc_site_theme，不复用应用的 trpg_theme —— 那是应用自己的键，且不同源。 */
+     与应用同构：默认「密大装饰」走 :root 基线（键名沿用 gothic），羊皮纸写 data-theme='parchment'。键用 coc_site_theme，不复用应用的 trpg_theme —— 那是应用自己的键，且不同源。 */
   (function () {
     var THEMES = {
-      gothic:    { label: '羊皮纸', icon: '#i-sun',  meta: '#0c0e13' },
-      parchment: { label: '暗夜',   icon: '#i-moon', meta: '#f0e6d3' },
+      gothic:    { label: '羊皮纸',   icon: '#i-sun',  meta: '#0a110f' },
+      parchment: { label: '密大装饰', icon: '#i-moon', meta: '#f0e6d3' },
     }
     var btn = document.getElementById('theme-toggle')
     var icon = document.getElementById('theme-icon')
@@ -977,7 +1120,8 @@
     // 截图按主题各存一套：切主题时把 src 换成对应前缀的那张。
     function syncShots(theme) {
       document.querySelectorAll('img[data-shot]').forEach(function (img) {
-        img.src = 'assets/shots/' + theme + '-' + img.dataset.shot + '.webp'
+        var src = 'assets/shots/' + theme + '-' + img.dataset.shot + '.webp'
+        if (img.getAttribute('src') !== src) img.src = src
       })
     }
 
@@ -995,45 +1139,78 @@
     })
   })();
 
-  /* ---------- 滚动进场 + 背景视差 ---------- */
+  /* ---------- 页签：黄铜底在按钮之间滑过去，截图与说明交叉淡入 ---------- */
+  (function () {
+    document.querySelectorAll('[data-tabs]').forEach(function (bar) {
+      var name = bar.dataset.tabs
+      var pill = bar.querySelector('.pill')
+      var buttons = bar.querySelectorAll('button')
+      var imgs = document.querySelectorAll('[data-stack="' + name + '"] img')
+      var caps = document.querySelectorAll('[data-caps="' + name + '"] p')
+
+      function place(btn) {
+        pill.style.setProperty('--x', btn.offsetLeft + 'px')
+        pill.style.setProperty('--w', btn.offsetWidth + 'px')
+      }
+      function select(btn) {
+        var key = btn.dataset.key
+        buttons.forEach(function (b) { b.setAttribute('aria-selected', String(b === btn)) })
+        imgs.forEach(function (i) { i.classList.toggle('is-on', i.dataset.key === key) })
+        caps.forEach(function (p) { p.classList.toggle('is-on', p.dataset.for === key) })
+        place(btn)
+      }
+      buttons.forEach(function (b) {
+        b.addEventListener('click', function () { select(b) })
+        b.addEventListener('keydown', function (e) {
+          if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+          var list = Array.prototype.slice.call(buttons)
+          var next = list[(list.indexOf(b) + (e.key === 'ArrowRight' ? 1 : list.length - 1)) % list.length]
+          next.focus(); select(next)
+        })
+      })
+      var on = bar.querySelector('[aria-selected="true"]') || buttons[0]
+      place(on)
+      // 字体晚到会改按钮宽度，到了再量一次
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { place(bar.querySelector('[aria-selected="true"]')) })
+      addEventListener('resize', function () { place(bar.querySelector('[aria-selected="true"]')) })
+    })
+  })();
+
+  /* ---------- 首屏开场 + 滚动进场 + 背景视差 ---------- */
   (function () {
     var reduce = matchMedia('(prefers-reduced-motion: reduce)')
+    var hero = document.querySelector('.hero')
+    // 首屏：等第一帧画出初始态再开门，否则过渡没有起点
+    requestAnimationFrame(function () { requestAnimationFrame(function () { hero.classList.add('is-open') }) })
 
-    // 进场：只做一次，出视口不再收回去——来回滚动时反复闪是最烦人的。
-    var targets = document.querySelectorAll(
-      'section:not(.hero) :is(.eyebrow, h2, .section-lede, .card, .notice,' +
-      ' .step, .ledger-row, .feature-text, .shot, .shot-cap),' +
-      ' .hero .shot, footer .foot-grid > div, footer .colophon'
-    )
-
+    var targets = document.querySelectorAll('.reveal')
     if (reduce.matches || !('IntersectionObserver' in window)) {
       targets.forEach(function (el) { el.classList.add('is-in') })
       return
     }
 
-    // 同组内错开：--i 取它在父容器里同类兄弟中的序号。
+    // 同组内错开：--i 取它在父容器里同为 .reveal 的兄弟中的序号。
     targets.forEach(function (el) {
       var sibs = Array.prototype.filter.call(el.parentElement.children, function (n) {
-        return n.className === el.className
+        return n.classList.contains('reveal')
       })
       var i = sibs.indexOf(el)
       if (i > 0) el.style.setProperty('--i', String(Math.min(i, 5)))
     })
 
+    // 只做一次，出视口不再收回去——来回滚动时反复闪是最烦人的。
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (!e.isIntersecting) return
         e.target.classList.add('is-in')
         io.unobserve(e.target)
       })
-    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.05 })
+    }, { rootMargin: '0px 0px -10% 0px', threshold: 0.05 })
     targets.forEach(function (el) { io.observe(el) })
 
     // 背景视差 + hero 淡出：rAF 节流，滚动事件本身只记一个数。
     var root = document.documentElement
-    var hero = document.querySelector('.hero')
     var ticking = false
-
     function onScroll() {
       if (ticking) return
       ticking = true
@@ -1046,7 +1223,6 @@
         ticking = false
       })
     }
-
     onScroll()
     addEventListener('scroll', onScroll, { passive: true })
     addEventListener('resize', onScroll)

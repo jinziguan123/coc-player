@@ -15,7 +15,7 @@ site/
 
 ## 主题
 
-两套皮肤与应用同构：默认**暗夜哥特**走 `:root` 基线，**羊皮纸**写 `data-theme="parchment"`，
+两套皮肤与应用同构：默认**密大装饰**（装饰艺术风，键名沿用 `gothic`）走 `:root` 基线，**羊皮纸**写 `data-theme="parchment"`，
 色值直接取自 `apps/web/src/index.css` 的同名 token，改应用主题时记得对一下这边。
 
 - 首选项存在 `localStorage['coc_site_theme']`，没存过则跟随系统 `prefers-color-scheme`；
@@ -29,10 +29,13 @@ site/
 
 ## 动效
 
-- **进场**：区块随滚动「从上方落下一点点 + 淡入」，由 `IntersectionObserver` 加 `.is-in` 解除，
+- **进场**：带 `.reveal` 的元素随滚动「从上方落下一点点 + 淡入」，由 `IntersectionObserver` 加 `.is-in` 解除，
   只触发一次，不会来回闪。
-- **背景**：`.bg-layer` 是固定层，脚本把滚动进度写进 `--sy`（0→1），层内两片渐变按不同系数
-  反向位移，形成视差；hero 另有 `--hero` 控制淡出上移。
+- **首屏**：日芒描线、标题依次落下，截图像两扇门从中间推开（`.hero.is-open`，脚本在第二帧加上）。
+- **背景**：`.bg-layer` 是固定层（日芒射线 + 两团光），脚本把滚动进度写进 `--sy`（0→1），
+  两层按不同系数反向位移，形成视差；hero 另有 `--hero` 控制淡出上移。
+- **页签**：`[data-tabs]` 的黄铜底在按钮间滑动，同名 `[data-stack]` 里的截图与 `[data-caps]` 里的说明交叉淡入。
+  叠放的截图都带 `data-shot`，切主题时一起换。
 - 初始隐藏态挂在 `<html class="js-anim">` 下，**没有 JS 时内容照常显示**；
   `prefers-reduced-motion: reduce` 下位移、淡入、视差全部关闭。
 
