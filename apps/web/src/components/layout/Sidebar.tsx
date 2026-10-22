@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { m } from 'motion/react'
-import { GiScrollUnfurled, GiCharacter, GiDiceTwentyFacesTwenty, GiArchiveResearch, GiGears, GiRuleBook } from 'react-icons/gi'
+import { GiScrollUnfurled, GiCharacter, GiDiceTwentyFacesTwenty, GiArchiveResearch, GiGears, GiRuleBook, GiSandsOfTime } from 'react-icons/gi'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { spring } from '@/lib/motion'
 import { DecoSunburst } from '@/components/ui/deco'
 import { canLeave } from '@/lib/navGuard'
+import { runningJobCount, useUploadJobsStore } from '@/stores/uploadJobsStore'
 
 const NAV_ITEMS = [
   { to: '/', label: '卷宗', icon: GiArchiveResearch },
@@ -33,6 +34,9 @@ export function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
     setSessionOverride(null)
   }
   const collapsed = autoCollapse ? (sessionOverride ?? true) : collapsedPref
+  const runningJobs = useUploadJobsStore((s) => runningJobCount(s.jobs))
+  const jobsOpen = useUploadJobsStore((s) => s.open)
+  const setJobsOpen = useUploadJobsStore((s) => s.setOpen)
 
   const toggle = () => {
     if (autoCollapse) {
@@ -98,6 +102,20 @@ export function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
           </NavLink>
         ))}
       </nav>
+      {/* 模组解析在后台跑，刷新/换页都不影响——这里随时能看进度 */}
+      <div className="sidebar-jobs">
+        <button
+          type="button"
+          className={`sidebar-link ${jobsOpen ? 'active' : ''}`}
+          onClick={() => setJobsOpen(!jobsOpen)}
+          aria-expanded={jobsOpen}
+          title={runningJobs ? `解析进度（${runningJobs} 个进行中）` : '解析进度'}
+        >
+          <GiSandsOfTime className={runningJobs ? 'sidebar-jobs-spin' : undefined} />
+          <span className="sidebar-link-label">解析进度</span>
+          {runningJobs > 0 && <i className="sidebar-jobs-badge" aria-label={`${runningJobs} 个进行中`}>{runningJobs}</i>}
+        </button>
+      </div>
       <button
         className="sidebar-toggle"
         onClick={toggle}

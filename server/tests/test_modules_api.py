@@ -512,3 +512,70 @@ def test_backdrop_timeout_is_bounded(monkeypatch, tmp_path):
     asyncio.run(mod._run_upload_job(job_id, "原文", [], "coc"))
 
     assert mod._upload_jobs[job_id]["status"] == "done"
+
+
+def test_upload_jobs_list_and_dismiss(client, monkeypatch):
+    """刷新页面后前端靠任务列表找回进行中的解析；已结束的可移除，进行中的不许删。"""
+    import app.api.modules as mod
+
+    async def noop_job(job_id, raw_text, images, rule_system, ocr_prepass=False):
+        return None
+
+    monkeypatch.setattr(mod, "_run_upload_job", noop_job)
+    monkeypatch.setattr(mod, "_upload_jobs", {})
+    r = client.post(
+        "/api/modules/upload?rule_system=coc",
+        files={"files": ("古宅.txt", "模组正文".encode("utf-8"), "text/plain")},
+    )
+    job_id = r.json()["job_id"]
+    jobs = client.get("/api/modules/upload/jobs").json()
+    assert [j["id"] for j in jobs] == [job_id]
+    assert jobs[0]["files"] == ["古宅.txt"] and jobs[0]["status"] == "running"
+    assert client.delete(f"/api/modules/upload/jobs/{job_id}").status_code == 409
+
+    mod._job_update(job_id, status="done")
+    assert client.delete(f"/api/modules/upload/jobs/{job_id}").status_code == 200
+    assert client.get("/api/modules/upload/jobs").json() == []
+    assert client.delete(f"/api/modules/upload/jobs/{job_id}").status_code == 404
+
+
+def test_extract_failure_marks_job_failed(monkeypatch):
+    """抽取挪进后台任务后，「编码不明」之类的错误落成任务的 failed + 可读说明。"""
+    import asyncio
+
+    import app.api.modules as mod
+
+    called = []
+
+    async def should_not_run(*a, **k):
+        called.append(1)
+
+    monkeypatch.setattr(mod, "_run_upload_job", should_not_run)
+    job_id = mod._job_new(["坏文件.txt"])
+    # 奇数长度的非法字节：所有候选编码（含 UTF-16）都解不了
+    asyncio.run(mod._run_upload_pipeline(job_id, [("坏文件.txt", "text/plain", b"\xff\xfe\x00")], False, "coc", False))
+    job = mod._upload_jobs[job_id]
+    assert job["status"] == "failed" and "坏文件.txt" in job["detail"]
+    assert called == []
+
+
+def test_pdf_extract_runs_in_subprocess_and_errors_cross_process():
+    """PDF 抽取在子进程里跑（GIL 隔离）；子进程里抛的 ExtractError 原样带回主进程。"""
+    import asyncio
+    import io
+
+    from PIL import Image
+
+    from app.services import module_extract
+
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), "white").save(buf, format="PDF")   # 无文字层、无大图
+    pdf = buf.getvalue()
+
+    async def go():
+        return await module_extract.run_extract([("扫描件.pdf", "application/pdf", pdf)], False, False)
+
+    with pytest.raises(module_extract.ExtractError) as ei:
+        asyncio.run(go())
+    assert ei.value.status_code == 422 and "扫描件" in ei.value.detail
+    assert module_extract._pool is not None          # 确实走了子进程池

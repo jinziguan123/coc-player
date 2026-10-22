@@ -148,6 +148,9 @@ async def lifespan(_app: FastAPI):
     watchdog = loop_watchdog.start(asyncio.get_running_loop())
     yield
     watchdog.set()
+    # 模组文件抽取的子进程池：随服务一起收掉，不留孤儿进程与泄漏的信号量
+    from app.services import module_extract
+    module_extract.shutdown()
 
 
 app = FastAPI(title="CoC Player", version="0.1.0", lifespan=lifespan)

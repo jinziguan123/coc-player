@@ -6,6 +6,8 @@ import { useNetlinkAutoStart } from '@/features/netlink/useNetlinkAutoStart'
 import { pageVariants } from '@/lib/motion'
 import { MobileNav } from './MobileNav'
 import { Sidebar } from './Sidebar'
+import { UploadJobsDrawer } from './UploadJobsDrawer'
+import { useUploadJobsSync } from './useUploadJobsSync'
 
 export function AppShell() {
   // 内置直连的这两件事都必须挂在全局，房主多半正在跑团而不是待在设置页：
@@ -13,6 +15,8 @@ export function AppShell() {
   // 自动恢复不全局，隧道要等他恰好翻到设置页才启动，客人在那之前怎么都进不来。
   useNetlinkAutoStart()
   useKnockNotices()
+  // 模组解析进度同样挂全局：刷新页面后找回进行中的任务，完成时无论身在哪页都会提示
+  useUploadJobsSync()
   const { pathname } = useLocation()
   // 退场动画期间旧页还要再渲染一会儿：用 useOutlet 拿到「这一刻」的页面元素交给
   // AnimatePresence 冻住，而不是 <Outlet />——后者会在旧页上直接渲染出新路由的内容。
@@ -39,6 +43,7 @@ export function AppShell() {
         </m.main>
       </AnimatePresence>
       {showMobileNav && <MobileNav />}
+      <UploadJobsDrawer />
       <div className="film-grain" aria-hidden />
     </div>
   )

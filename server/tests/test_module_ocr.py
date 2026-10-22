@@ -3,7 +3,7 @@
 import asyncio
 
 from app.api import modules as modules_api
-from app.services import module_ocr
+from app.services import module_extract, module_ocr
 
 
 class _Vision:
@@ -156,17 +156,18 @@ def test_pdf抽图两种取法():
         monkey.append(data[:1])
         return (data, "image/jpeg")
 
-    orig = modules_api._normalize_image
-    modules_api._normalize_image = fake_norm
+    # 抽取逻辑已挪到 module_extract（子进程里跑），替换要打在它的命名空间上
+    orig = module_extract._normalize_image
+    module_extract._normalize_image = fake_norm
     try:
         monkey.clear()
-        modules_api._select_pdf_images(_Reader(), max_images=3, keep_page_order=True)
+        module_extract._select_pdf_images(_Reader(), max_images=3, keep_page_order=True)
         assert monkey == [b"s", b"L", b"m"]      # 页序
         monkey.clear()
-        modules_api._select_pdf_images(_Reader(), max_images=3)
+        module_extract._select_pdf_images(_Reader(), max_images=3)
         assert monkey == [b"L", b"m", b"s"]      # 体积降序
     finally:
-        modules_api._normalize_image = orig
+        module_extract._normalize_image = orig
 
 
 def test_插画自述被丢弃而不是拼进原文():

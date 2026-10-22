@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api, localApi } from '../api/client'
+import { localApi } from '../api/client'
 import { useModuleStore } from '../stores/moduleStore'
+import { useUploadJobsStore } from '../stores/uploadJobsStore'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { GiUpCard, GiScrollUnfurled, GiQuillInk } from 'react-icons/gi'
 import { AnimatePresence, m } from 'motion/react'
@@ -18,7 +19,11 @@ export function ModulePage() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [ruleSystem, setRuleSystem] = useState('coc')
   const [uploading, setUploading] = useState(false)
-  const [uploadJob, setUploadJob] = useState<{ stage: string; percent: number } | null>(null)
+  // 进行中的解析任务来自全局任务表：刷新页面后照样显示，完成提示也由全局统一弹
+  const uploadJobs = useUploadJobsStore((s) => s.jobs)
+  const runningJobs = uploadJobs.filter((j) => j.status === 'running')
+  const trackJob = useUploadJobsStore((s) => s.track)
+  const openJobs = useUploadJobsStore((s) => s.setOpen)
   const [dragOver, setDragOver] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   // 导入抽屉：上传是偶尔才做的事，不该常年占着首屏最好的位置。书架空着时自动摊开。
@@ -71,34 +76,11 @@ export function ModulePage() {
       const jobId = await startUpload(selectedFiles, ruleSystem)
       setSelectedFiles([])
       if (fileRef.current) fileRef.current.value = ''
-      setUploadJob({ stage: '排队中', percent: 0 })
-      // 轮询后台解析任务进度，直到 done / failed
-      type JobStatus = {
-        status: 'running' | 'done' | 'failed'
-        stage: string
-        percent: number
-        detail: string
-        result: { title?: string } | null
-      }
-      for (;;) {
-        const s = await api.get<JobStatus>(`/modules/upload/status/${jobId}`)
-        if (s.status === 'running') {
-          setUploadJob({ stage: s.stage, percent: s.percent })
-          await new Promise((r) => setTimeout(r, 1200))
-          continue
-        }
-        if (s.status === 'done') {
-          toast.success(`模组「${s.result?.title ?? ''}」解析完成`)
-          await fetchModules()
-        } else {
-          toast.error(s.detail || '模组解析失败')
-        }
-        break
-      }
+      // 解析在后台跑：进度看下方或侧边栏「解析进度」，结束时全局提示并刷新列表
+      await trackJob(jobId)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '模组上传失败')
     } finally {
-      setUploadJob(null)
       setUploading(false)
     }
   }
@@ -240,7 +222,7 @@ export function ModulePage() {
             </SelectContent>
           </Select>
           <button onClick={handleUpload} disabled={uploading || !selectedFiles.length} className="btn-primary">
-            {uploading ? '解析中...' : '上传并解析'}
+            {uploading ? '上传中...' : '上传并解析'}
           </button>
         </div>
       </div>
@@ -248,28 +230,31 @@ export function ModulePage() {
       )}
       </AnimatePresence>
 
-      {uploadJob && (
-        <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+      {runningJobs.map((job) => (
+        <div key={job.id} className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem' }}>
           <div
             style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem',
               fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginBottom: '0.4rem',
             }}
           >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Loader2 size={13} className="animate-spin" />
-              {uploadJob.stage}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+              <Loader2 size={13} className="animate-spin" style={{ flexShrink: 0 }} />
+              <span className="truncate">{job.files.join('、')} · {job.stage}</span>
             </span>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>{uploadJob.percent}%</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0 }}>
+              <button type="button" className="text-xs underline" onClick={() => openJobs(true)}>全部进度</button>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>{job.percent}%</span>
+            </span>
           </div>
           <div className="upload-progress-track">
             <div
               className="upload-progress-fill"
-              style={{ width: `${Math.max(uploadJob.percent, 4)}%` }}
+              style={{ width: `${Math.max(job.percent, 4)}%` }}
             />
           </div>
         </div>
-      )}
+      ))}
 
       {loading ? (
         <p style={{ color: 'var(--color-text-secondary)' }}>加载中...</p>

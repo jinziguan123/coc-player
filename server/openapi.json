@@ -4543,7 +4543,7 @@
     },
     "/api/modules/upload": {
       "post": {
-        "description": "上传模组：先抽取文件与校验格式（在线程里做，错误立即可见），解析转后台任务。\n\n返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。\n\n``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，\n以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。",
+        "description": "上传模组：立即建任务返回 {job_id}，抽取与解析都在后台任务里做。\n\n前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果；GET /upload/jobs 列出最近\n的任务（刷新页面后据此找回）。抽取失败（扫描件无字、编码不明等）落成任务的 failed。\n\n``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，\n以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。",
         "operationId": "upload_module_api_modules_upload_post",
         "parameters": [
           {
@@ -4598,6 +4598,67 @@
           }
         },
         "summary": "Upload Module",
+        "tags": [
+          "modules"
+        ]
+      }
+    },
+    "/api/modules/upload/jobs": {
+      "get": {
+        "description": "最近的上传解析任务（新的在前）：前端「解析进度」抽屉据此展示，刷新页面也能找回。",
+        "operationId": "list_upload_jobs_api_modules_upload_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Upload Jobs",
+        "tags": [
+          "modules"
+        ]
+      }
+    },
+    "/api/modules/upload/jobs/{job_id}": {
+      "delete": {
+        "description": "从列表移除一条已结束的任务（进行中的不许删——删了它仍在后台跑，只是看不见了）。",
+        "operationId": "dismiss_upload_job_api_modules_upload_jobs__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Upload Job",
         "tags": [
           "modules"
         ]

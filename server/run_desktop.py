@@ -47,4 +47,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # 打包后的子进程（模组文件抽取用 spawn 进程池，见 module_extract）会重新执行本可执行文件；
+    # freeze_support 让它们认出自己是 worker 并只跑任务，而不是再起一个后端。
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     main()

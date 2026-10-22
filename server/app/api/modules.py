@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 
 import httpx
@@ -19,6 +20,7 @@ from app.services import (
     image_store,
     module_image_service,
     module_map_service,
+    module_extract,
     module_map_vision,
     module_ocr,
     module_rag_service,
@@ -26,6 +28,20 @@ from app.services import (
     rule_options_service,
 )
 from app.services.event_protocol import make_chunk
+from app.services.module_extract import (  # noqa: F401 — 旧导入路径（测试等）继续可用
+    MAX_EMBEDDED_IMAGES,
+    MAX_IMAGES_PER_VISION_PARSE,
+    OCR_MAX_PAGES,
+    ExtractError,
+    _convert_doc_to_text,
+    _decode_text,
+    _extract_doc_text,
+    _extract_pdf_images,
+    _extract_uploads,
+    _normalize_image,
+    _read_pdf_text,
+    _select_pdf_images,
+)
 from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
@@ -43,13 +59,21 @@ _GUIDANCE_TIMEOUT_S = 60
 _MAP_GROUNDING_TIMEOUT_S = 240
 
 
-def _job_new() -> str:
+# 后台任务的强引用：asyncio 只弱引用 create_task 出来的任务，不留一份可能半路被回收
+_upload_tasks: set[asyncio.Task] = set()
+
+
+def _job_new(files: list[str] | None = None) -> str:
     job_id = uuid.uuid4().hex
     while len(_upload_jobs) >= _MAX_UPLOAD_JOBS:
         _upload_jobs.pop(next(iter(_upload_jobs)), None)
     _upload_jobs[job_id] = {
+        "id": job_id,
         "status": "running", "stage": "排队中", "percent": 0,
         "detail": "", "result": None,
+        # 供「解析进度」抽屉展示：刷新页面后前端靠任务列表找回进行中的解析
+        "files": list(files or []),
+        "created_at": time.time(),
     }
     return job_id
 
@@ -97,196 +121,6 @@ class ModuleImageRegenerateRequest(BaseModel):
     #: True = 用户点了「重新生成」，必须真的重出一张；缺省 False 是 <img onError> 的自愈路径，
     #: 图还在就复用，不为每次加载报错重花一次生图的钱。
     force: bool = False
-
-
-def _decode_text(content: bytes) -> str:
-    """容错解码文本：UTF-8(含BOM) → GB18030(覆盖 GBK/GB2312) → Big5 → UTF-16 依次尝试。
-
-    中文 txt 常是 GBK 编码（非 UTF-8），直接 utf-8 解码会抛 UnicodeDecodeError。
-    全部失败（多半是二进制文件）时抛友好错误而非 500。
-    """
-    for enc in ("utf-8-sig", "gb18030", "big5", "utf-16"):
-        try:
-            return content.decode(enc)
-        except (UnicodeDecodeError, LookupError):
-            continue
-    raise HTTPException(422, "无法识别文件编码（可能是二进制文件）。请上传 PDF / Word(.docx) / 纯文本(UTF-8 或 GBK)")
-
-
-def _read_pdf_text(content: bytes) -> str:
-    """提取 PDF 文字层（扫描件可能为空）。"""
-    import io
-
-    from pypdf import PdfReader
-    reader = PdfReader(io.BytesIO(content))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-
-def _normalize_image(pil, data: bytes) -> tuple[bytes, str] | None:
-    """把 PDF 里抽出的图规整成「视觉接口一定能解码」的 RGB JPEG（限尺寸），失败返回 None。
-
-    pypdf 的 img.data 对某些图（CMYK/索引色/特殊滤镜/掩膜）并非合法的独立 PNG/JPEG，
-    直接当 image/png 发出去会被接口 400 拒收。统一经 Pillow 重新编码可规避，并顺带压体积。
-    """
-    import io
-
-    from PIL import Image
-
-    im = pil
-    if im is None:
-        try:
-            im = Image.open(io.BytesIO(data))
-        except Exception:
-            return None
-    try:
-        if im.mode not in ("RGB", "L"):
-            im = im.convert("RGB")
-        im.thumbnail((1600, 1600))  # 限制最长边，避免过大 payload
-        buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=85)
-        return buf.getvalue(), "image/jpeg"
-    except Exception:
-        return None
-
-
-def _select_pdf_images(
-    reader, max_images: int = 8, min_bytes: int = 3000, keep_page_order: bool = False,
-) -> list[tuple[bytes, str]]:
-    """从 PdfReader 抽取内嵌位图并规整为合法 JPEG。
-
-    两种取法，对应两种用途：
-    - 默认（喂视觉解析）：**按体积降序**取前 N 张。地图通常是页面里最大的那张图，
-      而那次调用只塞得下几张，得优先挑信息量大的。
-    - ``keep_page_order``（喂 OCR 前置）：**保持页序**。扫描件每页就是一整张图，
-      按体积挑等于随机丢页、还把顺序打乱，OCR 出来的原文会前言不搭后语。
-
-    每张经 Pillow 重新编码（统一 RGB JPEG、限尺寸），无法解码的直接跳过——
-    避免把畸形图发给视觉接口触发 400。
-    """
-    candidates: list[tuple[object, bytes, int]] = []
-    for page in reader.pages:
-        for img in getattr(page, "images", None) or []:
-            data = getattr(img, "data", b"") or b""
-            if len(data) < min_bytes:
-                continue
-            try:
-                pil = img.image  # pypdf 已解码的 PIL Image（访问即解码，可能抛错）
-            except Exception:
-                pil = None
-            candidates.append((pil, data, len(data)))
-    if not keep_page_order:
-        candidates.sort(key=lambda t: t[2], reverse=True)
-    out: list[tuple[bytes, str]] = []
-    for pil, data, _ in candidates:
-        norm = _normalize_image(pil, data)
-        if norm:
-            out.append(norm)
-        if len(out) >= max_images:
-            break
-    if len(candidates) > len(out):
-        # 不做无声截断：读日志的人得知道这本书还有多少页没进解析。
-        logger.warning(
-            "PDF 内嵌图 %s 张，本次只取 %s 张（上限 %s）", len(candidates), len(out), max_images,
-        )
-    return out
-
-
-#: 从 PDF 抽内嵌图的上限。抽出来是**给多个消费者用的**：结构化解析、地图定位、OCR，
-#: 各自有各自的取用量（见下）。抽得多本身不花钱，只是多解码几张图。
-MAX_EMBEDDED_IMAGES = 40
-
-#: 一次性视觉解析**单个请求**里最多带几张图。这个不能跟着上限走：parse_module_images
-#: 是把图全部塞进一次调用，每张限长边 1600px 的 JPEG、base64 后 300~500KB——
-#: 40 张就是十几 MB 的请求体，在 provider 的 120s 超时下几乎必然读超时
-#: （实测报的就是一个 message 为空的 httpx 超时）。按体积降序取前几张最有信息量的。
-MAX_IMAGES_PER_VISION_PARSE = 8
-
-#: OCR 前置的取图上限。扫描件一页一张图，8 张连一章都盖不住；OCR 是逐张独立调用、
-#: 有并发闸，页数多只是慢一点，不像视觉解析那样受单次请求体限制。
-OCR_MAX_PAGES = 60
-
-
-def _extract_pdf_images(
-    content: bytes, max_images: int = 8, keep_page_order: bool = False,
-) -> list[tuple[bytes, str]]:
-    import io
-
-    from pypdf import PdfReader
-    return _select_pdf_images(
-        PdfReader(io.BytesIO(content)), max_images=max_images, keep_page_order=keep_page_order,
-    )
-
-
-def _convert_doc_to_text(content: bytes) -> str | None:
-    """把旧版二进制 Word(.doc) 转成纯文本。
-
-    .doc 是 OLE 复合格式，python-docx 读不了；这里复用系统现成转换器（不引入重依赖）：
-    优先 macOS 自带 textutil，其次 LibreOffice(soffice/libreoffice)。都没有则返回 None。
-    """
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        src = os.path.join(tmp, "in.doc")
-        with open(src, "wb") as f:
-            f.write(content)
-
-        # macOS：textutil 直接转纯文本到 stdout
-        if shutil.which("textutil"):
-            try:
-                out = subprocess.run(
-                    ["textutil", "-convert", "txt", "-stdout", src],
-                    capture_output=True, timeout=60,
-                )
-                if out.returncode == 0 and out.stdout.strip():
-                    return out.stdout.decode("utf-8", errors="replace")
-            except (subprocess.SubprocessError, OSError):
-                pass
-
-        # 跨平台：LibreOffice headless 转 txt 文件再读
-        soffice = shutil.which("soffice") or shutil.which("libreoffice")
-        if soffice:
-            try:
-                subprocess.run(
-                    [soffice, "--headless", "--convert-to", "txt:Text", "--outdir", tmp, src],
-                    capture_output=True, timeout=120,
-                )
-                txt = os.path.join(tmp, "in.txt")
-                if os.path.exists(txt):
-                    with open(txt, "rb") as f:
-                        data = f.read()
-                    if data.strip():
-                        return _decode_text(data)
-            except (subprocess.SubprocessError, OSError, HTTPException):
-                pass
-
-    return None
-
-
-def _extract_doc_text(content: bytes, filename: str) -> str:
-    """docx / 旧版 doc / 纯文本（含 GBK 等）解码。PDF 由调用方单独处理。"""
-    fn = filename.lower()
-    if fn.endswith(".docx"):
-        import io
-
-        from docx import Document
-        doc = Document(io.BytesIO(content))
-        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    if fn.endswith(".doc"):
-        text = _convert_doc_to_text(content)
-        if text and text.strip():
-            return text
-        raise HTTPException(
-            422,
-            f"「{filename}」是旧版 Word(.doc)，本机未找到可用的转换器（macOS 自带 textutil "
-            "或安装 LibreOffice）。请另存为 .docx / PDF 后上传，或安装 LibreOffice 后重试",
-        )
-    try:
-        return _decode_text(content)
-    except HTTPException as e:
-        raise HTTPException(e.status_code, f"「{filename}」{e.detail}")
 
 
 async def _apply_map_grounding(job_id: str, parsed: dict, images: list) -> None:
@@ -456,51 +290,16 @@ async def _run_upload_job(
         _job_update(job_id, status="failed", detail="解析失败，请重试")
 
 
-def _extract_uploads(
-    uploads: list[tuple[str, str, bytes]], vision: bool, ocr_prepass: bool,
-) -> tuple[list[str], list[tuple[bytes, str]]]:
-    """把上传的文件抽成文字段落与图片（同步、CPU 密集，调用方放线程里跑）。"""
-    _IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
-    multi = len(uploads) > 1
-    parts: list[str] = []
-    images: list[tuple[bytes, str]] = []   # (bytes, mime) —— 图片走多模态视觉解析
-    for filename, ct, content in uploads:
-        fn = filename.lower()
-        if ct.startswith("image/") or fn.endswith(_IMG_EXT):
-            images.append((content, ct or "image/png"))
-        elif fn.endswith(".pdf") or ct == "application/pdf":
-            text = _read_pdf_text(content)
-            # OCR 前置要页序、要全本；否则按体积降序抽到上限，供解析/地图定位各取所需。
-            pdf_imgs = _extract_pdf_images(
-                content,
-                max_images=OCR_MAX_PAGES if ocr_prepass else MAX_EMBEDDED_IMAGES,
-                keep_page_order=ocr_prepass,
-            ) if vision else []
-            if text.strip():
-                parts.append(f"=== 文件：{filename} ===\n{text}" if multi else text)
-            images.extend(pdf_imgs)
-            if not text.strip() and not pdf_imgs:
-                raise HTTPException(
-                    422,
-                    f"「{filename}」似乎是扫描件（无可提取文字）。请改用含文字层的 PDF，"
-                    "或到设置页把一个支持视觉的配置标记为「视觉模型」后重试（届时会直接识图，"
-                    "带团用的主模型不必更换）",
-                )
-        else:
-            text = _extract_doc_text(content, filename)
-            parts.append(f"=== 文件：{filename} ===\n{text}" if multi else text)
-    return parts, images
-
-
 @router.post("/upload", dependencies=[Depends(require_local_client)])
 async def upload_module(
     files: list[UploadFile],
     rule_system: str = "coc",
     ocr_prepass: bool = False,
 ):
-    """上传模组：先抽取文件与校验格式（在线程里做，错误立即可见），解析转后台任务。
+    """上传模组：立即建任务返回 {job_id}，抽取与解析都在后台任务里做。
 
-    返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。
+    前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果；GET /upload/jobs 列出最近
+    的任务（刷新页面后据此找回）。抽取失败（扫描件无字、编码不明等）落成任务的 failed。
 
     ``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，
     以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。
@@ -517,15 +316,52 @@ async def upload_module(
     except Exception:
         vision = False
 
-    # 读上传体是异步 IO；抽文字 / 抽图 / 转 .doc 是同步 CPU 活，放线程里跑——直接在事件循环上做，
-    # 大 PDF 抽取期间整个服务器卡住，其他接口全都等着（实测 35 页图的 PDF 卡 1.2s，扫描书更久）。
+    # 读上传体是异步 IO；抽取（文字 / 内嵌图 / 转 .doc）交给后台任务做，接口立即返回 job_id：
+    # 大 PDF 抽图要几十秒（JPEG2000 尤甚），放在请求里等，期间刷新页面就连任务号都拿不到。
     uploads = [(f.filename or "", f.content_type or "", await f.read()) for f in files]
-    parts, images = await asyncio.to_thread(_extract_uploads, uploads, vision, ocr_prepass)
-    raw_text = "\n\n".join(parts)
-
-    job_id = _job_new()
-    asyncio.create_task(_run_upload_job(job_id, raw_text, images, rule_system, ocr_prepass))
+    job_id = _job_new([name for name, _, _ in uploads])
+    task = asyncio.create_task(
+        _run_upload_pipeline(job_id, uploads, vision, rule_system, ocr_prepass),
+    )
+    _upload_tasks.add(task)
+    task.add_done_callback(_upload_tasks.discard)
     return {"job_id": job_id}
+
+
+async def _run_upload_pipeline(
+    job_id: str, uploads: list[tuple[str, str, bytes]], vision: bool,
+    rule_system: str, ocr_prepass: bool,
+) -> None:
+    """抽取上传文件 → 解析全流程。抽取失败（扫描件无字、编码不明……）落成 job 的 failed。"""
+    _job_update(job_id, stage="读取文件内容（大 PDF 抽图需要一会儿）", percent=3)
+    try:
+        parts, images = await module_extract.run_extract(uploads, vision, ocr_prepass)
+    except ExtractError as e:
+        _job_update(job_id, status="failed", detail=e.detail)
+        return
+    except Exception:
+        logger.exception("模组文件抽取失败: job=%s", job_id)
+        _job_update(job_id, status="failed", detail="读取文件失败，请确认文件未损坏后重试")
+        return
+    await _run_upload_job(job_id, "\n\n".join(parts), images, rule_system, ocr_prepass)
+
+
+@router.get("/upload/jobs")
+def list_upload_jobs():
+    """最近的上传解析任务（新的在前）：前端「解析进度」抽屉据此展示，刷新页面也能找回。"""
+    return sorted(_upload_jobs.values(), key=lambda j: j.get("created_at") or 0, reverse=True)
+
+
+@router.delete("/upload/jobs/{job_id}", dependencies=[Depends(require_local_client)])
+def dismiss_upload_job(job_id: str):
+    """从列表移除一条已结束的任务（进行中的不许删——删了它仍在后台跑，只是看不见了）。"""
+    job = _upload_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "任务不存在或已过期")
+    if job.get("status") == "running":
+        raise HTTPException(409, "任务还在进行中")
+    _upload_jobs.pop(job_id, None)
+    return {"ok": True}
 
 
 @router.get("/upload/status/{job_id}")

@@ -306,15 +306,56 @@ export interface paths {
         put?: never;
         /**
          * Upload Module
-         * @description 上传模组：先抽取文件与校验格式（在线程里做，错误立即可见），解析转后台任务。
+         * @description 上传模组：立即建任务返回 {job_id}，抽取与解析都在后台任务里做。
          *
-         *     返回 {job_id}；前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果。
+         *     前端轮询 GET /upload/status/{job_id} 展示进度并取最终结果；GET /upload/jobs 列出最近
+         *     的任务（刷新页面后据此找回）。抽取失败（扫描件无字、编码不明等）落成任务的 failed。
          *
          *     ``ocr_prepass=true``（实验开关，默认关）：图片先逐张 OCR 成文字，再当纯文本模组解析，
          *     以此换取文本链路的断点续写与查漏自检。同一份文件开关两次即可 A/B。
          */
         post: operations["upload_module_api_modules_upload_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/modules/upload/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Upload Jobs
+         * @description 最近的上传解析任务（新的在前）：前端「解析进度」抽屉据此展示，刷新页面也能找回。
+         */
+        get: operations["list_upload_jobs_api_modules_upload_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/modules/upload/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Dismiss Upload Job
+         * @description 从列表移除一条已结束的任务（进行中的不许删——删了它仍在后台跑，只是看不见了）。
+         */
+        delete: operations["dismiss_upload_job_api_modules_upload_jobs__job_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -5306,6 +5347,57 @@ export interface operations {
                 "multipart/form-data": components["schemas"]["Body_upload_module_api_modules_upload_post"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_upload_jobs_api_modules_upload_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    dismiss_upload_job_api_modules_upload_jobs__job_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

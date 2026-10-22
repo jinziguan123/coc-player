@@ -4006,6 +4006,82 @@ button.chip, .chip-btn { cursor: pointer; }
   background: rgba(200, 162, 90, 0.06);
 }
 
+/* 「解析进度」入口：与导航项同款，固定在导航之下 */
+.sidebar-jobs { padding: 0 0.5rem; }
+.sidebar-jobs .sidebar-link { width: 100%; background: transparent; cursor: pointer; }
+.sidebar-jobs .sidebar-link.active { color: var(--color-text-accent); background: rgba(200, 162, 90, 0.08); }
+.sidebar-jobs-badge {
+  margin-left: auto;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.3rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--color-bg-primary);
+  background: var(--color-accent);
+}
+.sidebar.collapsed .sidebar-jobs-badge {
+  position: absolute;
+  top: 0.15rem;
+  right: 0.35rem;
+  margin: 0;
+}
+.sidebar-jobs-spin { animation: sidebar-jobs-turn 2.4s ease-in-out infinite; }
+@keyframes sidebar-jobs-turn {
+  0%, 40% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(180deg); }
+}
+@media (prefers-reduced-motion: reduce) { .sidebar-jobs-spin { animation: none; } }
+
+/* 解析进度抽屉（外壳复用 .trace-drawer） */
+.upload-jobs-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 1rem 1rem; }
+.upload-jobs-empty { padding: 2rem 0.5rem; text-align: center; font-size: var(--text-sm); color: var(--color-text-secondary); }
+.upload-jobs-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.upload-job {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  background: var(--color-bg-card);
+}
+.upload-job-head { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.upload-job-icon { flex: none; display: inline-flex; color: var(--color-text-secondary); }
+.upload-job-icon.is-done { color: var(--color-success, var(--color-text-accent)); }
+.upload-job-icon.is-failed { color: var(--color-danger); }
+.upload-job-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+.upload-job-time { flex: none; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-secondary); }
+.upload-job-dismiss { flex: none; display: inline-flex; padding: 0.15rem; color: var(--color-text-secondary); }
+.upload-job-dismiss:hover { color: var(--color-text-primary); }
+.upload-job-stage {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.45rem 0 0.35rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.upload-job-error { margin-top: 0.4rem; font-size: var(--text-xs); line-height: 1.5; color: var(--color-danger); }
+.upload-job-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-accent);
+}
+.upload-jobs-foot { padding: 0.7rem 1rem; border-top: 1px solid var(--color-border); text-align: right; }
+
 .sidebar-footer {
   padding: 0.75rem;
   text-align: center;
