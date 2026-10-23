@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from app.services import (
     agent_trace,
     entity_state,
     event_recall,
+    housekeeping_snapshot,
     plot_threads,
     scene_kind,
     session_service,
@@ -91,11 +93,13 @@ async def _maybe_merge_chapters(db: Session, session: GameSession, llm) -> None:
         head = world_memory.chapters_to_merge(ws)
         if not head:
             return
+        snapshot = housekeeping_snapshot.Snapshot.capture(db, session)
         with agent_trace.span("summary", f"章节合并 · {len(head)} 章", session_id=session.id, db=db):
             merged = await story_summarizer.merge_chapters(llm, [c["text"] for c in head])
-        if not merged:
+        if not merged or not snapshot.is_current(db, session, allow_append=True):
             return
-        ws2 = world_memory.replace_merged_chapters(ws, merged, len(head))
+        # 校验通过即 world_state 未变；仍从刚刷新的值构建，不写回等待前的副本。
+        ws2 = world_memory.replace_merged_chapters(dict(session.world_state or {}), merged, len(head))
         # 二次压缩同样自检：合并后的首章对照台账，补回被合并掉的线索 / 人物原名
         module = db.get(Module, session.module_id) if session.module_id else None
         ws2, _ = summary_audit.audit_chapter(
@@ -114,7 +118,7 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
 
     在 KP 每轮生成收尾（done 之后）调用；未攒够阈值时零成本返回，不额外调用 LLM。
     摘要失败：静默忽略（保持原摘要、原游标）。抽取差量失败/为空：跳过差量、摘要照常推进；
-    差量落库经 ``_apply_world_memory`` fail-open，且台账 status 恒不受抽取器影响。绝不阻塞跑团。
+    差量与新章节同一次提交且 fail-open，且台账 status 恒不受抽取器影响。绝不阻塞跑团。
     """
     try:
         session = db.get(GameSession, session_id)
@@ -154,6 +158,7 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
         )
         # 叙事主流已停但仍持锁做收尾：给前端一个可读状态，别让玩家对着无声脉冲点干等。
         room_hub.broadcast(session_id, _make_chunk("housekeeping", "KP 正在整理笔记…"))
+        snapshot = housekeeping_snapshot.Snapshot.capture(db, session)
         with agent_trace.span(
             "summary", f"滚动摘要 · {len(to_summ)} 条事件", session_id=session_id, db=db,
         ):
@@ -164,6 +169,9 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
                 threads_brief=plot_threads.format_threads_brief(ws),
             )
         if not result:
+            return
+        if not snapshot.is_current(db, session, allow_append=True):
+            logger.info("滚动摘要快照已过期，下轮重试: session=%s", session_id)
             return
         new_chapter, npc_updates, clue_notes, team_updates = result[:4]
         thread_updates = result[4] if len(result) > 4 else {}
@@ -182,25 +190,28 @@ async def _maybe_roll_story_summary(db: Session, session_id: str, llm) -> None:
         ws2, _ = summary_audit.audit_chapter(
             ws2, module, entity_state.active_flags(session), events=to_summ,
         )
+        # 差量合并：只改 attitude/reason/promises/lies 与已存在线索的 note，绝不碰台账 status；
+        # 队友差量另经 apply_team_memory_delta（白名单 = 本会话真实 AI 队友 id）。
+        # 与新章节、游标同一次提交：差量绑定刚校验过的快照，不能拖到章节合并的模型等待之后。
+        if npc_updates or clue_notes or team_updates:
+            allowed = {t.id for t in ai_teammates}
+            try:
+                merged_ws = world_memory.apply_team_memory_delta(
+                    world_memory.apply_memory_delta(copy.deepcopy(ws2), npc_updates, clue_notes),
+                    team_updates, allowed,
+                )
+                if isinstance(merged_ws, dict):
+                    ws2 = merged_ws
+            except Exception:
+                logger.exception("世界记忆差量合并失败（忽略差量，摘要照常推进）: session=%s", session_id)
         session.world_state = ws2
         db.commit()
-        # 章节攒够了才把最老的几章下沉合并一次（LSM 式）。合并失败保持原样：
-        # 章节多一点只是上下文长一点，比压坏了强。
-        await _maybe_merge_chapters(db, session, llm)
         # 这批事件刚失去逐字原文（只剩梗概），正是给它们建索引的时刻——之后 KP 要引用
         # 其中的确切内容，只能靠 recall_history 查回来。fail-open：索引失败不影响摘要。
         event_recall.index_pending(db, session_id)
-        # 差量合并：只改 attitude/reason/promises/lies 与已存在线索的 note，绝不碰台账 status；
-        # 队友差量另经 apply_team_memory_delta（白名单 = 本会话真实 AI 队友 id）。
-        if npc_updates or clue_notes or team_updates:
-            allowed = {t.id for t in ai_teammates}
-            _apply_world_memory(
-                db, session,
-                lambda w: world_memory.apply_team_memory_delta(
-                    world_memory.apply_memory_delta(w, npc_updates, clue_notes),
-                    team_updates, allowed,
-                ),
-            )
+        # 章节攒够了才把最老的几章下沉合并一次（LSM 式）。合并失败保持原样：
+        # 章节多一点只是上下文长一点，比压坏了强。合并自带快照校验，过期则整体放弃。
+        await _maybe_merge_chapters(db, session, llm)
         logger.info(
             "滚动剧情摘要更新：session=%s 游标→%s", session_id, to_summ[-1].sequence_num,
         )
@@ -294,6 +305,7 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
             n.get("id") for n in (module.npcs or [])
             if n.get("id") and n.get("id") not in dormant_ids
         }
+        snapshot = housekeeping_snapshot.Snapshot.capture(db, session)
         trace = agent_trace.start(session_id, "backstage", stage="幕后推演", db=db)
         try:
             bevents = await agent.infer(messages, valid_ids)
@@ -303,6 +315,9 @@ async def _maybe_run_backstage(db: Session, session_id: str, llm) -> None:
         agent_trace.finish(trace)
         if bevents is None:
             return  # 首次调用本身失败：游标不动、不落库（网络恢复后重试）
+        if not snapshot.is_current(db, session, allow_append=True):
+            logger.info("幕后推演快照已过期，下轮重试: session=%s", session_id)
+            return
 
         npc_names = {
             n.get("id"): n.get("name") or n.get("id")

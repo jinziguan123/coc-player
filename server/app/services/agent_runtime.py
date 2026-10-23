@@ -8,6 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import json
+
+from app.ai.token_estimate import estimate_text_tokens
+
+
+class ContextBudgetExceeded(ValueError):
+    """必须保留的系统约束或当前输入已超过预算，拒绝静默截断。"""
+
 
 
 @dataclass(frozen=True)
@@ -39,25 +47,54 @@ class ContextBundle:
         )
 
     def fit(self) -> "ContextBundle":
-        """按 budget_tokens 裁掉最旧的历史消息；system 与最后一条消息始终保留。
+        """按 KP 同口径裁历史；保留系统消息、最新输入和完整工具交互组。
 
-        这是跨 Agent 的兜底预算，不替代 KP 自己的分段预算。估算口径与上下文模块一致
-        （约 3 字符 = 1 token）；只做减法，不重写内容。
+        超预算时不截断人设/安全约束/当前输入，而是显式失败，让调用方按职责降级。
+        visibility 仅描述已构建的上下文；数据过滤必须在构建阶段完成。
         """
-        def _cost(text: str) -> int:
-            return max(1, len(str(text or "")) // 3)
+        if self.budget_tokens <= 0:
+            raise ValueError("上下文预算必须为正整数")
+
+        def cost(message: dict) -> int:
+            content = message.get("content") or ""
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+            tools = json.dumps(message.get("tool_calls") or [], ensure_ascii=False)
+            return 4 + estimate_text_tokens(content) + estimate_text_tokens(tools)
 
         messages = [dict(m) for m in self.messages]
-        total = _cost(self.system) + sum(_cost(m.get("content")) for m in messages)
-        while len(messages) > 1 and total > self.budget_tokens:
-            dropped = messages.pop(0)
-            total -= _cost(dropped.get("content"))
+        groups: list[list[dict]] = []
+        for message in messages:
+            if message.get("role") == "tool" and groups:
+                groups[-1].append(message)
+            else:
+                groups.append([message])
+        total = estimate_text_tokens(self.system) + sum(cost(m) for m in messages)
+        dropped = 0
+        # system 消息无论在何处都保留，工具调用及其返回作为一个整体删除。
+        kept = []
+        # 最新输入＝最后一条 user 消息；工具续写轮的末组是工具交互，玩家输入在其之前，同样钉住。
+        last_user = max(
+            (i for i, g in enumerate(groups) if g[0].get("role") == "user"), default=len(groups) - 1,
+        )
+        for index, group in enumerate(groups):
+            pinned = (
+                index in (len(groups) - 1, last_user)
+                or any(m.get("role") == "system" for m in group)
+            )
+            if total > self.budget_tokens and not pinned:
+                total -= sum(cost(m) for m in group)
+                dropped += len(group)
+            else:
+                kept.extend(group)
+        if total > self.budget_tokens:
+            raise ContextBudgetExceeded(
+                f"必须保留的上下文约 {total} token，超过预算 {self.budget_tokens}；未截断约束或当前输入。"
+            )
         return ContextBundle(
-            system=self.system,
-            messages=messages,
-            budget_tokens=self.budget_tokens,
+            system=self.system, messages=kept, budget_tokens=self.budget_tokens,
             visibility=self.visibility,
-            metadata=self.metadata,
+            metadata={**self.metadata, "estimated_tokens": total, "dropped_messages": dropped},
         )
 
     def for_model(self) -> list[dict]:

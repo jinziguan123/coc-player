@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NamedTuple
 
+from app.ai.token_estimate import estimate_text_tokens as _estimate_tokens
+
 from app.ai import profile_store
 from app.ai.provider import CACHE_BLOCKS_KEY, CACHE_BREAK_KEY
 from app.config import settings
@@ -185,11 +187,6 @@ ANTITHESIS_NUDGE_THRESHOLD = 3
 VAGUE_NUDGE_THRESHOLD = 3
 
 
-def _estimate_tokens(text: str) -> int:
-    """粗估 token 数：中文约 1.5 token/字，英文约 0.75 token/word"""
-    cn_chars = sum(1 for c in text if '一' <= c <= '鿿')
-    other = len(text) - cn_chars
-    return int(cn_chars * 1.5 + other * 0.4)
 
 
 # ── 系统提示的分段装配 ────────────────────────────────────────────────────
