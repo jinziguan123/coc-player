@@ -13,8 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import profile_store, turn_planner
 from app.ai import tools as kp_tools
-from app.ai.agents.kp_agent import _CHECK_TURN_TEMPERATURE, KPAgent
-from app.ai.context import build_kp_context
+from app.ai.agents.kp_agent import _CHECK_TURN_TEMPERATURE
 from app.ai.prompts.kp_system import (
     KP_DICE_CONTINUATION_PROMPT,
     KP_MODULE_CONTINUATION_PROMPT,
@@ -30,6 +29,7 @@ from app.services import (
     agent_trace,
     chat_event_writer,
     command_protocol,
+    entity_state,
     dice_runtime,
     event_recall,
     illustration_service,
@@ -38,16 +38,16 @@ from app.services import (
     narration_protocol,
     npc_identity,
     npc_runtime,
-    rule_options_service,
+    plot_progress,
     rulebook_service,
-    session_service,
     team_turn_service,
-    style_editor,
     turn_context,
     turn_effects,
 )
 from app.services.event_protocol import make_chunk as _make_chunk
 from app.services.execution_scope import COORDINATED_TOOLS, CoordinatorIntent
+
+from app.services.turn_pipeline import NarrationResult
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +176,10 @@ MAX_TOOL_LOOP_STEPS = 20
 
 
 def _tool_loop_active(llm) -> bool:
-    """KP 生成是否走 agent loop（工具调用）新路径：配置开关 && Provider 支持工具。
+    """是否用**原生**工具调用：配置开关（use_tool_calls，默认开）且 Provider 支持工具。
 
-    开关**默认开启**（use_tool_calls=true）；无激活档/读取异常一律回退旧路径（fail-open）。
+    不满足（含无激活档/读取异常）时并不退回别的编排，而是由 ``loop_llm`` 包一层文本指令适配层，
+    同样走工具循环。
     """
     try:
         profile = profile_store.load_active_profile()
@@ -224,6 +225,13 @@ def _tool_call_from_text(step_text: str) -> ToolCall | None:
     只认注册表里的终止型指令（GROUP/SAY 是文本标注不算动作）。
     参数解析与旧正则同款宽容：键值对优先，单参数指令允许裸值。
     """
+    calls = _tool_calls_from_text(step_text, limit=1)
+    return calls[0] if calls else None
+
+
+def _tool_calls_from_text(step_text: str, limit: int | None = None) -> list[ToolCall]:
+    """把文本里的终止型指令按出现顺序全部解析成合成 ToolCall（文本指令适配层用）。"""
+    calls: list[ToolCall] = []
     text = (step_text or "").replace("【", "[").replace("】", "]")
     for m in _TEXT_TAG_RE.finditer(text):
         tag, inner = m.group(1), (m.group(2) or "").strip()
@@ -239,8 +247,31 @@ def _tool_call_from_text(step_text: str) -> ToolCall | None:
             solo = _SOLO_ARG_KEY.get(name)
             if solo:
                 kv = {solo: inner}
-        return ToolCall(id=f"text_{uuid.uuid4().hex[:8]}", name=name, arguments=kv)
-    return None
+        calls.append(ToolCall(id=f"text_{uuid.uuid4().hex[:8]}", name=name, arguments=kv))
+        if limit is not None and len(calls) >= limit:
+            break
+        spec = kp_tools.TOOLS_BY_NAME.get(name)
+        if spec is not None and spec.kind == "lookup":
+            # 查阅是终止性指令（文本指令的既有约定）：其后写的指令在查阅结果回来之前不作数，
+            # 模型读完原文会在续写里重新决定要不要检定。
+            break
+    return calls
+
+
+def loop_llm(llm):
+    """工具循环要用的 Provider：原生支持工具调用（且未关闭）就用原生；否则包一层文本指令适配层
+    （见 ``app.ai.text_tool_adapter``）——编排层只有工具循环这一条路径。"""
+    if llm is None or _tool_loop_active(llm):
+        return llm
+    from app.ai.text_tool_adapter import TextToolAdapter
+    return TextToolAdapter(llm, _tool_calls_from_text)
+
+
+def tool_mode_messages(llm, extra) -> list[dict]:
+    """原生工具调用才追加「工具调用模式」提示；文本适配层下模型照旧写方括号指令。"""
+    if getattr(llm, "text_commands", False):
+        return []
+    return [kp_tools.tool_mode_message(extra)]
 
 
 def _plan_check_call(plan: turn_planner.TurnPlan) -> ToolCall:
@@ -324,7 +355,7 @@ def _build_kp_tool_executor(
     任何执行异常 fail-open 返回错误说明，绝不断流。
 
     ``pre_gen_seq``（本轮生成前基线序号）给定时透传给理智检定：KP 没写 chars 就退回
-    「本轮真正行动过的人」而非在场全体，与旧路径 ``_process_commands`` 同一口径。
+    「本轮真正行动过的人」而非在场全体，与文本指令时代的口径一致。
 
     ``ruleset``（本局生效规则）给定时，其中启用的组件声明的 KP 工具（``ruleset.kp_tools``，
     见 app.rules.kp_tools）也可调用。内置工具名优先——插件加载时已拒绝重名，这里不会撞上。
@@ -489,6 +520,12 @@ def _build_kp_tool_executor(
         flag = kv.get("flag", "").strip()
         if not flag:
             return kp_tools.ToolOutcome("参数缺失：flag 为必填。")
+        rejected = plot_progress.model_flag_rejection(
+            module, entity_state.active_flags(game_session), flag, name == "set_flag",
+        )
+        if rejected:
+            logger.warning("KP 标志操作未通过校验：%s", rejected)
+            return kp_tools.ToolOutcome(rejected)
         chunks = _exec_flag(db, session_id, game_session, flag, name == "set_flag")
         return kp_tools.ToolOutcome("ok", chunks=chunks)
 
@@ -500,11 +537,11 @@ def _build_kp_tool_executor(
         chunks = await _exec_hp_change(
             db, session_id, player_char,
             kv.get("target", ""), kv.get("delta", ""), kv.get("reason", ""),
-            module=module, teammates=teammates,
+            module=module, teammates=teammates, source="kp_tool",
         )
         if chunks:
             return kp_tools.ToolOutcome("ok", chunks=chunks)
-        return kp_tools.ToolOutcome("未结算（target 当前仅支持 player，且 delta 须为整数）。")
+        return kp_tools.ToolOutcome("无需再次结算，或目标/整数伤害参数无效；不要改写理由重复提交。")
 
     async def _h_travel_suggest(name, kv):
         ref = (kv.get("scene_id") or "").strip()
@@ -740,7 +777,7 @@ async def _kp_agent_loop_body(
             logger.info("耗时|KP 工具循环 %d 轮：%s", len(used_tools), "、".join(used_tools))
 
     for _step in range(max_steps):
-        step = ["", "", [], [], []]
+        step = NarrationResult()
         tool_calls: list[ToolCall] = []
         reasoning_parts: list[str] = []
 
@@ -851,7 +888,7 @@ async def _kp_agent_loop_body(
                 "直接收束本轮叙述：自然交代当前处境，停在等待玩家行动处。"
             ),
         })
-        step = ["", "", [], [], []]
+        step = NarrationResult()
 
         async def _plain_deltas():
             async for delta in llm.stream_chat(messages, tools=None, temperature=temperature):
@@ -875,529 +912,3 @@ async def _kp_agent_loop_body(
 
     for card in deferred_cards:
         yield card
-
-
-def _group_label_for_text(groups: list[dict] | None, text: str) -> str | None:
-    """在分头分组里找出「这段文字归属的组」：按成员名做包含匹配。"""
-    if not groups:
-        return None
-    for grp in groups:
-        for member in (grp.get("members") or []):
-            if member and (member in (text or "") or (text or "") in member):
-                return grp["label"]
-    return groups[0]["label"] if groups else None
-
-
-def _group_scope_resolver(
-    kp_text: str,
-    scene_groups: list[dict] | None,
-    player_char: Character,
-    teammates: list[Character] | None,
-    focus_group_label: str | None = None,
-):
-    """返回 ``pos -> 该处指令所属分组的角色列表``（非分头时恒为 None）。
-
-    分头行动逐组生成、合并成一段文本统一处理，指令本身不带出处。``_run_split_narrations``
-    在每组产物前留了 ``[GROUP: scene=<组名>]`` 标记，这里按指令在文本中的位置回溯到最近的
-    标记，从而知道这条 [SAN_CHECK]/[DICE_CHECK] 是哪一组的事——不这么定位，一组撞见的恐怖
-    会照着「主角在哪」结算到另一组头上。
-    """
-    if not scene_groups or len(scene_groups) < 2:
-        return lambda _pos: None
-
-    party = [player_char] + list(teammates or [])
-
-    def members_of(label: str | None) -> list[Character] | None:
-        grp = next((g for g in scene_groups if g.get("label") == label), None)
-        if grp is None:
-            return None
-        names = grp.get("members") or []
-        return [
-            c for c in party
-            if any(n and (c.name == n or n in c.name or c.name in n) for n in names)
-        ] or None
-
-    marks = [
-        (match.start(), (match.group(1) or "").split("=", 1)[-1].strip())
-        for match in GROUP_RE.finditer(kp_text or "")
-    ]
-
-    def resolve(pos: int) -> list[Character] | None:
-        label = next(
-            (mark_label for mark_pos, mark_label in reversed(marks) if mark_pos <= pos),
-            None,
-        )
-        return members_of(label) or members_of(focus_group_label)
-
-    return resolve
-
-
-async def _process_commands(
-    db: Session,
-    session_id: str,
-    kp_text: str,
-    module: Module,
-    player_char: Character,
-    game_session: GameSession,
-    llm,
-    teammates: list[Character] | None = None,
-    allow_rule_lookup: bool = True,
-    lookup_depth: int = 0,
-    dice_depth: int = 0,
-    scene_groups: list[dict] | None = None,
-    focus_group_label: str | None = None,
-    pre_gen_seq: int | None = None,
-) -> AsyncIterator[str]:
-    # 全角括号归一为半角：模型有时用【】写指令，统一成 [] 好让下面各指令正则命中并处理（而非泄漏）。
-    kp_text = (kp_text or "").replace("【", "[").replace("】", "]")
-    # 规则书查阅是终止性指令（独占一次回复的最后一行）：命中即查阅+续写，不再处理本段其余
-    if allow_rule_lookup and lookup_depth < MAX_RULE_LOOKUPS:
-        lookup = RULE_LOOKUP_RE.search(kp_text)
-        if lookup:
-            async for chunk in _handle_rule_lookup(
-                db, session_id, lookup.group(1).strip(), module, player_char,
-                game_session, llm, teammates=teammates, lookup_depth=lookup_depth,
-            ):
-                yield chunk
-            return
-
-    # 模组原文查阅同为终止性指令，与规则书查阅走同一开关与配额（lookup_depth 合并计数）
-    if allow_rule_lookup and lookup_depth < MAX_RULE_LOOKUPS:
-        mlookup = MODULE_LOOKUP_RE.search(kp_text)
-        if mlookup:
-            async for chunk in _handle_module_lookup(
-                db, session_id, mlookup.group(1).strip(), module, player_char,
-                game_session, llm, teammates=teammates, lookup_depth=lookup_depth,
-            ):
-                yield chunk
-            return
-
-    # 回想本局往事：同为终止性指令，共享同一开关与配额
-    if allow_rule_lookup and lookup_depth < MAX_RULE_LOOKUPS:
-        rlookup = RECALL_HISTORY_RE.search(kp_text)
-        if rlookup:
-            async for chunk in _handle_recall_history(
-                db, session_id, rlookup.group(1).strip(), module, player_char,
-                game_session, llm, teammates=teammates, lookup_depth=lookup_depth,
-            ):
-                yield chunk
-            return
-
-    dice_descriptions: list[str] = []
-    san_pending = False
-    dice_pending = False
-    # 分头行动：按指令在合并文本里的位置回溯它出自哪一组，据此限定群体检定的候选域。
-    group_scope = _group_scope_resolver(
-        kp_text, scene_groups, player_char, teammates, focus_group_label,
-    )
-
-    for match in SAN_CHECK_RE.finditer(kp_text):
-        kv = _parse_tag_kv(match.group(1))
-        san_chunks, san_descs, pending = await _exec_san_check(
-            db, session_id, game_session, kv, player_char, teammates,
-            scope=group_scope(match.start()), pre_gen_seq=pre_gen_seq,
-        )
-        for chunk in san_chunks:
-            yield chunk
-        dice_descriptions.extend(san_descs)
-        san_pending = san_pending or pending
-
-    if san_pending:
-        return
-
-    for match in HP_CHANGE_RE.finditer(kp_text):
-        hp_chunks = await _exec_hp_change(
-            db, session_id, player_char,
-            match.group(1).strip(), match.group(2).strip(), match.group(3).strip(),
-            module=module, teammates=teammates,
-        )
-        for chunk in hp_chunks:
-            yield chunk
-
-    for match in DICE_CHECK_RE.finditer(kp_text):
-        kv = _parse_tag_kv(match.group(1))
-        dice_chunks, dice_descs, pending = await _exec_dice_check(
-            db, session_id, game_session, module, kv, player_char, teammates,
-            scope=group_scope(match.start()),
-        )
-        for chunk in dice_chunks:
-            yield chunk
-        dice_descriptions.extend(dice_descs)
-        dice_pending = dice_pending or pending
-
-    if dice_pending:
-        return
-
-    for match in OPPOSED_CHECK_RE.finditer(kp_text):
-        try:
-            async for chunk in _resolve_opposed(
-                db, session_id, _parse_tag_kv(match.group(1)),
-                module, player_char, teammates, dice_descriptions,
-            ):
-                yield chunk
-        except ValueError as error:
-            # 模型生成的内部指令可能缺字段；跳过坏指令，不中断已经生成的叙事。
-            logger.warning("跳过无效的 AI 对抗检定指令：%s", error)
-
-    if dice_descriptions:
-        continuation_prompt = KP_DICE_CONTINUATION_PROMPT.format(
-            dice_results="\n".join(dice_descriptions)
-        )
-        events = session_service.get_session_events(db, session_id)
-
-        if scene_groups and len(scene_groups) >= 2:
-            # 分头行动：骰子续写同样要按组生成、按组打 GROUP 标签，不能退化成单场景
-            # 只演检定执行者那一列、丢掉其他组的后续剧情。
-            # 这里只续写**实际产生检定结果的组**——其余组的场景叙事已由本轮分头生成覆盖，
-            # 不需要再额外推一轮，避免其他场景被重复推进。
-            by_group: dict[str, list[str]] = {}
-            for desc in dice_descriptions:
-                label = _group_label_for_text(scene_groups, desc)
-                if label is None:
-                    label = focus_group_label or scene_groups[0]["label"]
-                by_group.setdefault(label, []).append(desc)
-            if focus_group_label and not by_group:
-                by_group[focus_group_label] = list(dice_descriptions)
-            cont_command_parts: list[str] = []
-            kp = KPAgent(llm)
-            for label, group_descs in by_group.items():
-                grp = next(g for g in scene_groups if g["label"] == label)
-                messages = build_kp_context(
-                    game_session, module, player_char, events, teammates=teammates,
-                    viewer_scene_id=grp.get("scene_id"),
-                    scene_groups=scene_groups,
-                    rule_options_block=rule_options_service.context_block(db, game_session),
-                )
-                messages.append({
-                    "role": "user",
-                    "content": KP_DICE_CONTINUATION_PROMPT.format(
-                        dice_results="\n".join(group_descs)
-                    ),
-                })
-                cont_result = ["", "", [], [], []]
-                try:
-                    async for chunk in _stream_narration_filtered(
-                        kp, messages, cont_result,
-                        npcs=_matcher_npcs(module, teammates, game_session),
-                        group_label=label,
-                        masker=npc_identity.build_masker(db, session_id, module),
-                    ):
-                        yield chunk
-                    await style_editor.polish_result(llm, cont_result)   # 取消时不走，finally 落原文
-                finally:
-                    chat_event_writer.persist_narration(
-                        db, session_id, cont_result,
-                        attach_npc_portraits=_attach_npc_portraits,
-                        model=chat_event_writer.model_name(llm),
-                    )
-                _record_npc_say_memory(
-                    db, session_id, game_session, module, cont_result[2], grp["members"],
-                )
-                # 同 _run_split_narrations：留组界标记，续写里追加的 [SAN_CHECK]
-                # （读懂禁忌知识那种）才不会顺着主角的位置结算到别组头上。
-                cont_command_parts.append(f"[GROUP: scene={label}]\n{cont_result[1]}")
-            cont_command_text = "\n".join(cont_command_parts)
-        else:
-            messages = build_kp_context(
-                game_session, module, player_char, events, teammates=teammates,
-                rule_options_block=rule_options_service.context_block(db, game_session),
-            )
-            messages.append({"role": "user", "content": continuation_prompt})
-
-            kp = KPAgent(llm)
-            cont_result = ["", "", [], [], []]
-            try:
-                async for chunk in _stream_narration_filtered(
-                    kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
-                    masker=npc_identity.build_masker(db, session_id, module),
-                ):
-                    yield chunk
-                await style_editor.polish_result(llm, cont_result)   # 取消时不走，finally 落原文
-            finally:
-                cont_narration = cont_result[0].rstrip()
-                if cont_narration:
-                    session_service.add_event(
-                        db, session_id, "narration", cont_narration, actor_name="KP",
-                        metadata=chat_event_writer.model_meta(llm),
-                    )
-                for npc_name, dialogue_text in cont_result[2]:
-                    ev = session_service.add_event(
-                        db, session_id, "dialogue", dialogue_text, actor_name=npc_name,
-                    )
-                    _attach_npc_portrait(db, session_id, module, ev)
-            # 世界记忆钩子 c：续写里的 NPC 台词同样记入其互动史
-            _record_npc_say_memory(
-                db, session_id, game_session, module, cont_result[2],
-                [player_char.name] + [t.name for t in (teammates or [])],
-            )
-            cont_command_text = cont_result[1]
-
-        # 续写里 KP 可能再发指令（如读懂禁忌知识后追加 [SAN_CHECK]、或场景切换）——
-        # 继续处理，但限深度防无限掷骰链。
-        if dice_depth + 1 < MAX_DICE_CONTINUATIONS:
-            async for chunk in _process_commands(
-                db, session_id, cont_command_text, module, player_char, game_session, llm,
-                teammates=teammates, allow_rule_lookup=False, dice_depth=dice_depth + 1,
-                scene_groups=scene_groups,
-                focus_group_label=focus_group_label,
-                pre_gen_seq=pre_gen_seq,
-            ):
-                yield chunk
-
-    for match in SCENE_CHANGE_RE.finditer(kp_text):
-        scene_chunks, _sid, _note = await _exec_scene_change(
-            db, session_id, game_session, module, match.group(1).strip(),
-            player_char, teammates,
-        )
-        for chunk in scene_chunks:
-            yield chunk
-
-    # 此路不通 / 恢复通行：只改寻路看的状态，不搬人、不出卡片。
-    for match in BLOCK_PATH_RE.finditer(kp_text):
-        kv = _parse_tag_kv(match.group(1))
-        _set_path_block(
-            db, session_id, game_session, module,
-            kv.get("scene_id") or match.group(1).strip(), kv.get("reason", ""), blocked=True,
-        )
-    for match in UNBLOCK_PATH_RE.finditer(kp_text):
-        kv = _parse_tag_kv(match.group(1))
-        _set_path_block(
-            db, session_id, game_session, module,
-            kv.get("scene_id") or match.group(1).strip(), "", blocked=False,
-        )
-
-    # 建议前往：不搬人，只挂一张「要不要去」的卡；玩家点了才进他自己的暂存动作。
-    for match in TRAVEL_SUGGEST_RE.finditer(kp_text):
-        kv = _parse_tag_kv(match.group(1))
-        suggest_chunks, _note = _travel_suggest_event(
-            db, session_id, game_session, module,
-            kv.get("scene_id") or match.group(1).strip(), kv.get("reason", ""),
-        )
-        for chunk in suggest_chunks:
-            yield chunk
-
-    # 剧情状态推进：置/清标志后，刷新内存里的 game_session.world_state，使本次生成的后续
-    # 处理（续写、NPC 行动）与下一轮上下文都能看到最新状态。
-    for match in SET_FLAG_RE.finditer(kp_text):
-        for chunk in _exec_flag(db, session_id, game_session, match.group(1).strip(), True):
-            yield chunk
-    for match in CLEAR_FLAG_RE.finditer(kp_text):
-        for chunk in _exec_flag(db, session_id, game_session, match.group(1).strip(), False):
-            yield chunk
-
-    # 配乐氛围：多条只认最后一条（同一段叙述里改两次，后者才是收尾时的气氛）。
-    mood_matches = list(SET_MOOD_RE.finditer(kp_text))
-    if mood_matches:
-        mood_chunks, _note = turn_effects.exec_set_mood(
-            db, session_id, game_session, mood_matches[-1].group(1).strip(),
-        )
-        for chunk in mood_chunks:
-            yield chunk
-
-    # 手书发放：[HANDOUT: id=xxx] → 把模组手书的原文落库为 system 事件并广播（handout 是
-    # 给玩家看的实体文书，正常进聊天流，前端按 metadata.kind 渲染成信笺卡片）。
-    # 幂等：同 id 只发放一次（重复发放静默跳过）；未知 id 静默跳过（只记日志，不出卡片）。
-    for match in HANDOUT_RE.finditer(kp_text):
-        inner = match.group(1).strip()
-        hid = (_parse_tag_kv(inner).get("id") or inner).strip()
-        handout_chunks, _note = await _exec_handout(
-            db, session_id, game_session, module, hid, player_char, teammates,
-        )
-        for chunk in handout_chunks:
-            yield chunk
-
-    # 记账：[MARK_SEEN: clue=xxx] / [MARK_SEEN: event=机制点原文] → 只写世界记忆，不出 chunk。
-    for match in MARK_SEEN_RE.finditer(kp_text):
-        _exec_mark_seen(
-            db, session_id, game_session, module,
-            _parse_tag_kv(match.group(1).strip()), player_char, teammates,
-        )
-
-    for match in NPC_ACT_RE.finditer(kp_text):
-        npc_chunks, _resp = await _exec_npc_act(
-            db, session_id, game_session, module, llm, player_char,
-            match.group(1).strip(), match.group(2).strip(),
-        )
-        for chunk in npc_chunks:
-            yield chunk
-
-
-async def _handle_rule_lookup(
-    db: Session,
-    session_id: str,
-    query: str,
-    module: Module,
-    player_char: Character,
-    game_session: GameSession,
-    llm,
-    teammates: list[Character] | None = None,
-    lookup_depth: int = 0,
-) -> AsyncIterator[str]:
-    """KP 发起 [RULE_LOOKUP] 后：检索规则书原文 → 回灌让 KP 据此续写裁定。
-
-    透明提示一条 ephemeral system（不落库）；检索不到时给降级文案让 KP 凭经验处理。
-    续写产物再过一遍 _process_commands（禁再查阅），以便"查完规则随即发起检定"成立。
-    """
-    yield _make_chunk("system", "守秘人翻阅规则书……")
-
-    passages = _rule_lookup_passages(db, query, module.rule_system, game_session)
-    continuation = KP_RULE_CONTINUATION_PROMPT.format(query=query, passages=passages)
-    events = session_service.get_session_events(db, session_id)
-    messages = build_kp_context(
-        game_session, module, player_char, events, teammates=teammates,
-        rules_lookup_enabled=False,  # 续写阶段不再广告查阅，避免长链
-    )
-    messages.append({"role": "user", "content": continuation})
-
-    kp = KPAgent(llm)
-    cont_result = ["", "", [], [], []]
-    try:
-        async for chunk in _stream_narration_filtered(
-            kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
-            masker=npc_identity.build_masker(db, session_id, module),
-            npc_guard=_npc_guard(
-                db, session_id, game_session, module, llm, player_char,
-            ),
-        ):
-            yield chunk
-    finally:
-        cont_narration = cont_result[0].rstrip()
-        if cont_narration:
-            session_service.add_event(
-                db, session_id, "narration", cont_narration, actor_name="KP",
-            )
-        for npc_name, dialogue_text in cont_result[2]:
-            ev = session_service.add_event(
-                db, session_id, "dialogue", dialogue_text, actor_name=npc_name,
-            )
-            _attach_npc_portrait(db, session_id, module, ev)
-
-    # 世界记忆钩子 c：续写里的 NPC 台词同样记入其互动史
-    _record_npc_say_memory(
-        db, session_id, game_session, module, cont_result[2],
-        [player_char.name] + [t.name for t in (teammates or [])],
-    )
-
-    # 续写里可能含查完规则后发起的检定/场景切换等，照常处理（但禁止再次查阅）
-    async for chunk in _process_commands(
-        db, session_id, cont_result[1], module, player_char, game_session, llm,
-        teammates=teammates, allow_rule_lookup=False, lookup_depth=lookup_depth + 1,
-    ):
-        yield chunk
-
-
-async def _handle_module_lookup(
-    db: Session,
-    session_id: str,
-    query: str,
-    module: Module,
-    player_char: Character,
-    game_session: GameSession,
-    llm,
-    teammates: list[Character] | None = None,
-    lookup_depth: int = 0,
-) -> AsyncIterator[str]:
-    """KP 发起 [MODULE_LOOKUP] 后：检索模组原文 → 回灌让 KP 据此续写。
-
-    与 [RULE_LOOKUP] 同一套处理模式，且共享 lookup_depth 配额（合并计数）。
-    透明提示一条 ephemeral system（不落库）；检索不到/失败时给降级文案让 KP
-    按结构化模组资料续写（fail-open，不阻塞跑团）。
-    """
-    yield _make_chunk("system", "守秘人翻阅模组手稿……")
-
-    passages = _module_lookup_passages(db, module, game_session, query)
-    continuation = KP_MODULE_CONTINUATION_PROMPT.format(query=query, passages=passages)
-    events = session_service.get_session_events(db, session_id)
-    messages = build_kp_context(
-        game_session, module, player_char, events, teammates=teammates,
-        rules_lookup_enabled=False,  # 续写阶段不再广告查阅，避免长链
-    )
-    messages.append({"role": "user", "content": continuation})
-
-    kp = KPAgent(llm)
-    cont_result = ["", "", [], [], []]
-    try:
-        async for chunk in _stream_narration_filtered(
-            kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
-            masker=npc_identity.build_masker(db, session_id, module),
-            npc_guard=_npc_guard(
-                db, session_id, game_session, module, llm, player_char,
-            ),
-        ):
-            yield chunk
-    finally:
-        cont_narration = cont_result[0].rstrip()
-        if cont_narration:
-            session_service.add_event(
-                db, session_id, "narration", cont_narration, actor_name="KP",
-            )
-        for npc_name, dialogue_text in cont_result[2]:
-            ev = session_service.add_event(
-                db, session_id, "dialogue", dialogue_text, actor_name=npc_name,
-            )
-            _attach_npc_portrait(db, session_id, module, ev)
-
-    # 续写里可能含查完原文后发起的检定/场景切换等，照常处理（但禁止再次查阅）
-    async for chunk in _process_commands(
-        db, session_id, cont_result[1], module, player_char, game_session, llm,
-        teammates=teammates, allow_rule_lookup=False, lookup_depth=lookup_depth + 1,
-    ):
-        yield chunk
-
-
-async def _handle_recall_history(
-    db: Session,
-    session_id: str,
-    query: str,
-    module: Module,
-    player_char: Character,
-    game_session: GameSession,
-    llm,
-    teammates: list[Character] | None = None,
-    lookup_depth: int = 0,
-) -> AsyncIterator[str]:
-    """KP 发起 [RECALL_HISTORY] 后：回捞本局早前的事件原文 → 回灌让 KP 据此续写。
-
-    与 [RULE_LOOKUP]/[MODULE_LOOKUP] 同一套处理模式并共享 lookup_depth 配额，区别在于
-    查的是「本局已经发生过的事」：那部分记忆被滚动摘要压缩过，凭梗概编造出来的往事会
-    与玩家的记录冲突。检索不到时给降级文案，让 KP 当作确实没发生过（fail-open）。
-    """
-    yield _make_chunk("system", "守秘人回想早前的事……")
-
-    passages = _recall_history_passages(db, session_id, game_session, query)
-    continuation = KP_RECALL_CONTINUATION_PROMPT.format(query=query, passages=passages)
-    events = session_service.get_session_events(db, session_id)
-    messages = build_kp_context(
-        game_session, module, player_char, events, teammates=teammates,
-        rules_lookup_enabled=False,  # 续写阶段不再广告查阅，避免长链
-    )
-    messages.append({"role": "user", "content": continuation})
-
-    kp = KPAgent(llm)
-    cont_result = ["", "", [], [], []]
-    try:
-        async for chunk in _stream_narration_filtered(
-            kp, messages, cont_result, npcs=_matcher_npcs(module, teammates, game_session),
-            masker=npc_identity.build_masker(db, session_id, module),
-            npc_guard=_npc_guard(
-                db, session_id, game_session, module, llm, player_char,
-            ),
-        ):
-            yield chunk
-    finally:
-        cont_narration = cont_result[0].rstrip()
-        if cont_narration:
-            session_service.add_event(
-                db, session_id, "narration", cont_narration, actor_name="KP",
-            )
-        for npc_name, dialogue_text in cont_result[2]:
-            ev = session_service.add_event(
-                db, session_id, "dialogue", dialogue_text, actor_name=npc_name,
-            )
-            _attach_npc_portrait(db, session_id, module, ev)
-
-    async for chunk in _process_commands(
-        db, session_id, cont_result[1], module, player_char, game_session, llm,
-        teammates=teammates, allow_rule_lookup=False, lookup_depth=lookup_depth + 1,
-    ):
-        yield chunk

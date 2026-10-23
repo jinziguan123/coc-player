@@ -20,7 +20,8 @@ from app.models.character import Character
 from app.models.event_log import EventLog  # noqa: F401 注册建表
 from app.models.module import Module, ModuleChunk
 from app.models.session import GameSession
-from app.services import chat_service, module_rag_service, session_service
+from app.services import chat_service, module_rag_service, rulebook_service, session_service
+from tests.text_commands import run_text_commands
 
 
 class FakeEmbedder(Embedder):
@@ -344,26 +345,35 @@ async def _collect(agen):
     return wires([c async for c in agen])
 
 
-def test_process_commands_routes_module_lookup(db_factory, monkeypatch):
+def _executor(db, session, module, char):
+    from app.services import kp_tool_loop
+    return kp_tool_loop._build_kp_tool_executor(
+        db, session.id, session, module, char, [], None, ["", "", [], [], []],
+    )
+
+
+def _call(name, query):
+    from app.ai.provider import ToolCall
+    return ToolCall(id=name, name=name, arguments={"query": query})
+
+
+def test_module_lookup_text_command_short_circuits_following_commands(db_factory, monkeypatch):
     db = db_factory()
     module, char, session = _seed_session(db, rag_status="ready")
-
     seen = {}
 
-    async def fake_handle(db_, session_id, query, *a, **k):
+    def fake_retrieve(db_, module_id, query, k=3, scene_id=None):
         seen["query"] = query
-        yield chat_service._make_chunk("system", "stub")
+        return []
 
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_handle_module_lookup", fake_handle)
-
-    # MODULE_LOOKUP 为终止性指令：短路其后的 DICE_CHECK
+    monkeypatch.setattr(module_rag_service, "retrieve", fake_retrieve)
     text = (
         "让我确认一下原文。\n"
         "[MODULE_LOOKUP: query=旅馆大堂的描写]\n"
         "[DICE_CHECK: skill=侦查, difficulty=normal]"
     )
     asyncio.run(_collect(
-        chat_service._process_commands(db, session.id, text, module, char, session, None)
+        run_text_commands(db, session.id, text, module, char, session, None)
     ))
 
     assert seen["query"] == "旅馆大堂的描写"
@@ -375,110 +385,50 @@ def test_process_commands_routes_module_lookup(db_factory, monkeypatch):
 
 
 def test_lookup_quota_shared_between_rule_and_module(db_factory, monkeypatch):
+    """一轮之内规则书与模组原文共用查阅配额：用尽后两种查阅一并停用。"""
     db = db_factory()
     module, char, session = _seed_session(db, rag_status="ready")
-
     calls = {"rule": 0, "module": 0}
 
-    async def fake_rule(*a, **k):
+    def fake_rule(*a, **k):
         calls["rule"] += 1
-        yield chat_service._make_chunk("system", "rule")
+        return []
 
-    async def fake_module(*a, **k):
+    def fake_module(*a, **k):
         calls["module"] += 1
-        yield chat_service._make_chunk("system", "module")
+        return []
 
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_handle_rule_lookup", fake_rule)
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_handle_module_lookup", fake_module)
+    monkeypatch.setattr(rulebook_service, "retrieve", fake_rule)
+    monkeypatch.setattr(module_rag_service, "retrieve", fake_module)
+    execute = _executor(db, session, module, char)
 
-    def run(text, depth):
-        asyncio.run(_collect(chat_service._process_commands(
-            db, session.id, text, module, char, session, None, lookup_depth=depth,
-        )))
+    async def run():
+        outs = []
+        for i in range(chat_service.MAX_RULE_LOOKUPS):
+            outs.append(await execute(_call("module_lookup" if i % 2 else "rule_lookup", "q")))
+        outs.append(await execute(_call("rule_lookup", "q")))
+        outs.append(await execute(_call("module_lookup", "q")))
+        return outs
 
-    # 同一配额未用尽：两种查阅都可路由
-    run("[MODULE_LOOKUP: query=原文]", chat_service.MAX_RULE_LOOKUPS - 1)
-    assert calls["module"] == 1
-
-    # 配额用尽（不论此前是哪种查阅消耗的）：两种查阅一并停用
-    run("[RULE_LOOKUP: query=规则]", chat_service.MAX_RULE_LOOKUPS)
-    run("[MODULE_LOOKUP: query=原文]", chat_service.MAX_RULE_LOOKUPS)
-    assert calls["rule"] == 0
-    assert calls["module"] == 1
-
-    # allow_rule_lookup=False（续写阶段）同样对两者生效
-    asyncio.run(_collect(chat_service._process_commands(
-        db, session.id, "[MODULE_LOOKUP: query=原文]", module, char, session, None,
-        allow_rule_lookup=False,
-    )))
-    assert calls["module"] == 1
+    outs = asyncio.run(run())
+    assert calls["rule"] + calls["module"] == chat_service.MAX_RULE_LOOKUPS
+    assert all("配额已用完" in o.result_text for o in outs[-2:])
 
 
-def test_handle_module_lookup_retrieves_continues_and_persists(db_factory, monkeypatch):
+def test_module_lookup_feeds_passages_back_for_continuation(db_factory, monkeypatch):
     db = db_factory()
     module, char, session = _seed_session(db, rag_status="ready")
-
-    captured = {}
-
-    def fake_retrieve(db_, module_id, query, k=3, scene_id=None):
-        captured["query"] = query
-        captured["scene_id"] = scene_id
-        return [{"text": "大堂吊灯上蒙着厚灰。", "scene_hint": "scene_1", "score": 0.9, "ordinal": 0}]
-
-    monkeypatch.setattr(module_rag_service, "retrieve", fake_retrieve)
-
-    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
-        captured["messages"] = messages
-        result[0] = "吊灯的灰在你们头顶簌簌落下。"
-        result[1] = result[0]
-        yield chat_service._make_chunk("narration", result[0], actor_name="KP")
-
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_stream_narration_filtered", fake_stream)
-
-    chunks = asyncio.run(_collect(
-        chat_service._handle_module_lookup(
-            db, session.id, "旅馆大堂", module, char, session, None,
-        )
-    ))
-
-    assert any("翻阅模组手稿" in c for c in chunks)  # 透明提示
-    assert captured["query"] == "旅馆大堂"
-    assert captured["scene_id"] == "scene_1"  # 带当前场景做加权
-
-    # 原文片段与泄密警示回灌进了续写上下文
-    last_user = [m for m in captured["messages"] if m["role"] == "user"][-1]["content"]
-    assert "大堂吊灯上蒙着厚灰" in last_user
-    assert "泄密约束照常适用" in last_user
-
-    # 续写叙事落库
-    narrs = [
-        e for e in session_service.get_session_events(db, session.id)
-        if e.event_type == "narration"
-    ]
-    assert any("簌簌落下" in e.content for e in narrs)
+    monkeypatch.setattr(
+        module_rag_service, "retrieve",
+        lambda *a, **k: [{"text": "旅馆大堂铺着暗红地毯", "score": 0.9}],
+    )
+    outcome = asyncio.run(_executor(db, session, module, char)(_call("module_lookup", "大堂")))
+    assert "暗红地毯" in outcome.result_text and "大堂" in outcome.result_text
 
 
-def test_handle_module_lookup_fallback_when_no_hits(db_factory, monkeypatch):
+def test_module_lookup_fallback_when_no_hits(db_factory, monkeypatch):
     db = db_factory()
     module, char, session = _seed_session(db, rag_status="ready")
-
     monkeypatch.setattr(module_rag_service, "retrieve", lambda *a, **k: [])
-
-    captured = {}
-
-    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
-        captured["messages"] = messages
-        result[0] = "按既有资料续写。"
-        result[1] = result[0]
-        yield chat_service._make_chunk("narration", result[0], actor_name="KP")
-
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_stream_narration_filtered", fake_stream)
-
-    asyncio.run(_collect(
-        chat_service._handle_module_lookup(
-            db, session.id, "不存在的内容", module, char, session, None,
-        )
-    ))
-
-    last_user = [m for m in captured["messages"] if m["role"] == "user"][-1]["content"]
-    assert "未在模组原文中找到" in last_user
+    outcome = asyncio.run(_executor(db, session, module, char)(_call("module_lookup", "大堂")))
+    assert "未在模组原文中找到" in outcome.result_text

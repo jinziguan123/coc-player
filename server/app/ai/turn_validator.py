@@ -377,13 +377,27 @@ def _keep_original_when_empty(
     return result
 
 
+def _reported(report: dict, result: TurnValidation | None, narration: str) -> TurnValidation | None:
+    if result is None:
+        report["status"] = "unavailable"
+    elif result.violated and not result.corrected_narration.strip():
+        report["status"] = "rewrite_missing"
+    else:
+        report["status"] = "rewritten" if result.violated else "pass"
+    return _keep_original_when_empty(result, narration)
+
+
 async def validate_turn_narration(
     llm: Any, plan: TurnPlan | None, narration: str, seen_context: str = "",
     turn_inputs: str = "", on_start: Callable[[], None] | None = None,
     party_names: Iterable[str] | None = None, location_context: str = "",
-    settled_checks: str = "",
+    settled_checks: str = "", report: dict | None = None,
 ) -> TurnValidation | None:
     """校验一段已生成的旁白是否违反本轮裁定计划的硬约束，违反则给出改写版本。
+
+    ``report`` 给定时写入 ``status``：skipped（无需校验）/ pass / rewritten /
+    unavailable（调用或解析失败）/ rewrite_missing（判违规却没有改写稿）。返回值仍保持
+    fail-open 语义；需要区分「通过」与「没校验成」的调用方（高风险缓冲）读 status。
 
     只对『落库/持久化的文本』生效——无法收回已经流式广播出去的内容，但能防止违规
     内容永久留在会话记录里（重连、其他玩家、复盘都会看到落库版本）。
@@ -397,9 +411,12 @@ async def validate_turn_narration(
     判违规却没改写、改写稿长度失真）才回退叙事模型重跑一次。没单独配快模型或
     ``CHECKS_USE_FAST_MODEL=false`` 时只跑一次叙事模型，绝不把同一份请求发两遍。
     """
+    report = report if report is not None else {}
     if plan is None or llm is None or not narration.strip():
+        report["status"] = "skipped" if plan is None or not narration.strip() else "unavailable"
         return None
     if not _looks_suspicious(narration, plan, turn_inputs, location_context):
+        report["status"] = "skipped"
         return None
     if on_start is not None:
         on_start()
@@ -420,7 +437,7 @@ async def validate_turn_narration(
             t0 = time.monotonic()
             result = await _validate_once(first_llm, plan, narration, **kwargs)
             logger.info("耗时|终检 %.1fs（%s）", time.monotonic() - t0, _verdict_label(result))
-            return _keep_original_when_empty(result, narration)
+            return _reported(report, result, narration)
 
         t0 = time.monotonic()
         first = await _validate_once(first_llm, plan, narration, **kwargs)
@@ -428,7 +445,7 @@ async def validate_turn_narration(
         reason = _fallback_reason(first, narration, plan)
         if reason is None:
             logger.info("耗时|终检 快模型 %.1fs（%s）", first_s, _verdict_label(first))
-            return _keep_original_when_empty(first, narration)
+            return _reported(report, first, narration)
 
         logger.info("耗时|终检 快模型 %.1fs 不可用（%s），回退叙事模型重跑", first_s, reason)
         t1 = time.monotonic()
@@ -437,4 +454,4 @@ async def validate_turn_narration(
             "耗时|终检 叙事模型回退 %.1fs（%s）",
             time.monotonic() - t1, _verdict_label(result),
         )
-        return _keep_original_when_empty(result, narration)
+        return _reported(report, result, narration)

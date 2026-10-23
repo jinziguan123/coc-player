@@ -153,7 +153,7 @@ async def filter_narration_stream(
     #
     # 此前是 ``full_response += token``，而命令标签终止时 ``break`` 只跳出字符循环——于是
     # 标签之后、同一 token 之内的文字会残留下来，残留多少取决于 Provider 怎么切词（不可控）。
-    # 这不只是「尾巴脏了」：``full_response`` 正是下游 ``_process_commands`` 解析指令的输入，
+    # 这不只是「尾巴脏了」：``full_response`` 曾是下游文本指令解析的输入（现由适配层从原始流解析），
     # 而它对 SET_FLAG / BLOCK_PATH 这些用的是 finditer。于是模型写
     # ``[SET_FLAG: a][SET_FLAG: b]`` 时，第二条**时而执行、时而不执行**，
     # 全看那两个标签落在同一个 token 里没有。

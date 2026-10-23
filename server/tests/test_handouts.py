@@ -21,6 +21,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
 from app.services import chat_service, module_service, session_service, world_memory
+from tests.text_commands import run_text_commands
 
 
 HANDOUT_CONTENT = "亲爱的玛丽：\n若你读到这封信，我恐怕已不在人世。\n——你的父亲"
@@ -88,7 +89,7 @@ def _handout_events(db, session_id):
 
 def _run_commands(db, session, module, char, text):
     return asyncio.run(_collect(
-        chat_service._process_commands(db, session.id, text, module, char, session, None)
+        run_text_commands(db, session.id, text, module, char, session, None)
     ))
 
 

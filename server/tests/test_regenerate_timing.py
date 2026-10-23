@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.base import Base
 from app.services import chat_service, session_service
 from tests.test_chat_service import _patch_runtime, _seed_session
+from tests.text_commands import loop_from_stream_fake
 
 
 @pytest.fixture
@@ -41,7 +42,7 @@ def test_重新生成有完整耗时打点(db_factory, monkeypatch, caplog):
 
     monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_run_turn_planner)
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
-    monkeypatch.setattr(chat_service, "_process_commands", fake_process)
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     db = db_factory()
     session_id = _seed_session(db)

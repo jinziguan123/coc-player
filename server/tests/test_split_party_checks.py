@@ -14,7 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from app.ai.turn_planner import SanityPolicy, TurnPlan
 from app.models import Base, Character, GameSession, Module, SessionParticipant  # noqa: F401
 from app.services import chat_service as cs
-from app.services import dice_runtime, kp_tool_loop, session_service, turn_effects
+from app.services import dice_runtime, session_service, turn_effects
+from tests.text_commands import run_text_commands
 
 HOUSE = "科比特的老房子"
 ASYLUM = "罗克斯伯里疗养院"
@@ -146,7 +147,7 @@ def test_san_check_falls_back_to_whole_party_without_locations(db_factory):
     assert actors == {char.name for char in chars}
 
 
-# ── 指令归组（合并文本 → 发出它的那一组）────────────────────────────────
+# ── 指令归组：分头时每组在自己的工具循环里执行，执行器限定该组成员 ────────────
 
 
 def _groups():
@@ -156,51 +157,25 @@ def _groups():
     ]
 
 
-def test_group_scope_resolver_maps_position_to_its_group(db_factory):
-    db = db_factory()
-    _session, _module, chars = _seed(db)
-    hero = chars[0]
-    text = (
-        f"[GROUP: scene={HOUSE}]\n屋里安静得不像话。\n"
-        f"[GROUP: scene={ASYLUM}]\n病房里那个人影还站在原地。\n"
-    )
-    resolve = kp_tool_loop._group_scope_resolver(text, _groups(), hero, chars[1:])
-
-    assert [c.name for c in resolve(text.index("屋里"))] == ["陈守一", "坂田桐时"]
-    assert [c.name for c in resolve(text.index("病房"))] == ["林知微", "伊芙琳·哈特"]
-
-    # 首个组界标记之前的位置无从判断 → 回落到本轮聚焦组；没有聚焦组则交回缺省（在场全体）
-    stray = "开场白。\n" + text
-    assert [
-        c.name for c in kp_tool_loop._group_scope_resolver(
-            stray, _groups(), hero, chars[1:], focus_group_label=ASYLUM,
-        )(0)
-    ] == ["林知微", "伊芙琳·哈特"]
-    assert kp_tool_loop._group_scope_resolver(stray, _groups(), hero, chars[1:])(0) is None
-
-
-def test_group_scope_resolver_is_noop_without_split(db_factory):
-    db = db_factory()
-    _session, _module, chars = _seed(db)
-    resolve = kp_tool_loop._group_scope_resolver("随便什么文本", None, chars[0], chars[1:])
-    assert resolve(0) is None
+def _scope(chars, label):
+    members = next(g["members"] for g in _groups() if g["label"] == label)
+    return [c for c in chars if c.name in members]
 
 
 def test_san_check_stays_in_the_group_that_saw_the_horror(db_factory):
-    """端到端：疗养院那一组的 [SAN_CHECK] 不该波及老房子里的人（含主角）。"""
+    """端到端：疗养院那一组的 SAN_CHECK 不该波及老房子里的人（含主角）。"""
     db = db_factory()
     session, module, chars = _seed(db)
     hero = chars[0]
     kp_text = (
-        f"[GROUP: scene={HOUSE}]\n屋内维持着一种近乎刻意的安静。\n"
-        f"[GROUP: scene={ASYLUM}]\n病床下伸出一截青灰色的手指。\n"
+        "病床下伸出一截青灰色的手指。\n"
         "[SAN_CHECK: success_loss=0, failure_loss=1d6, source=病床下的手指, "
         "reason=病床下伸出的那截青灰色手指]\n"
     )
 
-    _run(kp_tool_loop._process_commands(
+    _run(run_text_commands(
         db, session.id, kp_text, module, hero, session, llm=None,
-        teammates=chars[1:], scene_groups=_groups(),
+        teammates=chars[1:], dice_scope=_scope(chars, ASYLUM),
     ))
 
     requests = _san_requests(db, session.id)
@@ -216,14 +191,13 @@ def test_group_dice_check_stays_in_its_group(db_factory):
     session, module, chars = _seed(db)
     hero = chars[0]
     kp_text = (
-        f"[GROUP: scene={ASYLUM}]\n走廊里很安静。\n"
-        f"[GROUP: scene={HOUSE}]\n墙根传来极轻的窸窣声。\n"
+        "墙根传来极轻的窸窣声。\n"
         "[DICE_CHECK: skill=聆听, char=在场, reason=墙根那阵极轻的窸窣声]\n"
     )
 
-    _run(kp_tool_loop._process_commands(
+    _run(run_text_commands(
         db, session.id, kp_text, module, hero, session, llm=None,
-        teammates=chars[1:], scene_groups=_groups(),
+        teammates=chars[1:], dice_scope=_scope(chars, HOUSE),
     ))
 
     requests = [

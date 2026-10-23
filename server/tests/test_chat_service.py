@@ -20,6 +20,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
 from app.services import chat_service, session_service, turn_orchestrator
+from tests.text_commands import loop_from_stream_fake, run_text_commands
 
 
 @pytest.fixture
@@ -468,7 +469,7 @@ def test_unclosed_bracket_does_not_eat_narration():
 
 
 def test_set_flag_regex_tolerant():
-    """SET_FLAG 正则容忍漏写 flag=／冒号写成空格（全角括号在 _process_commands 里已归一）。"""
+    """SET_FLAG 正则容忍漏写 flag=／冒号写成空格（全角括号在解析前已归一）。"""
     assert chat_service.SET_FLAG_RE.findall("[SET_FLAG: flag=basement_flooded]") == ["basement_flooded"]
     assert chat_service.SET_FLAG_RE.findall("[SET_FLAG hint_x]") == ["hint_x"]
     assert chat_service.SET_FLAG_RE.findall("[SET_FLAG:door_open]") == ["door_open"]
@@ -1075,6 +1076,8 @@ def test_generation_saves_on_interrupt(db_factory, monkeypatch):
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
 
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
+
     db = db_factory()
     session_id = _seed_session(db)
     session_service.add_event(db, session_id, "dialogue", "我环顾四周", actor_name="玩家")
@@ -1097,6 +1100,8 @@ def test_opening_saves_partial_on_stream_error(db_factory, monkeypatch):
         raise RuntimeError("provider stream dropped")
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     db = db_factory()
     session_id = _seed_session(db)
@@ -1186,6 +1191,8 @@ def test_generation_saves_once_on_success(db_factory, monkeypatch):
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
 
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
+
     db = db_factory()
     session_id = _seed_session(db)
     asyncio.run(chat_service.run_opening_generation(session_id))
@@ -1220,7 +1227,7 @@ def test_generation_injects_turn_plan(db_factory, monkeypatch):
 
     monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_run_turn_planner)
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
-    monkeypatch.setattr(chat_service, "_process_commands", fake_process)
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     db = db_factory()
     session_id = _seed_session(db)
@@ -1264,8 +1271,8 @@ def test_generation_patches_narration_when_validator_flags_violation(db_factory,
 
     monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_run_turn_planner)
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
     monkeypatch.setattr(chat_service.turn_validator, "validate_turn_narration", fake_validate)
-    monkeypatch.setattr(chat_service, "_process_commands", fake_process)
 
     db = db_factory()
     session_id = _seed_session(db)
@@ -1309,7 +1316,7 @@ def test_split_generation_injects_turn_plan_into_each_group(db_factory, monkeypa
 
     monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_run_turn_planner)
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
-    monkeypatch.setattr(chat_service, "_process_commands", fake_process)
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     db = db_factory()
     module = Module(
@@ -1378,11 +1385,13 @@ def test_split_narrations_supports_per_group_prompts_and_persists_groups(db_fact
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
 
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
+
     focus_label = groups[0]["label"]
     custom_prompt = "玩家「莫妮卡」申请用「心理学」检定，请裁定"
-    combined = asyncio.run(chat_service._run_split_narrations(
+    asyncio.run(chat_service._run_split_narrations_tool_loop(
         db, session.id, session, module, pc, events, [mate],
-        kp=object(), llm=None, rules_enabled=False, matcher_npcs=[], groups=groups,
+        llm=None, rules_enabled=False, matcher_npcs=[], groups=groups,
         group_prompts={focus_label: custom_prompt},
         default_prompt="DEFAULT_{label}_{members}",
     ))
@@ -1397,10 +1406,6 @@ def test_split_narrations_supports_per_group_prompts_and_persists_groups(db_fact
     evs = session_service.get_session_events(db_factory(), session.id)
     narr_groups = {(e.metadata_ or {}).get("group") for e in evs if e.event_type == "narration"}
     assert narr_groups == {g["label"] for g in groups}
-    # 每组产物前带组界标记：合并文本交给 _process_commands 后，指令仍能回溯到发出它的那一组。
-    assert combined == "\n".join(
-        f"[GROUP: scene={g['label']}]\n{g['label']} 的叙事" for g in groups
-    )
 
 
 def test_run_kp_turn_split_check_request_generates_each_group(db_factory, monkeypatch):
@@ -1441,7 +1446,8 @@ def test_run_kp_turn_split_check_request_generates_each_group(db_factory, monkey
             yield None
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
-    monkeypatch.setattr(chat_service, "_process_commands", fake_process)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     asyncio.run(chat_service._run_kp_turn(
         db, session.id, session, module, pc, [mate],
@@ -1457,70 +1463,10 @@ def test_run_kp_turn_split_check_request_generates_each_group(db_factory, monkey
     assert narr_groups == {g["label"] for g in groups}
 
 
-def test_process_commands_split_dice_continuation_tags_affected_group(db_factory, monkeypatch):
-    """分头行动中的自动骰（如心理学暗投）续写按实际产出结果的组生成并落 group 标签；
-    其他组已有本轮分头叙事，不需要再被重复推一轮。"""
-    db = db_factory()
-    module = Module(
-        title="M", rule_system="coc", npcs=[],
-        scenes=[{"id": "scene_office", "name": "事务所"}, {"id": "scene_lib", "name": "图书馆"}],
-    )
-    pc = Character(name="莫妮卡", rule_system="coc", is_player=True)
-    mate = Character(name="亨利", rule_system="coc", is_player=True)
-    db.add_all([module, pc, mate])
-    db.flush()
-    session = GameSession(
-        module_id=module.id, player_character_id=pc.id, status="active",
-        current_scene_id="scene_office", world_state={},
-    )
-    db.add(session)
-    db.commit()
-    session_service.set_char_location(db, session.id, mate.id, "scene_lib")
-    session = db.get(GameSession, session.id)
-    groups = chat_service._location_groups(session, module, pc, [mate])
-    assert len(groups) == 2
-
-    captured = []
-
-    async def fake_stream(kp, messages, result, npcs=None, group_label=None, **kwargs):
-        captured.append(group_label)
-        result[0] = f"{group_label} 续写"
-        result[1] = ""
-        result[4].append((0, group_label))
-        yield chat_service._make_chunk("narration", result[0], actor_name="KP")
-
-    async def fake_exec_dice_check(*args, **kwargs):
-        return (
-            [],
-            ["【暗投·亨利·心理学（normal），结果仅你（KP）可见】：达成 普通成功；他观察到了对方的犹豫"],
-            False,
-        )
-
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_stream_narration_filtered", fake_stream)
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_exec_dice_check", fake_exec_dice_check)
-
-    asyncio.run(_collect(chat_service._process_commands(
-        db, session.id, "[DICE_CHECK: skill=心理学, char=亨利, visibility=blind]",
-        module, pc, session, llm=None, teammates=[mate],
-        scene_groups=groups,
-        focus_group_label=groups[1]["label"],
-    )))
-
-    assert captured == [groups[1]["label"]]
-    evs = session_service.get_session_events(db_factory(), session.id)
-    narr_groups = {(e.metadata_ or {}).get("group") for e in evs if e.event_type == "narration"}
-    assert narr_groups == {groups[1]["label"]}
-
-
 def test_psychology_check_is_always_blind(db_factory, monkeypatch):
     """心理学检定一律强制暗投：不挂「待玩家投骰」、不广播达成等级，结果只回灌 KP。
     其他技能（如侦查）不受影响，仍照常明骰。"""
-    # 检定后 _process_commands 会触发 KP 续写；本测只关心检定本身产出的 dice chunk
-    # （在续写之前 yield），把续写打桩掉以免调用真实 LLM。
-    async def _no_stream(*a, **k):
-        if False:
-            yield None
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_stream_narration_filtered", _no_stream)
+    # 只关心检定本身产出的 dice chunk（续写属于工具循环，不在本测范围）。
 
     db = db_factory()
     module = Module(title="M", rule_system="coc", npcs=[], scenes=[])
@@ -1537,7 +1483,7 @@ def test_psychology_check_is_always_blind(db_factory, monkeypatch):
     tiers = ("大成功", "极难成功", "困难成功", "普通成功", "普通失败", "大失败")
 
     # 心理学：即使 KP 没写 visibility，也应强制暗投
-    chunks = asyncio.run(_collect(chat_service._process_commands(
+    chunks = asyncio.run(_collect(run_text_commands(
         db, session.id, "[DICE_CHECK: skill=心理学, char=伊芙琳]",
         module, hero, session, llm=None,
     )))
@@ -1550,7 +1496,7 @@ def test_psychology_check_is_always_blind(db_factory, monkeypatch):
     assert len(dice_evs) == 1 and "结果仅 KP 可见" in dice_evs[0].content
 
     # 侦查：不在强制暗投名单，对真人角色仍照常挂「待玩家投骰」（与心理学的强制暗投形成对照）
-    chunks2 = asyncio.run(_collect(chat_service._process_commands(
+    chunks2 = asyncio.run(_collect(run_text_commands(
         db, session.id, "[DICE_CHECK: skill=侦查, char=伊芙琳]",
         module, hero, session, llm=None,
     )))
@@ -1579,7 +1525,8 @@ def test_travel_runs_team_turn_so_teammates_speak(db_factory, monkeypatch):
         return '{"action":"speak","content":"这地方不太对劲。"}'
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
-    monkeypatch.setattr(chat_service, "_process_commands", fake_process)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
     monkeypatch.setattr(chat_service.TeamAgent, "decide", fake_decide)
 
     db = db_factory()
@@ -1625,6 +1572,7 @@ def test_opening_generation_skips_turn_planner(db_factory, monkeypatch):
 
     monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_run_turn_planner)
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     db = db_factory()
     session_id = _seed_session(db)
@@ -1646,6 +1594,8 @@ def test_opening_idempotent(db_factory, monkeypatch):
         yield chat_service._make_chunk("narration", "不该发生", actor_name="KP")
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     db = db_factory()
     session_id = _seed_session(db)
@@ -1871,6 +1821,8 @@ def test_epilogue_writes_closing_narration(db_factory, monkeypatch):
         yield chat_service._make_chunk("narration", result[0], actor_name="KP")
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
     db = db_factory()
     session_id = _seed_ended_session(db)
     asyncio.run(chat_service.run_epilogue_generation(session_id))
@@ -1894,6 +1846,8 @@ def test_epilogue_is_idempotent(db_factory, monkeypatch):
         yield chat_service._make_chunk("narration", "收场", actor_name="KP")
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
     db = db_factory()
     session_id = _seed_ended_session(db)
     asyncio.run(chat_service.run_epilogue_generation(session_id))
@@ -1912,6 +1866,8 @@ def test_epilogue_mentions_reached_ending(db_factory, monkeypatch):
         yield chat_service._make_chunk("narration", "收场", actor_name="KP")
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
     db = db_factory()
     session_id = _seed_ended_session(db)
     session = db.get(GameSession, session_id)
@@ -1932,6 +1888,8 @@ def test_epilogue_survives_generation_failure(db_factory, monkeypatch):
         yield  # pragma: no cover — 让它是异步生成器
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", boom)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(boom))
     db = db_factory()
     session_id = _seed_ended_session(db)
     asyncio.run(chat_service.run_epilogue_generation(session_id))   # 不抛
@@ -2072,3 +2030,35 @@ def test_explicit_no_check_verdict_is_respected(db_factory):
     assert not planned_effects.requested_check_fallback_command(
         db, session_id, actor, "格斗(斗殴)", pre,
     )
+
+
+def test_planner_识别检定申请时不丢弃计划_门控物品先暂存(db_factory, monkeypatch):
+    """计划里被这次检定门控的收获要暂存等骰子；此前整份计划被丢弃，投骰成功也拿不到东西。"""
+    _patch_runtime(monkeypatch, db_factory)
+    captured = {}
+
+    async def fake_planner(llm, messages):
+        return chat_service.turn_planner.TurnPlan(
+            player_check_request="侦查",
+            items_gained=[{"name": "黄铜钥匙", "who": "测试角色"}],
+        )
+
+    async def fake_run_kp_turn(db, session_id, game_session, module, player_char, party_others, user_prompt, **kw):
+        db.expire_all()
+        captured["pending"] = list((db.get(GameSession, session_id).turn_state or {}).get("pending_item_gains") or [])
+
+    monkeypatch.setattr(chat_service.turn_planner, "run_turn_planner", fake_planner)
+    monkeypatch.setattr(chat_service, "_run_kp_turn", fake_run_kp_turn)
+
+    db = db_factory()
+    session_id = _seed_session(db)
+    actor_id = db.get(GameSession, session_id).player_character_id
+    session_service.add_event(
+        db, session_id, "action", "我用侦查看看书桌暗格", actor_id=actor_id, actor_name="测试角色",
+    )
+    asyncio.run(chat_service.run_chat_generation(session_id))
+    assert [g["name"] for g in captured["pending"]] == ["黄铜钥匙"]
+    assert captured["pending"][0]["skill"] == "侦查"
+    # 物品尚未入库：骰子落地前不发货
+    events = session_service.get_session_events(db_factory(), session_id)
+    assert not [e for e in events if (e.metadata_ or {}).get("item_gain")]

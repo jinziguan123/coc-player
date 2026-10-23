@@ -327,6 +327,7 @@ def record_clue_ledger_from_plan(
             ws,
             list(policy.candidate_clue_ids) if policy.action_matches_clue else [],
             present, seq, note=policy.notes,
+            skill=(plan.check.skill or plan.player_check_request or "").strip(),
         ))
         return
     # 记账前先取台账快照：新旧对比才知道哪些线索是**本轮首次**触碰（配图卡只出一次）
@@ -454,7 +455,11 @@ def _remap_marks_after_rewrite(
     old_len = len(old_narr)
     if old_len <= 0:
         if len(result) > 3:
-            del result[3:]
+            if hasattr(result, "dialogue_marks"):
+                result.dialogue_marks.clear()
+                result.group_marks.clear()
+            else:
+                del result[3:]
         if event_order is not None:
             event_order[:] = [(0, eid) for _o, eid in event_order]
         return
@@ -491,13 +496,13 @@ async def _validate_and_patch_narration(
     llm, plan: turn_planner.TurnPlan | None, result: list,
     event_order: list | None = None, seen_context: str = "", turn_inputs: str = "",
     on_start=None, party_names=None, location_context: str = "",
-    settled_checks: str = "",
+    settled_checks: str = "", report: dict | None = None,
 ) -> None:
     """校验本轮旁白是否违反裁定计划的硬约束（泄露 do_not_reveal / 汇报体+内部标识泄露），
     违反则用改写版本替换落库文本，防止违规内容永久留在会话记录里。
 
     无法收回已经流式广播出去的内容，但能保证重连、其他玩家、复盘看到的是干净版本。
-    只替换 result[0]（落库/展示用的旁白），result[1]（供 _process_commands 解析指令）不动。
+    只替换 result[0]（落库/展示用的旁白），result[1]（模型原始输出，含指令原文）不动。
     改写会使 result[3]（对话交错偏移）相对原文失真——**不再直接丢弃**（那会让 _persist_narration
     走「整段旁白 + 对话全部追加」的回退，旁白与气泡各自成堆、丢交错顺序，是用户可见的渲染 bug），
     改为按长度比例重映射偏移，保住交错顺序。
@@ -508,8 +513,10 @@ async def _validate_and_patch_narration(
         await _validate_only(
             llm, plan, result, event_order, seen_context=seen_context, turn_inputs=turn_inputs,
             on_start=on_start, party_names=party_names, location_context=location_context,
-            settled_checks=settled_checks,
+            settled_checks=settled_checks, report=report,
         )
+    elif report is not None:
+        report["status"] = "skipped"
     # 去口癖编辑器：不依赖 plan，任何路径的落库版本都过一遍（fail-open，见 style_editor）。
     from app.services import style_editor
     await style_editor.polish_result(llm, result, event_order, on_start=on_start)
@@ -519,9 +526,11 @@ async def _validate_only(
     llm, plan: turn_planner.TurnPlan, result: list,
     event_order: list | None = None, seen_context: str = "", turn_inputs: str = "",
     on_start=None, party_names=None, location_context: str = "",
-    settled_checks: str = "",
+    settled_checks: str = "", report: dict | None = None,
 ) -> None:
     validator_kwargs = {"seen_context": seen_context}
+    if report is not None:
+        validator_kwargs["report"] = report
     if turn_inputs:
         validator_kwargs["turn_inputs"] = turn_inputs
     if party_names:
@@ -869,3 +878,23 @@ def _record_turn_usage(
         db.commit()
     except Exception:
         logger.exception("落库回合 usage 失败（忽略）")
+
+
+def checks_hung_since(db: Session, session_id: str, pre_gen_seq: int) -> bool:
+    """本次生成里是否已挂出仍待玩家投掷的技能检定（不含理智检定卡）。
+
+    回合挂起时，后置守卫不应再替结果未定的行动搬场景、补进场检定或补发门控的 SAN。
+    """
+    game_session = db.get(GameSession, session_id)
+    pending = set(((game_session.turn_state if game_session else None) or {}).get("pending_checks") or {})
+    if not pending:
+        return False
+    for ev in session_service.get_session_events(db, session_id):
+        meta = ev.metadata_ or {}
+        if (
+            (ev.sequence_num or 0) > pre_gen_seq and ev.event_type == "system"
+            and meta.get("check_request") and meta.get("id") in pending
+            and meta.get("kind") != "san_check"
+        ):
+            return True
+    return False

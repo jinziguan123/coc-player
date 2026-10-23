@@ -9,14 +9,15 @@ import httpx
 
 from sqlalchemy.orm import Session
 
-from app.ai import turn_planner, usage_tracker
+from app.ai import call_budget, turn_planner, usage_tracker
 from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import KPAgent
 from app.ai.context import build_kp_context
 from app.ai.llm_factory import get_fast_llm, get_llm
 from app.ai.provider import StreamStalled, model_name
-from app.services import style_editor
+from app.services import style_editor as style_editor  # 兼容测试与插件的旧注入点
 from app.ai.providers import openai_compat
+from app.config import settings
 from app.ai.prompts.kp_system import (
     CHECK_REQUEST_PROMPT,
     COMBAT_AFTERMATH_PROMPT,
@@ -27,9 +28,10 @@ from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
-    agent_runtime,
     agent_trace,
     character_chronicle,
+    check_gating,
+    effect_channel,
     chat_event_writer,
     command_protocol,
     dice_runtime,
@@ -55,12 +57,15 @@ from app.services import (
     session_service,
     team_turn_service,
     turn_context,
+    turn_pipeline,
     turn_effects,
     turn_event_order,
     world_state,
 )
 from app.services.event_protocol import luck_offer_event_id
 from app.services.room_hub import room_hub
+
+from app.services.turn_pipeline import NarrationResult
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +394,55 @@ def _validator_note(session_id: str):
     )
 
 
+async def _run_narration_stage(
+    db, session_id, game_session, module, player_char, teammates, llm,
+    stream, result: NarrationResult, *, plan=None, events=None,
+    event_order=None, base_seq=0, party_names=None, turn_inputs="",
+    location_guard="", listeners=None, group=None, hold=False, after_generate=None,
+):
+    """所有入口共用校验、持久化、重排和 NPC 记忆处理；兼容注入点在编排层保留。"""
+    order = event_order if event_order is not None else []
+    # 高风险回合（本轮有明确不可泄露的内容）：整段缓冲到终检完成再放出，牺牲首字延迟换取可拦截。
+    high_risk = bool(
+        settings.narration_buffer_high_risk and plan is not None and plan.safety.do_not_reveal
+    )
+    ctx = turn_pipeline.TurnContext(
+        session_id, result, turn_pipeline.TurnSpec(
+            "KP 叙事", hold_for_check=hold, buffer_until_validated=high_risk,
+            validate_timeout=settings.narration_buffer_timeout_seconds if high_risk else None,
+            on_validation_failure=settings.narration_buffer_on_failure,
+        ),
+        pre_gen_seq=base_seq, event_order=order, group=group,
+    )
+    if high_risk:
+        room_hub.broadcast(session_id, _make_chunk("housekeeping", "守秘人正在斟酌措辞…"))
+
+    async def validate():
+        extra = {"report": ctx.validation} if high_risk else {}
+        await _validate_and_patch_narration(
+            llm, plan, result, event_order,
+            seen_context=_recent_seen_text(events or []), turn_inputs=turn_inputs,
+            on_start=_validator_note(session_id),
+            settled_checks=_settled_checks_context(events or []),
+            party_names=party_names, location_context=location_guard, **extra,
+        )
+
+    def persist():
+        _persist_narration(db, session_id, result, event_order, llm=llm)
+        if event_order is not None:
+            _reorder_turn_events(db, session_id, event_order, base_seq)
+
+    await turn_pipeline.run(
+        ctx, stream, broadcast=lambda chunk: room_hub.broadcast(session_id, chunk),
+        validate=validate, persist=persist, after_generate=after_generate,
+        keep=_check_request_narration_keep,
+    )
+    _record_npc_say_memory(
+        db, session_id, game_session, module, result.bubbles,
+        listeners if listeners is not None else [player_char.name] + [t.name for t in (teammates or [])],
+    )
+
+
 async def _run_generation(
     db: Session,
     session_id: str,
@@ -399,9 +453,10 @@ async def _run_generation(
     teammates: list[Character] | None = None,
     blind_results: list[str] | None = None,
     plan: turn_planner.TurnPlan | None = None,
+    finish: bool = True,
 ) -> None:
-    llm = get_llm()
-    kp = KPAgent(llm)
+    # 不支持原生工具调用时经文本指令适配层，同样走工具循环（见 kp_tool_loop.loop_llm）
+    llm = kp_tool_loop.loop_llm(get_llm())
     # 仅在非开场、且该规则系统已挂载规则书时，向 KP 广告 [RULE_LOOKUP] 能力
     rules_enabled = bool(events) and rulebook_service.has_rulebook(db, module.rule_system)
     # 仅在非开场、且模组原文索引就绪时，向 KP 广告 [MODULE_LOOKUP] 能力（镜像规则书模式）
@@ -412,6 +467,7 @@ async def _run_generation(
     matcher_npcs = _matcher_npcs(module, teammates, game_session)
     # 生成前基线序号：供确定性 SAN 守卫判断「本轮 KP 是否已自行掷过 SAN」（幂等，防重复扣）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
+    combat_before = bool(combat_service.get_combat(game_session))
 
     # 回合裁定计划：主链路（run_chat_generation）已在队友回合之前先跑好 plan 并记过线索台账，
     # 通过 plan 参数传入 → 此处不重复调用。其他入口（run_travel_generation / _run_kp_turn 尾部）
@@ -469,13 +525,12 @@ async def _run_generation(
     rule_excerpts = _rule_excerpts_for_context(db, module, plan, events, game_session)
 
     if len(scene_groups) >= 2:
-        # 分头行动 v1 仍走旧正则路径（与 use_tool_calls 开关无关）：多分组编排与
-        # loop 的 group 标签/指令归并交互留待下一步，先保证主路径可开关灰度。
+        # 分头行动：每组各跑一次工具循环（见 _run_split_generation）。
         await _run_split_generation(
             db, session_id, game_session, module, player_char, events,
-            teammates, kp, llm, rules_enabled, matcher_npcs, scene_groups,
+            teammates, llm, rules_enabled, matcher_npcs, scene_groups,
             plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
-            location_guard=location_guard,
+            location_guard=location_guard, finish=finish, combat_before=combat_before,
         )
         return
 
@@ -508,157 +563,166 @@ async def _run_generation(
 
     # 玩家党名单（玩家 + AI 队友）：供台词归属守卫用——KP 绝不能用气泡替他们说话。
     party_names = {player_char.name} | {t.name for t in (teammates or [])}
-    result = ["", "", [], [], []]
-    if _tool_loop_active(llm):
-        # 新路径：agent loop（标准工具调用）。指令在 loop 内经执行器完成（含文本指令兜底），
-        # 不再走 _process_commands；validator 终检/落库/记忆钩子与旧路径共用（见下方）。
-        # 本局启用的规则组件（含插件）声明的 KP 工具：同时进工具模式说明、原生 schema 与执行器。
-        rs = rule_options_service.ruleset(db, game_session)
-        messages.append(kp_tools.tool_mode_message(rs.kp_tools))
-        exclude = set()
-        if not rules_enabled:
-            exclude.add("rule_lookup")   # 未挂规则书：不提供该工具（镜像旧路径不广告）
-        if not module_rag_enabled:
-            exclude.add("module_lookup")  # 原文索引未就绪：同上
-        execute = _build_kp_tool_executor(
-            db, session_id, game_session, module, player_char, teammates, llm, result,
-            ruleset=rs,
-        )
-        # 本轮基线序号 + 事件广播顺序清单：loop 内工具事件即时落库（较小序号），旁白收尾才落库，
-        # 直接 resync 会顺序错乱；收尾按广播偏移把本轮（seq>base_seq）事件重排回交错顺序。
-        base_seq = session_service.get_next_sequence_num(db, session_id) - 1
-        event_order: list = []
-        tools = kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools)
-        usage_probe: dict = {}
-        try:
-            async for chunk in _run_kp_agent_loop(
-                llm, messages, result, execute,
-                tools=tools,
-                npcs=matcher_npcs, plan=plan, party_names=party_names,
-                shown_dialogues=shown_dialogues,
-                event_order=event_order,
-                masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
-                usage_probe=usage_probe,
-                npc_guard=_npc_dialogue_guard(
-                    db, session_id, game_session, module, llm, player_char,
-                ),
-            ):
-                room_hub.broadcast(session_id, chunk)
-        except BaseException:
-            _persist_narration(db, session_id, result, event_order, llm=llm)
-            _reorder_turn_events(db, session_id, event_order, base_seq)
-            raise
-        _record_turn_usage(   # validator 前，趁 last_usage 仍是主叙事那次
+    result = NarrationResult()
+    # agent loop：指令在 loop 内经执行器完成（原生工具调用，或经适配层转换的文本指令）。
+    # 本局启用的规则组件（含插件）声明的 KP 工具：同时进工具模式说明、原生 schema 与执行器。
+    rs = rule_options_service.ruleset(db, game_session)
+    messages.extend(kp_tool_loop.tool_mode_messages(llm, rs.kp_tools))
+    exclude = set()
+    if not rules_enabled:
+        exclude.add("rule_lookup")   # 未挂规则书：不提供该工具
+    if not module_rag_enabled:
+        exclude.add("module_lookup")  # 原文索引未就绪：同上
+    execute = _build_kp_tool_executor(
+        db, session_id, game_session, module, player_char, teammates, llm, result,
+        ruleset=rs, pre_gen_seq=pre_gen_seq,
+    )
+    # 本轮基线序号 + 事件广播顺序清单：loop 内工具事件即时落库（较小序号），旁白收尾才落库，
+    # 直接 resync 会顺序错乱；收尾按广播偏移把本轮（seq>base_seq）事件重排回交错顺序。
+    base_seq = session_service.get_next_sequence_num(db, session_id) - 1
+    event_order: list = []
+    tools = kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools)
+    usage_probe: dict = {}
+    stream = _run_kp_agent_loop(
+        llm, messages, result, execute, tools=tools,
+        npcs=matcher_npcs, plan=plan, party_names=party_names,
+        shown_dialogues=shown_dialogues, event_order=event_order,
+        masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+        usage_probe=usage_probe,
+        npc_guard=_npc_dialogue_guard(db, session_id, game_session, module, llm, player_char),
+    )
+    await _run_narration_stage(
+        db, session_id, game_session, module, player_char, teammates, llm, stream, result,
+        plan=plan, events=events, event_order=event_order, base_seq=base_seq,
+        party_names=party_names, turn_inputs=turn_inputs, location_guard=location_guard,
+        after_generate=lambda: _record_turn_usage(
             db, game_session, llm, events, messages,
             tools=tools, calibration_usage=usage_probe.get("first"),
-        )
-        await _validate_and_patch_narration(
-            llm, plan, result, event_order, seen_context=_recent_seen_text(events),
-            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
-            settled_checks=_settled_checks_context(events),
-            party_names=party_names, location_context=location_guard,
-        )
-        _persist_narration(db, session_id, result, event_order, llm=llm)
-        _reorder_turn_events(db, session_id, event_order, base_seq)
-        # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
-        _record_npc_say_memory(
-            db, session_id, game_session, module, result[2],
-            [player_char.name] + [t.name for t in (teammates or [])],
-        )
-    else:
-        # 旧路径：单次流式生成 + 正则指令后处理（降级开关，行为不变）。
-        # 取消（硬取消 task）或流式中途报错（如供应商抖动断流）时，已生成的叙事都要落库，
-        # 否则客户端在收到 done 后 resync 会拉到空历史，造成「生成到一半聊天全部消失」。
-        try:
-            async for chunk in _stream_narration_filtered(
-                kp, messages, result, npcs=matcher_npcs, party_names=party_names,
-                shown_dialogues=shown_dialogues,
-                masker=npc_identity.build_masker(db, session_id, module),
-                npc_guard=_npc_dialogue_guard(
-                    db, session_id, game_session, module, llm, player_char,
-                ),
-            ):
-                room_hub.broadcast(session_id, chunk)
-        except BaseException:
-            # CancelledError(继承 BaseException) 与普通异常都先把已生成片段落库再上抛
-            _persist_narration(db, session_id, result, llm=llm)
-            raise
-        _record_turn_usage(db, game_session, llm, events, messages)   # validator 前，趁 last_usage 仍是主叙事那次
-        await _validate_and_patch_narration(
-            llm, plan, result, seen_context=_recent_seen_text(events),
-            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
-            settled_checks=_settled_checks_context(events),
-            party_names=party_names, location_context=location_guard,
-        )
-        _persist_narration(db, session_id, result, llm=llm)
-        # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
-        _record_npc_say_memory(
-            db, session_id, game_session, module, result[2],
-            [player_char.name] + [t.name for t in (teammates or [])],
-        )
+        ),
+    )
 
-        async for chunk in _process_commands(
-            db, session_id, result[1], module, player_char, game_session, llm,
-            teammates=teammates, pre_gen_seq=pre_gen_seq,
+    await _run_post_effects(
+        db, session_id, game_session, module, player_char, teammates, llm,
+        allowed=turn_pipeline.TurnSpec.for_entry("regular").effects, plan=plan,
+        pre_gen_seq=pre_gen_seq, combat_before=combat_before,
+    )
+
+    if finish:
+        await _finish_generation(db, session_id, llm)
+
+
+async def _run_pre_effects(
+    db, session_id, game_session, player_char, teammates, *,
+    allowed: frozenset[str], plan, requested_skill: str = "",
+):
+    """叙事前效果（``turn_pipeline.PRE_EFFECT_ORDER``）：在 KP 动笔前就该定下的确定性效果。"""
+    if plan is None:
+        return
+    if "gated_items" in allowed:
+        # 检定还没掷：收获一律按「需检定」暂存，骰子落地（手动或自动）再兑现。
+        gated = plan.model_copy(update={
+            "requires_check": True, "auto_outcome": "none",
+            "check": plan.check.model_copy(update={
+                "skill": plan.check.skill or requested_skill,
+            }),
+        })
+        async for chunk in _ensure_planned_items(
+            db, session_id, game_session, player_char, teammates, gated,
         ):
             room_hub.broadcast(session_id, chunk)
 
-    async for chunk in _ensure_planned_combat(
-        db, session_id, game_session, module, player_char, teammates, llm, plan,
-    ):
+
+async def _run_post_effects(
+    db, session_id, game_session, module, player_char, teammates, llm, *,
+    allowed: frozenset[str], plan, pre_gen_seq: int, combat_before: bool,
+    plan_factory=None, requested_check=None,
+):
+    """所有入口共用的后置效果：按 ``turn_pipeline.POST_EFFECT_ORDER`` 的固定顺序执行入口允许的子集。
+
+    ``plan_factory``（旁路续写）：回合起点没有计划，在第一个依赖计划的效果前现跑一次规划器——
+    此时上下文已含本轮叙事与前面守卫落下的事件（补开战、进场检定）。
+    每个守卫自身仍幂等；这里只负责「谁能跑、按什么顺序、回合挂起时跳过什么」。
+    """
+    def emit(chunk):
         room_hub.broadcast(session_id, chunk)
 
-    # 叙事—机制脱节守卫：计划判了不开战，KP 却把怪物写成已经扑上来 → 补开战（预筛后才判）。
-    async for chunk in _ensure_narrated_combat(
-        db, session_id, game_session, module, player_char, teammates, llm, plan, pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
+    async def drain(gen):
+        async for chunk in gen:
+            emit(chunk)
+
+    if "planned_combat" in allowed:
+        await drain(_ensure_planned_combat(
+            db, session_id, game_session, module, player_char, teammates, llm, plan,
+        ))
+    # 叙事—机制脱节守卫：计划判了不开战（或旁路根本没有计划），KP 却把怪物写成已经扑上来 → 补开战。
+    if "narrated_combat" in allowed:
+        await drain(_ensure_narrated_combat(
+            db, session_id, game_session, module, player_char, teammates, llm, plan, pre_gen_seq,
+        ))
+
+    # 玩家亲口申请的检定必须有归宿：KP 把它写成叙事顺过去时确定性补挂（详见守卫的文档）。
+    # 放在挂起判定之前：补挂的检定同样让场景/进场检定/SAN 守卫让路。
+    if "requested_check" in allowed and requested_check is not None:
+        await drain(requested_check())
+
+    # 回合挂起感知：KP 已挂出待投检定（结果未定）或本轮刚开战时，守卫不再替未定的结果
+    # 搬场景、补进场检定或补发被检定门控的 SAN——这些留给投骰后的续写或下一轮。
+    hung_check = turn_context.checks_hung_since(db, session_id, pre_gen_seq)
+    db.refresh(game_session)
+    combat_started = not combat_before and bool(combat_service.get_combat(game_session))
+    if hung_check or combat_started:
+        logger.info(
+            "回合已挂起（待投检定=%s 新开战=%s），跳过部分后置守卫: session=%s",
+            hung_check, combat_started, session_id,
+        )
+
+    def gated() -> bool:
+        return hung_check and bool(plan and plan.requires_check)
 
     # 确定性场景守卫先执行：真实进入目标场景后，后续 SAN 守卫才能读取该场景的模组机制。
-    async for chunk in _ensure_planned_scene(
-        db, session_id, game_session, module, player_char, teammates, plan,
-        pre_gen_seq=pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
+    if "scene" in allowed and not (gated() or combat_started):
+        await drain(_ensure_planned_scene(
+            db, session_id, game_session, module, player_char, teammates, plan,
+            pre_gen_seq=pre_gen_seq,
+        ))
     # 确定性进场检定守卫：模组写明「进入本场景时投X」的机制点 → 后端补发（每角色一次）。
-    # 开场不跑规划器、又禁止 KP 发检定，起始场景的进场检定只能靠这里补。
-    async for chunk in _ensure_scene_entry_checks(
-        db, session_id, game_session, module, player_char, teammates,
-    ):
-        room_hub.broadcast(session_id, chunk)
+    # 已有待投检定或刚开战时不叠卡；按角色幂等，下一轮仍会补上。
+    if "entry_checks" in allowed and not (hung_check or combat_started):
+        await drain(_ensure_scene_entry_checks(
+            db, session_id, game_session, module, player_char, teammates,
+        ))
+
+    if plan is None and plan_factory is not None:
+        plan = await plan_factory()
 
     # 确定性 SAN 守卫：计划裁定本轮目睹恐怖但 KP 漏发 SAN → 后端补发（幂等）。
-    async for chunk in _ensure_planned_sanity(
-        db, session_id, game_session, player_char, teammates, plan, pre_gen_seq,
-        module=module,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
+    # 计划本身要求检定且该检定仍待投时，恐怖多半由检定揭示，交给投骰后续写的 SAN 守卫。
+    if "sanity" in allowed and not gated():
+        await drain(_ensure_planned_sanity(
+            db, session_id, game_session, player_char, teammates, plan, pre_gen_seq,
+            module=module,
+        ))
+    if "mishap" in allowed:
+        await drain(_ensure_planned_mishap(
+            db, session_id, player_char, teammates, plan, pre_gen_seq, module=module,
+        ))
     # 确定性库存守卫：计划裁定的物品获得/失去 → 后端确定性增减（幂等），库存是权威状态。
-    async for chunk in _ensure_planned_items(
-        db, session_id, game_session, player_char, teammates, plan,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
+    if "items" in allowed:
+        await drain(_ensure_planned_items(
+            db, session_id, game_session, player_char, teammates, plan,
+        ))
     # 确定性战斗伤害守卫：战斗中非常规/范围攻击 → 挂成玩家 pending_roll 亲手掷、扣敌人 HP。
-    async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
-        room_hub.broadcast(session_id, chunk)
-
+    if "combat_damage" in allowed:
+        await drain(_ensure_planned_combat_damage(db, session_id, player_char, plan))
     # 剧情进度外置：规划器裁定本轮满足的剧情钩子 → 校验后确定性落标志（+ KP 专属事件）。
-    # 放在收尾之前：本轮收尾的幕后推演就以新进度为准。
-    async for chunk in plot_progress.apply_planned_flags(
-        db, session_id, game_session, module, plan,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
+    if "flags" in allowed:
+        await drain(plot_progress.apply_planned_flags(db, session_id, game_session, module, plan))
     # 叙事进度记账（放在全部守卫之后：场景守卫可能刚把队伍挪进新场景）：本轮演过的场景
     # 机制点 / 摆到玩家面前的线索 → 确定性写世界记忆，补规划器漏记的那些（详见守卫文档）。
-    planned_effects.record_narrated_progress(
-        db, session_id, game_session, module, player_char, teammates, pre_gen_seq,
-    )
-
-    await _finish_generation(db, session_id, llm)
+    if "narrated_progress" in allowed:
+        planned_effects.record_narrated_progress(
+            db, session_id, game_session, module, player_char, teammates, pre_gen_seq,
+        )
 
 
 def _tag_turn_events_by_group(db: Session, turn_events: list, groups: list[dict]) -> None:
@@ -692,114 +756,6 @@ def _tag_turn_events_by_group(db: Session, turn_events: list, groups: list[dict]
             label = _match(head)
         if label:
             session_service.set_event_group(db, e, label)
-
-
-async def _run_split_narrations(
-    db: Session,
-    session_id: str,
-    game_session: GameSession,
-    module: Module,
-    player_char: Character,
-    events: list,
-    teammates: list[Character] | None,
-    kp: KPAgent,
-    llm,
-    rules_enabled: bool,
-    matcher_npcs: list[dict],
-    groups: list[dict],
-    plan: turn_planner.TurnPlan | None = None,
-    blind_message: dict | None = None,
-    rule_excerpts: list[dict] | None = None,
-    location_guard: str = "",
-    group_prompts: dict[str, str] | None = None,
-    default_prompt: str | None = None,
-) -> str:
-    """分头行动：逐组生成聚焦叙事，后端确定性归组并落库。
-
-    返回各组成员叙事合并后的指令文本（供统一 _process_commands 处理）。
-    ``group_prompts`` 可按组覆盖提示词（如检定裁定/骰子续写只喂给相关组）；
-    未覆盖的组使用 ``default_prompt``（缺省 SPLIT_FOCUS_PROMPT）继续推进本场景。
-    """
-    # 先把本回合各角色的行动/对话/掷骰也归入其所在场景列：这样每一列＝该场景里
-    # 「玩家行动 + KP 叙事」自成一体（而非行动全挤在主线、叙事另起一列）。
-    # 位置已由显式移动（玩家大地图 / 队友 travel 动作）确定性写入，此处不再据分组反推搬人。
-    _tag_turn_events_by_group(db, _current_turn_events(events), groups)
-    plan_message = turn_planner.build_turn_plan_message(plan) if plan is not None else None
-
-    # 模组原文 RAG：与单场景路径同一门槛（索引就绪才广告 [MODULE_LOOKUP]/注入摘录）
-    module_rag_enabled = bool(events) and getattr(module, "rag_status", "") == "ready"
-    party_ids = {player_char.id} | {t.id for t in (teammates or [])}
-    shown_dialogues = _shown_turn_dialogues(events, party_ids)
-    turn_inputs = _shown_turn_context(events, party_ids)
-
-    combined: list[str] = []
-    for grp in groups:
-        label = grp["label"]
-        members = "、".join(grp["members"])
-        # 关键：以该组所在场景为锚构建上下文，否则每列都拿主角场景的 NPC/线索，
-        # KP 只能把主角场景重复叙述一遍（两列讲同一件事）。
-        messages = build_kp_context(
-            game_session, module, player_char, events, teammates=teammates,
-            rules_lookup_enabled=rules_enabled, viewer_scene_id=grp.get("scene_id"),
-            module_excerpts=_module_excerpts_for_context(
-                db, module, game_session, events, party_ids,
-                scene_id=grp.get("scene_id"),
-            ),
-            module_lookup_enabled=module_rag_enabled,
-            # 规则要点不依赖场景：各分组共用调用方预取的同一份（与模组摘录注入现状对齐）
-            rule_excerpts=rule_excerpts,
-            recall_enabled=event_recall.is_enabled(game_session),
-            # 全部分组都给，配合 viewer_scene_id 指明本轮聚焦哪一组：KP 得知道别组的人
-            # 此刻不在场，才不会把他们写进这一列。
-            scene_groups=groups,
-            rule_options_block=rule_options_service.context_block(db, game_session),
-        )
-        if plan_message is not None:
-            messages.append(plan_message)
-        if blind_message is not None:
-            messages.append(blind_message)
-        if location_guard and player_char.name in (grp.get("members") or []):
-            messages.append({"role": "system", "content": location_guard})
-        if group_prompts and label in group_prompts:
-            user_content = group_prompts[label]
-        else:
-            prompt = default_prompt or SPLIT_FOCUS_PROMPT
-            user_content = prompt.format(label=label, members=members)
-        messages.append({"role": "user", "content": user_content})
-        result = ["", "", [], [], []]
-        try:
-            stream_kwargs = {"shown_dialogues": shown_dialogues} if shown_dialogues else {}
-            async for chunk in _stream_narration_filtered(
-                kp, messages, result, npcs=matcher_npcs, group_label=label,
-                masker=npc_identity.build_masker(db, session_id, module),
-                npc_guard=_npc_dialogue_guard(
-                    db, session_id, game_session, module, llm, player_char,
-                ),
-                **stream_kwargs,
-            ):
-                room_hub.broadcast(session_id, chunk)
-        except BaseException:
-            _persist_narration(db, session_id, result, llm=llm)
-            raise
-        await _validate_and_patch_narration(
-            llm, plan, result, seen_context=_recent_seen_text(events),
-            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
-            settled_checks=_settled_checks_context(events),
-            # 取**全队**而非本组成员：别组的队友同样不能被代演
-            party_names={player_char.name} | {t.name for t in (teammates or [])},
-            location_context=(
-                location_guard if player_char.name in (grp.get("members") or []) else ""
-            ),
-        )
-        _persist_narration(db, session_id, result, llm=llm)
-        # 世界记忆钩子 c：本组 NPC 台词记入其互动史（听众＝该组成员，信息不跨组共享）
-        _record_npc_say_memory(
-            db, session_id, game_session, module, result[2], grp["members"],
-        )
-        # 留下组界标记：合并后的文本交给 _process_commands 统一处理，指令本身不带出处，
-        # 只有这个标记能让「谁该跟着检定」落回发出指令的那一组（见 _group_scope_resolver）。
-        combined.append(f"[GROUP: scene={label}]\n{result[1]}")
-    return "\n".join(combined)
 
 
 async def _apply_coordinator_intents(
@@ -880,11 +836,10 @@ async def _run_split_narrations_tool_loop(
 ) -> None:
     """分头行动的工具循环版：每组一套聚焦上下文，工具即时执行并广播。
 
-    与旧分头路径的分工：
+    要点：
     - 组内骰子候选域由 dice_scope 限定，不会把别组的人拉进群检；
-    - 组内 NPC/场景工具仍直接作用于会话状态（与旧路径统一指令处理器一致）；
-    - 叙事、检定、场景切换都在 loop 内完成，不再把文本拼回去走第二次
-      _process_commands，否则检定会重复结算。
+    - 组内 NPC/场景工具直接作用于会话状态；
+    - 叙事、检定、场景切换都在各组的 loop 内完成，不再把各组文本拼回去二次处理。
     """
     _tag_turn_events_by_group(db, _current_turn_events(events), groups)
     plan_message = turn_planner.build_turn_plan_message(plan) if plan is not None else None
@@ -935,6 +890,8 @@ async def _run_split_narrations_tool_loop(
             messages.append(blind_message)
         if location_guard and player_char.name in (grp.get("members") or []):
             messages.append({"role": "system", "content": location_guard})
+        # 与单场景工具循环一致：原生工具调用要告知模型用工具代替方括号指令（此前分头路径漏了这段）
+        messages.extend(kp_tool_loop.tool_mode_messages(llm, rs.kp_tools))
         if group_prompts and label in group_prompts:
             user_content = group_prompts[label]
         else:
@@ -942,7 +899,7 @@ async def _run_split_narrations_tool_loop(
             user_content = prompt.format(label=label, members=members)
         messages.append({"role": "user", "content": user_content})
 
-        result = ["", "", [], [], []]
+        result = NarrationResult()
         base_seq = session_service.get_next_sequence_num(db, session_id) - 1
         event_order: list = []
         execute = _build_kp_tool_executor(
@@ -950,39 +907,19 @@ async def _run_split_narrations_tool_loop(
             pre_gen_seq=pre_gen_seq, ruleset=rs, dice_scope=char_scope,
             scope=scope, coordinator_intents=coordinator_intents,
         )
-        try:
-            async for chunk in _run_kp_agent_loop(
-                llm, messages, result, execute,
-                tools=tools, npcs=matcher_npcs, group_label=label, plan=plan,
-                party_names=party_names, shown_dialogues=shown_dialogues,
-                event_order=event_order,
-                masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
-                npc_guard=_npc_dialogue_guard(
-                    db, session_id, game_session, module, llm, player_char,
-                ),
-            ):
-                meta = dict(getattr(chunk, "metadata", None) or {})
-                if meta.get("group") != label:
-                    meta["group"] = label
-                    chunk = chunk.model_copy(update={"metadata": meta})
-                room_hub.broadcast(session_id, chunk)
-        except BaseException:
-            _persist_narration(db, session_id, result, event_order, llm=llm)
-            _reorder_turn_events(db, session_id, event_order, base_seq)
-            raise
-        await _validate_and_patch_narration(
-            llm, plan, result, seen_context=_recent_seen_text(events),
-            turn_inputs=turn_inputs, on_start=_validator_note(session_id),
-            settled_checks=_settled_checks_context(events),
-            party_names=party_names,
-            location_context=(
-                location_guard if player_char.name in (grp.get("members") or []) else ""
-            ),
+        stream = _run_kp_agent_loop(
+            llm, messages, result, execute,
+            tools=tools, npcs=matcher_npcs, group_label=label, plan=plan,
+            party_names=party_names, shown_dialogues=shown_dialogues,
+            event_order=event_order,
+            masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_dialogue_guard(db, session_id, game_session, module, llm, player_char),
         )
-        _persist_narration(db, session_id, result, event_order, llm=llm)
-        _reorder_turn_events(db, session_id, event_order, base_seq)
-        _record_npc_say_memory(
-            db, session_id, game_session, module, result[2], grp["members"],
+        await _run_narration_stage(
+            db, session_id, game_session, module, player_char, teammates, llm, stream, result,
+            plan=plan, events=events, turn_inputs=turn_inputs, party_names=party_names,
+            event_order=event_order, base_seq=base_seq, listeners=grp["members"], group=label,
+            location_guard=location_guard if player_char.name in (grp.get("members") or []) else "",
         )
 
     await _apply_coordinator_intents(
@@ -999,7 +936,6 @@ async def _run_split_generation(
     player_char: Character,
     events: list,
     teammates: list[Character] | None,
-    kp: KPAgent,
     llm,
     rules_enabled: bool,
     matcher_npcs: list[dict],
@@ -1008,95 +944,33 @@ async def _run_split_generation(
     blind_message: dict | None = None,
     rule_excerpts: list[dict] | None = None,
     location_guard: str = "",
+    finish: bool = True,
+    combat_before: bool = False,
 ) -> None:
-    """分头行动：对每个分组各跑一次聚焦叙事，后端确定性地把产物归入该组。
+    """分头行动：对每个分组各跑一次聚焦的工具循环，后端确定性地把产物归入该组。
 
     每组单独生成 → 篇幅均衡、不会「只详写最后一个场景」；分组标签由后端注入 →
-    前端实时/重连都能稳定分栏，不靠模型自觉打 [GROUP]。
-    命令（检定/HP/旗标/场景）在所有分组叙事完成后，对合并文本统一处理一次。
+    前端实时/重连都能稳定分栏，不靠模型自觉打 [GROUP]。工具在各组循环内即时执行。
     ``plan`` 是本回合唯一的裁定计划（跨分组共用），每组都注入一份、也各自校验一次——
     分头场景 NPC/线索并行推进，同样需要 clue_policy/safety 兜底，不能因为分头
-    就退化回纯提示词。
+    就退化回纯提示词。后置效果与单场景共用 ``_run_post_effects``（常规口径）。
     """
     # 生成前基线序号：供确定性 SAN 守卫判断本轮 KP 是否已自行掷过 SAN（幂等）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
-    if _tool_loop_active(llm):
-        # 工具循环分头：每组即时执行工具，不再把文本拼回去走统一指令处理。
-        await _run_split_narrations_tool_loop(
-            db, session_id, game_session, module, player_char, events, teammates,
-            llm, rules_enabled, matcher_npcs, groups,
-            plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
-            location_guard=location_guard,
-        )
-    else:
-        combined = await _run_split_narrations(
-            db, session_id, game_session, module, player_char, events, teammates,
-            kp, llm, rules_enabled, matcher_npcs, groups,
-            plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
-            location_guard=location_guard,
-        )
-
-        async for chunk in _process_commands(
-            db, session_id, combined, module, player_char, game_session, llm,
-            teammates=teammates, scene_groups=groups, pre_gen_seq=pre_gen_seq,
-        ):
-            room_hub.broadcast(session_id, chunk)
-
-    async for chunk in _ensure_planned_combat(
-        db, session_id, game_session, module, player_char, teammates, llm, plan,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 叙事—机制脱节守卫：分头行动同样可能被某一组写出交战却没落成战斗态。
-    async for chunk in _ensure_narrated_combat(
-        db, session_id, game_session, module, player_char, teammates, llm, plan, pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 先落实有真实移动证据的场景，再据抵达场景的模组机制裁定 SAN。
-    async for chunk in _ensure_planned_scene(
-        db, session_id, game_session, module, player_char, teammates, plan,
-        pre_gen_seq=pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 分头行动同样补进场检定：各分组按自己所在场景各判各的（幂等键逐角色）。
-    async for chunk in _ensure_scene_entry_checks(
-        db, session_id, game_session, module, player_char, teammates,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 确定性 SAN 守卫：计划裁定本轮目睹恐怖但 KP 漏发 SAN → 后端补发（幂等）。
-    async for chunk in _ensure_planned_sanity(
-        db, session_id, game_session, player_char, teammates, plan, pre_gen_seq,
-        module=module,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 确定性库存守卫：计划裁定的物品获得/失去 → 后端确定性增减（幂等），库存是权威状态。
-    async for chunk in _ensure_planned_items(
-        db, session_id, game_session, player_char, teammates, plan,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 确定性战斗伤害守卫：战斗中非常规/范围攻击 → 挂成玩家 pending_roll 亲手掷、扣敌人 HP。
-    async for chunk in _ensure_planned_combat_damage(db, session_id, player_char, plan):
-        room_hub.broadcast(session_id, chunk)
-
-    # 剧情进度外置：规划器裁定本轮满足的剧情钩子 → 校验后确定性落标志（+ KP 专属事件）。
-    # 放在收尾之前：本轮收尾的幕后推演就以新进度为准。
-    async for chunk in plot_progress.apply_planned_flags(
-        db, session_id, game_session, module, plan,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 叙事进度记账（放在全部守卫之后：场景守卫可能刚把队伍挪进新场景）：本轮演过的场景
-    # 机制点 / 摆到玩家面前的线索 → 确定性写世界记忆，补规划器漏记的那些（详见守卫文档）。
-    planned_effects.record_narrated_progress(
-        db, session_id, game_session, module, player_char, teammates, pre_gen_seq,
+    await _run_split_narrations_tool_loop(
+        db, session_id, game_session, module, player_char, events, teammates,
+        llm, rules_enabled, matcher_npcs, groups,
+        plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
+        location_guard=location_guard,
+    )
+    await _run_post_effects(
+        db, session_id, game_session, module, player_char, teammates, llm,
+        allowed=turn_pipeline.TurnSpec.for_entry("regular").effects, plan=plan,
+        pre_gen_seq=pre_gen_seq, combat_before=combat_before,
     )
 
-    await _finish_generation(db, session_id, llm)
+    if finish:
+        await _finish_generation(db, session_id, llm)
 
 
 def _skill_names(char: Character) -> list[str]:
@@ -1159,6 +1033,8 @@ def _failure_notice(exc: BaseException) -> str:
     """
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return "（连不上模型服务——请检查网络或代理，然后重试）"
+    if isinstance(exc, call_budget.BudgetExceeded):
+        return "（本回合 AI 调用已达到预算上限，已停止继续请求；已结算的结果保留。可直接继续输入）"
     if isinstance(exc, StreamStalled):
         return "（模型服务只回心跳不回内容，已放弃等待。多见于中转代理处理长请求出错：到设置页换直连端点后重试）"
     return "（KP 生成中断，请重试或继续输入）"
@@ -1191,6 +1067,8 @@ async def run_chat_generation(session_id: str) -> None:
             db, session_id, exclude_id=game_session.player_character_id,
         )
         get_llm()   # fail-fast：未配置 AI 时在此就近报「请到设置页配置」，不深入半截流程
+        # 新的玩家回合：上一轮没投的门控收益/线索作废，不能被本轮之后的投骰误兑现。
+        check_gating.begin_turn(db, game_session)
 
         # 一阵疯狂计时：本回合开始给在场角色的临时疯狂发作各减 1 回合，到期自动解除并广播恢复。
         for chunk in _tick_madness_recovery(db, session_id, [player_char, *party_others]):
@@ -1266,9 +1144,6 @@ async def run_chat_generation(session_id: str) -> None:
                 rule_excerpts=_rule_excerpts_for_planner(db, module, events, game_session),
                 rule_options_block=rule_options_service.context_block(db, game_session),
             )
-            plan_messages = agent_runtime.ContextBundle.from_messages(
-                plan_messages, budget_tokens=16000,
-            ).fit().for_model()
             with agent_trace.span("planner", "规划本回合（队友行动后）", session_id=session_id, db=db):
                 plan = await turn_planner.run_turn_planner(fast_llm, plan_messages)
             planned_effects.enforce_plan_item_locations(
@@ -1294,6 +1169,13 @@ async def run_chat_generation(session_id: str) -> None:
             and not _looks_like_combat_declaration(player_text)
             and not (plan and plan.combat.should_start)
         ):
+            # 计划不能整份丢弃：叙事前效果先落（门控收获暂存，线索已在上面暂存）；
+            # 场景/SAN/标志依赖检定结果，留给投骰后的续写裁定，这里不提前执行。
+            await _run_pre_effects(
+                db, session_id, game_session, player_char, party_others,
+                allowed=turn_pipeline.TurnSpec.for_entry("check_request").pre_effects,
+                plan=plan, requested_skill=requested_skill,
+            )
             await _run_kp_turn(
                 db, session_id, game_session, module, player_char, party_others,
                 CHECK_REQUEST_PROMPT.format(
@@ -1311,7 +1193,7 @@ async def run_chat_generation(session_id: str) -> None:
         t_kp = time.monotonic(); u_kp = usage_tracker.snapshot()
         await _run_generation(
             db, session_id, game_session, module, player_char, events,
-            teammates=party_others, blind_results=team_blind, plan=generation_plan,
+            teammates=party_others, blind_results=team_blind, plan=generation_plan, finish=False,
         )
         logger.info(
             "耗时|KP 叙事 %.1fs（%s）session=%s",
@@ -1331,6 +1213,7 @@ async def run_chat_generation(session_id: str) -> None:
             time.monotonic() - t_turn, usage_tracker.fmt(turn_usage), session_id,
         )
         usage_tracker.warn_if_reasoning_dominates(turn_usage)
+        await _finish_generation(db, session_id, get_llm())
     except asyncio.CancelledError:
         logger.info("生成被取消: session=%s", session_id)
     except Exception as exc:
@@ -1525,13 +1408,13 @@ async def _run_kp_turn_tool_loop(
     """
     messages = list(messages)
     rs = rule_options_service.ruleset(db, game_session)   # 插件 KP 工具，同主路径
-    messages.append(kp_tools.tool_mode_message(rs.kp_tools))
+    messages.extend(kp_tool_loop.tool_mode_messages(llm, rs.kp_tools))
     exclude = set()
     if not rules_enabled:
         exclude.add("rule_lookup")
     if not module_rag_enabled:
         exclude.add("module_lookup")
-    res = ["", "", [], [], []]
+    res = NarrationResult()
     execute = _build_kp_tool_executor(
         db, session_id, game_session, module, player_char, party_others, llm, res,
         pre_gen_seq=pre_gen_seq, ruleset=rs,
@@ -1539,50 +1422,20 @@ async def _run_kp_turn_tool_loop(
     base_seq = session_service.get_next_sequence_num(db, session_id) - 1
     event_order: list = []
     party_names = {player_char.name} | {t.name for t in (party_others or [])}
-    held: list = []
-    try:
-        async for chunk in _run_kp_agent_loop(
-            llm, messages, res, execute,
-            tools=kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools),
-            npcs=_matcher_npcs(module, party_others, game_session),
-            party_names=party_names,
-            event_order=event_order,
-            masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
-            npc_guard=_npc_dialogue_guard(
-                db, session_id, game_session, module, llm, player_char,
-            ),
-        ):
-            if hold:
-                held.append(chunk)
-            else:
-                room_hub.broadcast(session_id, chunk)
-    except BaseException:
-        _persist_narration(db, session_id, res, event_order, llm=llm)
-        _reorder_turn_events(db, session_id, event_order, base_seq)
-        raise
-    if hold:
-        keep = _check_request_narration_keep(res)
-        for chunk in held:
-            if keep or getattr(chunk, "type", None) not in _NARRATION_CHUNK_TYPES:
-                room_hub.broadcast(session_id, chunk)
-        if not keep:
-            # 没有旁白可交错了：工具事件保持即时落库的原序即可
-            res[0], res[2], res[3], res[4] = "", [], [], []
-            event_order.clear()
-    # 旁路没有完整 plan：有位置硬约束时用空计划做定点终检（偏移按比例重映射），再过润色。
-    await _validate_and_patch_narration(
-        llm, turn_planner.TurnPlan() if location_guard else None, res, event_order,
-        turn_inputs=_shown_turn_context(events, party_ids),
-        on_start=_validator_note(session_id),
-        settled_checks=_settled_checks_context(events),
-        party_names=party_names, location_context=location_guard,
+    stream = _run_kp_agent_loop(
+        llm, messages, res, execute,
+        tools=kp_tools.openai_tool_schemas(exclude=exclude, extra=rs.kp_tools),
+        npcs=_matcher_npcs(module, party_others, game_session), party_names=party_names,
+        event_order=event_order,
+        masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
+        npc_guard=_npc_dialogue_guard(db, session_id, game_session, module, llm, player_char),
     )
-    _persist_narration(db, session_id, res, event_order, llm=llm)
-    _reorder_turn_events(db, session_id, event_order, base_seq)
-    # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
-    _record_npc_say_memory(
-        db, session_id, game_session, module, res[2],
-        [player_char.name] + [t.name for t in (party_others or [])],
+    await _run_narration_stage(
+        db, session_id, game_session, module, player_char, party_others, llm, stream, res,
+        plan=turn_planner.TurnPlan() if location_guard else None,
+        events=events, event_order=event_order, base_seq=base_seq,
+        party_names=party_names, turn_inputs=_shown_turn_context(events, party_ids),
+        location_guard=location_guard, hold=hold,
     )
 
 
@@ -1594,6 +1447,7 @@ async def _run_kp_turn(
     requested_check: tuple[Character, str] | None = None,
     focus_member: str | None = None,
     split_aware: bool = False,
+    finish: bool = True,
 ) -> None:
     """跑一轮 KP：注入 user_prompt → 流式叙事 → 处理指令（待定检定/掷骰/场景等）→ done。
 
@@ -1607,10 +1461,11 @@ async def _run_kp_turn(
     揭示的恐怖是在**叙事生成时**才出现的（回合起点的 plan 看不到），故在叙事之后现跑一次 planner
     （此时上下文已含刚揭示的恐怖）→ 确定性补发 SAN；KP 已自发掷过 SAN 则幂等跳过、不重复扣。
     """
-    llm = get_llm()
-    kp = KPAgent(llm)
+    # 不支持原生工具调用时经文本指令适配层，同样走工具循环（见 kp_tool_loop.loop_llm）
+    llm = kp_tool_loop.loop_llm(get_llm())
     # SAN 守卫基线：本次续写生成前的最大 seq，用于判断 KP 是否已自行掷过 SAN（幂等）。
     pre_gen_seq = session_service.get_next_sequence_num(db, session_id) - 1
+    combat_before = bool(combat_service.get_combat(game_session))
     events = session_service.get_session_events(db, session_id)
     # 检定申请/投骰续写等旁路同样可能踩「人在 A、旁白写 B」：这里没有 planner 清洗，
     # 直接复用生成前位置硬闸（plan=None，只注入约束）。
@@ -1629,29 +1484,19 @@ async def _run_kp_turn(
             scene_groups, focus_member, user_prompt, requested_check,
         )
         group_prompts = {focus_label: user_prompt} if focus_label else None
-        if _tool_loop_active(llm):
-            await _run_split_narrations_tool_loop(
-                db, session_id, game_session, module, player_char, events, party_others,
-                llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
-                scene_groups, location_guard=location_guard,
-                group_prompts=group_prompts,
-                default_prompt=SPLIT_FOCUS_PROMPT,
-            )
-            commands_text = ""
-        else:
-            commands_text = await _run_split_narrations(
-                db, session_id, game_session, module, player_char, events, party_others,
-                kp, llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
-                scene_groups, location_guard=location_guard,
-                group_prompts=group_prompts,
-                default_prompt=SPLIT_FOCUS_PROMPT,
-            )
+        await _run_split_narrations_tool_loop(
+            db, session_id, game_session, module, player_char, events, party_others,
+            llm, rules_enabled, _matcher_npcs(module, party_others, game_session),
+            scene_groups, location_guard=location_guard,
+            group_prompts=group_prompts,
+            default_prompt=SPLIT_FOCUS_PROMPT,
+        )
     else:
         module_rag_enabled = getattr(module, "rag_status", "") == "ready"
         party_ids = {player_char.id} | {t.id for t in (party_others or [])}
         messages = build_kp_context(
             game_session, module, player_char, events,
-            teammates=party_others, rules_lookup_enabled=rules_enabled,
+            teammates=party_others, rules_lookup_enabled=rules_enabled, scene_groups=scene_groups,
             module_excerpts=_module_excerpts_for_context(
                 db, module, game_session, events, party_ids,
             ),
@@ -1663,147 +1508,73 @@ async def _run_kp_turn(
             messages.append({"role": "system", "content": location_guard})
         messages.append({"role": "user", "content": user_prompt})
 
-        if _tool_loop_active(llm):
-            # 与主路径同一条 agent loop：检定续写 / 申请检定 / 战斗余波 / 前往等旁路也能用
-            # rule_lookup / module_lookup / recall_history 等工具。指令在 loop 内执行完毕，
-            # 不再经 _process_commands（commands_text 置空）；分头模式仍走上面的旧路径（同主路径）。
-            await _run_kp_turn_tool_loop(
-                db, session_id, game_session, module, player_char, party_others,
-                llm, messages, events, party_ids,
-                rules_enabled=rules_enabled, module_rag_enabled=module_rag_enabled,
-                location_guard=location_guard, hold=requested_check is not None,
-                pre_gen_seq=pre_gen_seq,
-            )
-            commands_text = ""
-        else:
-            res = ["", "", [], [], []]
-            # 申请检定轮先攒着不广播：KP 该只回一行指令，小模型却常在前面先写一段揣测性旁白
-            # （「心里有个影子若隐若现地晃着」），既提前泄了骰子还没定的结果、又和骰后续写重复，
-            # 还把气泡渲染搅乱。看完整产物再定去留（见 _check_request_narration_keep）。
-            hold = requested_check is not None
-            held: list = []
-            try:
-                async for chunk in _stream_narration_filtered(
-                    kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
-                    masker=npc_identity.build_masker(db, session_id, module),
-                    npc_guard=_npc_dialogue_guard(
-                        db, session_id, game_session, module, llm, player_char,
-                    ),
-                ):
-                    if hold:
-                        held.append(chunk)
-                    else:
-                        room_hub.broadcast(session_id, chunk)
-            except asyncio.CancelledError:
-                _persist_narration(db, session_id, res, llm=llm)
-                raise
-            if hold:
-                if _check_request_narration_keep(res):
-                    for chunk in held:
-                        room_hub.broadcast(session_id, chunk)
-                else:
-                    res[0], res[2], res[3], res[4] = "", [], [], []
-            if location_guard:
-                # 旁路没有完整 plan，仍用位置硬约束对落库版本做一次定点终检。
-                validation = await turn_context.turn_validator.validate_turn_narration(
-                    llm, turn_planner.TurnPlan(), res[0],
-                    turn_inputs=_shown_turn_context(events, party_ids),
-                    party_names={player_char.name} | {t.name for t in (party_others or [])},
-                    location_context=location_guard,
-                    # 旁路本身就是「投骰之后的续写」，不给它骰子，写出检定所得必被判成代演
-                    settled_checks=_settled_checks_context(events),
-                )
-                if validation is not None and validation.violated:
-                    logger.warning("旁路位置终检已改写落库旁白：%s", validation.reason)
-                    res[0] = validation.corrected_narration
-            await style_editor.polish_result(llm, res, on_start=_validator_note(session_id))
-            _persist_narration(db, session_id, res, llm=llm)
-            # 世界记忆钩子 c：本轮 NPC 台词记入其互动史（对全队说话）
-            _record_npc_say_memory(
-                db, session_id, game_session, module, res[2],
-                [player_char.name] + [t.name for t in (party_others or [])],
-            )
-            commands_text = res[1]
+        # 与主路径同一条 agent loop：检定续写 / 申请检定 / 战斗余波 / 前往等旁路也能用
+        # rule_lookup / module_lookup / recall_history 等工具，指令在 loop 内执行完毕。
+        await _run_kp_turn_tool_loop(
+            db, session_id, game_session, module, player_char, party_others,
+            llm, messages, events, party_ids,
+            rules_enabled=rules_enabled, module_rag_enabled=module_rag_enabled,
+            location_guard=location_guard, hold=requested_check is not None,
+            pre_gen_seq=pre_gen_seq,
+        )
 
-    async for chunk in _process_commands(
-        db, session_id, commands_text, module, player_char, game_session, llm,
-        teammates=party_others,
-        scene_groups=scene_groups if split_mode else None,
-        focus_group_label=focus_label,
-        pre_gen_seq=pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 叙事—机制脱节守卫：检定后续写最容易写出「潜行失败 → 它扑上来了」，而这条路径回合
-    # 起点根本没有 plan（开战裁定无从谈起），叙事里打起来了却没有战斗态就全靠这里兜。
-    async for chunk in _ensure_narrated_combat(
-        db, session_id, game_session, module, player_char, party_others, llm, None, pre_gen_seq,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 大地图『前往』走的就是这条路：抵达新场景后立刻补该场景的进场检定，不必等下一轮行动。
-    async for chunk in _ensure_scene_entry_checks(
-        db, session_id, game_session, module, player_char, party_others,
-    ):
-        room_hub.broadcast(session_id, chunk)
-
-    # 确定性后果守卫（检定后续写等路径）：恐怖揭示 / 大失败身体反噬都是在**叙事生成时**才定的
-    # （回合起点的 plan 看不到），故在叙事之后现跑一次 planner——此时上下文已含刚揭示的恐怖与
-    # 大失败结果——据其 sanity / mishap 裁定确定性补发 SAN / 扣血。KP 已自发掷 SAN / 扣血则各自幂等跳过。
+    # 后置效果（旁路口径，见 turn_pipeline.ENTRY_EFFECTS["side"]）：检定后续写最容易写出
+    # 「潜行失败 → 它扑上来了」，这条路径回合起点没有 plan，打起来了却没有战斗态全靠补开战；
+    # 恐怖揭示 / 大失败身体反噬都是在**叙事生成时**才定的，故按需在叙事后现跑一次 planner
+    # 据其裁定确定性补发 SAN / 扣血。KP 已自发掷 SAN / 扣血则各自幂等跳过。
     need_sanity = sanity_guard and not _san_rolled_this_turn(db, session_id, pre_gen_seq)
     need_mishap = mishap_guard and not _hp_changed_this_turn(db, session_id, pre_gen_seq)
-    if need_sanity or need_mishap:
+    allowed = turn_pipeline.TurnSpec.for_entry("side").effects
+    if not need_sanity:
+        allowed -= {"sanity"}
+    if not need_mishap:
+        allowed -= {"mishap"}
+
+    async def post_plan():
         post_events = session_service.get_session_events(db, session_id)
-        rules_enabled = bool(post_events) and rulebook_service.has_rulebook(db, module.rule_system)
+        rules_on = bool(post_events) and rulebook_service.has_rulebook(db, module.rule_system)
         plan_messages = turn_planner.build_turn_plan_messages(
             game_session, module, player_char, post_events, teammates=party_others,
-            rules_lookup_enabled=rules_enabled,
+            rules_lookup_enabled=rules_on,
             rule_excerpts=_rule_excerpts_for_planner(db, module, post_events, game_session),
             rule_options_block=rule_options_service.context_block(db, game_session),
         )
         with agent_trace.span("planner", "判理智/反噬（叙事后）", session_id=session_id, db=db):
             plan = await turn_planner.run_turn_planner(get_fast_llm(), plan_messages)
-        planned_effects.enforce_plan_item_locations(
-            plan, module, game_session.current_scene_id,
-        )
+        planned_effects.enforce_plan_item_locations(plan, module, game_session.current_scene_id)
         # 叙事后现跑的这次规划同样看得到刚发生的事：满足剧情钩子就落标志
         plot_progress.sanitize_plan_flags(plan, module, entity_state.active_flags(game_session))
-        async for chunk in plot_progress.apply_planned_flags(
-            db, session_id, game_session, module, plan,
-        ):
-            room_hub.broadcast(session_id, chunk)
-        if need_sanity:
-            async for chunk in _ensure_planned_sanity(
-                db, session_id, game_session, player_char, party_others, plan, pre_gen_seq,
-                module=module,
-            ):
-                room_hub.broadcast(session_id, chunk)
-        if need_mishap:
-            async for chunk in _ensure_planned_mishap(
-                db, session_id, player_char, party_others, plan, pre_gen_seq, module=module,
-            ):
-                room_hub.broadcast(session_id, chunk)
+        return plan
 
-    # 叙事进度记账：本轮演过的场景机制点 / 摆到玩家面前的线索 → 确定性写世界记忆。
-    # 放在 _process_commands 之后，KP 自发的 [HANDOUT]/线索指令已落账，这里只补它漏的。
-    planned_effects.record_narrated_progress(
-        db, session_id, game_session, module, player_char, party_others, pre_gen_seq,
-    )
-
-    # 玩家亲口申请的检定必须有归宿：KP 把它写成叙事顺过去时确定性补挂（详见守卫的文档）。
-    if requested_check is not None:
+    async def requested_fallback():
         cmd = planned_effects.requested_check_fallback_command(
             db, session_id, requested_check[0], requested_check[1], pre_gen_seq,
         )
-        if cmd:
-            async for chunk in _process_commands(
-                db, session_id, cmd, module, player_char, game_session, llm,
-                teammates=party_others, allow_rule_lookup=False,
-                scene_groups=scene_groups if split_mode else None,
-                focus_group_label=focus_label,
-                pre_gen_seq=pre_gen_seq,
-            ):
-                room_hub.broadcast(session_id, chunk)
+        if not cmd:
+            return
+        # 与工具循环同一执行器：分头时限定在触发者那一组，产物打上该组标签。
+        focus = next((g for g in scene_groups if g["label"] == focus_label), None) if split_mode else None
+        by_name = {c.name: c for c in [player_char, *(party_others or [])]}
+        execute = _build_kp_tool_executor(
+            db, session_id, game_session, module, player_char, party_others, llm, NarrationResult(),
+            pre_gen_seq=pre_gen_seq,
+            dice_scope=[by_name[n] for n in (focus or {}).get("members") or [] if n in by_name] or None,
+        )
+        for call in kp_tool_loop._tool_calls_from_text(cmd):
+            outcome = await execute(call)
+            for chunk in outcome.chunks:
+                if focus_label and split_mode:
+                    meta = dict(getattr(chunk, "metadata", None) or {})
+                    meta["group"] = focus_label
+                    chunk = chunk.model_copy(update={"metadata": meta})
+                yield chunk
+
+    await _run_post_effects(
+        db, session_id, game_session, module, player_char, party_others, llm,
+        allowed=allowed, plan=None, pre_gen_seq=pre_gen_seq, combat_before=combat_before,
+        plan_factory=post_plan if (need_sanity or need_mishap) else None,
+        requested_check=requested_fallback if requested_check is not None else None,
+    )
 
     if then_team_turn:
         db.refresh(game_session)  # 叙事里可能有 [SCENE_CHANGE]/[MOVE] 改了位置，重取再判分头
@@ -1812,7 +1583,8 @@ async def _run_kp_turn(
         ):
             room_hub.broadcast(session_id, chunk)
 
-    await _finish_generation(db, session_id, llm)
+    if finish:
+        await _finish_generation(db, session_id, llm)
 
 
 async def run_check_request_generation(
@@ -1822,7 +1594,7 @@ async def run_check_request_generation(
 
     ``intent`` 是玩家顺带说明的检定目标（如「查书桌暗格」）——现场同时有多条线索/多个
     可疑点时，光报技能名 KP 猜不出具体针对什么，必须带上这句话才能裁定到位。
-    KP 若判定需要，会输出 [DICE_CHECK]，经 _process_commands 挂成「待玩家投骰」；
+    KP 若判定需要，会调用 dice_check（或写出 [DICE_CHECK] 经适配层转换），挂成「待玩家投骰」；
     若判定无需检定，则直接简短叙述。"""
     async with _timed(session_id, "申请检定"):
         await _run_check_request_generation(session_id, actor_id, skill, intent)
@@ -1842,6 +1614,7 @@ async def _run_check_request_generation(
         party_others = session_service.get_party_members(
             db, session_id, exclude_id=game_session.player_character_id,
         )
+        check_gating.begin_turn(db, game_session)   # 新的玩家行动：旧门控暂存作废
         await _run_kp_turn(
             db, session_id, game_session, module, player_char, party_others,
             CHECK_REQUEST_PROMPT.format(
@@ -1854,9 +1627,10 @@ async def _run_check_request_generation(
         )
     except asyncio.CancelledError:
         logger.info("检定申请生成被取消: session=%s", session_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("检定申请生成失败: session=%s", session_id)
-        room_hub.broadcast(session_id, _make_chunk("system", "生成出错，请重试"))
+        # 与其他入口一致落库错误提示：只广播的话，done 之后 resync 会把它抹掉。
+        _persist_error_notice(db, session_id, _failure_notice(exc))
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
@@ -1889,7 +1663,7 @@ async def _run_combat_aftermath_generation(session_id: str) -> None:
         )
         await _run_kp_turn(
             db, session_id, game_session, module, player_char, party_others,
-            COMBAT_AFTERMATH_PROMPT,
+            COMBAT_AFTERMATH_PROMPT, finish=False, split_aware=True,
         )
         # 读一次即清：_run_kp_turn 走 build_kp_context 注入了 combat_result 但不清除
         # （只有 _run_generation 会清），这里补清，避免下一次玩家回合重复注入余波。
@@ -1899,6 +1673,7 @@ async def _run_combat_aftermath_generation(session_id: str) -> None:
             ws.pop("combat_result", None)
             game_session.world_state = ws
             db.commit()
+        await _finish_generation(db, session_id, get_llm())
     except asyncio.CancelledError:
         logger.info("战斗余波生成被取消: session=%s", session_id)
     except Exception:
@@ -1952,6 +1727,8 @@ async def _run_roll_generation(session_id: str, check_id: str, proxy: bool = Fal
                 return
 
             source = str(check.get("san_key") or check.get("source") or "")
+            # 结算、恐怖源台账与待投卡消费同一笔事务：这些都在 turn_state/台账/角色卡上，
+            # 后台收尾只写 world_state，不必等 drain；卡已被并发请求消费则不重复结算。
             san_chunks, san_desc = turn_effects._settle_san_target(
                 db,
                 session_id,
@@ -1960,17 +1737,18 @@ async def _run_roll_generation(session_id: str, check_id: str, proxy: bool = Fal
                 str(check.get("success_loss") or "0"),
                 str(check.get("failure_loss") or "1d6"),
                 source,
-                mark_checked=False,
+                consume_check_id=check_id,
             )
+            if not san_chunks:
+                room_hub.broadcast(session_id, _make_chunk("done"))
+                return
             for chunk in san_chunks:
                 room_hub.broadcast(session_id, chunk)
 
-            # 与普通待投检定相同：骰子先广播，再等上一轮 housekeeping，最后才写 world_state。
+            # 骰子先广播，再等上一轮 housekeeping；之后的批次结果与续写会写 world_state。
             await _drain_housekeeping(session_id)
             db.expire_all()
-            session_service.pop_pending_check(db, session_id, check_id)
             game_session = db.get(GameSession, session_id)
-            turn_effects._mark_san_checked(db, game_session, source, char_id)
 
             batch_id = str(check.get("san_batch_id") or "")
             remaining = session_service.append_pending_batch_result(
@@ -2042,9 +1820,17 @@ async def _run_roll_generation(session_id: str, check_id: str, proxy: bool = Fal
             "target": result.target, "outcome": result.outcome, "tier": result.tier,
             "actor": shown_name, "dice": _check_dice_detail(result, modifiers),
         }
-        ev = session_service.add_event(
-            db, session_id, "dice", dice_content, actor_name="系统", metadata=dice_meta,
-        )
+        # 骰子事件与消费待投卡同一笔事务：两者都不碰 world_state（卡在 turn_state），
+        # 不必等后台收尾。此前消费放在 drain 之后，中途失败会留下「骰子已出、卡还能再投」——
+        # 玩家可以借此重掷一个更好的结果。卡已被并发请求消费则本次不再掷。
+        with effect_channel.transaction(db):
+            if session_service.pop_pending_check(db, session_id, check_id, commit=False) is None:
+                room_hub.broadcast(session_id, _make_chunk("done"))
+                return
+            ev = session_service.add_event(
+                db, session_id, "dice", dice_content, actor_name="系统", metadata=dice_meta,
+                commit=False,
+            )
         room_hub.broadcast(
             session_id,
             _make_chunk("dice", dice_content, metadata=dice_meta, event_id=ev.id),
@@ -2061,8 +1847,6 @@ async def _run_roll_generation(session_id: str, check_id: str, proxy: bool = Fal
         # housekeeping 是在另一个 Session 里提交的；本会话的身份映射还挂着旧的
         # world_state，直接写回会把它刚写的摘要/记忆盖掉。expire 掉强制重新取。
         db.expire_all()
-        # 到这里才真正消费掉待定检定（唯一的 world_state 写入，已在 drain 之后）。
-        session_service.pop_pending_check(db, session_id, check_id)
         game_session = db.get(GameSession, session_id)
 
         # 幸运消费（村规开启时）：这一骰差几点够得着？够得着就**停在这里**问玩家买不买。
@@ -2538,22 +2322,17 @@ async def _run_epilogue_generation(session_id: str) -> None:
             "content": KP_EPILOGUE_PROMPT.format(ending_line=ending_line),
         })
         room_hub.broadcast(session_id, _make_chunk("generating"))
-        res = ["", "", [], [], []]
+        res = NarrationResult()
         kp = KPAgent(get_llm())
-        try:
-            async for chunk in _stream_narration_filtered(
-                kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
-                masker=npc_identity.build_masker(db, session_id, module),
-                npc_guard=_npc_dialogue_guard(
-                    db, session_id, game_session, module, kp, player_char,
-                ),
-            ):
-                room_hub.broadcast(session_id, chunk)
-        except asyncio.CancelledError:
-            _persist_narration(db, session_id, res, llm=kp)
-            raise
-        await style_editor.polish_result(kp, res, on_start=_validator_note(session_id))
-        _persist_narration(db, session_id, res, llm=kp)
+        stream = _stream_narration_filtered(
+            kp, messages, res, npcs=_matcher_npcs(module, party_others, game_session),
+            masker=npc_identity.build_masker(db, session_id, module),
+            npc_guard=_npc_dialogue_guard(db, session_id, game_session, module, kp, player_char),
+        )
+        await _run_narration_stage(
+            db, session_id, game_session, module, player_char, party_others, kp, stream, res,
+            events=events,
+        )
         world_state.set_key(db, db.get(GameSession, session_id), "epilogue_done", True)
         # 收场白落定之后再归档经历：这时故事真的讲完了，滚动摘要也已收进最后一批事件，
         # 写小传的素材最全。fail-open——归档失败不影响已经结束的会话。
@@ -2634,6 +2413,7 @@ async def _run_travel_generation(
         scene_name = (scene or {}).get("title") or (scene or {}).get("name") or scene_id
 
         room_hub.broadcast(session_id, _make_chunk("generating"))
+        check_gating.begin_turn(db, game_session)   # 新的玩家行动：旧门控暂存作废
         # 确定性切换该角色位置（主角则一并更新 current_scene_id），并落一条「前往」行动
         session_service.set_char_location(db, session_id, actor.id, scene_id)
         ev = session_service.add_event(
@@ -2780,6 +2560,3 @@ _tool_call_from_text = kp_tool_loop._tool_call_from_text
 _plan_check_call = kp_tool_loop._plan_check_call
 _build_kp_tool_executor = kp_tool_loop._build_kp_tool_executor
 _run_kp_agent_loop = kp_tool_loop._run_kp_agent_loop
-_process_commands = kp_tool_loop._process_commands
-_handle_rule_lookup = kp_tool_loop._handle_rule_lookup
-_handle_module_lookup = kp_tool_loop._handle_module_lookup

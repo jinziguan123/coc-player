@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401 注册表
 )
 from app.models.session_navigation import SessionNavigation
 from app.services import chat_service, npc_identity, session_service
+from tests.text_commands import loop_from_stream_fake, run_text_commands
 
 
 @pytest.fixture
@@ -63,7 +64,7 @@ def _run(db, module, hero, teammates, session, kp_text, monkeypatch):
 
     async def go():
         chunks = []
-        async for ch in chat_service._process_commands(
+        async for ch in run_text_commands(
             db, session.id, kp_text, module, hero, session, None, teammates=teammates,
         ):
             chunks.append(ch)
@@ -200,6 +201,8 @@ def test_roll_generation_rolls_pending_check(db_factory, monkeypatch):
         yield
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
 
     import asyncio as _asyncio
     _asyncio.run(chat_service.run_roll_generation(session.id, "chk1"))
@@ -376,6 +379,7 @@ def test_dice_continuation_sanity_guard_only_on_success(db_factory, monkeypatch)
         monkeypatch.setattr(chat_service, "KPAgent", lambda llm: object())
         monkeypatch.setattr(room_hub, "broadcast", lambda *a, **k: None)
         monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+        monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
         monkeypatch.setattr(chat_service, "build_kp_context", lambda *a, **k: [{"role": "system", "content": "x"}])
         monkeypatch.setattr(chat_service, "_module_excerpts_for_context", lambda *a, **k: [])
         monkeypatch.setattr(chat_service, "_finish_generation", noop_finish)
@@ -390,37 +394,53 @@ def test_dice_continuation_sanity_guard_only_on_success(db_factory, monkeypatch)
 
 
 def test_dice_continuation_fires_followup_san_check(db_factory, monkeypatch):
-    """检定续写里 KP 追加的 SAN_CHECK 应被处理，并向真人发出待投请求。"""
+    """自动掷骰后的续写里 KP 追加的 SAN_CHECK 应被处理，并向真人发出待投请求。
+
+    走生产路径：纯文本模型 → 文本指令适配层 → 工具循环；NPC 检定自动掷出结果后，
+    循环据结果续写，续写里的 [SAN_CHECK] 再经执行器挂成待投请求。
+    """
+    from app.ai import tools as kp_tools
+    from app.ai.text_tool_adapter import TextToolAdapter
+    from app.services import kp_tool_loop
+
     db = db_factory()
     module, hero, teammates, session = _seed(db)
     hero.system_data = {"sanity": {"current": 50, "max": 99}}
     db.commit()
+    outputs = [
+        "守墓人凝视着铭文……\n[DICE_CHECK: skill=侦查, char=守墓人]",
+        "你读懂了亵渎的铭文，领悟了不该知道的真相。\n[SAN_CHECK: success_loss=0, failure_loss=1d4]",
+        "你的精神受到冲击。",
+    ]
+    seen = []
 
-    calls = {"n": 0}
+    class _TextModel:
+        def supports_tools(self):
+            return False
 
-    async def fake_stream(kp, messages, result, npcs=None, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            # 第一段续写：揭示禁忌知识并在末尾追加 SAN 检定
-            result[0] = "你读懂了亵渎的铭文，领悟了不该知道的真相。"
-            result[1] = result[0] + "\n[SAN_CHECK: success_loss=0, failure_loss=1d4]"
-        else:
-            result[0] = "你的精神受到冲击。"
-            result[1] = result[0]
-        return
-        yield
+        async def complete(self, *a, **k):
+            return ""
 
-    monkeypatch.setattr(chat_service.kp_tool_loop, "_stream_narration_filtered", fake_stream)
+        async def stream(self, messages, **kw):
+            seen.append(messages)
+            yield outputs[len(seen) - 1]
+
+    adapter = TextToolAdapter(_TextModel(), kp_tool_loop._tool_calls_from_text)
+    result = ["", "", [], [], []]
+    execute = kp_tool_loop._build_kp_tool_executor(
+        db, session.id, session, module, hero, teammates, None, result,
+    )
 
     async def go():
-        # 用 NPC 检定触发自动掷→续写链（真人主角检定改为待手动投骰，不会即时续写）
-        return [c async for c in chat_service._process_commands(
-            db, session.id, "守墓人凝视着铭文……\n[DICE_CHECK: skill=侦查, char=守墓人]",
-            module, hero, session, None, teammates=teammates,
+        return [c async for c in chat_service._run_kp_agent_loop(
+            adapter, [{"role": "system", "content": "KP"}], result, execute,
+            tools=kp_tools.openai_tool_schemas(),
         )]
 
     asyncio.run(go())
 
+    assert len(seen) == 2   # 检定结果回来后续写一次；SAN 挂起后收束
+    assert "刚才的骰子检定已完成" in seen[1][-1]["content"]   # 续写收到投骰续写提示
     events = session_service.get_session_events(db, session.id)
     requests = [
         e for e in events
@@ -460,7 +480,7 @@ def test_san_per_character_and_once_per_source(db_factory, monkeypatch):
 
     def run(text):
         async def go():
-            return [c async for c in chat_service._process_commands(
+            return [c async for c in run_text_commands(
                 db, session.id, text, module, hero, session, None, teammates=teammates,
             )]
         return asyncio.run(go())
@@ -747,6 +767,8 @@ def test_dice_is_broadcast_before_waiting_on_housekeeping(db_factory, monkeypatc
         yield
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
     _asyncio.run(chat_service.run_roll_generation(session.id, "chk1"))
 
     assert "dice" in order, f"没有广播骰子事件：{order}"

@@ -17,6 +17,7 @@ from app.models.session import GameSession
 from app.services import chat_service, narration_protocol, session_service
 from app.services.turn_orchestrator import _check_request_narration_keep
 from tests.test_chat_service import _patch_runtime
+from tests.text_commands import loop_from_stream_fake
 
 
 @pytest.fixture
@@ -94,6 +95,8 @@ def _run_check_turn(db_factory, monkeypatch, narration, commands):
         yield chat_service._make_chunk("narration", narration, actor_name="KP")
 
     monkeypatch.setattr(chat_service, "_stream_narration_filtered", fake_stream)
+
+    monkeypatch.setattr(chat_service, "_run_kp_agent_loop", loop_from_stream_fake(fake_stream))
     db = db_factory()
     module, pc, session = _seed(db)
     session_service.add_event(db, session.id, "action", "（申请「侦查」检定：看看针线包）", actor_id=pc.id, actor_name=pc.name)

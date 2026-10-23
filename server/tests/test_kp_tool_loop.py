@@ -411,7 +411,8 @@ def _patch_runtime(monkeypatch, db_factory, llm):
 
 
 def test_switch_off_uses_legacy_path(db_factory, monkeypatch):
-    """开关关闭（默认）：走旧路径（KPAgent.stream），不碰 stream_chat。"""
+    """工具调用开关关闭：不调原生 stream_chat。默认经文本指令适配层（内层仍是 stream），
+    叙事结果与旧路径一致。"""
 
     llm = _FakeToolLLM([[_text("不该被用到。")]])
     _patch_runtime(monkeypatch, db_factory, llm)
@@ -985,7 +986,7 @@ def test_kp_turn_switch_off_keeps_legacy_path(db_factory, monkeypatch):
 
 
 def test_kp_turn_loop_executes_tools_instead_of_regex(db_factory, monkeypatch):
-    """loop 路径的指令在循环内执行：dice_check 挂出待投请求后收束，_process_commands 不再重复处理。"""
+    """loop 路径的指令在循环内执行：dice_check 挂出待投请求后收束，不再二次处理文本。"""
     llm = _FakeToolLLM([
         [_text("地板下传来刮擦声。"), _call("dice_check", {"skill": "聆听", "chars": "伊芙琳"})],
         [_text("不该走到这一步。")],
@@ -1133,7 +1134,7 @@ def test_split_narrations_tool_loop_runs_each_group(db_factory, monkeypatch):
 
 
 def test_kp_turn_split_mode_uses_tool_loop(db_factory, monkeypatch):
-    """分头模式与主路径一致：开关开启时逐组走工具循环，而不是旧的合并文本路径。"""
+    """分头模式与主路径一致：逐组走工具循环（旧的合并文本路径已删除）。"""
     llm = _FakeToolLLM([[_text("不该被用到。")]])
     _kp_turn_runtime(monkeypatch, db_factory, llm, True)
     groups = [
@@ -1146,12 +1147,7 @@ def test_kp_turn_split_mode_uses_tool_loop(db_factory, monkeypatch):
     async def _fake_loop(*a, **k):
         called["tool_loop"] = True
 
-    async def _legacy(*a, **k):
-        called["legacy"] = True
-        return ""
-
     monkeypatch.setattr(chat_service, "_run_split_narrations_tool_loop", _fake_loop)
-    monkeypatch.setattr(chat_service, "_run_split_narrations", _legacy)
 
     db = db_factory()
     session_id, session, module, hero = _seed(db)
@@ -1160,7 +1156,6 @@ def test_kp_turn_split_mode_uses_tool_loop(db_factory, monkeypatch):
     ))
 
     assert called.get("tool_loop") is True
-    assert "legacy" not in called
     assert llm.calls == []
 
 # ── DeepSeek 思考模式：本轮历史里的 assistant 消息折成 user ─────────────────────
@@ -1197,3 +1192,77 @@ def test_fold_turn_history_keeps_loop_generated_assistant():
     before = [dict(m) for m in msgs]
     fold_turn_history_for_tools(msgs)
     assert msgs == before
+
+
+@pytest.mark.parametrize("hang", [True, False])
+def test_本轮已挂待投检定时后置守卫不再搬场景补卡(db_factory, monkeypatch, hang):
+    """KP 已挂出结果未定的检定：计划门控的场景切换/SAN 与进场检定都留给投骰之后。"""
+    from app.ai.turn_planner import TurnPlan
+
+    steps = [_call("dice_check", {"skill": "侦查", "reason": "看清书桌"})] if hang else []
+    llm = _FakeToolLLM([[_text("你俯身看向书桌。"), *steps], [_text("……")]])
+    _patch_runtime(monkeypatch, db_factory, llm)
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: _Profile(True))
+    called = []
+
+    def recorder(name):
+        async def guard(*a, **k):
+            called.append(name)
+            if False:
+                yield None
+        return guard
+
+    for name in ("_ensure_planned_scene", "_ensure_scene_entry_checks", "_ensure_planned_sanity"):
+        from app.services import turn_orchestrator
+        monkeypatch.setattr(turn_orchestrator, name, recorder(name))
+
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    session_service.add_event(db, session_id, "action", "我搜查书桌", actor_id=hero.id, actor_name="伊芙琳")
+    events = session_service.get_session_events(db, session_id)
+    # 对照组不要求检定（要求检定时系统会按计划补挂，同样进入挂起）
+    plan = TurnPlan(requires_check=True, check={"skill": "侦查"}) if hang else TurnPlan()
+    asyncio.run(chat_service._run_generation(db, session_id, session, module, hero, events, plan=plan))
+
+    if hang:
+        assert called == []
+    else:
+        assert called == ["_ensure_planned_scene", "_ensure_scene_entry_checks", "_ensure_planned_sanity"]
+
+
+@pytest.mark.parametrize("risky", [True, False])
+def test_do_not_reveal_回合展示的是终检后的版本(db_factory, monkeypatch, risky):
+    """高风险回合缓冲到终检之后：玩家看到的与存档一致；普通回合保持流式（展示原文）。"""
+    from app.ai import turn_validator
+    from app.ai.turn_planner import TurnPlan
+    from app.services.room_hub import room_hub
+
+    llm = _FakeToolLLM([[_text("地窖里躺着老爷的尸体。")]])
+    _patch_runtime(monkeypatch, db_factory, llm)
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: _Profile(True))
+    shown = []
+    monkeypatch.setattr(room_hub, "broadcast", lambda room, chunk, **k: shown.append(chunk))
+
+    async def fake_validate(llm_, plan, narration, report=None, **kw):
+        if report is not None:
+            report["status"] = "rewritten"
+        return turn_validator.TurnValidation(
+            violated=True, reason="泄露", corrected_narration="地窖里一片漆黑。",
+        )
+
+    monkeypatch.setattr(turn_validator, "validate_turn_narration", fake_validate)
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    session_service.add_event(db, session_id, "action", "我下地窖", actor_id=hero.id, actor_name="伊芙琳")
+    events = session_service.get_session_events(db, session_id)
+    plan = TurnPlan(safety={"do_not_reveal": ["老爷已死"] if risky else []})
+    asyncio.run(chat_service._run_generation(db, session_id, session, module, hero, events, plan=plan))
+
+    shown_text = "".join(c.content or "" for c in shown if c.type == "narration")
+    saved = [e.content for e in session_service.get_session_events(db_factory(), session_id)
+             if e.event_type == "narration"]
+    assert saved == ["地窖里一片漆黑。"]
+    if risky:
+        assert "尸体" not in shown_text and "漆黑" in shown_text
+    else:
+        assert "尸体" in shown_text   # 普通回合流式展示，终检只修订存档（既有限制）

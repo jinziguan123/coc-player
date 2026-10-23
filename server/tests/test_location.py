@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base, Character, GameSession, Module  # noqa: F401
 from app.models.session_navigation import SessionNavigation
 from app.services import session_service
+from tests.text_commands import run_text_commands
 
 
 @pytest.fixture
@@ -237,7 +238,6 @@ def test_stored_keywords_unlock_by_any_including_address(db_factory):
 def test_scene_change_moves_player_and_colocated_party(db_factory):
     """[SCENE_CHANGE] 明确移动：主角切场景，同处的队友一同前往；目的地变已访问、可见。"""
     import asyncio
-    from app.services import chat_service
 
     db = db_factory()
     sid, pc_id, ally_id, mod_id = _seed(db)
@@ -247,7 +247,7 @@ def test_scene_change_moves_player_and_colocated_party(db_factory):
     ally = db.get(Character, ally_id)
 
     async def run():
-        return [c async for c in chat_service._process_commands(
+        return [c async for c in run_text_commands(
             db, sid, "他们走进档案馆。[SCENE_CHANGE: scene_id=c]",
             module, player, game_session, None, teammates=[ally],
         )]

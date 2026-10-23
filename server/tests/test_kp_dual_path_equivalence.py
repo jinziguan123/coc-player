@@ -1,15 +1,13 @@
-"""KP 两条执行路径的**等价性契约**。
+"""原生工具调用与文本指令的**等价性契约**。
 
-项目刻意保留了两条把「模型意图」变成「世界状态」的路径（DESIGN §8.3、§13-5）：
+模型意图变成世界状态只有一个执行器（``_build_kp_tool_executor``），但有两种表达形式：
 
-- **工具路径**：模型走标准 tool call，由 ``_build_kp_tool_executor`` 分发；
-- **文本兼容路径**：模型把指令写成 ``[DICE_CHECK: ...]`` 方括号，由 ``_process_commands`` 解析。
+- **原生工具调用**：模型走标准 tool call；
+- **文本指令**：不支持工具调用的模型把指令写成 ``[DICE_CHECK: ...]`` 方括号，由文本指令适配层
+  （``app.ai.text_tool_adapter`` + ``kp_tool_loop._tool_calls_from_text``）解析成同样的工具调用。
+  旧的独立文本路径 ``_process_commands`` 已于 2026-10-23 删除。
 
-保留降级路径是自觉的取舍（供应商不支持工具调用时不能没得玩）。但此前**只有各自的用例
-测试，没有任何东西保证两条路径行为一致**——同一个意图走不同路径落库出不同结果，
-是这种双实现结构最典型、也最难在跑团现场发现的缺陷（玩家只会觉得「今天 KP 怪怪的」）。
-
-这组测试就是那份缺失的契约：同一意图分别喂给两条路径，断言**落库事件与世界状态一致**。
+这组测试保证：同一意图经两种表达，**落库事件与世界状态一致**（解析口径不能漂移）。
 
 **口径**：比对「事件类型 + actor + 关键内容」与受影响的世界状态，不比对旁白措辞
 （旁白由模型产出，本就不同）、不比对事件 id/时间戳（本就该不同）。
@@ -30,6 +28,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.models.session_participant import SessionParticipant  # noqa: F401 — 注册建表
 from app.services import kp_tool_loop, session_service
+from tests.text_commands import run_text_commands
 
 
 @pytest.fixture
@@ -49,7 +48,8 @@ def _seed(db):
             {"id": "scene_b", "title": "地下室", "kind": "location", "connections": ["scene_a"]},
         ],
         npcs=[{"id": "n_1", "name": "管家"}],
-        clues=[], triggers=[],
+        # 模型来源的标志须是模组认得的名字（见 plot_progress.model_flag_rejection）
+        clues=[], triggers=[{"when": "地下室的门被打开", "set_flags": ["door_opened"]}],
         handouts=[{"id": "h_1", "kind": "letter", "title": "泛黄的信", "content": "别下去。"}],
     )
     hero = Character(
@@ -186,10 +186,11 @@ async def _run_tool_path(db, steps: list[Step]) -> list[dict]:
 
 
 async def _run_text_path(db, steps: list[Step]) -> list[dict]:
+    """文本指令形态：经适配层同款解析器转成工具调用，交同一执行器。"""
     session_id, session, module, hero = _seed(db)
     snaps = []
     for _tool, _args, text in steps:
-        async for _ in kp_tool_loop._process_commands(
+        async for _ in run_text_commands(
             db, session_id, text, module, hero, session, _NoLLM(), teammates=[],
         ):
             pass
@@ -270,3 +271,54 @@ def test_session_service_仍暴露导航与回合态的同名入口():
     """两条路径都经 session_service 取数；re-export 断了会让其中一条静默走空。"""
     for fn in ("scene_neighbors", "get_participants", "commit_turn"):
         assert callable(getattr(session_service, fn, None)), f"session_service.{fn} 不见了"
+
+
+# ── 文本指令适配层：纯文本模型经 Provider 适配后吐出的 tool_call 与原生工具等价 ────────
+
+
+class _TextOnlyLLM:
+    """只会写方括号指令的纯文本模型：stream 吐出预置文本。"""
+
+    def __init__(self, text: str):
+        self.text = text
+
+    def supports_tools(self) -> bool:
+        return False
+
+    async def complete(self, *a, **kw):
+        raise AssertionError("状态变更不该触发 LLM 调用")
+
+    async def stream(self, messages, **kw):
+        yield self.text
+
+
+async def _run_adapter_path(db, steps: list[Step]) -> list[dict]:
+    from app.ai.text_tool_adapter import TextToolAdapter
+
+    session_id, session, module, hero = _seed(db)
+    result = ["", "", [], [], []]
+    executor = kp_tool_loop._build_kp_tool_executor(
+        db, session_id, session, module, hero, [], _NoLLM(), result,
+    )
+    snaps = []
+    for _tool, _args, text in steps:
+        adapter = TextToolAdapter(_TextOnlyLLM(f"叙述一句。{text}"), kp_tool_loop._tool_calls_from_text)
+        calls = [
+            d.tool_call async for d in adapter.stream_chat([], tools=[{"type": "function"}])
+            if d.kind == "tool_call"
+        ]
+        assert len(calls) == 1
+        await executor(calls[0])
+        db.commit()
+        snaps.append(_snapshot(db, session_id))
+    return snaps
+
+
+@pytest.mark.parametrize("name,steps", INTENTS, ids=[i[0] for i in INTENTS])
+@pytest.mark.asyncio
+async def test_文本指令适配层与原生工具落库一致(db_factory, name, steps):
+    with db_factory() as db_a:
+        tool_snap = await _run_tool_path(db_a, steps)
+    with db_factory() as db_b:
+        adapter_snap = await _run_adapter_path(db_b, steps)
+    assert adapter_snap == tool_snap, f"「{name}」适配层与原生工具调用不等价"

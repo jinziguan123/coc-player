@@ -7,6 +7,7 @@
     python -m evals.run --no-judge           # 只跑确定性检查（不花裁判调用）
     python -m evals.run --smoke              # 不调 LLM，只验证 fixture 可重建、上下文可构建
     python -m evals.run --tool-loop          # 走 agent loop（工具调用）路径重放生成
+    python -m evals.run --text-adapter       # 走 agent loop，但模型只写文本指令、经适配层转工具调用
 
 fixture 未预存 plan 时，重放会现跑一次 turn_planner（评的是 planner+KP 端到端）；
 预存了 plan 则只评 KP 叙事本身（跨版本对比更稳）。
@@ -112,7 +113,9 @@ async def _narrate_tool_loop(case: ReplayCase, llm, plan, messages: list[dict]) 
     return narration
 
 
-async def run_case(case: ReplayCase, llm, use_judge: bool, tool_loop: bool = False) -> dict:
+async def run_case(
+    case: ReplayCase, llm, use_judge: bool, tool_loop: bool = False, text_adapter: bool = False,
+) -> dict:
     # 「投骰后续写」重放：跳过 planner，改重放 KP_DICE_CONTINUATION_PROMPT——评的是续写阶段
     # 的行为（如叙述主语必须是检定执行者），故不走首段叙事、不注入 plan，也不进 tool loop。
     if case.continuation:
@@ -123,14 +126,29 @@ async def run_case(case: ReplayCase, llm, use_judge: bool, tool_loop: bool = Fal
             rules_lookup_enabled=case.rules_lookup_enabled,
             recall_enabled=case.recall_enabled,
         )
-        messages.append({
-            "role": "user",
-            "content": KP_DICE_CONTINUATION_PROMPT.format(dice_results=case.continuation),
-        })
+        if text_adapter:
+            # 适配层的续写：本轮里模型写的检定指令 + 系统自动掷出的结果，经 to_text_messages
+            # 改写回注（检定结果套用同一份投骰续写提示）。与旧路径的差别只在多了那条指令消息。
+            from app.ai.text_tool_adapter import to_text_messages
+            messages.append({
+                "role": "assistant", "content": "[DICE_CHECK]",
+                "tool_calls": [{"id": "c1", "function": {"name": "dice_check", "arguments": "{}"}}],
+            })
+            # 执行器回给模型的就是套好投骰续写提示的结果（见 kp_tool_loop 的 dice_check 处理）
+            messages.append({
+                "role": "tool", "tool_call_id": "c1",
+                "content": KP_DICE_CONTINUATION_PROMPT.format(dice_results=case.continuation),
+            })
+            messages = to_text_messages(messages)
+        else:
+            messages.append({
+                "role": "user",
+                "content": KP_DICE_CONTINUATION_PROMPT.format(dice_results=case.continuation),
+            })
         kp = KPAgent(llm)
         narration = "".join([token async for token in kp.narrate(messages)])
         plan = None
-        plan_source = "continuation"
+        plan_source = "continuation" + ("+adapter" if text_adapter else "")
         findings = checks.run_all_checks(narration, case.player_names)
         findings += checks.check_narration_expect(narration, case.narration_expect)
         judge_result = await judge.run_judge(llm, case, plan, narration) if use_judge else None
@@ -171,7 +189,14 @@ async def run_case(case: ReplayCase, llm, use_judge: bool, tool_loop: bool = Fal
     if plan is not None:
         messages.append(turn_planner.build_turn_plan_message(plan))
 
-    if tool_loop:
+    if text_adapter:
+        # 文本指令适配层：模型照旧写方括号指令（不追加「工具调用模式」提示），适配层转成工具调用；
+        # 与旧文本路径对比的就是「同一提示词下，适配层是否改变叙事」。
+        from app.ai.text_tool_adapter import TextToolAdapter
+        from app.services import kp_tool_loop
+        adapter = TextToolAdapter(llm, kp_tool_loop._tool_calls_from_text)
+        narration = await _narrate_tool_loop(case, adapter, plan, messages)
+    elif tool_loop:
         from app.ai import tools as kp_tools
         messages.append(kp_tools.tool_mode_message())
         narration = await _narrate_tool_loop(case, llm, plan, messages)
@@ -337,6 +362,7 @@ async def main_async(args: argparse.Namespace) -> int:
             try:
                 samples.append(await run_case(
                     case, llm, use_judge=not args.no_judge, tool_loop=args.tool_loop,
+                    text_adapter=args.text_adapter,
                 ))
             except Exception as exc:  # noqa: BLE001 —— 单次采样失败不中断整套
                 print(f"  第{i + 1}次出错: {type(exc).__name__}: {exc}")
@@ -356,6 +382,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "suite": args.suite,
             "judge": not args.no_judge,
             "tool_loop": args.tool_loop,
+            "text_adapter": args.text_adapter,
             "repeat": repeat,
         },
         "results": results,
@@ -392,6 +419,10 @@ def main() -> None:
     parser.add_argument(
         "--tool-loop", dest="tool_loop", action="store_true",
         help="走 agent loop（工具调用）路径重放生成（需当前 Provider 支持工具）",
+    )
+    parser.add_argument(
+        "--text-adapter", dest="text_adapter", action="store_true",
+        help="走 agent loop，但经文本指令适配层（模拟不支持原生工具的模型）",
     )
     args = parser.parse_args()
     sys.exit(asyncio.run(main_async(args)))

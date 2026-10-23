@@ -12,6 +12,7 @@ from app.models import Base, Character, GameSession, Module, SessionParticipant 
 from app.models.session_ledger import SessionLedger
 from app.services import chat_service as cs
 from app.services import dice_runtime, session_service
+from tests.text_commands import loop_from_stream_fake
 
 
 @pytest.fixture
@@ -324,6 +325,7 @@ def test_check_continuation_fires_san_via_run_kp_turn(db_factory, monkeypatch):
     monkeypatch.setattr(cs, "get_llm", lambda: object())
     monkeypatch.setattr(cs, "get_fast_llm", lambda: object())
     monkeypatch.setattr(cs, "_stream_narration_filtered", _fake_stream)
+    monkeypatch.setattr(cs, "_run_kp_agent_loop", loop_from_stream_fake(_fake_stream))
     monkeypatch.setattr(cs, "build_kp_context", lambda *a, **k: [{"role": "system", "content": "x"}])
     monkeypatch.setattr(cs, "_module_excerpts_for_context", lambda *a, **k: [])
     monkeypatch.setattr(cs.turn_planner, "run_turn_planner", _fake_planner)
@@ -360,6 +362,7 @@ def test_check_continuation_no_guard_when_flag_off(db_factory, monkeypatch):
     monkeypatch.setattr(cs, "get_llm", lambda: object())
     monkeypatch.setattr(cs, "get_fast_llm", lambda: object())
     monkeypatch.setattr(cs, "_stream_narration_filtered", _fake_stream)
+    monkeypatch.setattr(cs, "_run_kp_agent_loop", loop_from_stream_fake(_fake_stream))
     monkeypatch.setattr(cs, "build_kp_context", lambda *a, **k: [{"role": "system", "content": "x"}])
     monkeypatch.setattr(cs, "_module_excerpts_for_context", lambda *a, **k: [])
     monkeypatch.setattr(cs.turn_planner, "run_turn_planner", _fake_planner)

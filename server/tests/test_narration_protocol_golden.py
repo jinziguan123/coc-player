@@ -95,7 +95,7 @@ async def test_命令标签终止时_full_response_切在标签处不受分词�
 
 @pytest.mark.asyncio
 async def test_终止标签之后的第二条指令一律不执行():
-    """上一条的**实际后果**：``full_response`` 是 ``_process_commands`` 解析指令的输入，
+    """上一条的**实际后果**：``full_response`` 曾是旧文本路径解析指令的输入，
     而它对 SET_FLAG / BLOCK_PATH 这些用的是 finditer。
 
     旧行为下，``[SET_FLAG: a][SET_FLAG: b]`` 里第二条时而被执行、时而不被——全看那两个

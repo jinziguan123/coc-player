@@ -24,6 +24,8 @@
 .venv/bin/python -m evals.run --tool-loop    # 走 agent loop（工具调用）路径重放生成
                                              # （需 Provider 支持工具；工具调用会序列化回
                                              #   方括号指令形态参与打分，口径与旧路径一致）
+.venv/bin/python -m evals.run --text-adapter # 文本指令适配层：模型照旧写方括号指令，经适配层转工具调用；
+                                             # 续写类 fixture 则按适配层的回注形态重放（与旧路径对比用）
 
 # 3. 对比两次运行
 .venv/bin/python -m evals.compare results/<旧>.json results/<新>.json

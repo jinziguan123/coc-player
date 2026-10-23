@@ -22,6 +22,7 @@ from app.models import (  # noqa: F401 注册表
 from app.rules.coc.components.check import resolve_skill_check
 from app.rules.dice import compose_d100, decompose_d100, roll_percentile_detailed
 from app.services import chat_service, session_service
+from tests.text_commands import run_text_commands
 
 
 # ---------- 纯函数：奖惩骰与合成 ----------
@@ -167,7 +168,7 @@ def _run(db, module, hero, teammates, session, kp_text, monkeypatch):
 
     async def go():
         chunks = []
-        async for ch in chat_service._process_commands(
+        async for ch in run_text_commands(
             db, session.id, kp_text, module, hero, session, None, teammates=teammates,
         ):
             chunks.append(ch)
