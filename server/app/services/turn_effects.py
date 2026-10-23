@@ -9,6 +9,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
+from app.ai import call_budget
 from app.ai.image_gen import get_image_llm
 from app.models.character import Character
 from app.models.module import Module
@@ -17,6 +18,8 @@ from app.models.session_ledger import SessionLedger
 from app.rules import Ruleset, ruleset_for
 from app.services import (
     character_service,
+    check_gating,
+    effect_channel,
     dice_runtime,
     human_kp_service,
     illustration_service,
@@ -50,7 +53,7 @@ _maybe_scene_illustration = illustration_service._maybe_scene_illustration
 _illustrate_handout = illustration_service._illustrate_handout
 
 
-def _update_character_stat(db: Session, char: Character, path: str, value) -> None:
+def _update_character_stat(db: Session, char: Character, path: str, value, *, commit: bool = True) -> None:
     """更新角色 system_data 中的嵌套字段并持久化"""
     sd = dict(char.system_data or {})
     parts = path.split(".")
@@ -63,13 +66,13 @@ def _update_character_stat(db: Session, char: Character, path: str, value) -> No
     target[parts[-1]] = value
     char.system_data = sd
     db.add(char)
-    db.commit()
+    db.commit() if commit else db.flush()
     db.refresh(char)
 
 
 def _apply_madness_status(
     db: Session, char: Character, new_san: int, went_insane: bool,
-    rs: Ruleset | None = None,
+    rs: Ruleset | None = None, *, commit: bool = True,
 ) -> str | None:
     """据 SAN 结果落疯狂状态（确定性）：SAN 归零→永久疯狂；一次损失≥当前SAN/5→临时疯狂。
 
@@ -93,7 +96,7 @@ def _apply_madness_status(
         sd["madness"] = rs.madness.make_bout()
         char.system_data = sd
     db.add(char)
-    db.commit()
+    db.commit() if commit else db.flush()
     return target
 
 
@@ -131,10 +134,10 @@ def _tick_madness_recovery(
     return out
 
 
-# ── 指令执行器（旧正则路径与 agent loop 共用的单一实现）─────────────────────
+# ── 指令执行器（工具循环、真人 KP 共用的单一实现）─────────────────────────────
 # 每个函数执行一条指令并返回「待广播的 chunks（事件已落库）」+ 路径各自需要的信息。
-# 旧路径（_process_commands）按正则匹配后调用；loop 路径（_build_kp_tool_executor）
-# 按工具调用分发——执行逻辑只此一份，不复制。
+# 工具循环的执行器（_build_kp_tool_executor）按工具调用分发；文本指令经 Provider 适配层
+# 转成同样的工具调用（app.ai.text_tool_adapter）——执行逻辑只此一份，不复制。
 
 
 async def _exec_san_check(
@@ -301,13 +304,14 @@ def _consume_san_credit(
     ts = dict(game_session.turn_state or {})
     ts["san_turn"] = book
     game_session.turn_state = ts
+    # 抵扣与记账同一次提交：抵掉了却没记上，下一次重新生成就会再扣一次。
+    _mark_san_checked(db, game_session, source, char_id, commit=False)
     db.commit()
-    _mark_san_checked(db, game_session, source, char_id)
     return True
 
 
 def _mark_san_checked(
-    db: Session, game_session: GameSession, source: str, char_id: str,
+    db: Session, game_session: GameSession, source: str, char_id: str, *, commit: bool = True,
 ) -> None:
     """在结算完成后记录恐怖源幂等键；待投路径须在 housekeeping 收尾后调用。"""
     if not source:
@@ -326,7 +330,7 @@ def _mark_san_checked(
         ts = dict(game_session.turn_state or {})
         ts["san_turn"] = book
         game_session.turn_state = ts
-    db.commit()
+    db.commit() if commit else db.flush()
 
 
 def _settle_san_target(
@@ -339,9 +343,41 @@ def _settle_san_target(
     source: str,
     *,
     mark_checked: bool = True,
+    consume_check_id: str | None = None,
 ) -> tuple[list[str], str]:
-    """掷出并结算单个角色的 SAN；自动路径与玩家点击后的路径共用。"""
+    """掷出并结算单个角色的 SAN；自动路径与玩家点击后的路径共用。
+
+    ``consume_check_id``（玩家点投骰）：待投卡的消费也并进同一笔事务——结算与消费要么都发生、
+    要么都不发生，不会出现「SAN 已扣、卡还挂着、再点一次又扣」。卡已被消费则视为重复，不结算。
+
+    经效果通道：SAN 数值、疯狂状态、骰子事件与（``mark_checked`` 时）恐怖源台账同一次提交，
+    中途失败整笔回滚——不会出现「已经扣了 SAN、台账却没记上，重新生成再扣一次」。
+    """
     rs = rule_options_service.ruleset(db, game_session)
+
+    def apply(receipt: dict) -> tuple[list[str], str]:
+        if consume_check_id:
+            session_service.pop_pending_check(db, session_id, consume_check_id, commit=False)
+        return _apply_san_settlement(
+            db, session_id, game_session, tchar, success_loss, failure_loss, source, rs,
+            receipt=receipt, mark_checked=mark_checked,
+        )
+
+    return effect_channel.execute(
+        db, session_id,
+        effect_channel.EffectProposal(effect_channel.SanChange(tchar.id, source), "system", 0),
+        apply, duplicate=([], ""),
+        already=lambda: bool(consume_check_id) and session_service.get_pending_check(
+            db, session_id, consume_check_id,
+        ) is None,
+    )
+
+
+def _apply_san_settlement(
+    db: Session, session_id: str, game_session: GameSession, tchar: Character,
+    success_loss: str, failure_loss: str, source: str, rs: Ruleset,
+    *, receipt: dict, mark_checked: bool,
+) -> tuple[list[str], str]:
     char_data = {
         "base_attributes": tchar.base_attributes,
         "skills": tchar.skills,
@@ -349,7 +385,7 @@ def _settle_san_target(
     }
     result = rs.sanity.san_check(char_data, success_loss, failure_loss)
     check = result["check"]
-    _update_character_stat(db, tchar, "sanity.current", result["new_san"])
+    _update_character_stat(db, tchar, "sanity.current", result["new_san"], commit=False)
 
     outcome_text = "成功" if check.outcome in (
         "critical_success", "hard_success", "success",
@@ -358,7 +394,9 @@ def _settle_san_target(
         f"{tchar.name}｜理智检定：{check.description}\n"
         f"SAN 损失：{result['san_loss']}（{result['old_san']} → {result['new_san']}）"
     )
-    madness = _apply_madness_status(db, tchar, result["new_san"], result["went_insane"], rs)
+    madness = _apply_madness_status(
+        db, tchar, result["new_san"], result["went_insane"], rs, commit=False,
+    )
     if madness == "permanent_insanity":
         dice_content += "\n永久疯狂！SAN 归零，调查员就此永远失常。"
     elif madness == "temporary_insanity":
@@ -390,9 +428,10 @@ def _settle_san_target(
             "kind": "pool", "notation": "0", "dice": [],
             "modifier": result["san_loss"], "total": result["san_loss"],
         }
+    # 执行凭据只进库（随事件审计），不随广播下发给玩家端。
     ev = session_service.add_event(
         db, session_id, "dice", dice_content,
-        actor_name="系统", metadata=dice_meta,
+        actor_name="系统", metadata={**dice_meta, "effect": receipt}, commit=False,
     )
     chunks = [
         _make_chunk("dice", dice_content, metadata=dice_meta, event_id=ev.id),
@@ -403,7 +442,7 @@ def _settle_san_target(
         f"（{result['old_san']}→{result['new_san']}）"
     )
     if mark_checked:
-        _mark_san_checked(db, game_session, source, tchar.id)
+        _mark_san_checked(db, game_session, source, tchar.id, commit=False)
     return chunks, desc
 
 
@@ -524,6 +563,36 @@ async def _exec_hp_change(
     module: Module | None = None,
     teammates: list[Character] | None = None,
     target: Character | None = None,
+    *, source: effect_channel.EffectSource = "manual",
+) -> list[str]:
+    """所有 HP 来源共用效果通道；自动提案同轮去重，真人重复操作保持独立。"""
+    char = target or _resolve_hp_target(target_str, player_char, teammates)
+    if char is None:
+        return []
+    try:
+        delta = int(str(delta_str).strip())
+    except ValueError:
+        return []
+    proposal = effect_channel.EffectProposal(
+        effect_channel.HpChange(char.id, delta, reason or ""), source,
+        _turn_anchor_seq(db, session_id, [player_char, *(teammates or [])]),
+    )
+    return effect_channel.execute(
+        db, session_id, proposal,
+        lambda receipt: _apply_hp_change(
+            db, session_id, player_char, target_str, delta_str, reason,
+            module, teammates, char, receipt=receipt,
+        ), duplicate=[],
+    )
+
+
+def _apply_hp_change(
+    db: Session, session_id: str, player_char: Character,
+    target_str: str, delta_str: str, reason: str,
+    module: Module | None = None,
+    teammates: list[Character] | None = None,
+    target: Character | None = None,
+    *, receipt: dict | None = None,
 ) -> list[str]:
     """执行一条 HP 变化结算（target=player/主角 或队友名；NPC/匹配不到则不结算）。返回 chunks。
 
@@ -552,11 +621,11 @@ async def _exec_hp_change(
     max_hp = hp_data.get("max", old_hp)
     new_hp = max(0, min(max_hp, old_hp + delta))
 
-    _update_character_stat(db, char, "hitPoints.current", new_hp)
+    _update_character_stat(db, char, "hitPoints.current", new_hp, commit=False)
     if delta < 0 and (char.system_data or {}).get("firstAidUsed"):
         # 受新伤 = 新的急救机会：清 once-per-wound 标记，否则之前被急救过的人再受伤后救不了。
         sd = dict(char.system_data or {}); sd["firstAidUsed"] = False
-        char.system_data = sd; db.add(char); db.commit()
+        char.system_data = sd; db.add(char); db.flush()
 
     chunks: list[str] = []
     rs = rule_options_service.ruleset_by_id(db, session_id)
@@ -569,7 +638,7 @@ async def _exec_hp_change(
         already_major = char.status == "major_wound"
         if max_hp > 0 and dmg > max_hp:
             # 单次伤害 > 最大 HP → 当场毙命（CoC 7e）
-            char.status = "dead"; db.add(char); db.commit()
+            char.status = "dead"; db.add(char); db.flush()
             hp_content += "\n单次伤害超过最大生命值，当场毙命！"
         elif new_hp <= 0:
             # 归零：受过重伤（本击重伤 或 已带重伤标记）→ 濒死；只受轻伤 → 昏迷（稳定、不致死）
@@ -579,7 +648,7 @@ async def _exec_hp_change(
             else:
                 char.status = "unconscious"
                 hp_content += "\n昏迷倒地（生命值归零，但只受轻伤、伤势稳定、不致死）。"
-            db.add(char); db.commit()
+            db.add(char); db.flush()
             major_wound = False   # 已按归零结算，不再走下方「未归零重伤体质检定」
         elif major_wound:
             hp_content += "\n重伤！"
@@ -592,7 +661,7 @@ async def _exec_hp_change(
             {"base_attributes": char.base_attributes, "skills": char.skills,
              "system_data": char.system_data},
         )
-        if character_service.change_conditions(db, char, add=effects["conditions_add"]):
+        if character_service.change_conditions(db, char, add=effects["conditions_add"], commit=False):
             hp_content += "".join(f"\n{line}" for line in effects["lines"])
     else:
         hp_content = f"{char.name} 恢复 {delta} 点生命（HP {old_hp} → {new_hp}）"
@@ -602,8 +671,9 @@ async def _exec_hp_change(
 
     ev = session_service.add_event(
         db, session_id, "system", hp_content,
-        actor_name="系统",
+        actor_name="系统", commit=False,
         metadata={
+            "effect": receipt or {},
             "hp_change": delta, "old_hp": old_hp, "new_hp": new_hp, "actor": char.name,
             "undo": {
                 "char_id": char.id, "hp": old_hp, "status": old_status,
@@ -617,45 +687,42 @@ async def _exec_hp_change(
     )
     chunks.append(_make_chunk("system", hp_content, event_id=ev.id))
 
-    # 重伤（未至濒死）→ 状态落库 + 自动体质检定判昏迷。fail-open：检定异常不阻塞结算。
+    # 重伤（未至濒死）→ 状态落库 + 自动体质检定判昏迷。与 HP 同事务，失败则整次伤害回滚。
     if major_wound and new_hp > 0 and module is not None:
-        try:
-            char.status = "major_wound"
+        char.status = "major_wound"
+        db.add(char)
+        db.flush()
+        cdata = {
+            "base_attributes": char.base_attributes,
+            "skills": char.skills,
+            "system_data": char.system_data,
+        }
+        result = rs.check.resolve_skill_check(cdata, "体质", "normal")
+        con_content = (
+            f"{char.name}｜重伤体质检定（判定是否昏迷）：{result.description}"
+        )
+        if result.outcome in ("failure", "fumble"):
+            char.status = "unconscious"
             db.add(char)
-            db.commit()
-            cdata = {
-                "base_attributes": char.base_attributes,
-                "skills": char.skills,
-                "system_data": char.system_data,
-            }
-            result = rs.check.resolve_skill_check(cdata, "体质", "normal")
-            con_content = (
-                f"{char.name}｜重伤体质检定（判定是否昏迷）：{result.description}"
-            )
-            if result.outcome in ("failure", "fumble"):
-                char.status = "unconscious"
-                db.add(char)
-                db.commit()
-                con_content += f"\n{char.name} 眼前一黑，昏迷倒地！"
-            dev = session_service.add_event(
-                db, session_id, "dice", con_content,
-                actor_name="系统", metadata={
-                    "skill": "体质", "roll": result.roll, "target": result.target,
-                    "outcome": result.outcome, "actor": char.name,
-                    "major_wound_check": True, "dice": _check_dice_detail(result),
-                    "undo_of": ev.id,   # 随这次扣血一起回滚
-                },
-            )
-            chunks.append(_make_chunk("dice", con_content, event_id=dev.id))
-        except Exception:
-            logger.exception("重伤体质检定失败（忽略，不阻塞结算）: char=%s", char.id)
+            db.flush()
+            con_content += f"\n{char.name} 眼前一黑，昏迷倒地！"
+        dev = session_service.add_event(
+            db, session_id, "dice", con_content,
+            actor_name="系统", commit=False, metadata={
+                "skill": "体质", "roll": result.roll, "target": result.target,
+                "outcome": result.outcome, "actor": char.name,
+                "major_wound_check": True, "dice": _check_dice_detail(result),
+                "undo_of": ev.id,   # 随这次扣血一起回滚
+            },
+        )
+        chunks.append(_make_chunk("dice", con_content, event_id=dev.id))
     # 通知前端刷新角色卡（HP/状态已变）——与 inventory_update 同一套刷新机制。
     chunks.append(_make_chunk("character_update", metadata={"char_id": char.id}))
-    chunks.extend(_sync_combatant_hp(db, session_id, char))
+    chunks.extend(_sync_combatant_hp(db, session_id, char, commit=False))
     return chunks
 
 
-def _sync_combatant_hp(db: Session, session_id: str, char: Character) -> list[str]:
+def _sync_combatant_hp(db: Session, session_id: str, char: Character, *, commit: bool = True) -> list[str]:
     """把角色卡上刚改过的 HP/状态同步回**进行中的战斗态**，并广播新战斗态。
 
     战斗面板画的是 `combat_state.initiative[].hp`，不是角色卡。而这条 HP 结算路径
@@ -689,7 +756,7 @@ def _sync_combatant_hp(db: Session, session_id: str, char: Character) -> list[st
     for cond in (char.system_data or {}).get("conditions") or []:
         if cond not in (hit.get("conditions") or []):
             hit["conditions"] = [*(hit.get("conditions") or []), cond]
-    combat_service._save_combat(db, session_id, state)
+    combat_service._save_combat(db, session_id, state, commit=commit)
     return [combat_service._combat_state_chunk(state)]
 
 
@@ -778,6 +845,7 @@ async def _exec_dice_check(
 
         group_any_success = False
         group_any_fumble = False
+        last_event_id = None
         for c in targets:
             if c in human_targets:
                 continue
@@ -790,12 +858,24 @@ async def _exec_dice_check(
             rc, rd, succeeded, fumbled = await _auto_roll_check(
                 db, session_id, game_session, module, cdata, c.name, False,
                 skill_name, difficulty, blind, source, c_bonus, c_penalty, modifier_reason,
+                gate=False,
             )
+            last_event_id = next(
+                (getattr(ch, "id", None) for ch in rc if getattr(ch, "type", "") == "dice"),
+                None,
+            ) or last_event_id
             chunks += rc
             descs += rd
             group_any_success = group_any_success or succeeded
             group_any_fumble = group_any_fumble or fumbled
         if not human_targets:
+            # 群检全部自动结算：任一成功即算通过，与手动群检的汇总口径一致。
+            if last_event_id:
+                chunks += check_gating.record_auto_check(
+                    db, session_id, game_session, event_id=last_event_id, skill=skill_name,
+                    succeeded=group_any_success, module=module,
+                    on_first_clue=illustration_service._maybe_clue_illustration,
+                )
             return chunks, descs, False
 
         batch_id = uuid.uuid4().hex
@@ -899,6 +979,7 @@ async def _auto_roll_check(
     skill_name: str, difficulty: str, blind: bool, source: str,
     bonus: int, penalty: int, modifier_reason: str = "",
     public_name: str = "",
+    gate: bool = True,
 ) -> tuple[list[str], list[str], bool, bool]:
     """系统自动掷一次检定并落库（不挂 pending）。单人自动路径与群检各成员共用。
 
@@ -969,12 +1050,14 @@ async def _auto_roll_check(
                     f"被 {disp_name} 用{skill_name}{verdict}",
                 ),
             )
-    return (
-        chunks,
-        descs,
-        result.outcome not in ("failure", "fumble"),
-        result.outcome == "fumble",
-    )
+    succeeded = result.outcome not in ("failure", "fumble")
+    # 玩家方的自动掷（AI 队友 / 暗投）同样是门控收益的结算点；群检由调用方汇总后统一记录。
+    if gate and not is_npc:
+        chunks += check_gating.record_auto_check(
+            db, session_id, game_session, event_id=ev.id, skill=skill_name,
+            succeeded=succeeded, module=module, on_first_clue=illustration_service._maybe_clue_illustration,
+        )
+    return chunks, descs, succeeded, result.outcome == "fumble"
 
 
 async def _exec_scene_change(
@@ -1004,15 +1087,18 @@ async def _exec_scene_change(
             return [], None, note
         # 主角明确移动到新场景：更新其位置（→ current_scene_id、已访问、地图跟随）；
         # 同处一地的队友一同前往，分头在别处、或本轮明确留守的队友留在原地。
-        session_service.set_char_location(db, session_id, player_char.id, sid)
-        # 「同处」含从未表过态的队友：位置是懒写入的，没动过的人没有记录，
-        # get_char_location 会把他们回落到当前场景，因此判据自然成立。
+        # 整队移动一笔事务：主角与随行队友要么全到、要么都不动，不会半路失败留下「人分两处」。
         stayed = session_service.stayed_char_ids(db, session_id)
-        for t in (teammates or []):
-            if session_service.get_char_location(game_session, t.id) == old:
-                if t.id in stayed:
-                    continue    # 本轮明确说了留下 → 不跟着走
-                session_service.set_char_location(db, session_id, t.id, sid)
+        followers = [
+            t for t in (teammates or [])
+            if session_service.get_char_location(game_session, t.id) == old and t.id not in stayed
+        ]
+        with effect_channel.transaction(db):
+            session_service.set_char_location(db, session_id, player_char.id, sid, commit=False)
+            # 「同处」含从未表过态的队友：位置是懒写入的，没动过的人没有记录，
+            # get_char_location 会把他们回落到当前场景，因此判据自然成立；本轮明确留守的不跟。
+            for t in followers:
+                session_service.set_char_location(db, session_id, t.id, sid, commit=False)
         db.refresh(game_session)
         # 首次抵达新场景 → 追加一张场景配图卡（chunk 随本次切换一并广播/重排）
         chunks = [_make_chunk("system", f"场景切换至：{_scene_name(module, sid)}")]
@@ -1128,14 +1214,16 @@ def _exec_flag(
     flag 不会产生额外图片。
     """
     session_service.set_flag(db, session_id, flag, value)
+    return _after_flags_changed(db, session_id, game_session)
+
+
+def _after_flags_changed(db: Session, session_id: str, game_session: GameSession) -> list[str]:
+    """标志提交之后的联动：刷新内存态，场景视觉状态若因此变化则落一张状态配图卡。"""
     db.refresh(game_session)
-    chunks: list = []
     module = db.get(Module, game_session.module_id)
-    if module is not None:
-        chunks.extend(_maybe_scene_illustration(
-            db, session_id, module, game_session.current_scene_id,
-        ))
-    return chunks
+    if module is None:
+        return []
+    return list(_maybe_scene_illustration(db, session_id, module, game_session.current_scene_id))
 
 
 def exec_set_mood(
@@ -1229,10 +1317,10 @@ async def _exec_handout(
             )
             return chunks, f"手书 {hid} 已发放（配图已进入真人 KP 审核队列）。"
         if get_image_llm().supports_image_gen():
-            asyncio.create_task(_illustrate_handout(
+            asyncio.create_task(call_budget.detached(_illustrate_handout(
                 session_id, ev.id, title,
                 str(handout.get("kind") or ""), ev.content or "",
-            ))
+            )))
     except Exception:  # noqa: BLE001 — 配图判定失败不影响发放
         logger.exception("手书配图任务启动失败（忽略）")
     return chunks, f"手书 {hid} 已发放（正文已由系统以卡片呈现给玩家，续写时不要复述正文）。"

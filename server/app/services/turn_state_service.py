@@ -212,8 +212,10 @@ def append_pending_group_check_result(
     return remaining
 
 
-def pop_pending_check(db: Session, session_id: str, check_id: str) -> dict | None:
-    """取出并移除一个待定检定；不存在返回 None。"""
+def pop_pending_check(
+    db: Session, session_id: str, check_id: str, *, commit: bool = True,
+) -> dict | None:
+    """取出并移除一个待定检定；不存在返回 None。commit=False 时参与外层效果事务。"""
     session = db.get(GameSession, session_id)
     if not session:
         return None
@@ -224,7 +226,7 @@ def pop_pending_check(db: Session, session_id: str, check_id: str) -> dict | Non
         return None
     ws["pending_checks"] = pending
     session.turn_state = ws
-    db.commit()
+    db.commit() if commit else db.flush()
     return check
 
 

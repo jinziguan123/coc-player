@@ -250,3 +250,196 @@ def test_真人无source的san待投_重复下发不再挂第二张(db):
     checks = (db.get(GameSession, s.id).turn_state or {})["pending_checks"]
     assert len(checks) == 1
     assert next(iter(checks.values()))["san_key"].startswith("turn:")
+
+
+@pytest.mark.parametrize("failure_at", ["event", "sync", "commit"])
+def test_HP效果中途失败不会留下角色修改或孤立事件(db, monkeypatch, failure_at):
+    s, pc, _mate, module = _seed(db)
+    cid, sid = pc.id, s.id
+    original_add = session_service.add_event
+    original_commit = db.commit
+
+    def fail_event(*args, **kwargs):
+        original_add(*args, **kwargs)
+        raise RuntimeError("事件写入后失败")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("提交中断探针")
+
+    if failure_at == "event":
+        monkeypatch.setattr(session_service, "add_event", fail_event)
+    elif failure_at == "sync":
+        monkeypatch.setattr(turn_effects, "_sync_combatant_hp", fail)
+    else:
+        monkeypatch.setattr(db, "commit", fail)
+    with pytest.raises(RuntimeError):
+        asyncio.run(turn_effects._exec_hp_change(
+            db, sid, pc, "player", "-4", "失败探针", module=module,
+        ))
+    monkeypatch.setattr(db, "commit", original_commit)
+    assert _hp(db, cid) == 15
+    assert session_service.get_session_events(db, sid) == []
+    # 回滚后 Session 仍可使用，重试只产生一次效果。
+    monkeypatch.undo()
+    asyncio.run(turn_effects._exec_hp_change(db, sid, pc, "player", "-4", "重试", module=module))
+    assert _hp(db, cid) == 11
+
+
+def test_HP工具文本与计划同轮提案去重且重生成后可重做(db):
+    s, pc, mate, module = _seed(db)
+    session_service.add_event(db, s.id, "action", "穿过火场", actor_id=pc.id)
+    for source in ("kp_tool", "kp_text", "planner"):
+        asyncio.run(turn_effects._exec_hp_change(
+            db, s.id, pc, "player", "-3", "火焰烧伤", module=module,
+            teammates=[mate], source=source,
+        ))
+    assert _hp(db, pc.id) == 12
+    session_service.add_event(db, s.id, "narration", "火焰灼伤皮肤。", actor_name="KP")
+    session_service.rollback_last_kp_output(db, s.id)
+    assert _hp(db, pc.id) == 15
+    asyncio.run(turn_effects._exec_hp_change(
+        db, s.id, pc, "player", "-3", "火焰烧伤", module=module, source="kp_tool",
+    ))
+    assert _hp(db, pc.id) == 12
+    session_service.add_event(db, s.id, "action", "再次穿过火场", actor_id=pc.id)
+    asyncio.run(turn_effects._exec_hp_change(
+        db, s.id, pc, "player", "-3", "火焰烧伤", module=module, source="kp_tool",
+    ))
+    assert _hp(db, pc.id) == 9
+
+
+def test_真人KP连续扣血不被自动提案去重(db):
+    s, pc, _mate, module = _seed(db)
+    for _ in range(2):
+        asyncio.run(turn_effects._exec_hp_change(db, s.id, pc, "player", "-2", "受伤", module=module))
+    assert _hp(db, pc.id) == 11
+
+
+def test_后台快照在新事件或世界变更后失效(db):
+    from app.services.housekeeping_snapshot import Snapshot
+    s, pc, _mate, _module = _seed(db)
+    snapshot = Snapshot.capture(db, s)
+    assert snapshot.is_current(db, s)
+    session_service.add_event(db, s.id, "action", "下一轮", actor_id=pc.id)
+    assert not snapshot.is_current(db, s)
+    snapshot = Snapshot.capture(db, s)
+    s.world_state = {"new_fact": "必须保留"}
+    db.commit()
+    assert not snapshot.is_current(db, s)
+    assert s.world_state["new_fact"] == "必须保留"
+
+
+@pytest.mark.parametrize("failure_at", ["rule", "dice_event", "conditions"])
+def test_重伤分支失败时整次伤害回滚(db, monkeypatch, failure_at):
+    from app.services import character_service, rule_options_service
+    s, pc, _mate, module = _seed(db)
+    cid, sid = pc.id, s.id
+    real_rs = rule_options_service.ruleset_by_id
+    real_add = session_service.add_event
+
+    class _BrokenCheck:
+        def resolve_skill_check(self, *a, **k):
+            raise RuntimeError("体质检定规则异常")
+
+    class _Proxy:
+        def __init__(self, inner):
+            self._inner = inner
+            self.check = _BrokenCheck()
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    def fail_dice(db_, sid_, kind, *a, **k):
+        if kind == "dice":
+            raise RuntimeError("检定事件写入失败")
+        return real_add(db_, sid_, kind, *a, **k)
+
+    def fail_conditions(*a, **k):
+        raise RuntimeError("状态写入失败")
+
+    if failure_at == "rule":
+        monkeypatch.setattr(rule_options_service, "ruleset_by_id", lambda d, i: _Proxy(real_rs(d, i)))
+    elif failure_at == "dice_event":
+        monkeypatch.setattr(session_service, "add_event", fail_dice)
+    else:
+        monkeypatch.setattr(character_service, "change_conditions", fail_conditions)
+    with pytest.raises(RuntimeError):
+        # 8 ≥ 15/2 → 重伤且未归零，走体质检定分支
+        asyncio.run(turn_effects._exec_hp_change(db, sid, pc, "player", "-8", "斧劈", module=module))
+    db.expire_all()
+    char = db.get(Character, cid)
+    assert char.system_data["hitPoints"]["current"] == 15
+    assert char.status != "major_wound"
+    assert not (char.system_data or {}).get("conditions")
+    assert session_service.get_session_events(db, sid) == []
+
+
+def test_同轮不同理由或数值的伤害不被误合并(db):
+    s, pc, mate, module = _seed(db)
+    session_service.add_event(db, s.id, "action", "冲进走廊", actor_id=pc.id)
+    for delta, reason in (("-2", "被咬"), ("-2", "被抓"), ("-3", "被咬")):
+        asyncio.run(turn_effects._exec_hp_change(
+            db, s.id, pc, "player", delta, reason, module=module, source="kp_tool",
+        ))
+    assert _hp(db, pc.id) == 8
+    # 同数值同理由但不同角色，也是两次独立效果
+    asyncio.run(turn_effects._exec_hp_change(
+        db, s.id, pc, "阿尔法", "-2", "被咬", module=module, teammates=[mate], source="kp_tool",
+    ))
+    db.expire_all()
+    assert db.get(Character, mate.id).system_data["hitPoints"]["current"] == 10
+
+
+@pytest.mark.parametrize("failure_at", ["event", "madness"])
+def test_SAN结算中途失败_数值事件台账一并回滚(db, monkeypatch, failure_at):
+    s, _pc, mate, _module = _seed(db)
+    sid, mid = s.id, mate.id
+
+    def boom(*a, **k):
+        raise RuntimeError("SAN 结算中断")
+
+    if failure_at == "event":
+        monkeypatch.setattr(session_service, "add_event", boom)
+    else:
+        monkeypatch.setattr(turn_effects, "_apply_madness_status", boom)
+    with pytest.raises(RuntimeError):
+        turn_effects._settle_san_target(db, sid, s, mate, "1", "1d6", "地窖里的尸体")
+    monkeypatch.undo()
+    assert _san(db, mid) == 50
+    assert session_service.get_session_events(db, sid) == []
+    led = db.get(GameSession, sid).ledger
+    assert not (led and led.san_checked)
+    # 回滚后重试：只结算一次，并记下恐怖源台账
+    chunks, desc = turn_effects._settle_san_target(
+        db, sid, db.get(GameSession, sid), db.get(Character, mid), "1", "1", "地窖里的尸体",
+    )
+    assert _san(db, mid) == 49 and "理智检定" in desc
+    db.expire_all()
+    assert "地窖里的尸体|" + mid in db.get(GameSession, sid).ledger.san_checked
+    dice = [e for e in session_service.get_session_events(db, sid) if e.event_type == "dice"]
+    assert dice[0].metadata_["effect"]["kind"] == "san_check"
+    assert "effect" not in (chunks[0].metadata or {})   # 凭据不随广播下发
+
+
+def test_SAN待投卡消费与结算同事务_重复点击只扣一次_失败卡仍在(db, monkeypatch):
+    s, _pc, mate, _module = _seed(db)
+    sid, mid = s.id, mate.id
+    session_service.add_pending_check(db, sid, {"id": "c1", "kind": "san_check", "char_id": mid})
+
+    def boom(*a, **k):
+        raise RuntimeError("中断")
+
+    monkeypatch.setattr(session_service, "add_event", boom)
+    with pytest.raises(RuntimeError):
+        turn_effects._settle_san_target(db, sid, s, mate, "1", "1", "低语", consume_check_id="c1")
+    monkeypatch.undo()
+    assert _san(db, mid) == 50
+    assert session_service.get_pending_check(db, sid, "c1") is not None   # 失败：卡还在，可重投
+
+    for _ in range(2):   # 重复点击
+        turn_effects._settle_san_target(
+            db, sid, db.get(GameSession, sid), db.get(Character, mid), "1", "1", "低语",
+            consume_check_id="c1",
+        )
+    assert _san(db, mid) == 49
+    assert session_service.get_pending_check(db, sid, "c1") is None

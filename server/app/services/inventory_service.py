@@ -24,12 +24,13 @@ def get_inventory(char: Character) -> list[dict]:
     return copy.deepcopy((char.system_data or {}).get("inventory") or [])
 
 
-def _save(db: Session, char: Character, items: list[dict]) -> None:
+def _save(db: Session, char: Character, items: list[dict], *, commit: bool = True) -> None:
     sd = dict(char.system_data or {})
     sd["inventory"] = items
     char.system_data = sd
     db.add(char)
-    db.commit()
+    # commit=False：参与外层效果事务（见 effect_channel），由外层统一提交/回滚。
+    db.commit() if commit else db.flush()
 
 
 def find_item(char: Character, item_id: str) -> dict | None:
@@ -39,6 +40,7 @@ def find_item(char: Character, item_id: str) -> dict | None:
 def add_item(
     db: Session, char: Character, name: str,
     qty: int = 1, kind: str | None = None, note: str | None = None,
+    *, commit: bool = True,
 ) -> dict:
     """加物品：同名同类型的条目 qty 累加（堆叠），否则新建。返回受影响条目（空 dict 表示无效入参）。"""
     name = (name or "").strip()
@@ -49,7 +51,7 @@ def add_item(
     for it in items:
         if it.get("name") == name and it.get("kind") == kind:
             it["qty"] = int(it.get("qty") or 1) + qty
-            _save(db, char, items)
+            _save(db, char, items, commit=commit)
             return it
     entry: dict = {"id": uuid.uuid4().hex, "name": name, "qty": qty}
     if kind:
@@ -57,11 +59,13 @@ def add_item(
     if note:
         entry["note"] = note
     items.append(entry)
-    _save(db, char, items)
+    _save(db, char, items, commit=commit)
     return entry
 
 
-def remove_item(db: Session, char: Character, item_id: str, qty: int | None = None) -> dict | None:
+def remove_item(
+    db: Session, char: Character, item_id: str, qty: int | None = None, *, commit: bool = True,
+) -> dict | None:
     """按 id 移除/减少：qty=None 或 ≥ 现有 → 整条移除；否则减 qty。返回被移除条目快照（qty=实际移除数）。"""
     items = get_inventory(char)
     it = next((x for x in items if x.get("id") == item_id), None)
@@ -69,21 +73,23 @@ def remove_item(db: Session, char: Character, item_id: str, qty: int | None = No
         return None
     cur = int(it.get("qty") or 1)
     if qty is None or qty >= cur:
-        _save(db, char, [x for x in items if x.get("id") != item_id])
+        _save(db, char, [x for x in items if x.get("id") != item_id], commit=commit)
         return {**it, "qty": cur}
     it["qty"] = cur - qty
-    _save(db, char, items)
+    _save(db, char, items, commit=commit)
     return {**it, "qty": qty}
 
 
-def remove_by_name(db: Session, char: Character, name: str, qty: int = 1) -> dict | None:
+def remove_by_name(
+    db: Session, char: Character, name: str, qty: int = 1, *, commit: bool = True,
+) -> dict | None:
     """按名字消耗/移除（供 KP 确定性销毁：火把熄灭、绳子被割断等）。匹配不到返回 None。"""
     name = (name or "").strip()
     it = next(
         (x for x in get_inventory(char) if x.get("name") == name or name in (x.get("name") or "")),
         None,
     )
-    return remove_item(db, char, it["id"], qty=qty) if it else None
+    return remove_item(db, char, it["id"], qty=qty, commit=commit) if it else None
 
 
 def use_item(db: Session, char: Character, item_id: str) -> dict | None:

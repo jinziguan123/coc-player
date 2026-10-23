@@ -16,6 +16,8 @@ from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
 from app.services import (
     agent_trace,
+    check_gating,
+    effect_channel,
     dice_runtime,
     entity_state,
     inventory_service,
@@ -928,7 +930,7 @@ async def _ensure_planned_mishap(
     reason = (plan.mishap.reason or "大失败反噬").strip()
     chunks = await _exec_hp_change(
         db, session_id, player_char, target, str(delta), reason,
-        module=module, teammates=teammates,
+        module=module, teammates=teammates, source="planner",
     )
     for chunk in chunks:
         yield chunk
@@ -977,14 +979,19 @@ async def _ensure_planned_items(
     )
     ws = dict(game_session.turn_state or {})
     done = set(ws.get("item_delta_keys") or [])
-    changed = False
 
     def _who(name: str) -> Character:
         return _resolve_hp_target((name or "").strip(), player_char, teammates) or player_char
 
     # 本轮挂着未决检定 → 收获全部转暂存，等骰子落地再定给不给（见 settle_pending_item_gains）。
+    # 检定若已在叙事中由系统自动掷过（AI 队友 / 暗投），直接按已知成败结算，不再暂存到下轮作废。
+    gate_skill = (plan.check.skill or plan.player_check_request or "").strip()
+    gate_known = (
+        check_gating.auto_outcome(db, game_session, gate_skill) if plan.requires_check else None
+    )
+    gains_now = plan.items_gained if (not plan.requires_check or gate_known) else []
     deferred = []
-    for ig in plan.items_gained if plan.requires_check else []:
+    for ig in plan.items_gained if plan.requires_check and gate_known is None else []:
         name = (ig.name or "").strip()
         if not name:
             continue
@@ -994,51 +1001,74 @@ async def _ensure_planned_items(
             continue
         deferred.append({
             "name": name, "qty": int(ig.qty or 1),
-            "kind": (ig.kind or ""), "char_id": target.id, "key": key,
+            "kind": (ig.kind or ""), "char_id": target.id, "key": key, "skill": gate_skill,
         })
     if deferred:
         ws["pending_item_gains"] = deferred
-        changed = True
+        game_session.turn_state = ws
+        db.commit()
 
-    for ig in ([] if plan.requires_check else plan.items_gained):
+    # 每件物品一笔短事务：库存、系统事件与台账键同提交（effect_channel），中途失败整笔回滚，
+    # 不会出现「东西进包了、键没记上 → 重新生成再发一次」。
+    for ig in gains_now:
         name = (ig.name or "").strip()
         if not name:
             continue
         target = _who(ig.who)
-        key = f"g|{anchor}|{name}|{target.id}"
-        if key in done:
-            continue
-        inventory_service.add_item(db, target, name, qty=ig.qty or 1, kind=(ig.kind or None))
-        done.add(key); changed = True
-        suffix = f"×{ig.qty}" if (ig.qty or 1) > 1 else ""
-        ev = session_service.add_event(
-            db, session_id, "system", f"{target.name} 获得了 {name}{suffix}",
-            actor_name="系统", metadata={"item_gain": True, "char_id": target.id},
-        )
-        yield _make_chunk("system", ev.content, event_id=ev.id, metadata={"item_gain": True})
-        yield _make_chunk("inventory_update", metadata={"char_id": target.id})
+        for chunk in _apply_item_change(db, session_id, game_session, target, effect_channel.ItemChange(
+            target.id, name, int(ig.qty or 1), "gain", f"g|{anchor}|{name}|{target.id}", ig.kind or "",
+        ), anchor):
+            yield chunk
 
     for il in plan.items_lost:
         name = (il.name or "").strip()
         if not name:
             continue
         target = _who(il.who)
-        key = f"l|{anchor}|{name}|{target.id}"
-        if key in done:
-            continue
-        done.add(key); changed = True   # 记键即便无匹配，避免重生成反复尝试
-        if inventory_service.remove_by_name(db, target, name, qty=il.qty or 1):
-            ev = session_service.add_event(
-                db, session_id, "system", f"{target.name} 失去了 {name}",
-                actor_name="系统", metadata={"item_loss": True, "char_id": target.id},
-            )
-            yield _make_chunk("system", ev.content, event_id=ev.id, metadata={"item_loss": True})
-            yield _make_chunk("inventory_update", metadata={"char_id": target.id})
+        for chunk in _apply_item_change(db, session_id, game_session, target, effect_channel.ItemChange(
+            target.id, name, int(il.qty or 1), "loss", f"l|{anchor}|{name}|{target.id}",
+        ), anchor):
+            yield chunk
 
-    if changed:
-        ws["item_delta_keys"] = list(done)
-        game_session.turn_state = ws
-        db.commit()
+
+def _apply_item_change(
+    db: Session, session_id: str, game_session: GameSession, target: Character,
+    change: "effect_channel.ItemChange", anchor: int, source: str = "planner",
+) -> list[str]:
+    """物品增减的确定性执行（效果通道）。按台账键幂等；失去时即便没匹配到也记键，避免反复尝试。"""
+    def already() -> bool:
+        return change.ledger_key in set((game_session.turn_state or {}).get("item_delta_keys") or [])
+
+    def apply(receipt: dict) -> list[str]:
+        chunks: list[str] = []
+        if change.op == "gain":
+            inventory_service.add_item(
+                db, target, change.name, qty=change.qty, kind=(change.kind or None), commit=False,
+            )
+            suffix = f"×{change.qty}" if change.qty > 1 else ""
+            content, flag = f"{target.name} 获得了 {change.name}{suffix}", "item_gain"
+            changed = True
+        else:
+            changed = bool(inventory_service.remove_by_name(
+                db, target, change.name, qty=change.qty, commit=False,
+            ))
+            content, flag = f"{target.name} 失去了 {change.name}", "item_loss"
+        if changed:
+            ev = session_service.add_event(
+                db, session_id, "system", content, actor_name="系统", commit=False,
+                metadata={flag: True, "char_id": target.id, "effect": receipt},
+            )
+            chunks.append(_make_chunk("system", ev.content, event_id=ev.id, metadata={flag: True}))
+            chunks.append(_make_chunk("inventory_update", metadata={"char_id": target.id}))
+        ts = dict(game_session.turn_state or {})
+        ts["item_delta_keys"] = [*(ts.get("item_delta_keys") or []), change.ledger_key]
+        game_session.turn_state = ts
+        return chunks
+
+    return effect_channel.execute(
+        db, session_id, effect_channel.EffectProposal(change, source, anchor),
+        apply, duplicate=[], already=already,
+    )
 
 
 def _discard_pending_item_gains(db: Session, game_session: GameSession) -> bool:
@@ -1064,35 +1094,22 @@ def settle_pending_item_gains(
     pending = list(ws.get("pending_item_gains") or [])
     if not pending:
         return []
+    # 先摘掉暂存再逐件结算：即便某件结算失败，也不会在下次投骰时被重复兑现。
     ws["pending_item_gains"] = []
-    chunks: list[str] = []
-    if succeeded:
-        done = set(ws.get("item_delta_keys") or [])
-        for item in pending:
-            target = db.get(Character, str(item.get("char_id") or ""))
-            name = str(item.get("name") or "").strip()
-            key = str(item.get("key") or "")
-            if target is None or not name or (key and key in done):
-                continue
-            qty = int(item.get("qty") or 1)
-            inventory_service.add_item(
-                db, target, name, qty=qty, kind=(str(item.get("kind") or "") or None),
-            )
-            if key:
-                done.add(key)
-            suffix = f"×{qty}" if qty > 1 else ""
-            ev = session_service.add_event(
-                db, session_id, "system", f"{target.name} 获得了 {name}{suffix}",
-                actor_name="系统", metadata={"item_gain": True, "char_id": target.id},
-            )
-            chunks.append(
-                _make_chunk("system", ev.content, event_id=ev.id, metadata={"item_gain": True}))
-            chunks.append(_make_chunk("inventory_update", metadata={"char_id": target.id}))
-        ws["item_delta_keys"] = list(done)
-    else:
-        chunks.append(_make_chunk("inventory_update"))
     game_session.turn_state = ws
     db.commit()
+    if not succeeded:
+        return [_make_chunk("inventory_update")]
+    chunks: list[str] = []
+    for item in pending:
+        target = db.get(Character, str(item.get("char_id") or ""))
+        name = str(item.get("name") or "").strip()
+        if target is None or not name:
+            continue
+        key = str(item.get("key") or "") or f"g|stash|{name}|{target.id}"
+        chunks += _apply_item_change(db, session_id, game_session, target, effect_channel.ItemChange(
+            target.id, name, int(item.get("qty") or 1), "gain", key, str(item.get("kind") or ""),
+        ), 0, source="planner")
     return chunks
 
 

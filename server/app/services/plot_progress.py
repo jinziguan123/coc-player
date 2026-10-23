@@ -27,7 +27,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.session import GameSession
-from app.services import entity_state, scene_kind, session_service
+from app.services import effect_channel, entity_state, scene_kind, session_service
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,41 @@ def legal_flags(module: Any) -> tuple[set[str], set[str]]:
         can_set.update(h["set_flags"])
         can_clear.update(h["clear_flags"])
     return can_set, can_clear
+
+
+def _state_flags(module: Any) -> set[str]:
+    """模组实体（场景/NPC/线索/物品/手书）``states[].when`` 里引用的标志：KP 置它们会切换实体状态。"""
+    out: set[str] = set()
+    for field in ("scenes", "npcs", "clues", "items", "handouts"):
+        for entity in getattr(module, field, None) or []:
+            if not isinstance(entity, dict):
+                continue
+            for st in entity.get("states") or []:
+                if isinstance(st, dict):
+                    out.update(_str_list(st.get("when")))
+    return out
+
+
+def model_flag_rejection(module: Any, flags: set[str], flag: str, value: bool) -> str:
+    """模型来源（KP 工具/文本指令）的置/清标志合法性：合法返回空串，否则返回给 KP 的说明。
+
+    与规划器同一白名单口径（模组钩子写明的标志），另认实体状态变体引用的标志；
+    真人 KP 的明确操作不经此校验。清除只回收已激活且模组认得的标志。
+    """
+    can_set, can_clear = legal_flags(module)
+    known = can_set | can_clear | _state_flags(module)
+    flag = str(flag or "").strip()
+    if not flag:
+        return "参数缺失：flag 为必填。"
+    if value:
+        if flag not in known:
+            return f"标志 {flag} 不在模组剧情钩子或实体状态里，已忽略；剧情推进请用叙事交代。"
+        return ""
+    if flag not in flags:
+        return f"标志 {flag} 当前未激活，无需清除。"
+    if flag not in known:
+        return f"标志 {flag} 不在模组剧情钩子或实体状态里，已忽略。"
+    return ""
 
 
 def validate_plan_flags(
@@ -197,20 +232,35 @@ async def apply_planned_flags(
         )
         if not (to_set or to_clear):
             return
-        chunks: list[str] = []
-        for f in to_set:
-            chunks.extend(turn_effects._exec_flag(db, session_id, game_session, f, True))
-        for f in to_clear:
-            chunks.extend(turn_effects._exec_flag(db, session_id, game_session, f, False))
         note = _progress_note(
             module, before, to_set, to_clear, getattr(policy, "flag_reason", "") or "",
         )
-        # 只落库不广播：标志名是剧情骨架，玩家永远不可见（同幕后事件）
-        session_service.add_event(
-            db, session_id, "system", note, actor_name="剧情",
-            visibility=[session_service.KP_ONLY_SENTINEL],
-            metadata={"kind": PLOT_PROGRESS_KIND, "set_flags": to_set, "clear_flags": to_clear},
+
+        def apply(receipt: dict) -> None:
+            for f in to_set:
+                session_service.set_flag(db, session_id, f, True, commit=False)
+            for f in to_clear:
+                session_service.set_flag(db, session_id, f, False, commit=False)
+            # 只落库不广播：标志名是剧情骨架，玩家永远不可见（同幕后事件）
+            session_service.add_event(
+                db, session_id, "system", note, actor_name="剧情",
+                visibility=[session_service.KP_ONLY_SENTINEL], commit=False,
+                metadata={
+                    "kind": PLOT_PROGRESS_KIND, "set_flags": to_set, "clear_flags": to_clear,
+                    "effect": receipt,
+                },
+            )
+
+        # 全部标志与记录同一事务（效果通道）：不会出现「标志落了一半、没有推进记录」。
+        effect_channel.execute(
+            db, session_id,
+            effect_channel.EffectProposal(
+                effect_channel.FlagChange(tuple(to_set), tuple(to_clear)), "planner", 0,
+            ),
+            apply, duplicate=None, already=lambda: False,
         )
+        # 配图等联动只在提交之后做一次。
+        chunks = turn_effects._after_flags_changed(db, session_id, game_session)
         logger.info(
             "规划器剧情标志落实：session=%s 置=%s 清=%s", session_id, to_set, to_clear,
         )

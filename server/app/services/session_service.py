@@ -1331,7 +1331,9 @@ def delete_session(db: Session, session_id: str) -> bool:
     return True
 
 
-def set_flag(db: Session, session_id: str, flag: str, value: bool = True) -> None:
+def set_flag(
+    db: Session, session_id: str, flag: str, value: bool = True, *, commit: bool = True,
+) -> None:
     """置/清剧情标志（world_state.flags）。KP 通过 [SET_FLAG]/[CLEAR_FLAG] 推进剧情状态，
     场景/NPC 的状态变体据此切换。flag 名做轻量规范化（去空白），value=False 即清除该标志。"""
     flag = (flag or "").strip()
@@ -1348,4 +1350,4 @@ def set_flag(db: Session, session_id: str, flag: str, value: bool = True) -> Non
         flags.pop(flag, None)
     ws["flags"] = flags
     session.world_state = ws
-    db.commit()
+    db.commit() if commit else db.flush()   # commit=False：参与外层效果事务

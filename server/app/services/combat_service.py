@@ -284,7 +284,7 @@ def get_combat(session: GameSession) -> dict | None:
     return copy.deepcopy(c)
 
 
-def _save_combat(db: Session, session_id: str, state: dict | None) -> None:
+def _save_combat(db: Session, session_id: str, state: dict | None, *, commit: bool = True) -> None:
     # 唯一写入口：state=None → 删行（结束战斗）；否则 upsert 该会话的战斗态行。
     cs = db.get(CombatState, session_id)   # session_id 即主键，1:1
     if state is None:
@@ -294,7 +294,7 @@ def _save_combat(db: Session, session_id: str, state: dict | None) -> None:
         db.add(CombatState(session_id=session_id, state=state))
     else:
         cs.state = state
-    db.commit()
+    db.commit() if commit else db.flush()
 
 
 def start_combat(db: Session, session_id: str, player_side: list[dict], enemies: list[dict],

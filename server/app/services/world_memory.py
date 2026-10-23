@@ -97,6 +97,7 @@ def record_clue_reveal(
 
 def stage_clue_reveal(
     ws: dict, clue_ids: list[str], discovered_by: list[str], seq: int, note: str = "",
+    skill: str = "",
 ) -> dict:
     """暂存「等这次检定落地才算数」的线索候选（world_state.pending_clue_reveals）。
 
@@ -113,6 +114,8 @@ def stage_clue_reveal(
         "discovered_by": list(discovered_by or []),
         "seq": int(seq or 0),
         "note": _truncate(note),
+        # 门控这批线索的检定技能：自动掷（AI 队友 / 暗投）时按它匹配兑现，见 check_gating
+        "skill": str(skill or "").strip(),
     }
     return ws
 

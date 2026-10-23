@@ -53,7 +53,9 @@ def get_char_location(session: GameSession, char_id: str | None) -> str | None:
     return get_party_locations(session).get(char_id) or session.current_scene_id
 
 
-def set_char_location(db: Session, session_id: str, char_id: str, scene_id: str) -> None:
+def set_char_location(
+    db: Session, session_id: str, char_id: str, scene_id: str, *, commit: bool = True,
+) -> None:
     """把某角色移动到某场景（玩家经大地图前往 / AI 队友分头时的落点）。
 
     主角移动时一并更新 current_scene_id（地图面板、NPC 上下文等仍以它为锚）。目的地记入已访问。
@@ -76,7 +78,8 @@ def set_char_location(db: Session, session_id: str, char_id: str, scene_id: str)
     nav.visited_scenes = visited
     if char_id == session.player_character_id:
         session.current_scene_id = scene_id
-    db.commit()
+    # commit=False：参与外层事务（整队移动要么全到、要么都不动）
+    db.commit() if commit else db.flush()
 
 
 #: 「本轮明确留守」的事件标记。位置默认跟随队伍，只有显式表过态的人自理。

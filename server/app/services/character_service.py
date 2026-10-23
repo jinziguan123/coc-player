@@ -101,6 +101,7 @@ def update_character(db: Session, character_id: str, updates: dict) -> Character
 
 def change_conditions(
     db: Session, char: Character, add: list[str] | None = None, remove: list[str] | None = None,
+    *, commit: bool = True,
 ) -> bool:
     """改角色卡上的持续状态（``system_data.conditions``，如流血）。返回是否真的有变化。
 
@@ -115,5 +116,5 @@ def change_conditions(
     sd["conditions"] = after
     char.system_data = sd
     db.add(char)
-    db.commit()
+    db.commit() if commit else db.flush()
     return True

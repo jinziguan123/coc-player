@@ -176,3 +176,49 @@ def test_second_decision_is_a_noop(db_factory, monkeypatch):
 
     db.expire_all()
     assert db.get(Character, char.id).system_data["luck"] == 40
+
+
+def test_投骰事件写入失败时卡仍可重投_重复投骰只掷一次(db_factory, monkeypatch):
+    """骰子事件与消费待投卡同一笔事务：不会出现「骰子已出、卡还在，可以重掷」。"""
+    _patch_runtime(monkeypatch, db_factory)
+    db = db_factory()
+    session_id, char = _seed(db, luck_spend=False)
+    check_id = _hang_pending_check(db, session_id, char)
+    _roll(monkeypatch, 10)
+    real = session_service.add_event
+
+    def boom(db_, sid, kind, *a, **k):
+        if kind == "dice":
+            raise RuntimeError("写入失败")
+        return real(db_, sid, kind, *a, **k)
+
+    monkeypatch.setattr(session_service, "add_event", boom)
+    asyncio.run(chat_service.run_roll_generation(session_id, check_id))
+    db.expire_all()
+    assert session_service.get_pending_check(db, session_id, check_id) is not None
+    assert not [e for e in session_service.get_session_events(db, session_id) if e.event_type == "dice"]
+
+    monkeypatch.setattr(session_service, "add_event", real)
+    asyncio.run(chat_service.run_roll_generation(session_id, check_id))
+    asyncio.run(chat_service.run_roll_generation(session_id, check_id))   # 重复点击
+    db.expire_all()
+    dice = [e for e in session_service.get_session_events(db, session_id) if e.event_type == "dice"]
+    assert len(dice) == 1
+    assert session_service.get_pending_check(db, session_id, check_id) is None
+
+
+def test_骰子落地后等待收尾时失败_卡已消费不能借机重掷(db_factory, monkeypatch):
+    _patch_runtime(monkeypatch, db_factory)
+
+    async def broken_drain(session_id):
+        raise RuntimeError("收尾排空失败")
+
+    monkeypatch.setattr(chat_service, "_drain_housekeeping", broken_drain)
+    db = db_factory()
+    session_id, char = _seed(db, luck_spend=False)
+    check_id = _hang_pending_check(db, session_id, char)
+    _roll(monkeypatch, 90)
+    asyncio.run(chat_service.run_roll_generation(session_id, check_id))
+    db.expire_all()
+    assert session_service.get_pending_check(db, session_id, check_id) is None
+    assert len([e for e in session_service.get_session_events(db, session_id) if e.event_type == "dice"]) == 1

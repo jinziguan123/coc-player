@@ -37,6 +37,9 @@ def _exec_start_chase(
     """start_chase 工具：玩家作逃方，pursuer 按名字解析模组 NPC（匹配不到按临场追兵建）。返回 chunks。"""
     from app.services import chase_service, rule_options_service
 
+    session = db.get(GameSession, session_id)
+    if session is not None and chase_service.get_chase(session):
+        return []  # 重复提案不能重置距离、轮次或已经结算的行动。
     nm = (pursuer_str or "").strip() or "追兵"
     spec = next((n for n in (module.npcs or []) if n.get("name") == nm or n.get("id") == nm), None)
     pursuer = chase_service._pursuer_from_npc(
@@ -61,6 +64,8 @@ async def _exec_start_combat(
     from app.ai.agents.combat_agent import CombatAgent
     from app.services import combat_service
 
+    if combat_service.get_combat(game_session):
+        return []  # 计划、工具与补偿守卫共用此入口，已开战时不得覆盖战斗态。
     names = [n.strip() for n in re.split(r"[，,、]", enemies_str or "") if n.strip()]
     npc_by = {n.get("name"): n for n in (module.npcs or [])}
     npc_by_id = {n.get("id"): n for n in (module.npcs or [])}

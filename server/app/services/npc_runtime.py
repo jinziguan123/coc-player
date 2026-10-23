@@ -102,6 +102,8 @@ class NpcRuntime:
                     "NPC 意图前置不满足：npc=%s target=%s verb=%s，仅生成台词、不落状态",
                     npc_id, canonical, verb,
                 )
+                # 说到做到：前置不成立时动作不入对象账本，也不作为世界意图记录。
+                canonical, verb = "", ""
         shown_name, line = await self.generate(npc_id, trigger)
         event = session_service.add_event(
             self.db, self.session_id, "dialogue", line,

@@ -107,3 +107,31 @@ def test_scene_guard_rejects_discussion_as_movement(db_factory):
     ))
     assert chunks == []
     assert db.get(GameSession, sid).current_scene_id == "a"
+
+
+def test_场景切换整队移动同事务_队友写入失败则主角也不动(db_factory, monkeypatch):
+    from app.services import session_service, turn_effects
+    db = db_factory(); sid, module, pc = _seed(db)
+    mate = Character(name="铃木", rule_system="coc", is_player=False, system_data={})
+    db.add(mate); db.commit()
+    real = session_service.set_char_location
+
+    def flaky(db_, session_id, char_id, scene_id, **kw):
+        if char_id == mate.id:
+            raise RuntimeError("写入失败")
+        return real(db_, session_id, char_id, scene_id, **kw)
+
+    monkeypatch.setattr(session_service, "set_char_location", flaky)
+    game_session = db.get(GameSession, sid)
+    with pytest.raises(RuntimeError):
+        asyncio.run(turn_effects._exec_scene_change(db, sid, game_session, module, "b", pc, [mate]))
+    db.expire_all()
+    g = db.get(GameSession, sid)
+    assert g.current_scene_id == "a"
+    assert session_service.get_char_location(g, pc.id) == "a"
+
+    monkeypatch.setattr(session_service, "set_char_location", real)
+    asyncio.run(turn_effects._exec_scene_change(db, sid, db.get(GameSession, sid), module, "b", pc, [mate]))
+    db.expire_all()
+    g = db.get(GameSession, sid)
+    assert g.current_scene_id == "b" and session_service.get_char_location(g, mate.id) == "b"

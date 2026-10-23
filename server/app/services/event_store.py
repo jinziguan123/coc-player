@@ -187,6 +187,7 @@ def add_event(
     visibility: list[str] | None = None,
     metadata: dict | None = None,
     group: str | None = None,
+    *, commit: bool = True,
 ) -> EventLog:
     meta = dict(metadata or {})
     # 分头行动：同一回合里不同分组/场景的内容，用 group 标签分栏渲染（KP 经 [GROUP] 标注）。
@@ -214,8 +215,14 @@ def add_event(
         )
         db.add(event)
         try:
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
         except IntegrityError as exc:
+            if not commit:
+                # 外层效果事务拥有回滚权；不能仅重试 INSERT 而丢失同事务的状态修改。
+                raise
             db.rollback()
             message = str(exc).lower()
             is_sequence_conflict = (

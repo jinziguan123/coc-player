@@ -133,3 +133,25 @@ def test_npc_runtime_reply_persists_dialogue_and_memory(tmp_path, monkeypatch):
     assert any(t.agent == "npc" and t.outcome == "ok" for t in traces)
     listed = agent_trace.list_for_session(db, session.id)
     assert listed and listed[0]["agent"] == "npc"
+
+
+def test_npc_意图前置不满足时只说台词不落对象账本(tmp_path, monkeypatch):
+    db = _db(tmp_path)()
+    module, hero, session = _seed(db)
+
+    async def fake_respond(self, messages):
+        return "我推门进去。"
+
+    monkeypatch.setattr("app.services.npc_runtime.NPCAgent.respond", fake_respond)
+    runtime = NpcRuntime(db, session.id, session, module, llm=object(), player_char=hero)
+    asyncio.run(runtime.reply("butler", "玩家要进门", target="门", verb="lock"))
+    from app.services import intent_ledger
+    before = intent_ledger.state(runtime.game_session.world_state or {}, "门")
+    assert before == "locked"
+    count = db.query(IntentHistory).filter(IntentHistory.session_id == session.id).count()
+    chunks, line = asyncio.run(runtime.reply("butler", "管家想进屋", target="门", verb="enter"))
+    assert line == "我推门进去。" and chunks
+    assert intent_ledger.state(runtime.game_session.world_state or {}, "门") == "locked"
+    rows = db.query(IntentHistory).filter(IntentHistory.session_id == session.id).all()
+    assert len(rows) == count + 1
+    assert rows[-1].verb in ("", None) and not rows[-1].target
