@@ -858,7 +858,7 @@ async def _exec_dice_check(
             rc, rd, succeeded, fumbled = await _auto_roll_check(
                 db, session_id, game_session, module, cdata, c.name, False,
                 skill_name, difficulty, blind, source, c_bonus, c_penalty, modifier_reason,
-                gate=False,
+                gate=False, char_id=c.id,
             )
             last_event_id = next(
                 (getattr(ch, "id", None) for ch in rc if getattr(ch, "type", "") == "dice"),
@@ -968,7 +968,7 @@ async def _exec_dice_check(
     rc, rd, _succeeded, _fumbled = await _auto_roll_check(
         db, session_id, game_session, module, char_data, disp_name, is_npc,
         skill_name, difficulty, blind, source, bonus, penalty, modifier_reason,
-        public_name=shown_name,
+        public_name=shown_name, char_id=None if is_npc else char_id,
     )
     return chunks + rc, descs + rd, False
 
@@ -980,8 +980,12 @@ async def _auto_roll_check(
     bonus: int, penalty: int, modifier_reason: str = "",
     public_name: str = "",
     gate: bool = True,
+    char_id: str | None = None,
 ) -> tuple[list[str], list[str], bool, bool]:
     """系统自动掷一次检定并落库（不挂 pending）。单人自动路径与群检各成员共用。
+
+    ``char_id``：玩家方掷骰者。门控移动按**他自己**的成败结算——群检的「任一成功」汇总
+    只用于物品/线索门控，绝不拿来替每个人决定能不能过去。
 
     返回 (chunks, 回灌 KP 的结果描述, 是否成功, 是否大失败)。
     暗投不落 dice 明细（会反推成败）。
@@ -1051,6 +1055,8 @@ async def _auto_roll_check(
                 ),
             )
     succeeded = result.outcome not in ("failure", "fumble")
+    if char_id and not is_npc:
+        chunks += _settle_moves_for(db, session_id, game_session, module, char_id, skill_name, succeeded)
     # 玩家方的自动掷（AI 队友 / 暗投）同样是门控收益的结算点；群检由调用方汇总后统一记录。
     if gate and not is_npc:
         chunks += check_gating.record_auto_check(
@@ -1060,54 +1066,118 @@ async def _auto_roll_check(
     return chunks, descs, succeeded, result.outcome == "fumble"
 
 
+def _settle_moves_for(
+    db: Session, session_id: str, game_session: GameSession, module: Module | None,
+    char_id: str, skill: str, succeeded: bool,
+) -> list[str]:
+    """某个玩家方角色的一次检定落地 → 结算他那份门控移动（其他人照旧待投）。"""
+    from app.services import movement
+
+    if not (game_session.turn_state or {}).get(movement.PENDING_KEY):
+        return []
+    party = session_service.get_party_members(db, session_id)
+    host = db.get(Character, game_session.player_character_id) if game_session.player_character_id else None
+    if host is not None and host not in party:
+        party.insert(0, host)
+    return movement.settle_pending_moves(
+        db, session_id, game_session, module, party, skill=skill, succeeded=succeeded,
+        char_ids={char_id},
+    )
+
+
 async def _exec_scene_change(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     ref: str, player_char: Character, teammates: list[Character] | None,
+    movers: list[Character] | None = None,
 ) -> tuple[list[str], str | None, str]:
     """执行一次场景切换。返回 (chunks, 发生切换的 scene_id 或 None, 未切换的原因说明)。
 
-    确定性连通校验：目标须沿 connections 连通图从当前场景可达（模组没建图时不启用，
+    ``movers`` 给定：只搬这些人（KP 点名、或本轮移动裁定的那批），其余人留在原处。
+    缺省：按本轮原话推定（``movement.default_movers``）——谁宣告了移动谁是带头人，「抛下队友」
+    「你们留在这」只走他自己；没人宣告时回落到主角带上默认跟随的 AI 队友（旧语义）。
+
+    确定性连通校验：目标须沿 connections 连通图从出发场景可达（模组没建图时不启用，
     行为与从前一致）——KP/planner 说「玩家到了X」也搬不动不连通的场景，杜绝叙事瞬移。
     """
+    from app.services import movement
+
     sid = _resolve_scene_ref(module, ref)
     # 只接受能对应到真实场景的 id/名字；解析不到就不动，
     # 避免写入脏值后地图回退到「第一个场景」造成「玩家换图了地图却没切」。
-    old = session_service.get_char_location(game_session, player_char.id)
-    if sid and sid != old:
-        if session_service.find_scene_path(module, old, sid) is None:
-            reachable = "、".join(
-                _scene_name(module, n) for n in session_service.scene_neighbors(module, old)
-            )
-            note = (
-                f"{_scene_name(module, sid)} 与当前场景不连通，无法直接前往"
-                + (f"（由此可直达：{reachable}）" if reachable else "")
-                + "。请让玩家分步移动或说明为何到不了，不要叙述其已抵达。"
-            )
-            logger.warning("SCENE_CHANGE 目标不连通，拒绝切换：%s -> %s", old, sid)
-            return [], None, note
-        # 主角明确移动到新场景：更新其位置（→ current_scene_id、已访问、地图跟随）；
-        # 同处一地的队友一同前往，分头在别处、或本轮明确留守的队友留在原地。
-        # 整队移动一笔事务：主角与随行队友要么全到、要么都不动，不会半路失败留下「人分两处」。
-        stayed = session_service.stayed_char_ids(db, session_id)
-        followers = [
-            t for t in (teammates or [])
-            if session_service.get_char_location(game_session, t.id) == old and t.id not in stayed
-        ]
-        with effect_channel.transaction(db):
-            session_service.set_char_location(db, session_id, player_char.id, sid, commit=False)
-            # 「同处」含从未表过态的队友：位置是懒写入的，没动过的人没有记录，
-            # get_char_location 会把他们回落到当前场景，因此判据自然成立；本轮明确留守的不跟。
-            for t in followers:
-                session_service.set_char_location(db, session_id, t.id, sid, commit=False)
-        db.refresh(game_session)
-        # 首次抵达新场景 → 追加一张场景配图卡（chunk 随本次切换一并广播/重排）
-        chunks = [_make_chunk("system", f"场景切换至：{_scene_name(module, sid)}")]
-        chunks += _maybe_scene_illustration(db, session_id, module, sid)
-        return chunks, sid, ""
     if not sid:
         logger.warning("SCENE_CHANGE 无法解析场景引用：%r（保持当前场景）", ref)
         return [], None, "场景引用无法解析（保持当前场景）。"
-    return [], None, "已身处该场景，未发生切换。"
+    party = [player_char, *(teammates or [])]
+    if not movers:
+        movers = movement.default_movers(
+            db, session_id, game_session, module, sid, party, fallback_leader=player_char,
+        )
+    old = session_service.get_char_location(game_session, movers[0].id)
+    if sid == old:
+        return [], None, "已身处该场景，未发生切换。"
+    if session_service.find_scene_path(module, old, sid) is None:
+        reachable = "、".join(
+            _scene_name(module, n) for n in session_service.scene_neighbors(module, old)
+        )
+        note = (
+            f"{_scene_name(module, sid)} 与当前场景不连通，无法直接前往"
+            + (f"（由此可直达：{reachable}）" if reachable else "")
+            + "。请让玩家分步移动或说明为何到不了，不要叙述其已抵达。"
+        )
+        logger.warning("SCENE_CHANGE 目标不连通，拒绝切换：%s -> %s", old, sid)
+        return [], None, note
+    # 只搬与带头人同处的人（各在别处的人另有各自的路）；一笔事务、主角走时写实留守者位置。
+    moving = [m for m in movers if session_service.get_char_location(game_session, m.id) == old]
+    chunks = movement.move_characters(db, session_id, game_session, module, moving, sid, party)
+    return chunks, sid, ""
+
+
+async def exec_tool_scene_change(
+    db: Session, session_id: str, game_session: GameSession, module: Module,
+    ref: str, raw_movers: str, player_char: Character, teammates: list[Character] | None,
+    *, scope_ids: set[str] | None = None,
+) -> tuple[list[str], str | None, str]:
+    """KP 的 scene_change（原生工具 / 文本指令适配层 / 分头协调器共用）。
+
+    - ``movers`` 写了：必须全部认得出，认不出的名字直接拒绝——绝不静默回退成主角或整队；
+    - ``movers`` 没写：按本轮原话推定移动者（独行、「我们一起」、默认跟随都在这里判）；
+    - 分头协调器给 ``scope_ids``：只能动本组的人；本组没人宣告移动、也不含主角时拒绝；
+    - 本轮移动裁定（待检定、受阻、商量、去向不明…）按人把关：漏写字段绕不过门控。
+    """
+    from app.services import movement
+
+    party = [player_char, *(teammates or [])]
+    if scope_ids is not None:
+        party = [c for c in party if c.id in scope_ids]
+    target = _resolve_scene_ref(module, ref) if module else None
+    if not target:
+        return [], None, "场景引用无法解析（保持当前场景）。"
+    if str(raw_movers or "").strip():
+        movers, unknown = movement.resolve_tool_movers(raw_movers, party)
+        if unknown or not movers:
+            names = "、".join(unknown) or str(raw_movers)
+            return [], None, (
+                f"movers 里有认不出的角色：{names}，未切换场景。请用队伍名册里的角色名重试，"
+                "或省略 movers 让系统按玩家原话判断谁在移动。"
+            )
+    else:
+        fallback = player_char if any(c.id == player_char.id for c in party) else None
+        movers = movement.default_movers(
+            db, session_id, game_session, module, target, party, fallback_leader=fallback,
+        )
+        if not movers:
+            return [], None, "本组没有人宣告要移动，未切换场景。"
+    refusal, settled = movement.tool_guard(game_session, target, movers)
+    if refusal:
+        return [], None, refusal
+    chunks, sid, note = await _exec_scene_change(
+        db, session_id, game_session, module, ref, player_char, teammates, movers=movers,
+    )
+    if sid:
+        return chunks, sid, ""
+    if settled is not None and note.startswith("已身处"):
+        return [], None, "本轮移动已由系统落位，无需再切换。"
+    return chunks, None, note
 
 
 def travel_suggest_event(

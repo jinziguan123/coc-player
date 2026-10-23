@@ -46,6 +46,7 @@ from app.services import (
     inventory_service,
     kp_actions,
     kp_tool_loop,
+    movement,
     narration_protocol,
     npc_identity,
     npc_runtime,
@@ -504,6 +505,19 @@ async def _run_generation(
     if plan is not None:
         _augment_plan_with_backstage(plan, events)
 
+    # 移动裁定（叙事前）：规划器的结构化移动提案经原话与连通证据复核，可执行的此刻就落位——
+    # 下面的分头分组、NPC 在场与 KP 上下文都以新位置为准，不会叙事还在旧场景、最后才换地图。
+    # 需检定的暂存到骰子落地；商量/条件句/走近/去向不明/受阻只给 KP 一句裁定说明，不动人。
+    move_note = ""
+    if plan is not None and events:
+        move_chunks, move_note = movement.adjudicate_plan(
+            db, session_id, game_session, module, player_char, teammates, plan,
+            pre_gen_seq=pre_gen_seq,
+        )
+        for chunk in move_chunks:
+            room_hub.broadcast(session_id, chunk)
+        db.refresh(game_session)
+
     # 位置意图硬闸：玩家只是提到/打算去别处、没有移动证据时，先清掉 plan 里的 scene_change，
     # 并生成一段注入 KP 上下文的位置硬约束。必须在生成前执行——生成后再拦截只能保住地图，
     # 保不住已经广播/落库的旁白。
@@ -530,7 +544,8 @@ async def _run_generation(
             db, session_id, game_session, module, player_char, events,
             teammates, llm, rules_enabled, matcher_npcs, scene_groups,
             plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
-            location_guard=location_guard, finish=finish, combat_before=combat_before,
+            location_guard=location_guard, move_note=move_note, finish=finish,
+            combat_before=combat_before,
         )
         return
 
@@ -560,6 +575,8 @@ async def _run_generation(
         messages.append(blind_message)
     if location_guard:
         messages.append({"role": "system", "content": location_guard})
+    if move_note:
+        messages.append({"role": "system", "content": move_note.strip()})
 
     # 玩家党名单（玩家 + AI 队友）：供台词归属守卫用——KP 绝不能用气泡替他们说话。
     party_names = {player_char.name} | {t.name for t in (teammates or [])}
@@ -594,7 +611,8 @@ async def _run_generation(
     await _run_narration_stage(
         db, session_id, game_session, module, player_char, teammates, llm, stream, result,
         plan=plan, events=events, event_order=event_order, base_seq=base_seq,
-        party_names=party_names, turn_inputs=turn_inputs, location_guard=location_guard,
+        party_names=party_names, turn_inputs=turn_inputs,
+        location_guard=location_guard + move_note,
         after_generate=lambda: _record_turn_usage(
             db, game_session, llm, events, messages,
             tools=tools, calibration_usage=usage_probe.get("first"),
@@ -613,7 +631,7 @@ async def _run_generation(
 
 async def _run_pre_effects(
     db, session_id, game_session, player_char, teammates, *,
-    allowed: frozenset[str], plan, requested_skill: str = "",
+    allowed: frozenset[str], plan, requested_skill: str = "", module=None,
 ):
     """叙事前效果（``turn_pipeline.PRE_EFFECT_ORDER``）：在 KP 动笔前就该定下的确定性效果。"""
     if plan is None:
@@ -629,6 +647,12 @@ async def _run_pre_effects(
         async for chunk in _ensure_planned_items(
             db, session_id, game_session, player_char, teammates, gated,
         ):
+            room_hub.broadcast(session_id, chunk)
+    if "moves" in allowed and module is not None:
+        chunks, _note = movement.adjudicate_plan(
+            db, session_id, game_session, module, player_char, teammates, plan,
+        )
+        for chunk in chunks:
             room_hub.broadcast(session_id, chunk)
 
 
@@ -778,21 +802,17 @@ async def _apply_coordinator_intents(
             continue
         seen.add(key)
         if intent.kind == "scene_change":
-            if not intent.scope.contains(player_char.id):
-                room_hub.broadcast(session_id, _make_chunk(
-                    "system", "分头组不能直接移动主队；场景切换请求已由协调器拒绝。",
-                ))
-                continue
-            scope_names = set(intent.scope.actor_ids)
-            scope_mates = [t for t in (teammates or []) if t.id in scope_names]
-            chunks, _sid, note = await _exec_scene_change(
-                db, session_id, game_session, module,
-                intent.args.get("scene_id", ""), player_char, scope_mates,
+            # 与组内工具同一入口：按本组原话推定移动者、按人过移动裁定；本组没人宣告、
+            # 又不含主角时拒绝（分头组不能替主队做主）。
+            chunks, _sid, note = await turn_effects.exec_tool_scene_change(
+                db, session_id, game_session, module, intent.args.get("scene_id", ""),
+                intent.args.get("movers", ""), player_char, teammates,
+                scope_ids=set(intent.scope.actor_ids),
             )
             for chunk in chunks:
                 room_hub.broadcast(session_id, chunk)
             if note:
-                room_hub.broadcast(session_id, _make_chunk("system", note))
+                logger.info("协调器场景切换未执行：%s", note)
         elif intent.kind == "start_combat":
             chunks = await _exec_start_combat(
                 db, session_id, game_session, module, player_char, teammates, llm,
@@ -833,6 +853,7 @@ async def _run_split_narrations_tool_loop(
     location_guard: str = "",
     group_prompts: dict[str, str] | None = None,
     default_prompt: str | None = None,
+    move_note: str = "",
 ) -> None:
     """分头行动的工具循环版：每组一套聚焦上下文，工具即时执行并广播。
 
@@ -890,6 +911,9 @@ async def _run_split_narrations_tool_loop(
             messages.append(blind_message)
         if location_guard and player_char.name in (grp.get("members") or []):
             messages.append({"role": "system", "content": location_guard})
+        if move_note:
+            # 移动裁定关乎每一组：走的人在新空间，留下的人在原处，各组都要按同一份位置叙述。
+            messages.append({"role": "system", "content": move_note.strip()})
         # 与单场景工具循环一致：原生工具调用要告知模型用工具代替方括号指令（此前分头路径漏了这段）
         messages.extend(kp_tool_loop.tool_mode_messages(llm, rs.kp_tools))
         if group_prompts and label in group_prompts:
@@ -919,7 +943,9 @@ async def _run_split_narrations_tool_loop(
             db, session_id, game_session, module, player_char, teammates, llm, stream, result,
             plan=plan, events=events, turn_inputs=turn_inputs, party_names=party_names,
             event_order=event_order, base_seq=base_seq, listeners=grp["members"], group=label,
-            location_guard=location_guard if player_char.name in (grp.get("members") or []) else "",
+            location_guard=(
+                location_guard if player_char.name in (grp.get("members") or []) else ""
+            ) + move_note,
         )
 
     await _apply_coordinator_intents(
@@ -946,6 +972,7 @@ async def _run_split_generation(
     location_guard: str = "",
     finish: bool = True,
     combat_before: bool = False,
+    move_note: str = "",
 ) -> None:
     """分头行动：对每个分组各跑一次聚焦的工具循环，后端确定性地把产物归入该组。
 
@@ -961,7 +988,7 @@ async def _run_split_generation(
         db, session_id, game_session, module, player_char, events, teammates,
         llm, rules_enabled, matcher_npcs, groups,
         plan=plan, blind_message=blind_message, rule_excerpts=rule_excerpts,
-        location_guard=location_guard,
+        location_guard=location_guard, move_note=move_note,
     )
     await _run_post_effects(
         db, session_id, game_session, module, player_char, teammates, llm,
@@ -1174,7 +1201,7 @@ async def run_chat_generation(session_id: str) -> None:
             await _run_pre_effects(
                 db, session_id, game_session, player_char, party_others,
                 allowed=turn_pipeline.TurnSpec.for_entry("check_request").pre_effects,
-                plan=plan, requested_skill=requested_skill,
+                plan=plan, requested_skill=requested_skill, module=module,
             )
             await _run_kp_turn(
                 db, session_id, game_session, module, player_char, party_others,
@@ -1290,6 +1317,8 @@ def _location_intent_guard_for_target(
         return ""
     if target == session_service.get_char_location(game_session, player_char.id):
         return ""
+    if any(r.get("target") == target for r in movement.turn_records(game_session)):
+        return ""   # 本轮移动裁定已就这个目的地给过权威说明（落位 / 待检定 / 受阻）
     if planned_effects._explicit_player_movement(
         db, session_id, module, player_char, target,
     ):
@@ -2116,6 +2145,14 @@ async def _settle_rolled_check(
     )
     succeeded = result.outcome not in ("failure", "fumble")
     fumbled = result.outcome == "fumble"
+    # 「先检定、后移动」按人结算，且必须在群检汇总**之前**：用的是这个人自己这一骰的成败，
+    # 成功只移动他（续写据新位置叙述）、失败只结束他的尝试；同批其他人照旧待投。
+    if check.get("char_id"):
+        for chunk in movement.settle_pending_moves(
+            db, session_id, game_session, module, [player_char, *(party_others or [])],
+            skill=skill, succeeded=succeeded, char_ids={str(check["char_id"])},
+        ):
+            room_hub.broadcast(session_id, chunk)
     batch_id = str(check.get("check_batch_id") or "")
     if batch_id:
         remaining = session_service.append_pending_group_check_result(
@@ -2414,8 +2451,12 @@ async def _run_travel_generation(
 
         room_hub.broadcast(session_id, _make_chunk("generating"))
         check_gating.begin_turn(db, game_session)   # 新的玩家行动：旧门控暂存作废
-        # 确定性切换该角色位置（主角则一并更新 current_scene_id），并落一条「前往」行动
-        session_service.set_char_location(db, session_id, actor.id, scene_id)
+        # 确定性切换该角色位置（主角则一并更新 current_scene_id），并落一条「前往」行动。
+        # 与自然语言移动同一套执行语义（movement.travel）：同处的人跟随或被写实在原处。
+        movement.travel(
+            db, session_id, game_session, module, actor, scene_id,
+            [player_char, *[c for c in party_others if c.id != player_char.id]],
+        )
         ev = session_service.add_event(
             db, session_id, "action", f"（前往：{scene_name}）",
             actor_id=actor.id, actor_name=actor.name,

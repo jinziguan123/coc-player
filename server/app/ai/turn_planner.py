@@ -204,8 +204,64 @@ class NpcPolicy(BaseModel):
     needs_npc_act: bool = False
 
 
+_MOVE_STANCES = ("act", "discuss", "conditional", "approach")
+
+
+class MovePlan(BaseModel):
+    """玩家方本轮宣告的一次空间移动（一个去向一项）。只是提案：后端按原话与连通证据复核后才落位。
+
+    stance：act=行动宣言（「我要从拱门钻进去」也是）；discuss=商量/提问；conditional=条件未满足；
+    approach=只走近/观察出口，人仍在原空间。
+    """
+
+    actors: StrList = Field(default_factory=list)   # 移动者角色名（只列自己表态的；「我们一起」可含 AI 队友）
+    stance: str = "act"
+    exit: str = ""          # 玩家口中的出口原词（「拱门」「墙洞」「那道门」）
+    target: str = ""        # 经该出口通往的场景 id/名；去向不唯一或无依据留空
+    solo: bool = False      # 明确独行（独自 / 抛下队友 / 你们留在这）
+    blocked: str = ""       # 通道封闭或有障碍、此刻过不去的原因
+    check_skill: str = ""   # 通过前须先过的检定（攀爬 / 力量…）；无需检定留空
+    # 这次检定是不是在**解除一道共同障碍**（撬开门锁、推开石板、打开机关）：true 时一人成功即全员
+    # 可过。默认 false＝个人通行检定（各自攀爬、各自挤过去），每人按自己的结果，绝不共享。
+    shared_check: bool = False
+
+    @field_validator("stance", mode="before")
+    @classmethod
+    def _coerce_stance(cls, v):
+        s = str(v or "").strip().lower()
+        return s if s in _MOVE_STANCES else "act"
+
+    @field_validator("solo", "shared_check", mode="before")
+    @classmethod
+    def _coerce_solo(cls, v):
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes", "是")
+        return bool(v)
+
+
+def _coerce_moves(v: Any) -> list:
+    """moves 容错：非 list → []；元素须是 dict（或 MovePlan），其内 str 字段写错形状就地归一。"""
+    if isinstance(v, dict):
+        v = [v]
+    if not isinstance(v, list):
+        return []
+    out: list = []
+    for x in v:
+        if isinstance(x, BaseModel):
+            out.append(x)
+        elif isinstance(x, dict):
+            out.append(_coerce_str_fields(MovePlan, dict(x)))
+    return out
+
+
+MoveList = Annotated[list[MovePlan], BeforeValidator(_coerce_moves)]
+
+
 class ScenePolicy(BaseModel):
     scene_change: str | None = None
+    # 结构化移动提案（谁、经哪个出口、去哪、表态性质、独行/同行、阻挡、检定）。
+    # 非空时以它为准；只有 scene_change 的旧输出按「宣告者移动」兼容处理（见 services/movement）。
+    moves: MoveList = Field(default_factory=list)
     # 本轮满足了哪个剧情钩子（plot_hooks）的条件 → 该置/清的标志。叙事后由
     # plot_progress.apply_planned_flags 校验（只认模组钩子里写明的标志）并落库。
     set_flags: StrList = Field(default_factory=list)
@@ -525,6 +581,21 @@ def _compact_player(character: Character) -> dict[str, Any]:
     }
 
 
+def _party_positions(
+    session: GameSession, module: Module, player_char: Character, teammates: list[Character],
+) -> list[dict[str, Any]]:
+    """各成员所在场景与由此可直达的邻居——规划器据此判断「穿过那道拱门」通往哪里。"""
+    out = []
+    for char in [player_char, *teammates]:
+        sid = session_service.get_char_location(session, char.id)
+        out.append({
+            "name": char.name,
+            "scene_id": sid,
+            "neighbors": session_service.scene_neighbors(module, sid),
+        })
+    return out
+
+
 def _compact_events(events: list[Any]) -> list[dict[str, Any]]:
     compacted = []
     for event in events[-8:]:
@@ -588,6 +659,8 @@ def build_turn_plan_messages(
         },
         "current_scene": current_scene,
         "scene_neighbors": scene_neighbors,
+        # 各成员此刻的确定性位置：移动从**移动者自己所在的场景**出发，不一定是 current_scene。
+        "party_positions": _party_positions(session, module, player_char, teammates or []),
         # 全局场景事实只用于防止把关键物品/NPC/事件搬到当前场景；不带 events 与线索正文，
         # 既给规划器位置锚点，又不让未访问场景的可揭示细节进入 candidate_clue_ids。
         "canonical_scene_facts": [
@@ -805,10 +878,22 @@ def build_turn_plan_messages(
                 "别为难玩家；\n"
                 "  · 玩家只是**打算/提议/回忆不确定的事**（「要是我带了钥匙就好了」）→ 不填。\n"
                 "无虚假声称就留空 \"\"。\n"
-                "scene_policy.scene_change：本轮玩家**确实移动并到达了别的场景**时，填目标场景的 id 或"
-                "名字（只能取运行时资料里的 current_scene / 可见场景，解析不到就别填）——后端据此确定性"
-                "把角色位置与大地图切过去，不靠 KP 记得。**仅讨论/打算/建议去某地（『我们该先去X』）"
-                "绝不填**：那只是商量，人没动；留空表示本轮仍在原场景。"
+                "scene_policy.moves：本轮玩家方角色**宣告的空间移动**，每个去向一项，没有就 []。"
+                "后端会按原话与连通/出口证据复核后才落位，所以如实分类、别替玩家决定："
+                "actors=宣告移动的角色名（「我们一起」可含 AI 队友；**绝不替没表态的其他真人玩家决定**）；"
+                "stance=act（行动宣言：「我抛下队友从拱门钻进去」「我要从拱门钻进去」都是——「我要」不是商量）"
+                "/discuss（商量或提问：「我们要不要进去？」）/conditional（条件未满足：「如果门开了我就进去」）"
+                "/approach（只是走近、观察出口，人仍在原空间）；exit=玩家口中的出口原词"
+                "（「拱门」「墙洞」「那道门」，没提就空）；target=经该出口通往的场景 id——依据移动者所在场景"
+                "（party_positions）的描述、scene_neighbors 与已展示的叙述判断，玩家不必说出房间正式名称；"
+                "去向不唯一或没有依据就留空，不要把「门」随手指到某个相邻场景；solo=明确独行"
+                "（独自/抛下队友/你们留在这）；blocked=通道封闭或有障碍、此刻过不去时写原因；"
+                "check_skill=通过前须先过的检定（攀爬/力量等，无需检定留空；需要时同时照常填 requires_check/check）；"
+                "shared_check 只在这次检定是**解除一道共同障碍**（撬开门锁、推开石板、打开机关，一人成功全员可过）时"
+                "为 true；各自攀爬/挤过去这类个人通行检定一律 false（每人按自己的结果）。"
+                "多名真人同轮去不同地方就分成多项。\n"
+                "scene_policy.scene_change：兼容字段——moves 里有一项 stance=act、target 明确且无阻挡时，"
+                "把同一个 target 也填在这里；商量/条件句/走近/去向不明一律不填，留空表示本轮仍在原场景。"
                 "scene_policy.set_flags / clear_flags / flag_reason：plot_hooks 是模组写明的、"
                 "**尚未触发**的剧情钩子（when=触发条件）。本轮事件（含玩家行动与 recent_events 里"
                 "已发生的事）**确实满足**了某个钩子的 when 时，把它的 set_flags（及 clear_flags）"

@@ -18,6 +18,7 @@ from app.services import (
     human_kp_service,
     illustration_service,
     kp_actions,
+    movement,
     navigation_service,
     npc_identity,
     rule_options_service,
@@ -165,10 +166,26 @@ async def execute_human_kp_action(
         return _exec_generic_roll(db, session_id, module, payload)
 
     if action == "scene_change":
+        # 真人 KP 是裁定者：可点名移动者（movers），不点名就搬与主角同处、本轮没说留守的全员
+        # （真人 KP 的切换按钮一向是「整队过去」，不套用 AI 回合里「不替没表态的真人决定」那条）。
+        party = [player_char, *(teammates or [])]
+        raw = str(payload.get("movers") or "").strip()
+        movers, unknown = movement.resolve_tool_movers(raw, party)
+        if raw and (unknown or not movers):
+            raise ValueError(f"认不出的角色：{'、'.join(unknown) or raw}")
+        if not movers:
+            here = session_service.get_char_location(game_session, player_char.id)
+            stayed = session_service.stayed_char_ids(db, session_id)
+            movers = [
+                c for c in party
+                if c.id == player_char.id or (
+                    c.id not in stayed and session_service.get_char_location(game_session, c.id) == here
+                )
+            ]
         chunks, sid, note = await _exec_scene_change(
             db, session_id, game_session, module,
             str(payload.get("scene_id") or payload.get("scene") or "").strip(),
-            player_char, teammates,
+            player_char, teammates, movers=movers,
         )
         return chunks, note or (f"已切换至 {_scene_name(module, sid)}" if sid else "场景未变化")
 

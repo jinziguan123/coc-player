@@ -30,7 +30,10 @@ def skill_matches(expected: str, rolled: str) -> bool:
 
 
 def begin_turn(db: Session, game_session: GameSession) -> bool:
-    """新的玩家回合：作废上一轮的门控暂存与自动检定记录。返回是否有改动。"""
+    """新的玩家回合：作废上一轮的门控暂存（物品、线索、移动）与自动检定记录。返回是否有改动。"""
+    from app.services import movement   # 延迟导入：movement 依赖本模块
+
+    moved = movement.begin_turn(game_session)
     ts = dict(game_session.turn_state or {})
     ws = dict(game_session.world_state or {})
     changed = False
@@ -41,7 +44,7 @@ def begin_turn(db: Session, game_session: GameSession) -> bool:
         changed = True
     if ws.pop("pending_clue_reveals", None):
         changed = True
-    if changed:
+    if changed or moved:
         game_session.turn_state = ts
         game_session.world_state = ws
         db.commit()
@@ -67,7 +70,11 @@ def record_auto_check(
     db: Session, session_id: str, game_session: GameSession, *,
     event_id: str, skill: str, succeeded: bool, module=None, on_first_clue=None,
 ) -> list:
-    """记录一次玩家方的自动检定，并兑现技能匹配的门控暂存。返回要广播的 chunk。"""
+    """记录一次玩家方的自动检定，并兑现技能匹配的门控暂存（物品、线索）。返回要广播的 chunk。
+
+    门控移动不在这里结算：它按掷骰者本人的成败逐人结算（见 turn_effects._auto_roll_check），
+    群检传进来的是「任一成功」汇总，不能替每个人决定能不能过去。
+    """
     from app.services import planned_effects   # 延迟导入：planned_effects 依赖 turn_effects
 
     ts = dict(game_session.turn_state or {})

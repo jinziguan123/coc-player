@@ -285,11 +285,17 @@ REGISTRY: tuple[ToolSpec, ...] = (
         name="scene_change",
         tag="SCENE_CHANGE",
         description=(
-            "切换当前场景：仅当玩家明确移动、真到了别处（进屋/前往某地）时调用；"
-            "别因其讨论/打算就搬人（「该先去X」只是商量）。"
+            "切换场景：仅当玩家明确移动、真到了别处（进屋/穿过拱门/前往某地）时调用；"
+            "别因其讨论/打算/条件句/走近观察就搬人（「该先去X」只是商量）。"
+            "只有部分人走（「我抛下队友独自钻进去」）时用 movers 点名移动者，其余人留在原处；"
+            "系统已在本轮移动裁定里落位或拒绝的移动，不必也不能再调。"
         ),
         parameters=_params({
             "scene_id": {"type": "string", "description": "目标场景的 id（或场景名，系统会解析）"},
+            "movers": {
+                "type": "string",
+                "description": "移动的角色名，多人用「、」分隔；留空=主角带上默认跟随的队友",
+            },
         }, ["scene_id"]),
         kind="state",
     ),

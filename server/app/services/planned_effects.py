@@ -22,6 +22,7 @@ from app.services import (
     entity_state,
     inventory_service,
     kp_actions,
+    movement,
     scene_kind,
     session_service,
     turn_context,
@@ -41,18 +42,6 @@ _exec_scene_change = turn_effects._exec_scene_change
 
 _META_CLUE_LOCATION_WORDS = ("位置", "下落", "提示", "传闻", "文字", "内容", "线索")
 
-# 这些词只表示讨论、建议、假设或未来的可能，不能作为「已经移动」的证据。
-# 「我们去图书馆看看吧」「之后我可能会去B」都落在这里：句中有「去」也只是意图。
-_NON_COMMITTAL_MOVE_MARKERS = (
-    "要不要", "是否", "能不能", "可以吗", "去不去", "要去吗", "建议", "提议",
-    "考虑", "打算", "想去", "想进入", "希望", "准备", "计划", "应该", "不如", "再决定", "如果",
-    "可能", "也许", "或许", "之后", "以后", "回头", "稍后", "待会", "待会儿", "过会儿",
-    "等会", "等会儿", "晚点", "晚些", "过一阵", "看看再说", "再说", "看看吧", "吧",
-)
-_MOVE_VERBS = (
-    "进入", "走进", "前往", "去往", "前去", "赶往", "抵达", "到达", "来到",
-    "走向", "移动到", "返回", "回到", "穿过", "去",
-)
 _ENTRY_MARKERS = ("进入", "走进", "抵达", "到达", "来到", "踏入")
 # 技能检定的进场机制点比 SAN 多认「前往/踏进」：模组常把「前往X时投灵感」写成预感式触发。
 _ENTRY_CHECK_MARKERS = (*_ENTRY_MARKERS, "前往", "踏进")
@@ -71,21 +60,6 @@ _READ_EVIDENCE_WORDS = (
 _READABLE_SOURCE_TERMS = (
     "报纸", "日记", "信件", "便签", "手稿", "书籍", "档案", "文件", "照片", "录像", "录音",
 )
-
-
-def _scene_terms(module: Module | None, scene_id: str | None) -> set[str]:
-    """返回场景 id 与名称，供移动证据做保守的文本匹配。"""
-    if not module or not scene_id:
-        return set()
-    terms = {str(scene_id).strip()}
-    for scene in module.scenes or []:
-        if str(scene.get("id") or "").strip() != str(scene_id).strip():
-            continue
-        for key in ("name", "title"):
-            value = str(scene.get(key) or "").strip()
-            if value:
-                terms.add(value)
-    return {term for term in terms if term}
 
 
 #: 取生成前一段玩家回合及其后果；实现在 turn_context（SAN 目睹者判定也要用它）。
@@ -123,34 +97,20 @@ def _explicit_player_movement(
     target_scene_id: str,
     pre_gen_seq: int | None = None,
 ) -> bool:
-    """判断本轮是否有玩家角色明确执行了前往目标场景的动作。
+    """判断本轮该玩家角色是否确有前往目标场景的移动。
 
-    只认玩家角色自己的 action/dialogue 或带 travel 元数据的动作；队友的建议、玩家的
-    疑问与条件句全部拒绝。地图 travel 本身是权威证据，普通对话只有同时命中地点和移动动词才算。
+    认三种证据：地图前往（travel 元数据）、本轮已由移动裁定落位、或其原话是行动宣言且能解析到
+    目标——点名地点，或经「拱门/墙洞」这类出口按场景描述与连通图唯一指向目标
+    （见 ``movement.has_move_evidence``）。队友的建议、疑问、条件句、走近观察一律不算。
     """
-    terms = _scene_terms(module, target_scene_id)
-    if not terms:
+    if not module or not target_scene_id:
         return False
-    events = _guard_turn_events(db, session_id, pre_gen_seq)
-    for event in events:
-        if event.actor_id != player_char.id:
-            continue
-        metadata = event.metadata_ or {}
-        travel_scene = str(metadata.get("scene_id") or "").strip()
-        if metadata.get("travel") and travel_scene == target_scene_id:
-            return True
-        if event.event_type not in ("action", "dialogue"):
-            continue
-        text = (event.content or "").strip()
-        if not text or "?" in text or "？" in text:
-            continue
-        if any(marker in text for marker in _NON_COMMITTAL_MOVE_MARKERS):
-            continue
-        if not any(term in text for term in terms):
-            continue
-        if any(verb in text for verb in _MOVE_VERBS):
-            return True
-    return False
+    game_session = db.get(GameSession, session_id)
+    if game_session is None:
+        return False
+    return movement.has_move_evidence(
+        db, session_id, module, game_session, player_char, target_scene_id, pre_gen_seq,
+    )
 
 
 def _trigger_matches(trigger: str, text: str) -> bool:
@@ -1181,43 +1141,40 @@ async def _ensure_planned_scene(
     plan: turn_planner.TurnPlan | None,
     pre_gen_seq: int | None = None,
 ) -> AsyncIterator[str]:
-    """确保规划器裁定的『玩家本轮真实移动到某场景』一定落成位置/地图切换，补偿 KP 漏调 scene_change。
+    """确保规划器裁定的移动一定落成位置/地图切换，补偿 KP 漏调 scene_change。
 
-    这修复的是「KP 叙述了到达新场景，但大地图仍停在旧场景」——过去场景切换**只**靠 KP 记得发
-    `[SCENE_CHANGE]`/`scene_change` 工具，漏发就地图与叙事脱节。现在与 SAN/战斗/库存一致：规划器
-    给出明确目标场景，后端确定性把角色搬过去。
-
-    幂等且保守：
-    - KP 已自行切到目标场景 → `_exec_scene_change` 见位置已到位、原地返回，不重复切；
-    - 目标解析不到真实场景 id/名 → 安全跳过（不写脏值、不回退到首个场景）；
-    - 规划器仅在玩家**确实前往并到达**别处时才置此字段（『讨论/打算去』不置），语义与 KP 工具一致。
+    常规回合在 KP 动笔前已由 ``movement.adjudicate_plan`` 裁定并落位（叙事据新位置生成）；这里是
+    同一裁定的生成后入口：同一回合已裁定过就原样复用、不重复执行（KP 自己切过也一样幂等），
+    没裁定过（其他入口直接调用）就现在裁定。之后补一道：门控移动暂存了、KP 却没挂出对应检定 →
+    确定性补挂，让「须先过攀爬才能过去」有归宿。
     """
     if plan is None:
         return
-    ref = (plan.scene_policy.scene_change or "").strip()
-    if not ref:
-        return
     db.refresh(game_session)
-    target_scene_id = turn_context._resolve_scene_ref(module, ref)
-    current_scene_id = session_service.get_char_location(game_session, player_char.id)
-    if (
-        target_scene_id
-        and target_scene_id != current_scene_id
-        and not _explicit_player_movement(
-            db, session_id, module, player_char, target_scene_id,
-            pre_gen_seq=pre_gen_seq,
-        )
-    ):
-        logger.warning(
-            "规划器场景切换缺少玩家移动证据，已跳过：session=%s target=%s",
-            session_id, target_scene_id,
-        )
-        return
-    chunks, _sid, _note = await _exec_scene_change(
-        db, session_id, game_session, module, ref, player_char, teammates,
+    party = [player_char, *(teammates or [])]
+    chunks, _note = movement.adjudicate_plan(
+        db, session_id, game_session, module, player_char, teammates, plan,
+        pre_gen_seq=pre_gen_seq,
     )
     for chunk in chunks:
         yield chunk
+    if pre_gen_seq is None:
+        return
+    for movers, skill in movement.pending_unissued(
+        db, session_id, game_session, party, pre_gen_seq,
+    ):
+        if not skill:
+            continue
+        kv = {"skill": skill, "chars": "、".join(c.name for c in movers), "source": "通过出口"}
+        try:
+            check_chunks, _descs, _pending = await _exec_dice_check(
+                db, session_id, game_session, module, kv, player_char, teammates,
+            )
+        except Exception:
+            logger.exception("门控移动的检定补挂失败：session=%s skill=%s", session_id, skill)
+            continue
+        for chunk in check_chunks:
+            yield chunk
 
 
 #: 进场标记后面的宾语指到这些泛称之一时，说的就是本场景（「进入房间时全员聆听」）。

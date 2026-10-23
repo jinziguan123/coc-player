@@ -508,9 +508,10 @@ def _build_kp_tool_executor(
         )
 
     async def _h_scene_change(name, kv):
-        chunks, sid, note = await _exec_scene_change(
-            db, session_id, game_session, module,
-            kv.get("scene_id", "").strip(), player_char, teammates,
+        # 原生工具与文本指令（经适配层）都落到这里：同一套 movers 解析、移动裁定把关与执行语义。
+        chunks, sid, note = await turn_effects.exec_tool_scene_change(
+            db, session_id, game_session, module, kv.get("scene_id", "").strip(),
+            kv.get("movers", ""), player_char, teammates,
         )
         if sid:
             return kp_tools.ToolOutcome(f"ok：场景已切换至 {_scene_name(module, sid)}", chunks=chunks)

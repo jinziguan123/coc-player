@@ -75,14 +75,16 @@ ENTRY_EFFECTS: dict[str, frozenset[str]] = {
 
 #: 叙事前效果：在 KP 动笔前就要定下、且不依赖本轮叙事的确定性效果。
 #: gated_items：被本轮检定门控的收获先暂存（失去/消耗是尝试本身的代价，照常结算），骰子落地再兑现。
-PRE_EFFECT_ORDER: tuple[str, ...] = ("gated_items",)
+#: moves：规划器的移动提案先裁定——无需检定的立刻落位（叙事据新位置生成），需检定的暂存到骰子落地。
+#: 常规回合的移动裁定在 ``_run_generation`` 里叙事前执行（那里才有现跑的计划），不经这张表。
+PRE_EFFECT_ORDER: tuple[str, ...] = ("gated_items", "moves")
 
 #: 各入口允许的叙事前效果。常规回合的物品在叙事后按计划结算（见 POST_EFFECT_ORDER 的 items），
 #: 只有「规划器识别出玩家申请检定」的分支会把整份计划交给检定裁定，需要先把门控收获暂存。
 PRE_ENTRY_EFFECTS: dict[str, frozenset[str]] = {
     "regular": frozenset(),
     "side": frozenset(),
-    "check_request": frozenset({"gated_items"}),
+    "check_request": frozenset({"gated_items", "moves"}),
 }
 
 #: 高风险缓冲在校验不可用/超时、且策略为 withhold 时展示与落库的占位旁白。
