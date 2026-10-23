@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.ai import usage_tracker
+from app.ai import usage_tracker, call_budget
+from app.config import settings
+from app.services.event_protocol import make_chunk
 from app.services import ai_quota
 from app.services.room_hub import room_hub
 
@@ -51,9 +53,30 @@ class GenerationManager:
             room_hub.broadcast(room_id, chunk)
         # 用 usage_tracker 包一层：本次生成里所有 LLM 子调用（planner/主叙事/validator/
         # 队友/子代理/战斗…）的服务端 usage 按 task 累加，结束时累进本局 session_usage。
-        task = asyncio.create_task(usage_tracker.tracked(room_id, coro))
+        async def run_bounded():
+            with call_budget.scope(
+                max_calls=settings.generation_max_calls,
+                max_tokens=settings.generation_max_tokens,
+                seconds=settings.generation_max_seconds,
+            ) as budget:
+                try:
+                    await asyncio.wait_for(
+                        usage_tracker.tracked(room_id, coro), timeout=budget.remaining_seconds,
+                    )
+                    if not budget.remaining_seconds:
+                        raise asyncio.TimeoutError
+                except (asyncio.TimeoutError, call_budget.BudgetExceeded):
+                    logger.warning("回合预算用尽: room=%s calls=%d tokens=%d", room_id, budget.calls, budget.tokens)
+                    room_hub.broadcast(room_id, make_chunk("system", "本回合生成已达到预算上限，已保留结算结果。"))
+                    room_hub.broadcast(room_id, make_chunk("done"))
+
+        task = asyncio.create_task(run_bounded())
         self._tasks[room_id] = task
-        task.add_done_callback(lambda _: self._on_done(room_id))
+        # task 在第一次调度前被取消时，tracked 的函数体不会运行；关闭其持有的原协程。
+        def completed(done):
+            coro.close()
+            self._on_done(room_id, done)
+        task.add_done_callback(completed)
         return task
 
     async def cancel(self, room_id: str) -> None:
@@ -73,7 +96,9 @@ class GenerationManager:
             pass
         await asyncio.sleep(0)
 
-    def _on_done(self, room_id: str) -> None:
+    def _on_done(self, room_id: str, task: asyncio.Task) -> None:
+        if self._tasks.get(room_id) is not task:
+            return
         room_hub.end_generation(room_id)
         self._tasks.pop(room_id, None)
 

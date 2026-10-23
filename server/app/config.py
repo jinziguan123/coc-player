@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
+from pydantic import Field
+from typing import Literal
 
 
 def _data_base() -> Path:
@@ -49,6 +51,19 @@ class Settings(BaseSettings):
     # 终检/去口癖这类「检查与改写」任务是否先用快模型、不可用再回退叙事模型。
     # 默认开启：快模型槽位通常关思考，这两步能省下每次 20~40s；设为 false 全部走叙事模型。
     checks_use_fast_model: bool = True
+    # 回合级保护；token 在供应商返回 usage 后累计，因此限制的是后续请求，不是计费硬上限。
+    generation_max_seconds: float = Field(default=600.0, gt=0)
+    generation_max_calls: int = Field(default=48, gt=0)
+    generation_max_tokens: int = Field(default=500000, gt=0)
+    housekeeping_max_seconds: float = Field(default=90.0, gt=0)
+    # 高风险叙事（规划器给出 do_not_reveal）先整段缓冲、终检通过后再放给玩家：
+    # 流式展示收不回已经播出的剧透，这类回合用首字延迟换可拦截。设为 false 恢复全程流式。
+    narration_buffer_high_risk: bool = True
+    # 缓冲回合的终检时限；超时与校验不可用同样按 narration_buffer_on_failure 处理。
+    narration_buffer_timeout_seconds: float = Field(default=60.0, gt=0)
+    # 终检不可用/超时：release=放出未经校验的原文（保持可玩，但**不保证不泄密**）；
+    # withhold=以占位旁白代替、提示重新生成（保密优先，本段叙述丢失）。
+    narration_buffer_on_failure: Literal["release", "withhold"] = "release"
     # KP 上下文的易变档（线索台账、NPC 记忆、幕后动态、摘录、封路……）放在哪：
     # true = 作为一条「当前局面」快照放到历史尾部（最后一条玩家消息之前），系统提示只剩
     #        静态+半静态两档，「系统提示 + 剧情摘要 + 历史」成为跨回合稳定的缓存前缀；

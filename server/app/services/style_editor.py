@@ -19,6 +19,8 @@ import re
 import time
 from collections.abc import Callable
 
+from app.ai import call_budget
+
 from app.ai.turn_validator import (
     _ANTITHESIS_RE, _SIMILE_RE, _VAGUE_RE, TIC_CATALOG,
 )
@@ -180,6 +182,8 @@ async def polish_result(
     ``llm`` 可以是 Provider，也可以是包着它的 agent（KPAgent.llm）。任何异常都吞掉：
     这一层只负责文风，绝不能让一轮叙事因为它落不了库。
     """
+    if not call_budget.allow_optional():
+        return False
     try:
         provider = llm if hasattr(llm, "complete") else getattr(llm, "llm", None)
         if provider is None or not result or not (result[0] or "").strip():

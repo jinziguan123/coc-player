@@ -18,6 +18,8 @@ import functools
 import inspect
 import logging
 
+from app.ai import call_budget
+
 from app.services import session_stats
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,7 @@ def add(usage: dict | None) -> None:
     """
     if not isinstance(usage, dict):
         return
+    call_budget.record(usage)
     acc, span = _acc.get(), _span.get()
     if acc is None and span is None:
         return

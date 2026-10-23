@@ -1058,3 +1058,39 @@ def test_teammate_without_stay_follows_the_party(db_factory, monkeypatch):
     session = db.get(GameSession, session.id)
     assert session_service.get_char_location(session, mate.id) == "street"
     assert len(turn_context._location_groups(session, module, hero, [mate])) == 1
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_队友父回合取消或超时会等待所有子任务退出(db_factory, monkeypatch, timeout):
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    started, stopped = set(), set()
+
+    async def slow(self, messages):
+        started.add(self.character_id)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            stopped.add(self.character_id)
+
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", slow)
+    if timeout:
+        monkeypatch.setattr(team_turn_service, "TEAM_AGENT_TIMEOUT_SECONDS", 0.02)
+
+    async def run():
+        task = asyncio.create_task(_collect(chat_service._run_team_turn(
+            db, session.id, session, module, hero, teammates, llm=None,
+        )))
+        while len(started) < 2:
+            await asyncio.sleep(0)
+        if timeout:
+            await asyncio.wait_for(task, 1)
+        else:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert stopped == started
+
+    asyncio.run(run())
+    db.close()

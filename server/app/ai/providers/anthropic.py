@@ -6,6 +6,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from app.ai import call_budget
+
 from app.ai import usage_tracker
 from app.ai.provider import (
     CACHE_BLOCKS_KEY, CACHE_BREAK_KEY, LLMProvider, StreamDelta, ToolCall, clean_headers,
@@ -195,6 +197,7 @@ class AnthropicProvider(LLMProvider):
         response_format: dict | None = None,
         timeout: float | None = None,
     ) -> str:
+        call_budget.reserve()
         system_blocks, user_messages = self._split_system(messages)
         payload: dict = {
             "model": self.model,
@@ -249,6 +252,7 @@ class AnthropicProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[StreamDelta]:
+        call_budget.reserve()
         system_blocks, user_messages = self._split_system(messages)
         payload: dict = {
             "model": self.model,
@@ -324,6 +328,7 @@ class AnthropicProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
+        call_budget.reserve()
         system_blocks, user_messages = self._split_system(messages)
         payload: dict = {
             "model": self.model,

@@ -158,3 +158,35 @@ def test_不传_drain_就不排干():
             pass
     _run(main())
     assert called == []
+
+
+def test_取消排干等待者不吞取消也不中断共享收尾():
+    async def run():
+        manager = generation_lifecycle.HousekeepingManager()
+        release = asyncio.Event()
+        task = asyncio.create_task(release.wait())
+        manager.tasks["s"] = task
+        waiter = asyncio.create_task(manager.drain("s"))
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not task.done()
+        assert manager.tasks["s"] is task
+        release.set()
+        await manager.drain("s")
+        assert "s" not in manager.tasks
+    asyncio.run(run())
+
+
+def test_已失败的收尾会读取异常并清理(caplog):
+    async def run():
+        async def fail():
+            raise ValueError("收尾失败探针")
+        manager = generation_lifecycle.HousekeepingManager()
+        manager.tasks["s"] = asyncio.create_task(fail())
+        await asyncio.sleep(0)
+        await manager.drain("s")
+        assert "s" not in manager.tasks
+    asyncio.run(run())
+    assert "后台收尾失败" in caplog.text

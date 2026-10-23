@@ -10,6 +10,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.ai.context import _active_flags, _resolve_state
+from app.ai import call_budget
 from app.ai.image_gen import get_image_llm
 from app.ai.llm_factory import get_fast_llm
 from app.models.event_log import EventLog
@@ -163,7 +164,7 @@ def _spawn_illustration(
                     if on_done is not None:
                         on_done()
 
-            asyncio.create_task(_run())
+            asyncio.create_task(call_budget.detached(_run()))
             spawned = True
     except Exception:  # noqa: BLE001 — 配图判定/起任务失败不影响主流程
         logger.exception("配图任务启动失败（忽略）：event=%s", event_id)

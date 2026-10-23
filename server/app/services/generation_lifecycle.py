@@ -6,11 +6,13 @@ import asyncio
 import contextlib
 import logging
 import time
+import weakref
 from collections.abc import Awaitable, Callable
 
 import httpx
 
-from app.ai import usage_tracker
+from app.ai import usage_tracker, call_budget
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +85,41 @@ class HousekeepingManager:
 
     def __init__(self) -> None:
         self.tasks: dict[str, asyncio.Task] = {}
+        self._reported: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
 
     async def drain(self, session_id: str) -> None:
-        task = self.tasks.pop(session_id, None)
-        if task is not None and not task.done():
-            try:
-                await task
-            except BaseException:
-                pass
+        # 等待期间可能又有新收尾接上（链式），一直等到登记的是已完成任务为止。
+        while (task := self.tasks.get(session_id)) is not None:
+            if not task.done():
+                try:
+                    # 取消等待者不能取消共享收尾，否则下一轮会读取未完成的世界记忆。
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    if task.done():
+                        # 任务自身被取消（进程关停等），不是等待者被取消。
+                        self._forget(session_id, task)
+                        continue
+                    raise
+                except Exception:
+                    pass
+            if task not in self._reported:
+                self._report(session_id, task)
+            self._forget(session_id, task)
+
+    def _forget(self, session_id: str, task: asyncio.Task) -> None:
+        if task.done() and self.tasks.get(session_id) is task:
+            self.tasks.pop(session_id, None)
+
+    def _report(self, session_id: str, task: asyncio.Task) -> None:
+        """及时读取异常：无人 drain 的会话也不留 “exception was never retrieved”。"""
+        if task in self._reported:
+            return
+        self._reported.add(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("后台收尾失败: session=%s", session_id, exc_info=exc)
 
     def spawn(
         self,
@@ -99,21 +128,39 @@ class HousekeepingManager:
         summarize: HousekeepingFn,
         backstage: HousekeepingFn,
     ) -> None:
+        previous = self.tasks.get(session_id)
+
         async def run() -> None:
             from app.database import SessionLocal
 
+            if previous is not None and not previous.done():
+                # 未排空就又启动收尾（如不 drain 的入口）：串在旧任务之后，不并发改写同一份世界记忆，
+                # 也不覆盖登记导致旧任务无人等待。
+                try:
+                    await asyncio.shield(previous)
+                except asyncio.CancelledError:
+                    if not previous.done():
+                        raise  # 本任务自身被取消
+                except Exception:
+                    pass  # 旧任务的异常由其 done 回调记录
             db = SessionLocal()
             started_at = time.monotonic()
             try:
-                with usage_tracker.phase("收尾"):
-                    await summarize(db, session_id, llm)
-                    await backstage(db, session_id, llm)
+                with usage_tracker.phase("收尾"), call_budget.scope(
+                    max_calls=12, max_tokens=100000, seconds=settings.housekeeping_max_seconds,
+                ) as budget:
+                    await asyncio.wait_for(summarize(db, session_id, llm), budget.remaining_seconds)
+                    await asyncio.wait_for(backstage(db, session_id, llm), budget.remaining_seconds)
+            except asyncio.TimeoutError:
+                db.rollback()
+                logger.warning("后台收尾达到时间上限，下轮重试: session=%s", session_id)
             finally:
                 db.close()
                 elapsed = time.monotonic() - started_at
                 if elapsed > 0.1:
                     logger.info("耗时|收尾（后台）%.1fs session=%s", elapsed, session_id)
 
-        self.tasks[session_id] = asyncio.create_task(
-            usage_tracker.tracked(session_id, run()),
-        )
+        task = asyncio.create_task(usage_tracker.tracked(session_id, run()))
+        task.add_done_callback(lambda done: self._report(session_id, done))
+        task.add_done_callback(lambda done: self._forget(session_id, done))
+        self.tasks[session_id] = task

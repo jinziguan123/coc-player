@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from app.ai import call_budget
+
 from app.ai import usage_tracker
 from app.ai.provider import (
     LLMProvider, StreamDelta, ToolCall, clean_headers, iter_sse_data_lines, strip_provider_keys,
@@ -231,6 +233,7 @@ class OpenAICompatProvider(LLMProvider):
         response_format: dict | None = None,
         timeout: float | None = None,
     ) -> str:
+        call_budget.reserve()
         # **内部走流式**再拼回完整字符串：长输出（如模组解析）用非流式常被 DeepSeek 等
         # 中途掐断连接（RemoteProtocolError: incomplete chunked read）——流式增量下发能避免。
         # 对外仍是「给完整结果」的语义。stream_options.include_usage 让流式收尾块带真实 usage。
@@ -444,6 +447,7 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[StreamDelta]:
+        call_budget.reserve()
         payload: dict = {
             "model": self.model,
             "messages": strip_provider_keys(messages),
@@ -497,6 +501,7 @@ class OpenAICompatProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
+        call_budget.reserve()
         payload: dict = {
             "model": self.model,
             "messages": strip_provider_keys(messages),

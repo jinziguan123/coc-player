@@ -538,53 +538,61 @@ async def _run_team_turn(
         asyncio.create_task(_decide_pair(t)): t
         for t in roster
     }
-    if owners:
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + TEAM_AGENT_TIMEOUT_SECONDS
-        pending = set(owners)
-        while pending:
-            remaining = max(0.0, deadline - loop.time())
-            done, still = await asyncio.wait(
-                pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED,
-            )
-            if not done:
-                for task in still:
-                    task.cancel()
-                logger.warning(
-                    "队友回合超时 %.0fs，未完成的队友按 silent 处理: session=%s",
-                    TEAM_AGENT_TIMEOUT_SECONDS, session_id,
+    try:
+        if owners:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + TEAM_AGENT_TIMEOUT_SECONDS
+            pending = set(owners)
+            while pending:
+                remaining = max(0.0, deadline - loop.time())
+                done, still = await asyncio.wait(
+                    pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED,
                 )
-                break
-            pending = still
-            for task in done:
-                teammate = owners[task]
-                try:
-                    _teammate, raw = task.result()
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    logger.exception("队友决策失败: char=%s", teammate.id)
-                    continue
-                if raw is None:
-                    continue
-                decision = _parse_team_decision(raw)
-                if not decision:
-                    continue
-                action = decision.get("action")
-                # 台词/沉默保持完成即提交；会改世界的动作先攒着，等本轮决策齐了做确定性冲突裁决。
-                if action in ("speak", "silent"):
-                    async for chunk in _commit(teammate, decision=decision):
-                        yield chunk
-                    committed_actors.add(teammate.id)
-                    committed_actors.add(teammate.name)
-                else:
-                    decision["observes_seq"] = snapshot_seq
-                    parsed_intent = team_intent.from_decision(
-                        teammate, decision, snapshot_seq, world_state=snapshot_world,
-                        module=module, session=game_session,
+                if not done:
+                    for task in still:
+                        task.cancel()
+                    logger.warning(
+                        "队友回合超时 %.0fs，未完成的队友按 silent 处理: session=%s",
+                        TEAM_AGENT_TIMEOUT_SECONDS, session_id,
                     )
-                    decision["_target_version"] = parsed_intent.target_version
-                    team_intents.append((teammate, decision, parsed_intent))
+                    break
+                pending = still
+                for task in done:
+                    teammate = owners[task]
+                    try:
+                        _teammate, raw = task.result()
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        logger.exception("队友决策失败: char=%s", teammate.id)
+                        continue
+                    if raw is None:
+                        continue
+                    decision = _parse_team_decision(raw)
+                    if not decision:
+                        continue
+                    action = decision.get("action")
+                    # 台词/沉默保持完成即提交；会改世界的动作先攒着，等本轮决策齐了做确定性冲突裁决。
+                    if action in ("speak", "silent"):
+                        async for chunk in _commit(teammate, decision=decision):
+                            yield chunk
+                        committed_actors.add(teammate.id)
+                        committed_actors.add(teammate.name)
+                    else:
+                        decision["observes_seq"] = snapshot_seq
+                        parsed_intent = team_intent.from_decision(
+                            teammate, decision, snapshot_seq, world_state=snapshot_world,
+                            module=module, session=game_session,
+                        )
+                        decision["_target_version"] = parsed_intent.target_version
+                        team_intents.append((teammate, decision, parsed_intent))
+
+    finally:
+        # 父回合取消、生成器关闭、提交失败及超时都必须回收子任务，再关闭所属数据库会话。
+        for task in owners:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*owners, return_exceptions=True)
 
     resolved = team_intent.resolve_team_intents(team_intents, committed_actors, world_state=snapshot_world)
     dropped = len(team_intents) - len(resolved)
