@@ -16,7 +16,7 @@
 | `app/application/movement_space.py` | 将模组 JSON 字段投影为不可变快照，避免保留 ORM 或可变 JSON 引用 |
 | `app/application/movement_plans.py` | AI `TurnPlan` 到领域 `MovementIntent` 的转换，兼容旧 `scene_change` |
 | `app/application/movement_execution.py` | 移动批次提交用例及写入端口；同事务暂存移动与回合状态，提交后返回凭据 |
-| `app/application/movement_state.py` | 待检定移动的类型化读取、旧存档兼容和状态写回，保留未处理字段 |
+| `app/application/movement_state.py` | 待检定移动与回合裁定记录的类型化读取、旧存档兼容和个人状态写回，保留未处理字段；存档 JSON 键只在此处与原服务的兼容入口出现 |
 | `app/services/movement.py` | 原有公开入口、导航候选集适配、状态加载、位置资格快照、事务写入和提交后的展示 |
 
 调用方向：原移动服务使用输入转换器取得领域意图，使用领域函数计算结算结果，再执行位置和事件写入。领域只接收角色 ID、状态和结果，不接收 SQLAlchemy Session、ORM 对象、Provider 或事件推送对象。
@@ -110,3 +110,41 @@
 
 存档键与 JSON 结构保持不变，无需重新导入模组。`MovementStateUpdate` 仍接收兼容字典，
 普通裁定记录、工具守卫及新待执行记录的创建尚未全部类型化，后续应沿同一边界推进。
+
+## 第八轮：回合裁定记录读取模型
+
+`MoveRecord` 把 `turn_moves` 里的一条裁定读成明确字段：整条状态、移动者 ID 与名字、原处、目标、
+留守者名字、出口、技能、原因、线索和个人状态。`load_move_records` 按回合锚点筛选，
+`busy_ids` 给出已有裁定者。以下入口改为共用这套解释，不再各自读字典：
+
+- 检定结算 `settle_pending_moves`：用 `concerns` 找到建立该待检定移动的那条裁定，`with_states` 写回；
+- 工具守卫 `tool_guard`：用 `status_of` 取每人状态、`names_of` 取被拒者名字；
+- 裁定说明恢复 `_verdict_from_record`（重新生成复用记录时）、移动证据 `has_move_evidence`、`busy_ids`。
+
+字段所有权：`with_states` 是唯一更新入口，合并个人状态并以领域 `rollup` 重算整条状态；
+其他字段只读，写回从私有深拷贝恢复，未知扩展字段保留。未更新的记录逐字写回，
+旧记录不会再被补上空的 `char_status`（之前结算会给所有记录加这个空键，读取语义相同）。
+个人状态的对外含义由领域 `person_status` 给出（`tried` 与 `pending` 同为待检定），
+与 `rollup` 放在一起，避免 tried 的语义在两处漂移。某人不在个人状态中时沿用整条状态。
+
+`turn_records`、`char_status` 和 `busy_ids` 的签名与返回值不变，仍供外部调用；
+`char_status` 改为委托 `MoveRecord.status_of`。应用边界的结构测试放宽为允许依赖领域模块，
+仍禁止 ORM、服务层、AI 及相对导入。
+
+`test_movement_state.py` 覆盖旧记录缺字段、个人状态与整条状态的优先级和重算、只更新部分人、
+引用隔离、扩展字段保留、记录与待检定移动的对应、锚点筛选，以及已有裁定者不等于待检定名单。
+`test_natural_movement.py` 新增两例：结算写回保留扩展字段且不改无关旧记录；工具守卫读取无个人状态的旧记录。
+原有真实数据库的回滚与重试测试继续通过。
+
+仍未迁移：新裁定记录与新待执行记录的创建还是 `Verdict.record` 与 `adjudicate_plan` 里手写的字典，
+`MovementStateUpdate` 仍接收兼容字典；`turn_orchestrator` 的位置意图守卫仍直接读 `turn_records` 的 `target`；
+`begin_turn` 直接清理存档键；批次裁定编排、导航读取和展示仍在原服务。
+
+### 再下一步的评估
+
+让 `MovementStateUpdate` 接收 `MoveRecord`/`PendingMove`、由写入适配器统一编码，收益明确：
+新建记录与结算写回将只剩一套键名，`adjudicate_plan` 也不必再手写待执行条目。
+这需要先给两个快照加上不依赖源记录的构造方式（例如由 `Verdict` 的值构建），
+并确保 `to_record` 的输出与当前手写字典逐字一致，否则会改变存档内容。
+批次裁定编排收拢到应用用例的依赖面更大（位置、控制权、导航、角色名字匹配），
+建议在前一步落地后，再以窄读取端口逐项引入；不要与导航算法、提示词或前端同时改。

@@ -68,6 +68,11 @@ def rollup(states: Mapping[str, str]) -> str:
     return "partial"
 
 
+def person_status(state: str) -> str:
+    """个人检定状态对外的含义：共同障碍上尝试失败（tried）仍在等障碍解除，与 pending 同属待检定。"""
+    return {"pending": "pending_check", "tried": "pending_check"}.get(state, state)
+
+
 def settle_check(
     states: Mapping[str, str], outcome: CheckOutcome, *,
     shared: bool, eligible_ids: frozenset[str],

@@ -31,13 +31,15 @@ from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch,
 )
 from app.application.movement_space import project_scene, project_space
-from app.application.movement_state import PendingMove
+from app.application.movement_state import (
+    MoveRecord, PendingMove, busy_ids as _busy_ids, load_move_records,
+)
 from app.domain import movement_party
 from app.domain.movement_evidence import NON_MOVING as NON_MOVING, assess_evidence
 from app.domain.movement_language import Statement, analyze, has_any as _has
 from app.domain.movement_space import Destination, resolve_destination as resolve_space_destination
 from app.domain.movement import (
-    CheckOutcome, MovementIntent, assess_passage, rollup as _rollup, settle_check,
+    CheckOutcome, MovementIntent, assess_passage, settle_check,
 )
 from app.models.character import Character
 from app.models.module import Module
@@ -151,8 +153,7 @@ def has_move_evidence(
 ) -> bool:
     """该角色本轮是否确有前往 target 的移动：地图前往、本轮已落位的裁定，或原话行动宣言能解析到 target。"""
     if any(
-        r.get("target") == target and char_status(r, char.id) == MOVED
-        for r in turn_records(game_session)
+        r.target == target and r.status_of(char.id) == MOVED for r in turn_moves(game_session)
     ):
         return True
     # 本轮已经被搬过去了（KP 工具 / 门控结算落的 move 事件）：那次移动本身就是证据。
@@ -376,10 +377,15 @@ def _participant(
 # ── 回合裁定记录 ─────────────────────────────────────────────────────
 
 def turn_records(game_session: GameSession, anchor: int | None = None) -> list[dict]:
+    """兼容入口：原始裁定记录字典。本模块内的规则一律经 ``turn_moves`` 读快照。"""
     records = list((game_session.turn_state or {}).get(MOVES_KEY) or [])
     if anchor is None:
         return records
     return [r for r in records if r.get("anchor") == anchor]
+
+
+def turn_moves(game_session: GameSession, anchor: int | None = None) -> tuple[MoveRecord, ...]:
+    return load_move_records((game_session.turn_state or {}).get(MOVES_KEY), anchor)
 
 
 def _set_turn_state(game_session: GameSession, **updates) -> None:
@@ -393,11 +399,9 @@ def char_status(record: dict, char_id: str) -> str:
     """某人在一条裁定里的状态：门控移动按人记（pending/tried/moved/failed），其余沿用整条的状态。
 
     tried＝共同障碍上他的尝试失败了，但障碍还可能被别人解除——对外仍是「待检定」，不是「失败」。
+    兼容入口，解释逻辑在 ``MoveRecord.status_of``。
     """
-    per = record.get("char_status") or {}
-    if char_id in per:
-        return {"pending": PENDING, "tried": PENDING, "moved": MOVED}.get(per[char_id], per[char_id])
-    return str(record.get("status") or "")
+    return MoveRecord.from_record(record).status_of(char_id)
 
 
 def begin_turn(game_session: GameSession) -> bool:
@@ -588,14 +592,14 @@ def _render_notes(module: Module | None, verdicts: list[Verdict]) -> str:
     )
 
 
-def _verdict_from_record(record: dict, party: list[Character]) -> Verdict:
+def _verdict_from_record(record: MoveRecord, party: list[Character]) -> Verdict:
+    """重新生成时从已存裁定恢复说明：只把记录里的 id/名字映射回本轮的角色对象。"""
     by_id = {c.id: c for c in party}
-    movers = [by_id[i] for i in record.get("movers") or [] if i in by_id]
-    stayers = [c for c in party if c.name in (record.get("stayers") or [])]
+    movers = [by_id[i] for i in record.mover_ids if i in by_id]
+    stayers = [c for c in party if c.name in record.stayer_names]
     return Verdict(
-        str(record.get("status") or ""), movers, record.get("origin"), record.get("target"),
-        stayers, str(record.get("exit") or ""), str(record.get("skill") or ""),
-        str(record.get("reason") or ""), list(record.get("clues") or []),
+        record.status, movers, record.origin, record.target, stayers, record.exit,
+        record.skill, record.reason, list(record.clues),
     )
 
 
@@ -613,7 +617,7 @@ def adjudicate_plan(
     party = [player_char, *(teammates or [])]
     anchor = turn_anchor(db, session_id, pre_gen_seq)
     db.refresh(game_session)
-    existing = turn_records(game_session, anchor)
+    existing = turn_moves(game_session, anchor)
     if existing:
         return [], _render_notes(module, [_verdict_from_record(r, party) for r in existing])
     proposals, legacy = _proposals(plan)
@@ -697,7 +701,7 @@ def settle_pending_moves(
                for e in (game_session.turn_state or {}).get(PENDING_KEY) or []]
     if not pending:
         return []
-    records = [dict(r, char_status=dict(r.get("char_status") or {})) for r in turn_records(game_session)]
+    records = list(turn_moves(game_session))
     by_id = {c.id: c for c in party}
     moves: list[tuple[str, list[Character]]] = []
     touched = False
@@ -715,16 +719,12 @@ def settle_pending_moves(
         if not resolution.changed:
             continue
         touched = True
-        states = dict(resolution.states)
         pending[index] = entry.with_states(resolution.states)
         rollers = resolution.roller_ids
         if resolution.mover_ids:
             moves.append((str(entry.target or ""),
                           [by_id[cid] for cid in resolution.mover_ids]))
-        for record in records:
-            if record.get("anchor") == entry.anchor and set(record.get("movers") or []) == set(entry.mover_ids):
-                record["char_status"].update(states)
-                record["status"] = _rollup(record["char_status"])
+        records = [r.with_states(resolution.states) if r.concerns(entry) else r for r in records]
         logger.info(
             "门控移动结算：session=%s %s %s → %s", session_id,
             "、".join(by_id[c].name for c in rollers if c in by_id), skill,
@@ -736,7 +736,7 @@ def settle_pending_moves(
     staged = commit_movement_batch(
         _MovementWriter(db, session_id, game_session, module, party),
         tuple(MoveCommand(target, tuple(c.id for c in movers)) for target, movers in moves),
-        state=MovementStateUpdate(tuple(records), tuple(remaining)),
+        state=MovementStateUpdate(tuple(r.to_record() for r in records), tuple(remaining)),
     )
     return _announce(db, session_id, module, list(staged))
 
@@ -800,25 +800,22 @@ def tool_guard(
     else:
         mover_ids = {default_leader.id} if default_leader is not None else set()
     settled: list[str] = []
-    for record in turn_records(game_session):
-        ids = set(record.get("movers") or []) & mover_ids
+    for record in turn_moves(game_session):
+        ids = set(record.mover_ids) & mover_ids
         if not ids:
             continue
-        same_target = record.get("target") == target
-        statuses = {cid: char_status(record, cid) for cid in ids}
+        same_target = record.target == target
+        statuses = {cid: record.status_of(cid) for cid in ids}
         if same_target and PENDING in statuses.values():
             return (
-                f"这次移动须先过「{record.get('skill')}」检定，系统已暂存、谁成功谁才移动；"
+                f"这次移动须先过「{record.skill}」检定，系统已暂存、谁成功谁才移动；"
                 "现在不要切换场景。",
                 None,
             )
         refused = [cid for cid, st in statuses.items() if st in _TOOL_REFUSE]
-        if refused and (same_target or not record.get("target")):
-            reason = record.get("reason") or _REFUSE_REASON.get(statuses[refused[0]], "本轮裁定未移动")
-            names = "、".join(
-                n for i, n in zip(record.get("movers") or [], record.get("mover_names") or [])
-                if i in refused
-            )
+        if refused and (same_target or not record.target):
+            reason = record.reason or _REFUSE_REASON.get(statuses[refused[0]], "本轮裁定未移动")
+            names = "、".join(record.names_of(refused))
             return f"本轮移动裁定为不移动（{reason}）：{names} 仍在原处，未切换场景。", None
         if same_target:
             settled += [cid for cid, st in statuses.items() if st == MOVED]
@@ -827,7 +824,7 @@ def tool_guard(
 
 def busy_ids(game_session: GameSession) -> set[str]:
     """本轮已有移动裁定的人：默认跟随不再把他们卷进别的移动。"""
-    return {i for r in turn_records(game_session) for i in (r.get("movers") or [])}
+    return _busy_ids(turn_moves(game_session))
 
 
 def resolve_tool_movers(raw: str, party: list[Character]) -> tuple[list[Character], list[str]]:

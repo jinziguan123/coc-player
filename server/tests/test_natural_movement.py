@@ -747,6 +747,28 @@ def test_两人各自攀爬_A成功只移动A_B继续待投_B失败不影响A(db
     assert records[0]["char_status"] == {t.alvin.id: "moved", t.hassan.id: "failed"}
 
 
+def test_门控结算写回裁定记录_保留扩展字段_不改无关旧记录(db_factory):
+    """结算只拥有个人状态与整条状态：其他字段（含未知扩展）原样保留，无关的旧格式记录逐字不变。"""
+    t = _seed_f(db_factory, human_hassan=True)
+    t.say(t.alvin, "我和哈桑从墙洞爬进去，你们留在这儿")
+    t.say(t.hassan, "我也从墙洞爬进去")
+    _stage_climb(t, ["阿尔文", "哈桑"])
+    gs = t.session
+    ts = dict(gs.turn_state or {})
+    legacy = {"anchor": -99, "status": "discuss", "movers": [t.party[2].id]}   # 无 char_status 的旧记录
+    ts[movement.MOVES_KEY] = [dict(r, ext={"来源": ["插件"]}) for r in ts[movement.MOVES_KEY]] + [legacy]
+    gs.turn_state = ts
+    t.db.commit()
+
+    _roll(t, t.alvin, "攀爬", "success")
+    _locs_, _moves, records, _pending = _committed_state(t)
+    assert records[0]["ext"] == {"来源": ["插件"]}
+    assert records[0]["char_status"] == {t.alvin.id: "moved", t.hassan.id: "pending"}
+    assert records[0]["status"] == movement.PENDING
+    assert records[1] == legacy
+    assert movement.busy_ids(t.session) == {t.alvin.id, t.hassan.id, t.party[2].id}
+
+
 def test_A失败后B仍能完成自己的检定与移动(db_factory):
     t = _seed_f(db_factory, human_hassan=True)
     t.say(t.alvin, "我和哈桑从墙洞爬进去，你们留在这儿")
@@ -1048,3 +1070,18 @@ def test_个人通行_先失败后他人成功_失败者仍不动_工具也拦(d
     assert records[0]["char_status"] == {t.alvin.id: "failed", t.hassan.id: "moved"}
     _scene_change_tool(t, "[SCENE_CHANGE: scene_id=前室, movers=阿尔文]")
     assert _locs(t)["阿尔文"] == "scene_1"
+
+
+def test_工具守卫读旧格式裁定记录_无个人状态时按整条状态拦截或放行():
+    a, b = SimpleNamespace(id="a", name="甲"), SimpleNamespace(id="b", name="乙")
+    gs = SimpleNamespace(turn_state={movement.MOVES_KEY: [
+        {"anchor": 1, "status": "discuss", "movers": ["a"], "mover_names": ["甲"], "target": None},
+        {"anchor": 1, "status": movement.PENDING, "movers": ["b"], "target": "room", "skill": "攀爬"},
+    ]})
+    refusal, _ = movement.tool_guard(gs, "room", [a])
+    assert refusal.startswith("本轮移动裁定为不移动（玩家只是在商量）：甲")
+    refusal, _ = movement.tool_guard(gs, "room", [b])
+    assert "「攀爬」检定" in refusal
+    gs.turn_state[movement.MOVES_KEY][1]["char_status"] = {"b": "moved"}
+    assert movement.tool_guard(gs, "room", [b]) == ("", ["b"])
+    assert movement.char_status(gs.turn_state[movement.MOVES_KEY][1], "b") == movement.MOVED
