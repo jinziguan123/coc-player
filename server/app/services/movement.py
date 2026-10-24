@@ -27,6 +27,9 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.application.movement_plans import movement_proposals as _proposals
+from app.application.movement_execution import (
+    MoveCommand, MovementStateUpdate, commit_movement_batch,
+)
 from app.application.movement_space import project_scene, project_space
 from app.domain import movement_party
 from app.domain.movement_evidence import NON_MOVING as NON_MOVING, assess_evidence
@@ -256,18 +259,47 @@ def _announce(
     return chunks
 
 
+@dataclass
+class _MovementWriter:
+    """现有数据库写入适配器；封装事务实现、存档键和 ORM 对象映射。"""
+    db: Session
+    session_id: str
+    game_session: GameSession
+    module: Module | None
+    party: list[Character]
+    extra_chars: list[Character] = field(default_factory=list)
+
+    def transaction(self):
+        return effect_channel.transaction(self.db)
+
+    def stage(self, command: MoveCommand) -> _Staged | None:
+        by_id = {c.id: c for c in [*self.party, *self.extra_chars]}
+        return _stage_move(
+            self.db, self.session_id, self.game_session, self.module,
+            [by_id[cid] for cid in command.mover_ids], command.target, self.party,
+            announce=command.announce,
+        )
+
+    def save_state(self, update: MovementStateUpdate) -> None:
+        _set_turn_state(self.game_session, **{
+            MOVES_KEY: list(update.records), PENDING_KEY: list(update.pending),
+        })
+
+    def refresh(self) -> None:
+        self.db.refresh(self.game_session)
+
+
 def move_characters(
     db: Session, session_id: str, game_session: GameSession, module: Module | None,
     movers: list[Character], target: str, party: list[Character], *, announce: bool = True,
 ) -> list[str]:
     """把 movers 移到 target：本函数拥有事务，一次提交；返回提交后要广播的 chunk。"""
     db.refresh(game_session)
-    with effect_channel.transaction(db):
-        staged = _stage_move(
-            db, session_id, game_session, module, movers, target, party, announce=announce,
-        )
-    db.refresh(game_session)
-    return _announce(db, session_id, module, [staged] if staged else [])
+    staged = commit_movement_batch(
+        _MovementWriter(db, session_id, game_session, module, party, movers),
+        (MoveCommand(target, tuple(c.id for c in movers), announce),),
+    )
+    return _announce(db, session_id, module, list(staged))
 
 
 def travel(
@@ -607,44 +639,40 @@ def adjudicate_plan(
     if not verdicts:
         return [], ""
 
-    staged: list[_Staged] = []
+    commands: list[MoveCommand] = []
     records: list[dict] = []
     new_pending: list[dict] = []
-    with effect_channel.transaction(db):
-        for verdict, shared in verdicts:
-            record = verdict.record(anchor)
-            if verdict.status == MOVED:
-                st = _stage_move(
-                    db, session_id, game_session, module, verdict.movers, verdict.target, party,
-                )
-                if st is not None:
-                    staged.append(st)
-                record["char_status"] = {c.id: "moved" for c in verdict.movers}
-            elif verdict.status == PENDING:
-                chars = {c.id: "pending" for c in verdict.movers}
-                record["char_status"] = dict(chars)
-                record["shared"] = shared
-                new_pending.append({
-                    "anchor": anchor, "movers": [c.id for c in verdict.movers],
-                    "origin": verdict.origin, "target": verdict.target, "skill": verdict.skill,
-                    "exit": verdict.exit, "shared": shared, "chars": chars,
-                })
-            records.append(record)
-            logger.info(
-                "移动裁定：session=%s %s %s→%s status=%s %s",
-                session_id, _names(verdict.movers), verdict.origin, verdict.target,
-                verdict.status, verdict.reason,
-            )
-        taken = {cid for e in new_pending for cid in e["movers"]}
-        old_pending = [
-            e for e in (game_session.turn_state or {}).get(PENDING_KEY) or []
-            if not (set(e.get("movers") or []) & taken)
-        ]
-        _set_turn_state(
-            game_session, **{MOVES_KEY: records, PENDING_KEY: old_pending + new_pending},
+    for verdict, shared in verdicts:
+        record = verdict.record(anchor)
+        if verdict.status == MOVED:
+            commands.append(MoveCommand(verdict.target, tuple(c.id for c in verdict.movers)))
+            record["char_status"] = {c.id: "moved" for c in verdict.movers}
+        elif verdict.status == PENDING:
+            chars = {c.id: "pending" for c in verdict.movers}
+            record["char_status"] = dict(chars)
+            record["shared"] = shared
+            new_pending.append({
+                "anchor": anchor, "movers": [c.id for c in verdict.movers],
+                "origin": verdict.origin, "target": verdict.target, "skill": verdict.skill,
+                "exit": verdict.exit, "shared": shared, "chars": chars,
+            })
+        records.append(record)
+    taken = {cid for e in new_pending for cid in e["movers"]}
+    old_pending = [
+        e for e in (game_session.turn_state or {}).get(PENDING_KEY) or []
+        if not (set(e.get("movers") or []) & taken)
+    ]
+    staged = commit_movement_batch(
+        _MovementWriter(db, session_id, game_session, module, party), tuple(commands),
+        state=MovementStateUpdate(tuple(records), tuple(old_pending + new_pending)),
+    )
+    for verdict, _shared in verdicts:
+        logger.info(
+            "移动裁定：session=%s %s %s→%s status=%s %s",
+            session_id, _names(verdict.movers), verdict.origin, verdict.target,
+            verdict.status, verdict.reason,
         )
-    db.refresh(game_session)
-    return _announce(db, session_id, module, staged), _render_notes(
+    return _announce(db, session_id, module, list(staged)), _render_notes(
         module, [v for v, _shared in verdicts],
     )
 
@@ -707,15 +735,12 @@ def settle_pending_moves(
     if not touched:
         return []
     remaining = [e for e in pending if any(st == "pending" for st in e["chars"].values())]
-    staged: list[_Staged] = []
-    with effect_channel.transaction(db):
-        for target, movers in moves:
-            st = _stage_move(db, session_id, game_session, module, movers, target, party)
-            if st is not None:
-                staged.append(st)
-        _set_turn_state(game_session, **{PENDING_KEY: remaining, MOVES_KEY: records})
-    db.refresh(game_session)
-    return _announce(db, session_id, module, staged)
+    staged = commit_movement_batch(
+        _MovementWriter(db, session_id, game_session, module, party),
+        tuple(MoveCommand(target, tuple(c.id for c in movers)) for target, movers in moves),
+        state=MovementStateUpdate(tuple(records), tuple(remaining)),
+    )
+    return _announce(db, session_id, module, list(staged))
 
 
 def pending_unissued(

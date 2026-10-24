@@ -30,6 +30,16 @@ import pytest
 
 APP = Path(__file__).resolve().parent.parent / "app"
 
+
+def test_移动提交用例不依赖数据库或外部服务():
+    import sys
+
+    path = APP / "application" / "movement_execution.py"
+    tree = ast.parse(path.read_text("utf-8"))
+    for mod, _line, _local in _imports(tree):
+        assert mod.split(".")[0] in sys.stdlib_module_names, mod
+    assert not any(isinstance(node, ast.ImportFrom) and node.level for node in ast.walk(tree))
+
 #: 层 → 它**不得**依赖的层。反向依赖一律是分层倒置，不接受个案豁免——
 #: 真需要跨层拿东西，是那个东西放错了地方（例：AI 配置曾住在 api/ai_settings，
 #: 于是 services 和 ai 都得反过来 import api，最后抽成了 ai/profile_store）。
