@@ -31,6 +31,7 @@ from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch,
 )
 from app.application.movement_space import project_scene, project_space
+from app.application.movement_state import PendingMove
 from app.domain import movement_party
 from app.domain.movement_evidence import NON_MOVING as NON_MOVING, assess_evidence
 from app.domain.movement_language import Statement, analyze, has_any as _has
@@ -692,39 +693,36 @@ def settle_pending_moves(
     if not char_ids:
         return []
     db.refresh(game_session)
-    pending = [dict(e, chars=dict(e.get("chars") or {
-        cid: "pending" for cid in e.get("movers") or []
-    })) for e in (game_session.turn_state or {}).get(PENDING_KEY) or []]
+    pending = [PendingMove.from_record(e)
+               for e in (game_session.turn_state or {}).get(PENDING_KEY) or []]
     if not pending:
         return []
     records = [dict(r, char_status=dict(r.get("char_status") or {})) for r in turn_records(game_session)]
     by_id = {c.id: c for c in party}
     moves: list[tuple[str, list[Character]]] = []
     touched = False
-    for entry in pending:
-        if not check_gating.skill_matches(entry.get("skill", ""), skill):
+    for index, entry in enumerate(pending):
+        if not check_gating.skill_matches(entry.skill, skill):
             continue
         resolution = settle_check(
-            entry["chars"], CheckOutcome(frozenset(char_ids), succeeded),
-            shared=bool(entry.get("shared")),
+            dict(entry.states), CheckOutcome(frozenset(char_ids), succeeded),
+            shared=entry.shared,
             eligible_ids=frozenset(
-                cid for cid in entry["chars"] if cid in by_id
-                and session_service.get_char_location(game_session, cid) == entry.get("origin")
+                cid for cid, _status in entry.states if cid in by_id
+                and session_service.get_char_location(game_session, cid) == entry.origin
             ),
         )
         if not resolution.changed:
             continue
         touched = True
         states = dict(resolution.states)
-        entry["chars"] = states
+        pending[index] = entry.with_states(resolution.states)
         rollers = resolution.roller_ids
         if resolution.mover_ids:
-            moves.append((str(entry.get("target") or ""),
+            moves.append((str(entry.target or ""),
                           [by_id[cid] for cid in resolution.mover_ids]))
         for record in records:
-            if record.get("anchor") == entry.get("anchor") and set(record.get("movers") or []) == set(
-                entry.get("movers") or []
-            ):
+            if record.get("anchor") == entry.anchor and set(record.get("movers") or []) == set(entry.mover_ids):
                 record["char_status"].update(states)
                 record["status"] = _rollup(record["char_status"])
         logger.info(
@@ -734,7 +732,7 @@ def settle_pending_moves(
         )
     if not touched:
         return []
-    remaining = [e for e in pending if any(st == "pending" for st in e["chars"].values())]
+    remaining = [e.to_record() for e in pending if e.waiting_ids]
     staged = commit_movement_batch(
         _MovementWriter(db, session_id, game_session, module, party),
         tuple(MoveCommand(target, tuple(c.id for c in movers)) for target, movers in moves),
@@ -756,22 +754,22 @@ def pending_unissued(
 
     out = []
     by_id = {c.id: c for c in party}
-    for entry in (game_session.turn_state or {}).get(PENDING_KEY) or []:
-        states = entry.get("chars") or {cid: "pending" for cid in entry.get("movers") or []}
-        waiting = [by_id[c] for c, st in states.items() if st == "pending" and c in by_id]
+    for record in (game_session.turn_state or {}).get(PENDING_KEY) or []:
+        entry = PendingMove.from_record(record)
+        waiting = [by_id[c] for c in entry.waiting_ids if c in by_id]
         if not waiting:
             continue
         issued = [
             m for m in waiting
             if planned_effects.requested_check_settled(db, session_id, m.id, pre_gen_seq, m.name)
         ]
-        if entry.get("shared"):
+        if entry.shared:
             if not issued:
-                out.append((waiting[:1], str(entry.get("skill") or "")))
+                out.append((waiting[:1], str(entry.skill or "")))
             continue
         rest = [m for m in waiting if m not in issued]
         if rest:
-            out.append((rest, str(entry.get("skill") or "")))
+            out.append((rest, str(entry.skill or "")))
     return out
 
 

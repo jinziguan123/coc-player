@@ -31,10 +31,11 @@ import pytest
 APP = Path(__file__).resolve().parent.parent / "app"
 
 
-def test_移动提交用例不依赖数据库或外部服务():
+@pytest.mark.parametrize("filename", ["movement_execution.py", "movement_state.py"])
+def test_移动提交与状态边界不依赖数据库或外部服务(filename):
     import sys
 
-    path = APP / "application" / "movement_execution.py"
+    path = APP / "application" / filename
     tree = ast.parse(path.read_text("utf-8"))
     for mod, _line, _local in _imports(tree):
         assert mod.split(".")[0] in sys.stdlib_module_names, mod
