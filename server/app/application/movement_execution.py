@@ -3,6 +3,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar
 
+from app.application.movement_state import MoveRecord, PendingMove
+
 
 @dataclass(frozen=True)
 class MoveCommand:
@@ -13,9 +15,9 @@ class MoveCommand:
 
 @dataclass(frozen=True)
 class MovementStateUpdate:
-    """沿用现有记录格式；存档键及 ORM 字段由适配器决定。"""
-    records: tuple[dict, ...]
-    pending: tuple[dict, ...]
+    """本回合裁定记录与仍待检定的移动的完整新值；编码、存档键及 ORM 字段由适配器决定。"""
+    records: tuple[MoveRecord, ...]
+    pending: tuple[PendingMove, ...]
 
 
 Receipt = TypeVar("Receipt")

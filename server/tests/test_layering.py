@@ -31,15 +31,20 @@ import pytest
 APP = Path(__file__).resolve().parent.parent / "app"
 
 
-@pytest.mark.parametrize("filename", ["movement_execution.py", "movement_state.py"])
+_PURE_APPLICATION = ["movement_execution.py", "movement_state.py"]
+
+
+@pytest.mark.parametrize("filename", _PURE_APPLICATION)
 def test_移动提交与状态边界不依赖数据库或外部服务(filename):
     import sys
 
+    pure = {f"app.application.{name.removesuffix('.py')}" for name in _PURE_APPLICATION}
     path = APP / "application" / filename
     tree = ast.parse(path.read_text("utf-8"))
     for mod, _line, _local in _imports(tree):
-        # 应用边界可以依赖领域规则（依赖方向向内），但不得碰 ORM、服务层或 AI。
-        assert mod.split(".")[0] in sys.stdlib_module_names or mod.startswith("app.domain."), mod
+        # 应用边界可以依赖领域规则（依赖方向向内）和彼此，但不得碰 ORM、服务层或 AI。
+        assert (mod.split(".")[0] in sys.stdlib_module_names or mod.startswith("app.domain.")
+                or mod in pure), mod
     assert not any(isinstance(node, ast.ImportFrom) and node.level for node in ast.walk(tree))
 
 #: 层 → 它**不得**依赖的层。反向依赖一律是分层倒置，不接受个案豁免——

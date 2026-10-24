@@ -284,7 +284,8 @@ class _MovementWriter:
 
     def save_state(self, update: MovementStateUpdate) -> None:
         _set_turn_state(self.game_session, **{
-            MOVES_KEY: list(update.records), PENDING_KEY: list(update.pending),
+            MOVES_KEY: [r.to_record() for r in update.records],
+            PENDING_KEY: [e.to_record() for e in update.pending],
         })
 
     def refresh(self) -> None:
@@ -388,6 +389,12 @@ def turn_moves(game_session: GameSession, anchor: int | None = None) -> tuple[Mo
     return load_move_records((game_session.turn_state or {}).get(MOVES_KEY), anchor)
 
 
+def _pending_moves(game_session: GameSession) -> tuple[PendingMove, ...]:
+    return tuple(
+        PendingMove.from_record(e) for e in (game_session.turn_state or {}).get(PENDING_KEY) or ()
+    )
+
+
 def _set_turn_state(game_session: GameSession, **updates) -> None:
     """在调用方事务里改 turn_state（不提交）。单独成函数，也是测试注入写入失败的接缝。"""
     ts = dict(game_session.turn_state or {})
@@ -427,13 +434,17 @@ class Verdict:
     reason: str = ""
     clues: list[str] = field(default_factory=list)
 
-    def record(self, anchor: int) -> dict:
-        return {
-            "anchor": anchor, "status": self.status, "movers": [c.id for c in self.movers],
-            "mover_names": [c.name for c in self.movers], "origin": self.origin,
-            "target": self.target, "stayers": [c.name for c in self.stayers], "exit": self.exit,
-            "skill": self.skill, "reason": self.reason, "clues": self.clues,
-        }
+    def record(
+        self, anchor: int, *, states: tuple[tuple[str, str], ...] | None = None,
+        shared: bool | None = None,
+    ) -> MoveRecord:
+        return MoveRecord.new(
+            anchor=anchor, status=self.status, mover_ids=tuple(c.id for c in self.movers),
+            mover_names=tuple(c.name for c in self.movers), origin=self.origin,
+            target=self.target, stayer_names=tuple(c.name for c in self.stayers),
+            exit=self.exit, skill=self.skill, reason=self.reason, clues=tuple(self.clues),
+            states=states, shared=shared,
+        )
 
 
 def _match_chars(names: list[str], party: list[Character]) -> list[Character]:
@@ -645,28 +656,25 @@ def adjudicate_plan(
         return [], ""
 
     commands: list[MoveCommand] = []
-    records: list[dict] = []
-    new_pending: list[dict] = []
+    records: list[MoveRecord] = []
+    new_pending: list[PendingMove] = []
     for verdict, shared in verdicts:
-        record = verdict.record(anchor)
+        ids = tuple(c.id for c in verdict.movers)
         if verdict.status == MOVED:
-            commands.append(MoveCommand(verdict.target, tuple(c.id for c in verdict.movers)))
-            record["char_status"] = {c.id: "moved" for c in verdict.movers}
+            commands.append(MoveCommand(verdict.target, ids))
+            records.append(verdict.record(anchor, states=tuple((cid, "moved") for cid in ids)))
         elif verdict.status == PENDING:
-            chars = {c.id: "pending" for c in verdict.movers}
-            record["char_status"] = dict(chars)
-            record["shared"] = shared
-            new_pending.append({
-                "anchor": anchor, "movers": [c.id for c in verdict.movers],
-                "origin": verdict.origin, "target": verdict.target, "skill": verdict.skill,
-                "exit": verdict.exit, "shared": shared, "chars": chars,
-            })
-        records.append(record)
-    taken = {cid for e in new_pending for cid in e["movers"]}
-    old_pending = [
-        e for e in (game_session.turn_state or {}).get(PENDING_KEY) or []
-        if not (set(e.get("movers") or []) & taken)
-    ]
+            records.append(verdict.record(
+                anchor, states=tuple((cid, "pending") for cid in ids), shared=shared,
+            ))
+            new_pending.append(PendingMove.new(
+                anchor=anchor, mover_ids=ids, origin=verdict.origin, target=verdict.target,
+                skill=verdict.skill, exit=verdict.exit, shared=shared,
+            ))
+        else:
+            records.append(verdict.record(anchor))
+    taken = {cid for e in new_pending for cid in e.mover_ids}
+    old_pending = [e for e in _pending_moves(game_session) if not (set(e.mover_ids) & taken)]
     staged = commit_movement_batch(
         _MovementWriter(db, session_id, game_session, module, party), tuple(commands),
         state=MovementStateUpdate(tuple(records), tuple(old_pending + new_pending)),
@@ -697,8 +705,7 @@ def settle_pending_moves(
     if not char_ids:
         return []
     db.refresh(game_session)
-    pending = [PendingMove.from_record(e)
-               for e in (game_session.turn_state or {}).get(PENDING_KEY) or []]
+    pending = list(_pending_moves(game_session))
     if not pending:
         return []
     records = list(turn_moves(game_session))
@@ -732,11 +739,11 @@ def settle_pending_moves(
         )
     if not touched:
         return []
-    remaining = [e.to_record() for e in pending if e.waiting_ids]
+    remaining = [e for e in pending if e.waiting_ids]
     staged = commit_movement_batch(
         _MovementWriter(db, session_id, game_session, module, party),
         tuple(MoveCommand(target, tuple(c.id for c in movers)) for target, movers in moves),
-        state=MovementStateUpdate(tuple(r.to_record() for r in records), tuple(remaining)),
+        state=MovementStateUpdate(tuple(records), tuple(remaining)),
     )
     return _announce(db, session_id, module, list(staged))
 
@@ -754,8 +761,7 @@ def pending_unissued(
 
     out = []
     by_id = {c.id: c for c in party}
-    for record in (game_session.turn_state or {}).get(PENDING_KEY) or []:
-        entry = PendingMove.from_record(record)
+    for entry in _pending_moves(game_session):
         waiting = [by_id[c] for c in entry.waiting_ids if c in by_id]
         if not waiting:
             continue

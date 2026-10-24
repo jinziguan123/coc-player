@@ -2,7 +2,8 @@
 
 字段所有权：快照只读出业务需要的值；``with_states`` 是唯一的更新入口，只改个人状态
 （裁定记录同时按个人状态重算整条状态）。其余字段原样来自存档，写回时从私有副本恢复，
-不供业务规则读取或修改。存档 JSON 键只在本模块出现。
+不供业务规则读取或修改。新建记录走 ``new``：先编码成存档格式再读回，所以新建与读取写回
+共用一套键名与默认值。存档 JSON 键只在本模块出现。
 """
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -32,6 +33,18 @@ class PendingMove:
             target=source.get("target"), skill=source.get("skill", ""),
             shared=bool(source.get("shared")), states=tuple(states.items()), _source=source,
         )
+
+    @classmethod
+    def new(
+        cls, *, anchor: int, mover_ids: tuple[str, ...], origin: str | None, target: str | None,
+        skill: str, exit: str, shared: bool,
+    ) -> "PendingMove":
+        """裁定时新建：所有移动者都待检定。"""
+        return cls.from_record({
+            "anchor": anchor, "movers": list(mover_ids), "origin": origin, "target": target,
+            "skill": skill, "exit": exit, "shared": shared,
+            "chars": {cid: "pending" for cid in mover_ids},
+        })
 
     @property
     def waiting_ids(self) -> tuple[str, ...]:
@@ -81,6 +94,26 @@ class MoveRecord:
             reason=str(source.get("reason") or ""), clues=tuple(source.get("clues") or ()),
             states=tuple((source.get("char_status") or {}).items()), _source=source,
         )
+
+    @classmethod
+    def new(
+        cls, *, anchor: int, status: str, mover_ids: tuple[str, ...], mover_names: tuple[str, ...],
+        origin: str | None, target: str | None, stayer_names: tuple[str, ...] = (),
+        exit: str = "", skill: str = "", reason: str = "", clues: tuple[str, ...] = (),
+        states: tuple[tuple[str, str], ...] | None = None, shared: bool | None = None,
+    ) -> "MoveRecord":
+        """裁定时新建。只有门控/落位裁定才带个人状态，只有待检定裁定才记共同障碍标志。"""
+        record = {
+            "anchor": anchor, "status": status, "movers": list(mover_ids),
+            "mover_names": list(mover_names), "origin": origin, "target": target,
+            "stayers": list(stayer_names), "exit": exit, "skill": skill, "reason": reason,
+            "clues": list(clues),
+        }
+        if states is not None:
+            record["char_status"] = dict(states)
+        if shared is not None:
+            record["shared"] = shared
+        return cls.from_record(record)
 
     def status_of(self, char_id: str) -> str:
         """某人在这条裁定里的对外状态；共同障碍上的 tried 对外仍是待检定。"""

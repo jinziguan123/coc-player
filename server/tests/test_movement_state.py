@@ -126,3 +126,30 @@ def test_按锚点读取且已有裁定者不等于待检定名单():
     assert load_move_records(None) == ()
     assert busy_ids(records) == {"a", "b", "c"}
     assert not any(r.status_of(cid) == "pending_check" for r in records for cid in r.mover_ids)
+
+
+def test_新建裁定记录与旧手写格式逐字一致():
+    base = {"anchor": 3, "status": "moved", "movers": ["a", "b"], "mover_names": ["甲", "乙"],
+            "origin": "hall", "target": "room", "stayers": ["丙"], "exit": "墙洞", "skill": "",
+            "reason": "", "clues": ["东侧"]}
+    common = dict(anchor=3, mover_ids=("a", "b"), mover_names=("甲", "乙"), origin="hall",
+                  target="room", stayer_names=("丙",), exit="墙洞", clues=("东侧",))
+    moved = MoveRecord.new(status="moved", states=(("a", "moved"), ("b", "moved")), **common)
+    assert moved.to_record() == dict(base, char_status={"a": "moved", "b": "moved"})
+    gated = MoveRecord.new(status="pending_check", skill="攀爬",
+                           states=(("a", "pending"), ("b", "pending")), shared=True, **common)
+    assert gated.to_record() == dict(base, status="pending_check", skill="攀爬", shared=True,
+                                     char_status={"a": "pending", "b": "pending"})
+    assert gated.status_of("a") == "pending_check" and gated.names_of(["b"]) == ("乙",)
+    blocked = MoveRecord.new(status="blocked", reason="石板", **common)
+    assert blocked.to_record() == dict(base, status="blocked", reason="石板")
+
+
+def test_新建待检定移动与旧手写格式逐字一致_并可直接结算():
+    entry = PendingMove.new(anchor=3, mover_ids=("a", "b"), origin="hall", target="room",
+                            skill="攀爬", exit="墙洞", shared=False)
+    assert entry.to_record() == {"anchor": 3, "movers": ["a", "b"], "origin": "hall",
+                                 "target": "room", "skill": "攀爬", "exit": "墙洞", "shared": False,
+                                 "chars": {"a": "pending", "b": "pending"}}
+    assert entry.waiting_ids == ("a", "b")
+    assert entry.with_states((("a", "moved"), ("b", "pending"))).waiting_ids == ("b",)

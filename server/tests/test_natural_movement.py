@@ -405,6 +405,41 @@ def test_通道受阻不移动(db_factory):
     assert not (t.session.turn_state or {}).get(movement.PENDING_KEY)
 
 
+def test_待检定裁定写入的存档字段与旧格式一致(db_factory):
+    """新建记录改由类型化快照编码后，存档键与取值不得变化（不要求重新导入、旧读取方照旧可用）。"""
+    t = _seed(db_factory())
+    t.say(t.alvin, "我抛下队友，从墙洞爬进去")
+    movement.adjudicate_plan(
+        t.db, t.sid, t.session, t.module, t.alvin, t.others(),
+        _plan(MovePlan(actors=["阿尔文"], exit="墙洞", target="scene_2", solo=True,
+                       check_skill="攀爬")),
+    )
+    ts = t.session.turn_state or {}
+    (record,) = ts[movement.MOVES_KEY]
+    (pending,) = ts[movement.PENDING_KEY]
+    assert set(record) == {"anchor", "status", "movers", "mover_names", "origin", "target",
+                           "stayers", "exit", "skill", "reason", "clues", "char_status", "shared"}
+    assert (record["status"], record["movers"], record["mover_names"], record["target"]) == (
+        movement.PENDING, [t.alvin.id], ["阿尔文"], "scene_2")
+    assert record["char_status"] == {t.alvin.id: "pending"} and record["shared"] is False
+    assert isinstance(record["stayers"], list) and isinstance(record["clues"], list)
+    assert pending == {"anchor": record["anchor"], "movers": [t.alvin.id], "origin": "scene_1",
+                       "target": "scene_2", "skill": "攀爬", "exit": "墙洞", "shared": False,
+                       "chars": {t.alvin.id: "pending"}}
+
+
+def test_不移动的裁定不写个人状态与共同障碍标志(db_factory):
+    t = _seed(db_factory())
+    t.say(t.alvin, "我直接穿过去进入藏宝室")
+    movement.adjudicate_plan(
+        t.db, t.sid, t.session, t.module, t.alvin, t.others(),
+        _plan(MovePlan(actors=["阿尔文"], target="scene_5")),
+    )
+    (record,) = movement.turn_records(t.session)
+    assert record["status"] == "unreachable"
+    assert "char_status" not in record and "shared" not in record
+
+
 def test_不连通的目标_拒绝并解释(db_factory):
     t = _seed(db_factory())
     t.say(t.alvin, "我直接穿过去进入藏宝室")

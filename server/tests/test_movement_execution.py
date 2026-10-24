@@ -6,6 +6,7 @@ import pytest
 from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch,
 )
+from app.application.movement_state import MoveRecord, PendingMove
 
 
 class MemoryWriter:
@@ -34,6 +35,7 @@ class MemoryWriter:
 
     def save_state(self, update):
         self.step("save")
+        self.saved = update
 
     def refresh(self):
         self.step("refresh")
@@ -68,3 +70,16 @@ def test_直接移动不覆盖回合记录():
     writer = MemoryWriter()
     commit_movement_batch(writer, (MoveCommand("room", ("a",)),))
     assert "save" not in writer.calls
+
+
+def test_状态更新以类型化快照交给写入端口_由适配器负责编码():
+    writer = MemoryWriter()
+    record = MoveRecord.new(anchor=1, status="pending_check", mover_ids=("a",), mover_names=("甲",),
+                            origin="hall", target="room", states=(("a", "pending"),), shared=False)
+    entry = PendingMove.new(anchor=1, mover_ids=("a",), origin="hall", target="room",
+                            skill="攀爬", exit="", shared=False)
+    update = MovementStateUpdate((record,), (entry,))
+    commit_movement_batch(writer, (), state=update)
+    assert writer.saved is update
+    assert isinstance(writer.saved.records[0], MoveRecord)
+    assert isinstance(writer.saved.pending[0], PendingMove)
