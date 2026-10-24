@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.application.movement_plans import movement_proposals as _proposals
 from app.application.movement_space import project_scene, project_space
+from app.domain import movement_party
 from app.domain.movement_language import Statement, analyze, has_any as _has
 from app.domain.movement_space import Destination, resolve_destination as resolve_space_destination
 from app.domain.movement import CheckOutcome, MovementIntent, rollup as _rollup, settle_check
@@ -307,32 +308,37 @@ def select_followers(
     - AI 队友：被点名（named）、自己表态、leader 说了「我们/一起」，或 leader 是房主锚点且没说独行
       （队伍默认跟随房主）→ 跟；leader 明说独行时只有自己表态的才跟。
     """
-    named_ids = {c.id for c in (named or [])}
-    out: list[Character] = []
-    for c in party:
-        if c.id == leader.id or c.id in stayed or c.id in (busy or set()):
-            continue
-        if session_service.get_char_location(game_session, c.id) != origin:
-            continue
-        stmt = stmts.get(c.id) or Statement()
-        if stmt.kind in ("discuss", "conditional", "negated", "approach") or stmt.solo:
-            continue
-        if stmt.hesitant and not stmt.acts:
-            continue   # 正劝人等一等的人自己不会跟着走
-        own = stmt.acts and not stmt.travel_scene
-        if own and stmt.kind == "act" and target:
-            dest = resolve_destination(module, origin, "。".join(stmt.sentences))
-            if dest.status == "resolved" and dest.target != target:
-                continue   # 他自己要去的是另一处：由他自己的那条提案裁定
-        if session_service.is_human_controlled(db, session_id, c.id):
-            if own:
-                out.append(c)
-            continue
-        if own or (not solo and (
-            c.id in named_ids or collective or leader.id == game_session.player_character_id
-        )):
-            out.append(c)
-    return out
+    snapshots = tuple(
+        _participant(db, session_id, game_session, c, stmts.get(c.id) or Statement(),
+                     module=module, resolve_from=origin, resolve_target=target)
+        for c in party
+    )
+    ids = movement_party.select_followers(
+        snapshots, leader_id=leader.id, host_id=game_session.player_character_id,
+        origin=origin, solo=solo, collective=collective, target=target,
+        stayed=frozenset(stayed), busy=frozenset(busy or ()),
+        named=frozenset(c.id for c in (named or [])),
+    )
+    by_id = {c.id: c for c in party}
+    return [by_id[cid] for cid in ids]
+
+
+def _participant(
+    db: Session, session_id: str, game_session: GameSession, char: Character, stmt: Statement,
+    *, module: Module | None, resolve_from: str | None, resolve_target: str | None,
+) -> movement_party.Participant:
+    """只在服务边界读取 ORM 与控制权，领域选择只消费值快照。"""
+    destination = None
+    if module is not None and stmt.kind == "act" and not stmt.travel_scene and resolve_target:
+        result = resolve_destination(module, resolve_from, "。".join(stmt.sentences))
+        if result.status == "resolved":
+            destination = result.target
+    return movement_party.Participant(
+        id=char.id, location=session_service.get_char_location(game_session, char.id),
+        human=session_service.is_human_controlled(db, session_id, char.id),
+        stance=stmt.kind, solo=stmt.solo, hesitant=stmt.hesitant,
+        travel_scene=stmt.travel_scene, destination=destination, collective=stmt.collective,
+    )
 
 
 # ── 回合裁定记录 ─────────────────────────────────────────────────────
@@ -835,29 +841,26 @@ def default_movers(
     for sid in _location_ids(module):
         named_terms |= scene_terms(module, sid)
     stmts, stayed = turn_statements(db, session_id, party, None, named_terms)
-    host = game_session.player_character_id
-    candidates: list[Character] = []
-    for c in party:
-        stmt = stmts.get(c.id) or Statement()
-        # 只有直接宣告移动（act）的人能带头；「我也去」「我跟上」是跟随，由下面的跟随规则处理。
-        if c.id in stayed or stmt.kind != "act" or stmt.travel_scene:
-            continue
-        origin = session_service.get_char_location(game_session, c.id)
-        dest = resolve_destination(module, origin, "。".join(stmt.sentences))
-        if dest.status == "resolved" and dest.target != target:
-            continue
-        candidates.append(c)
-    candidates.sort(key=lambda c: (
-        not session_service.is_human_controlled(db, session_id, c.id), c.id != host,
-    ))
-    leader = candidates[0] if candidates else fallback_leader
-    if leader is None:
-        return []
-    lead = stmts.get(leader.id) or Statement()
-    origin = session_service.get_char_location(game_session, leader.id)
-    followers = select_followers(
-        db, session_id, game_session, leader, party, origin=origin, solo=lead.solo,
-        collective=lead.collective, stmts=stmts, stayed=stayed,
-        busy=busy_ids(game_session) - {leader.id}, module=module, target=target,
+    snapshots = tuple(
+        _participant(
+            db, session_id, game_session, c, stmts.get(c.id) or Statement(), module=module,
+            resolve_from=session_service.get_char_location(game_session, c.id), resolve_target=target,
+        )
+        for c in party
     )
-    return [leader, *followers]
+    leader_id = movement_party.default_leader(
+        snapshots, target=target, host_id=game_session.player_character_id,
+        stayed=frozenset(stayed), fallback_id=fallback_leader.id if fallback_leader else None,
+    )
+    if leader_id is None:
+        return []
+    by_id = {c.id: c for c in party}
+    leader = by_id.get(leader_id) or fallback_leader
+    lead = stmts.get(leader_id) or Statement()
+    origin = session_service.get_char_location(game_session, leader_id)
+    ids = movement_party.select_followers(
+        snapshots, leader_id=leader_id, host_id=game_session.player_character_id,
+        origin=origin, solo=lead.solo, collective=lead.collective, target=target,
+        stayed=frozenset(stayed), busy=frozenset(busy_ids(game_session) - {leader_id}),
+    )
+    return [leader, *[by_id[cid] for cid in ids]]

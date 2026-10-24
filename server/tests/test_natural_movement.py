@@ -33,6 +33,25 @@ from app.services import (
 )
 from tests.text_commands import run_text_commands
 
+
+def test_无模组时参与者快照不解析去向(monkeypatch):
+    monkeypatch.setattr(session_service, "get_char_location", lambda *_: "hall")
+    monkeypatch.setattr(session_service, "is_human_controlled", lambda *_: True)
+
+    def unexpected_resolution(*_):
+        pytest.fail("缺少模组时不应解析去向")
+
+    monkeypatch.setattr(movement, "resolve_destination", unexpected_resolution)
+    member = movement._participant(
+        None, "session", SimpleNamespace(), SimpleNamespace(id="player"),
+        movement.Statement(kind="act"), module=None,
+        resolve_from="hall", resolve_target="room",
+    )
+    assert member.destination is None
+    assert member.location == "hall"
+    assert member.human is True
+
+
 # 《陵墓》的真实场景数据（描述、关键词、连通照抄本地模组，省略与移动无关的字段）。
 TOMB_SCENES = [
     {
