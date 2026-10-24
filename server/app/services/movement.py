@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.application.movement_plans import movement_proposals as _proposals
 from app.application.movement_space import project_scene, project_space
 from app.domain import movement_party
+from app.domain.movement_evidence import NON_MOVING as NON_MOVING, assess_evidence
 from app.domain.movement_language import Statement, analyze, has_any as _has
 from app.domain.movement_space import Destination, resolve_destination as resolve_space_destination
 from app.domain.movement import CheckOutcome, MovementIntent, rollup as _rollup, settle_check
@@ -55,10 +56,6 @@ PENDING_KEY = "pending_moves"
 #: 已落位 / 不动人的各种裁定。
 MOVED = "moved"
 PENDING = "pending_check"
-NON_MOVING = frozenset({
-    "discuss", "conditional", "approach", "negated", "blocked", "ambiguous", "unreachable",
-    "unresolved", "failed", "no_evidence",
-})
 
 # ── 空间快照适配：保留原服务入口，纯解析位于领域层 ──────────────
 
@@ -420,19 +417,18 @@ def _leader(
 ) -> Character | None:
     """提案的带头人：规划器点了名就只在点名的人里找（不借别人的原话），没点名才在全队里找；
     按「有移动原话、真人」优先。"""
-    for pool in ([actors] if actors else [party]):
-        ranked = sorted(
-            pool,
-            key=lambda c: (
-                not (stmts.get(c.id) or Statement()).acts,
-                not session_service.is_human_controlled(db, session_id, c.id),
-            ),
+    pool = actors or party
+    snapshots = tuple(
+        movement_party.Participant(
+            id=c.id, location=None,
+            human=session_service.is_human_controlled(db, session_id, c.id),
+            stance=(stmts.get(c.id) or Statement()).kind,
+            travel_scene=(stmts.get(c.id) or Statement()).travel_scene,
         )
-        for c in ranked:
-            stmt = stmts.get(c.id) or Statement()
-            if stmt.kind != "none" or stmt.travel_scene:
-                return c
-    return actors[0] if actors else None
+        for c in pool
+    )
+    leader_id = movement_party.proposal_leader(snapshots, named_ids=tuple(c.id for c in actors))
+    return next((c for c in pool if c.id == leader_id), None)
 
 
 def _adjudicate_one(
@@ -447,14 +443,13 @@ def _adjudicate_one(
     stmt = stmts.get(leader.id) or Statement()
     origin = session_service.get_char_location(game_session, leader.id)
     base = Verdict("no_evidence", [leader], origin, exit=proposal.exit)
-    if stmt.travel_scene:
+    evidence = assess_evidence(
+        stance=stmt.kind, travel_scene=stmt.travel_scene, planned_stance=proposal.stance,
+    )
+    if evidence.action == "ignore":
         return None   # 大地图前往另有确定性入口（commit_pending_travel），这里不重复裁定
-    # 表态性质：规划器与原话**都**认定是行动才算行动；任何一方说「人没动」就不动。
-    if not stmt.acts:
-        base.status = stmt.kind if stmt.kind in NON_MOVING else "no_evidence"
-        return base
-    if proposal.stance != "act":
-        base.status = proposal.stance
+    if evidence.action == "stop":
+        base.status = evidence.status
         return base
     text = "。".join(stmt.sentences)
     dest = resolve_destination(module, origin, text, proposal.exit)

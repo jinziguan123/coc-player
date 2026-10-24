@@ -60,3 +60,16 @@ def default_leader(
     ]
     candidates.sort(key=lambda p: (not p.human, p.id != host_id))
     return candidates[0].id if candidates else fallback_id
+
+
+def proposal_leader(
+    party: tuple[Participant, ...], *, named_ids: tuple[str, ...] = (),
+) -> str | None:
+    """点名提案只在点名者中找原话；行动优先，其次真人，同级保留输入顺序。"""
+    by_id = {p.id: p for p in party}
+    pool = tuple(by_id[cid] for cid in named_ids if cid in by_id) if named_ids else party
+    ranked = sorted(pool, key=lambda p: (not p.acts, not p.human))
+    for member in ranked:
+        if member.stance != "none" or member.travel_scene:
+            return member.id
+    return pool[0].id if named_ids and pool else None

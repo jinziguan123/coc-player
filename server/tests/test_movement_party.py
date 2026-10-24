@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from app.domain.movement_party import Participant, default_leader, select_followers
+from app.domain.movement_party import Participant, default_leader, proposal_leader, select_followers
 
 
 HOST = Participant("host", "hall", True)
@@ -67,3 +67,23 @@ def test_默认带头人选择真人行动者_排除目标冲突及仅跟随者(
                           stayed=frozenset({"human"})) == "ai"
     assert default_leader((replace(HUMAN, stance="follow"),), target="room", host_id="host") is None
     assert default_leader((HOST,), target="room", host_id="host", fallback_id="host") == "host"
+
+
+def test_提案点名者不能借用队友原话():
+    party = (HOST, replace(AI, stance="act"))
+    assert proposal_leader(party, named_ids=("host",)) == "host"
+    assert proposal_leader(party) == "ai"
+    assert proposal_leader((HOST, HUMAN)) is None
+
+
+def test_提案带头人行动优先于真人_同级尊重点名顺序():
+    assert proposal_leader((replace(HOST, stance="discuss"), replace(AI, stance="act"))) == "ai"
+    party = (replace(AI, stance="act"), replace(HUMAN, stance="follow"),
+             replace(HOST, stance="act"))
+    assert proposal_leader(party) == "human"
+    assert proposal_leader(party, named_ids=("host", "human", "ai")) == "host"
+    assert proposal_leader((HOST, HUMAN), named_ids=("human", "host")) == "human"
+
+
+def test_大地图表态能成为提案候选_交给后续证据门槛忽略():
+    assert proposal_leader((HOST, replace(AI, travel_scene="room"))) == "ai"
