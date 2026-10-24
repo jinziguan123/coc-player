@@ -260,14 +260,22 @@ REST 契约的单一真源是 `server/openapi.json`，前端类型由 `pnpm api:
 
 ### 4.10 依赖方向单向向下，局部导入不是解法
 
+> 2026-10-24 增补：以下是旧目录的分层约定，不代表服务之间没有依赖环。
+> 移动业务开始采用独立的 `domain/` 核心：个人/共享检定结算只依赖标准库，
+> `application/movement_plans.py` 将 AI 提案转换为领域类型，原 `services/movement.py`
+> 保留编排与持久化。领域不得反向依赖应用、服务、AI、ORM 或 Web，
+> 由 `test_layering.py` 单独守护。范围和后续边界见
+> [移动领域边界](docs/architecture-movement.md)。本次尚未将整个项目改造成六边形架构。
+
+
 ```text
 api/  →  services/（编排）  →  ai/  →  services/（领域）  →  models/ · rules/
 ```
 
 `services/` 里其实住着**两层**：会 import `ai/` 的是编排服务（`turn_orchestrator`、
 `kp_tool_loop`…），不 import 的是领域服务（`session_service`、`world_memory`、`hex_map`…），
-`ai/` 夹在两者中间。看懂这一点，「`ai/` 和 `services/` 好像成环了」的错觉就消失了——
-它不是环，是一个目录装了两层。
+`ai/` 夹在两者中间。目录间双向引用不必然意味着调用成环，但同目录服务也可能形成真实依赖环；
+应检查具体模块关系，不能仅凭这张分层图断言没有环。
 
 硬性禁令（`tests/test_layering.py` 逐条检查，**局部导入照查**）：
 `ai/` 与 `services/` 不得 import `api/`；`models/`、`rules/`、`schemas/` 不得 import

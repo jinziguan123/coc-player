@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
-from app.ai import turn_planner
+from app.application.movement_plans import movement_proposals as _proposals
+from app.domain.movement import CheckOutcome, MovementIntent, rollup as _rollup, settle_check
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
@@ -707,18 +708,6 @@ def char_status(record: dict, char_id: str) -> str:
     return str(record.get("status") or "")
 
 
-def _rollup(char_states: dict[str, str]) -> str:
-    """按人的状态汇总成整条的状态：还有人待投 → 待检定；全到 → 已移动；全败 → 失败；有成有败 → 部分。"""
-    values = set(char_states.values())
-    if values & {"pending", "tried"}:
-        return PENDING
-    if values == {"moved"}:
-        return MOVED
-    if values == {"failed"}:
-        return "failed"
-    return "partial"
-
-
 def begin_turn(game_session: GameSession) -> bool:
     """新的玩家回合：作废检定门控的待执行移动（不提交，由 check_gating.begin_turn 一并提交）。"""
     ts = dict(game_session.turn_state or {})
@@ -765,19 +754,6 @@ def _match_chars(names: list[str], party: list[Character]) -> list[Character]:
     return out
 
 
-def _proposals(plan: turn_planner.TurnPlan | None) -> tuple[list[turn_planner.MovePlan], bool]:
-    """规划器的移动提案；只有旧字段 scene_change 时合成一条（返回 legacy=True）。"""
-    if plan is None:
-        return [], False
-    moves = [m for m in plan.scene_policy.moves if m.actors or m.target or m.exit]
-    if moves:
-        return moves, False
-    ref = (plan.scene_policy.scene_change or "").strip()
-    if not ref:
-        return [], False
-    return [turn_planner.MovePlan(target=ref)], True
-
-
 def _leader(
     db: Session, session_id: str, actors: list[Character], stmts: dict[str, Statement],
     party: list[Character],
@@ -801,7 +777,7 @@ def _leader(
 
 def _adjudicate_one(
     db: Session, session_id: str, game_session: GameSession, module: Module | None,
-    proposal: turn_planner.MovePlan, party: list[Character], stmts: dict[str, Statement],
+    proposal: MovementIntent, party: list[Character], stmts: dict[str, Statement],
     stayed: set[str], busy: set[str], *, legacy_gate: str,
 ) -> Verdict | None:
     actors = _match_chars(list(proposal.actors), party)
@@ -938,7 +914,7 @@ def _verdict_from_record(record: dict, party: list[Character]) -> Verdict:
 def adjudicate_plan(
     db: Session, session_id: str, game_session: GameSession, module: Module | None,
     player_char: Character, teammates: list[Character] | None,
-    plan: turn_planner.TurnPlan | None, *, pre_gen_seq: int | None = None,
+    plan, *, pre_gen_seq: int | None = None,
 ) -> tuple[list[str], str]:
     """裁定并执行本轮的移动提案。返回 (要广播的 chunk, 注入 KP 上下文的裁定说明)。
 
@@ -1045,36 +1021,23 @@ def settle_pending_moves(
     for entry in pending:
         if not check_gating.skill_matches(entry.get("skill", ""), skill):
             continue
-        states = entry["chars"]
-        rollers = [cid for cid in char_ids if states.get(cid) == "pending"]
-        if not rollers:
-            continue   # 无关的人、或他这份已经结算过（重复投骰 / 重复结算不再兑现）
-        touched = True
-        if succeeded:
-            # 共同障碍一旦解除，所有仍在出发处、仍在这次移动里的人都能过——包括先前尝试失败的
-            # （tried：撬门失败不等于门开了还过不去）。个人通行检定只放行投骰者本人。
-            winners = (
-                [cid for cid, st in states.items() if st in ("pending", "tried")]
-                if entry.get("shared") else rollers
-            )
-            movers = [
-                by_id[cid] for cid in winners
-                if cid in by_id
+        resolution = settle_check(
+            entry["chars"], CheckOutcome(frozenset(char_ids), succeeded),
+            shared=bool(entry.get("shared")),
+            eligible_ids=frozenset(
+                cid for cid in entry["chars"] if cid in by_id
                 and session_service.get_char_location(game_session, cid) == entry.get("origin")
-            ]
-            for cid in winners:
-                states[cid] = "moved" if any(m.id == cid for m in movers) else "failed"
-            if movers:
-                moves.append((str(entry.get("target") or ""), movers))
-        else:
-            # 个人通行：失败即结束他的尝试。共同障碍：只用掉他这次尝试（tried），人仍等着障碍解除；
-            # 所有人都试过且都失败，障碍仍在，全体才算失败。
-            for cid in rollers:
-                states[cid] = "tried" if entry.get("shared") else "failed"
-            if entry.get("shared") and "pending" not in states.values():
-                for cid, st in states.items():
-                    if st == "tried":
-                        states[cid] = "failed"
+            ),
+        )
+        if not resolution.changed:
+            continue
+        touched = True
+        states = dict(resolution.states)
+        entry["chars"] = states
+        rollers = resolution.roller_ids
+        if resolution.mover_ids:
+            moves.append((str(entry.get("target") or ""),
+                          [by_id[cid] for cid in resolution.mover_ids]))
         for record in records:
             if record.get("anchor") == entry.get("anchor") and set(record.get("movers") or []) == set(
                 entry.get("movers") or []

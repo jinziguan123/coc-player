@@ -108,3 +108,24 @@ def test_ai_层不再留循环依赖的局部导入():
 def test_每个受约束的层都确实存在(layer):
     """防止目录改名后规则静默失效——层没了，上面两条就变成了空转。"""
     assert (APP / layer).is_dir(), f"app/{layer}/ 不存在，FORBIDDEN 该更新了"
+
+
+def test_领域核心只依赖标准库与领域模块():
+    """独立于旧 services 分层：禁止领域重新绑回 ORM、AI 或应用用例。"""
+    import sys
+
+    domain = APP / "domain"
+    assert domain.is_dir()
+    paths = list(domain.rglob("*.py"))
+    assert any(p.name != "__init__.py" for p in paths)
+    for path in paths:
+        tree = ast.parse(path.read_text("utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level:
+                package_depth = len(path.parent.relative_to(domain).parts)
+                assert node.level <= package_depth + 1, f"{path} 相对导入越过领域边界"
+        for mod, line, _local in _imports(tree):
+            assert (
+                mod.split(".")[0] in sys.stdlib_module_names
+                or mod == "app.domain" or mod.startswith("app.domain.")
+            ), f"{path}:{line} 领域不得依赖 {mod}"
