@@ -1,7 +1,33 @@
 """移动领域契约：不需要数据库和模型替身即可验证通行规则。"""
 import pytest
 
-from app.domain.movement import CheckOutcome, rollup, settle_check
+from app.domain.movement import (
+    CheckOutcome, MovementIntent, PassageDecision, assess_passage, rollup, settle_check,
+)
+
+
+def test_路径不通优先于通道阻碍和检定():
+    intent = MovementIntent(blocked="石板挡路", check_skill="力量")
+    assert assess_passage(intent, reachable=False, legacy_gate="攀爬") == \
+        PassageDecision("unreachable")
+
+
+def test_通道阻碍不被检定需求覆盖():
+    intent = MovementIntent(blocked="  石板挡路  ", check_skill="力量")
+    assert assess_passage(intent, reachable=True, legacy_gate="攀爬") == \
+        PassageDecision("blocked", reason="石板挡路")
+
+
+@pytest.mark.parametrize("skill,legacy,expected", [
+    (" 力量 ", "攀爬", "力量"),
+    ("  ", "攀爬", "攀爬"),
+    ("", "", ""),
+])
+def test_显式技能优先_缺省才使用旧门控(skill, legacy, expected):
+    result = assess_passage(MovementIntent(blocked="  ", check_skill=skill),
+                            reachable=True, legacy_gate=legacy)
+    expected_status = "pending_check" if expected else "moved"
+    assert result == PassageDecision(expected_status, skill=expected)
 
 
 def settle(states, actor, success, *, shared=False, eligible=("a", "b")):

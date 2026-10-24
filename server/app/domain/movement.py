@@ -1,6 +1,7 @@
 """移动业务类型与检定状态转换；仅接收值，不读写存档或发送消息。"""
 from dataclasses import dataclass
 from collections.abc import Mapping
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,30 @@ class MovementIntent:
     blocked: str = ""
     check_skill: str = ""
     shared_check: bool = False
+
+
+@dataclass(frozen=True)
+class PassageDecision:
+    status: Literal["unreachable", "blocked", "pending_check", "moved"]
+    reason: str = ""
+    skill: str = ""
+
+
+def assess_passage(
+    intent: MovementIntent, *, reachable: bool, legacy_gate: str = "",
+) -> PassageDecision:
+    """目的地已明确且不是原处时，按通行资格、通道阻碍、检定顺序裁定。
+
+    reachable 由导航提供，已包含借道限制；终点本身的 blocked_scenes 标记不是否决依据。
+    显式技能优先于旧门控；受阻时不创建待检定移动。
+    """
+    if not reachable:
+        return PassageDecision("unreachable")
+    blocked = (intent.blocked or "").strip()
+    if blocked:
+        return PassageDecision("blocked", reason=blocked)
+    skill = (intent.check_skill or "").strip() or legacy_gate
+    return PassageDecision("pending_check", skill=skill) if skill else PassageDecision("moved")
 
 
 @dataclass(frozen=True)

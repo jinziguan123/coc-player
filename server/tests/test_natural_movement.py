@@ -396,10 +396,13 @@ def test_通道受阻不移动(db_factory):
     chunks, note = movement.adjudicate_plan(
         t.db, t.sid, t.session, t.module, t.alvin, t.others(),
         _plan(MovePlan(actors=["阿尔文"], exit="东侧拱门", target="scene_4",
-                       blocked="巨大石板挡住了拱门，徒手推不动")),
+                       blocked="巨大石板挡住了拱门，徒手推不动", check_skill="力量")),
     )
     assert chunks == [] and t.loc(t.alvin) == "scene_2"
     assert "石板" in note
+    record = movement.turn_records(t.session)[0]
+    assert record["status"] == "blocked" and not record["skill"]
+    assert not (t.session.turn_state or {}).get(movement.PENDING_KEY)
 
 
 def test_不连通的目标_拒绝并解释(db_factory):

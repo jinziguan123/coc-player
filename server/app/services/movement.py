@@ -32,7 +32,9 @@ from app.domain import movement_party
 from app.domain.movement_evidence import NON_MOVING as NON_MOVING, assess_evidence
 from app.domain.movement_language import Statement, analyze, has_any as _has
 from app.domain.movement_space import Destination, resolve_destination as resolve_space_destination
-from app.domain.movement import CheckOutcome, MovementIntent, rollup as _rollup, settle_check
+from app.domain.movement import (
+    CheckOutcome, MovementIntent, assess_passage, rollup as _rollup, settle_check,
+)
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
@@ -461,21 +463,21 @@ def _adjudicate_one(
     base.target = target
     if target == origin:
         return None
-    if session_service.find_scene_path(
+    reachable = session_service.find_scene_path(
         module, origin, target, via_allowed=session_service.passable_scene_ids(game_session),
-    ) is None:
-        base.status = "unreachable"
+    ) is not None
+    passage = assess_passage(proposal, reachable=reachable, legacy_gate=legacy_gate)
+    base.status = passage.status
+    base.skill = passage.skill
+    base.reason = passage.reason
+    if passage.status == "unreachable":
         blocker = session_service.travel_blocker(module, game_session, origin, target)
         base.reason = (
             f"要先经过{turn_context._scene_name(module, blocker[0])}（{blocker[1]}）" if blocker
             else "与当前位置不连通"
         )
         return base
-    # 受阻只认规划器对**这条通道**的裁定（门锁着、石板挡着）。KP 标的 blocked_scenes 管的是
-    # 「借道穿过」，上面的寻路已按可通行集合把关；把它当终点仍是玩家的自由，与大地图前往一致。
-    if (proposal.blocked or "").strip():
-        base.status = "blocked"
-        base.reason = proposal.blocked.strip()
+    if passage.status == "blocked":
         return base
     solo = proposal.solo or stmt.solo
     followers = select_followers(
@@ -489,8 +491,6 @@ def _adjudicate_one(
         c for c in party
         if c not in movers and session_service.get_char_location(game_session, c.id) == origin
     ]
-    base.skill = (proposal.check_skill or "").strip() or legacy_gate
-    base.status = PENDING if base.skill else MOVED
     return base
 
 
