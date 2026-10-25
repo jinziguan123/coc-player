@@ -1120,3 +1120,30 @@ def test_工具守卫读旧格式裁定记录_无个人状态时按整条状态�
     gs.turn_state[movement.MOVES_KEY][1]["char_status"] = {"b": "moved"}
     assert movement.tool_guard(gs, "room", [b]) == ("", ["b"])
     assert movement.char_status(gs.turn_state[movement.MOVES_KEY][1], "b") == movement.MOVED
+
+
+def test_叙事后补挂门控检定_只给本轮还没有检定的人(db_factory, monkeypatch):
+    """补挂判断由 planned_effects 注入移动模块：已挂出检定的人不重复补，其余逐人补挂。"""
+    from app.services import planned_effects
+
+    t = _seed_f(db_factory, human_hassan=True)
+    t.say(t.alvin, "我和哈桑从墙洞爬进去，你们留在这儿")
+    t.say(t.hassan, "我也从墙洞爬进去")
+    pre = session_service.get_next_sequence_num(t.db, t.sid) - 1
+    _stage_climb(t, ["阿尔文", "哈桑"])
+    session_service.add_event(
+        t.db, t.sid, "system", "请阿尔文进行攀爬检定", actor_name="系统",
+        metadata={"check_request": True, "char_id": t.alvin.id, "skill": "攀爬"},
+    )
+    issued = []
+
+    async def fake_dice_check(db, session_id, game_session, module, kv, *_args, **_kw):
+        issued.append(kv)
+        return [], [], None
+
+    monkeypatch.setattr(planned_effects, "_exec_dice_check", fake_dice_check)
+    plan = _plan(MovePlan(actors=["阿尔文", "哈桑"], exit="墙洞", target="scene_2", check_skill="攀爬"))
+    asyncio.run(_collect(chat_service._ensure_planned_scene(
+        t.db, t.sid, t.session, t.module, t.alvin, t.others(), plan, pre_gen_seq=pre,
+    )))
+    assert [(kv["skill"], kv["chars"], kv["source"]) for kv in issued] == [("攀爬", "哈桑", "通过出口")]

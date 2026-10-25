@@ -229,3 +229,16 @@
 仍未迁移：`pending_unissued` 仍通过函数内导入回调 `planned_effects.requested_check_settled`，
 是 movement 与 planned_effects 互相导入的原因；回合开始清理仍由 `check_gating.begin_turn` 调用 `movement.begin_turn`。
 这两处属于回合生命周期与状态所有权，留到第三阶段一起梳理。
+
+## 第十三轮：补挂检定与跨模块状态读取（架构优化第三阶段）
+
+`pending_unissued(game_session, party, issued)` 不再自己查询事件：是否已为某人挂出或掷出检定，
+由调用方 `planned_effects._ensure_planned_scene` 注入（内部仍是 `requested_check_settled`）。
+按人补挂与共同障碍只补第一人的规则移入应用层纯函数 `checks_to_issue`。
+movement 因此不再导入 planned_effects，两者的互相导入消失。签名变化只影响这一个调用方。
+
+`turn_effects` 与 `turn_orchestrator` 不再读取移动存档键或遍历原始记录，改用
+`has_pending_moves`、`has_verdict_for`。结构测试限定 `turn_moves`/`pending_moves` 字面量及
+`movement.PENDING_KEY`/`MOVES_KEY`/`turn_records` 只出现在移动模块与其状态边界。
+
+状态所有权、事务边界与已知问题见 `docs/architecture-state-ownership.md`。

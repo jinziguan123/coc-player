@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -31,7 +32,7 @@ from app.application.movement_adjudication import ActorSnapshot, Proposal, adjud
 from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch, prepare_movement_batch,
 )
-from app.application.movement_settlement import settle_pending_checks
+from app.application.movement_settlement import checks_to_issue, settle_pending_checks
 from app.application.movement_space import project_scene, project_space
 from app.application.movement_state import (
     MoveRecord, PendingMove, busy_ids as _busy_ids, load_move_records,
@@ -657,34 +658,31 @@ def settle_pending_moves(
 
 
 def pending_unissued(
-    db: Session, session_id: str, game_session: GameSession, party: list[Character],
-    pre_gen_seq: int,
+    game_session: GameSession, party: list[Character], issued: Callable[[Character], bool],
 ) -> list[tuple[list[Character], str]]:
     """暂存了门控移动、本轮叙事后却还没挂出/掷出对应检定的人 → [(这些人, 技能)]。
 
-    按人看：一人的检定已挂出或已掷，不代表其他人的也有了。共同障碍只需一人尝试，
-    任一移动者已有检定就不再补挂。
+    ``issued`` 由调用方提供：本轮是否已为该角色挂出或掷出检定（事件查询归检定与计划效果一侧，
+    本模块不反向依赖它）。按人与共同障碍的补挂规则见 ``checks_to_issue``。
     """
-    from app.services import planned_effects   # 延迟导入：planned_effects 依赖本模块
-
-    out = []
     by_id = {c.id: c for c in party}
-    for entry in _pending_moves(game_session):
-        waiting = [by_id[c] for c in entry.waiting_ids if c in by_id]
-        if not waiting:
-            continue
-        issued = [
-            m for m in waiting
-            if planned_effects.requested_check_settled(db, session_id, m.id, pre_gen_seq, m.name)
-        ]
-        if entry.shared:
-            if not issued:
-                out.append((waiting[:1], str(entry.skill or "")))
-            continue
-        rest = [m for m in waiting if m not in issued]
-        if rest:
-            out.append((rest, str(entry.skill or "")))
-    return out
+    pending = _pending_moves(game_session)
+    waiting = {cid for entry in pending for cid in entry.waiting_ids if cid in by_id}
+    plan = checks_to_issue(
+        pending, party_ids=frozenset(by_id),
+        issued_ids=frozenset(cid for cid in waiting if issued(by_id[cid])),
+    )
+    return [([by_id[cid] for cid in ids], skill) for ids, skill in plan]
+
+
+def has_pending_moves(game_session: GameSession) -> bool:
+    """是否还有等骰子落地的门控移动；其他模块据此决定要不要走结算，不直接读存档键。"""
+    return bool(_pending_moves(game_session))
+
+
+def has_verdict_for(game_session: GameSession, target: str) -> bool:
+    """本轮是否已就这个目的地给过移动裁定（落位、待检定、受阻……都算）。"""
+    return any(r.target == target for r in turn_moves(game_session))
 
 
 #: KP 的 scene_change 撞上这些裁定就拒绝：都是「玩家原话或通道本身说明人没动」。

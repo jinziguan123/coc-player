@@ -1317,7 +1317,7 @@ def _location_intent_guard_for_target(
         return ""
     if target == session_service.get_char_location(game_session, player_char.id):
         return ""
-    if any(r.get("target") == target for r in movement.turn_records(game_session)):
+    if movement.has_verdict_for(game_session, target):
         return ""   # 本轮移动裁定已就这个目的地给过权威说明（落位 / 待检定 / 受阻）
     if planned_effects._explicit_player_movement(
         db, session_id, module, player_char, target,

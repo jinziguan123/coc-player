@@ -63,11 +63,19 @@
 互相导入从五对降为四对；强连通分量仍为 28 个模块（movement 还经 planned_effects、turn_context 等成环）。
 详见 `docs/architecture-movement.md` 第十二轮。
 
+## 第三阶段：状态所有权与事务边界
+
+结论与证据见 `docs/architecture-state-ownership.md`。本阶段代码收敛：
+movement 不再回调 planned_effects（补挂判断由调用方注入，规则移入 `checks_to_issue`）；
+其他模块不再解释移动存档键；以结构测试约束。互相导入从四对降为三对
+（剩余：check_gating ↔ planned_effects、movement ↔ turn_context、rule_options_service ↔ session_service）。
+调查中发现回合确认会抹掉移动与自动检定状态，按“业务漏洞单独修复”的要求另行提交。
+
 ## 持续进度
 
 - 第一阶段：已完成。验证：后端全量 2891 通过、11 跳过；Ruff 通过；`git diff --check` 通过。提交号见 Git 日志（「第一阶段」提交）。
 - 第二阶段：已完成。验证：后端全量 2908 通过、11 跳过；Ruff 通过；`git diff --check` 通过。提交号见 Git 日志（「第二阶段」提交）。
-- 第三阶段：待整理移动、检定、回合与导航状态所有权，选择一个明确的越界写入或重复解释收敛。
+- 第三阶段：已完成。验证：后端全量 2914 通过、11 跳过；Ruff 通过；`git diff --check` 通过。提交号见 Git 日志（「第三阶段」提交）。
 - 未解决：上表其余四对互相导入；`check_gating.begin_turn` 只清理了移动状态时返回值仍为 False（待第三阶段核实影响）。
 - 已知无关文件：既有 2026-10-22 计划草稿与 tmp 下审计/截图文件，不纳入提交。
-- 下一条操作：第三阶段，追踪 turn_moves / pending_moves / auto_checks / pending_item_gains 等回合状态的创建、修改、消费与清理。
+- 下一条操作：单独修复回合确认抹掉移动/自动检定状态的问题，然后给出最终架构评估。

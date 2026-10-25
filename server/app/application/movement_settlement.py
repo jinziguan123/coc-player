@@ -58,3 +58,26 @@ def settle_pending_checks(
         MovementStateUpdate(tuple(updated_records), tuple(e for e in entries if e.waiting_ids)),
         tuple(rollers),
     )
+
+
+def checks_to_issue(
+    pending: tuple[PendingMove, ...], *, party_ids: frozenset[str], issued_ids: frozenset[str],
+) -> tuple[tuple[tuple[str, ...], str], ...]:
+    """暂存了门控移动、叙事后却还没挂出或掷出对应检定的人 → ((这些人, 技能), ...)。
+
+    按人看：一人的检定已挂出或已掷，不代表其他人的也有了。共同障碍只需一人尝试：
+    任一待检定者已有检定就不再补挂，否则只为第一个待检定者补挂。不在队伍里的人不补。
+    """
+    out = []
+    for entry in pending:
+        waiting = tuple(cid for cid in entry.waiting_ids if cid in party_ids)
+        if not waiting:
+            continue
+        if entry.shared:
+            if not issued_ids.intersection(waiting):
+                out.append((waiting[:1], str(entry.skill or "")))
+            continue
+        rest = tuple(cid for cid in waiting if cid not in issued_ids)
+        if rest:
+            out.append((rest, str(entry.skill or "")))
+    return tuple(out)

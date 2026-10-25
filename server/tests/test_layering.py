@@ -179,3 +179,39 @@ def test_移动服务不依赖检定门控_避免两者互相导入():
         else:
             continue
         assert "app.services.check_gating" not in targets, f"movement.py:{node.lineno} 不得依赖 check_gating"
+
+
+def _import_targets(tree: ast.AST) -> list[tuple[str, int]]:
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            out += [(a.name, node.lineno) for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            out.append((node.module, node.lineno))
+            out += [(f"{node.module}.{a.name}", node.lineno) for a in node.names]
+    return out
+
+
+def test_移动服务不回调计划效果_补挂判断由调用方注入():
+    """planned_effects 调用 movement；movement 若再反向导入 planned_effects 就又成了互相导入。"""
+    tree = ast.parse((APP / "services" / "movement.py").read_text("utf-8"))
+    for mod, line in _import_targets(tree):
+        assert mod != "app.services.planned_effects", f"movement.py:{line} 不得依赖 planned_effects"
+
+
+#: 移动状态的存档键只归移动模块与其状态边界解释；其他模块经 movement 的查询函数读取。
+_MOVEMENT_STATE_OWNERS = {APP / "services" / "movement.py", APP / "application" / "movement_state.py"}
+
+
+def test_移动回合状态的存档键只由移动模块解释():
+    offenders = []
+    for path in sorted(APP.rglob("*.py")):
+        if path in _MOVEMENT_STATE_OWNERS:
+            continue
+        for node in ast.walk(ast.parse(path.read_text("utf-8"))):
+            if isinstance(node, ast.Constant) and node.value in ("turn_moves", "pending_moves"):
+                offenders.append(f"{path.relative_to(APP)}:{node.lineno} 字面量 {node.value}")
+            if isinstance(node, ast.Attribute) and node.attr in ("PENDING_KEY", "MOVES_KEY", "turn_records") \
+                    and isinstance(node.value, ast.Name) and node.value.id == "movement":
+                offenders.append(f"{path.relative_to(APP)}:{node.lineno} movement.{node.attr}")
+    assert not offenders, "\n".join(offenders)

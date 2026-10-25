@@ -1161,7 +1161,8 @@ async def _ensure_planned_scene(
     if pre_gen_seq is None:
         return
     for movers, skill in movement.pending_unissued(
-        db, session_id, game_session, party, pre_gen_seq,
+        game_session, party,
+        issued=lambda c: requested_check_settled(db, session_id, c.id, pre_gen_seq, c.name),
     ):
         if not skill:
             continue

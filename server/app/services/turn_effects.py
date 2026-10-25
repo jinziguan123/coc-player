@@ -1073,7 +1073,7 @@ def _settle_moves_for(
     """某个玩家方角色的一次检定落地 → 结算他那份门控移动（其他人照旧待投）。"""
     from app.services import movement
 
-    if not (game_session.turn_state or {}).get(movement.PENDING_KEY):
+    if not movement.has_pending_moves(game_session):
         return []
     party = session_service.get_party_members(db, session_id)
     host = db.get(Character, game_session.player_character_id) if game_session.player_character_id else None

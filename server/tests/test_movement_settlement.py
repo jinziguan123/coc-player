@@ -119,3 +119,37 @@ def test_写回保留扩展字段且不改输入快照():
 ])
 def test_技能匹配忽略空白大小写并允许互相包含(expected, rolled, hit):
     assert skill_matches(expected, rolled) is hit
+
+
+def _entry(movers, chars=None, shared=False, skill="攀爬"):
+    return PendingMove.from_record({"movers": list(movers), "skill": skill, "shared": shared,
+                                    **({"chars": chars} if chars else {})})
+
+
+def test_补挂检定_个人检定只给还没有检定的人():
+    from app.application.movement_settlement import checks_to_issue
+
+    pending = (_entry(["a", "b", "c"], {"a": "pending", "b": "pending", "c": "failed"}),)
+    assert checks_to_issue(pending, party_ids=frozenset("abc"), issued_ids=frozenset("a")) == (
+        (("b",), "攀爬"),)
+    assert checks_to_issue(pending, party_ids=frozenset("abc"), issued_ids=frozenset("ab")) == ()
+
+
+def test_补挂检定_共同障碍任一人已有检定就不补_否则只补第一个待检定者():
+    from app.application.movement_settlement import checks_to_issue
+
+    pending = (_entry(["a", "b", "c"], {"a": "tried", "b": "pending", "c": "pending"},
+                      shared=True, skill="力量"),)
+    party = frozenset("abc")
+    assert checks_to_issue(pending, party_ids=party, issued_ids=frozenset()) == ((("b",), "力量"),)
+    assert checks_to_issue(pending, party_ids=party, issued_ids=frozenset("c")) == ()
+    # tried 的人已用掉尝试，他本人的旧检定不算“已为待检定者挂出”
+    assert checks_to_issue(pending, party_ids=party, issued_ids=frozenset("a")) == ((("b",), "力量"),)
+
+
+def test_补挂检定_不在队伍里的人不补_旧条目缺个人状态按全员待检定():
+    from app.application.movement_settlement import checks_to_issue
+
+    pending = (_entry(["x", "a"]), _entry(["y"]))
+    assert checks_to_issue(pending, party_ids=frozenset("a"), issued_ids=frozenset()) == (
+        (("a",), "攀爬"),)
