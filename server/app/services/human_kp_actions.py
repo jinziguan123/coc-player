@@ -19,7 +19,6 @@ from app.services import (
     illustration_service,
     kp_actions,
     movement,
-    navigation_service,
     npc_identity,
     rule_options_service,
     scene_kind,
@@ -707,6 +706,10 @@ def _exec_move_actor(
     玩家自己走是「前往」，要过封路、连通性这些闸；KP 挪人是裁定结果——被拖走、被传送、
     昏迷后醒在别处——不该被同一套闸拦下。所以这里直接写落点，不走 travel 那条链。
     目的地顺带对玩家公开：人都在那儿了，地图上还藏着它没有意义。
+
+    只挪选中的这一个人。房主的位置就是 ``current_scene_id``，同处、没有位置记录的队友
+    会随之被回落「带走」，所以经 ``movement.move_characters`` 落位：它在同一笔事务里先写实
+    这些人的原位置（与自然语言移动同一实现），且不做通行校验。
     """
     scene = _find_scene(module, ref)
     if scene is None:
@@ -718,8 +721,10 @@ def _exec_move_actor(
         raise ValueError("找不到这个角色")
     sid = str(scene.get("id") or "")
     name = _scene_label(scene)
-    navigation_service.set_char_location(db, session_id, char_id, sid)
-    db.refresh(game_session)
+    party = session_service.get_party_members(db, session_id)
+    if char not in party:
+        party.append(char)
+    movement.move_characters(db, session_id, game_session, module, [char], sid, party, announce=False)
     ws = dict(game_session.world_state or {})
     revealed = list(ws.get("kp_revealed") or [])
     if sid not in revealed:

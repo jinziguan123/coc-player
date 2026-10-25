@@ -83,6 +83,37 @@ def test_mark_seen_records_one_or_many_clues(db_factory):
         _run(db, session, module, "mark_seen", {})
 
 
+def test_move_actor_moves_only_chosen_host_and_leaves_mates_in_place(db_factory):
+    """KP 强制挪房主：同处、没有显式位置记录的队友原地不动（房主位置即 current_scene_id，曾把他们一起带走）。"""
+    db = db_factory()
+    module, hero, mate, session = _seed(db, with_ai_mate=True)
+    assert session_service.get_char_location(session, mate.id) == "s1"
+    assert mate.id not in session_service.get_party_locations(session)   # 前提：队友没有位置记录
+
+    _chunks, note = _run(db, session, module, "move_actor", {"character_id": hero.id, "scene_id": "s2"})
+    db.expire_all()
+    session = db.get(GameSession, session.id)
+    assert "已移动到" in note
+    assert session_service.get_char_location(session, hero.id) == "s2"
+    assert session_service.get_char_location(session, mate.id) == "s1"
+    moved = [e for e in session_service.get_session_events(db, session.id)
+             if (e.metadata_ or {}).get("moved_to")]
+    assert [(e.metadata_ or {}).get("char_id") for e in moved] == [hero.id]
+
+
+def test_move_actor_moves_only_chosen_mate_and_ignores_travel_gates(db_factory):
+    """挪队友只动他本人；KP 挪人不受封路/连通性闸门限制（s2 → s1 没有出口也能挪）。"""
+    db = db_factory()
+    module, hero, mate, session = _seed(db, with_ai_mate=True)
+    _run(db, session, module, "move_actor", {"character_id": mate.id, "scene_id": "s2"})
+    _run(db, session, module, "move_actor", {"character_id": hero.id, "scene_id": "s2"})
+    _run(db, session, module, "move_actor", {"character_id": mate.id, "scene_id": "s1"})
+    db.expire_all()
+    session = db.get(GameSession, session.id)
+    assert session_service.get_char_location(session, hero.id) == "s2"
+    assert session_service.get_char_location(session, mate.id) == "s1"
+
+
 def test_block_and_unblock_path(db_factory):
     db = db_factory()
     module, _hero, _mate, session = _seed(db)
