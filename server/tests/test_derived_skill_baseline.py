@@ -61,12 +61,19 @@ def test_按界面显示的起始值加点不会蒸发(client):
     assert landed["闪避"] == 40              # 30 + 10
 
 
-def test_教育高于九十时母语不被建卡上限砍掉():
+@pytest.mark.parametrize("education_roll,expected", [(1, 95), (100, 99)])
+def test_教育高于九十时母语不被建卡上限砍掉(monkeypatch, education_roll, expected):
     """90 是「加点不得超过」的上限，不是属性派生基础值的上限。EDU 上限是 99。"""
     attrs = {**ATTRS, "EDU": 95}
     assert ruleset_for("coc").character.base_skills(attrs)["母语"] == 95
 
     from app.services import ai_character_service
+    from types import SimpleNamespace
+
+    # 显式覆盖年龄增强成功和失败；不让随机骰决定这个基础值回归测试是否通过。
+    monkeypatch.setattr("app.rules.coc.components.character.roll", lambda notation: SimpleNamespace(
+        total=education_roll if notation == "1d100" else 4,
+    ))
 
     class _Mod:
         id = "m"
@@ -75,7 +82,9 @@ def test_教育高于九十时母语不被建卡上限砍掉():
         world_setting = {"era": "1920s"}
 
     ai = {"name": "学者", "age": 40, "occupation": "记者", "credit_rating": 30, "skills": {}}
-    assert ai_character_service._assemble(_Mod(), attrs, ai)["skills"]["母语"] == 95
+    card = ai_character_service._assemble(_Mod(), attrs, ai)
+    assert card["base_attributes"]["EDU"] == expected
+    assert card["skills"]["母语"] == expected
 
 
 def test_ai_建卡也允许给母语加点():

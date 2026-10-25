@@ -44,5 +44,3 @@ def remap_marks_after_rewrite(
         result[4] = [(_remap(o), label) for (o, label) in result[4]]
     if event_order:
         event_order[:] = [(_remap(o), eid) for (o, eid) in event_order]
-
-
