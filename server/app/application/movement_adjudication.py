@@ -1,5 +1,5 @@
 """移动批次裁定：消费参与者快照及只读导航，不持有 ORM 或执行写入。"""
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -113,6 +113,29 @@ def adjudicate_one(
     return replace(base, mover_ids=ids, stayer_ids=tuple(
         member.id for member in members if member.id not in ids and member.location == lead.location
     ))
+
+
+def fill_unproposed(
+    proposals: tuple[Proposal, ...], party: tuple[ActorSnapshot, ...], *,
+    gates: Mapping[str, str] | None = None,
+) -> tuple[Proposal, ...]:
+    """规划器漏报的真人行动宣言：按本人原话补一条提案，排在规划器提案之后。
+
+    只补真人、本人原话是明确行动（不含仅表态跟随）、不是大地图前往、且没有出现在任何规划器提案里
+    （无论 stance）的人——规划器明确判过的（走近、商量、受阻……）照旧以规划器为准。
+    补出的提案不带出口与目标，去向、通行和跟随照常复核。``gates`` 给出本轮计划要求此人先过的检定，
+    有就按检定门控，不会因为补位绕过规划器要的骰子。
+    """
+    covered = {cid for proposal in proposals for cid in proposal.actor_ids}
+    added = tuple(
+        Proposal(MovementIntent(stance="act", solo=actor.participant.solo,
+                                check_skill=(gates or {}).get(actor.participant.id, "")),
+                 (actor.participant.id,))
+        for actor in party
+        if actor.participant.human and actor.participant.stance == "act"
+        and not actor.participant.travel_scene and actor.participant.id not in covered
+    )
+    return proposals + added
 
 
 def adjudicate_batch(

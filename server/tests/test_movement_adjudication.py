@@ -139,3 +139,40 @@ def test_整句也解析不出时保留原结果_已解析时不再看整句():
     seen.clear()
     ok = resolve_statement(lambda t: seen.append(t) or Destination("resolved", "x"), ("钻进去",), ("整句",))
     assert ok.target == "x" and seen == ["钻进去"]
+
+
+def _snap(cid, *, human=True, stance="act", **kw):
+    return ActorSnapshot(Participant(cid, "hall", human, stance=stance, **kw), ("钻进去",))
+
+
+def test_规划器漏报的真人行动宣言按原话补提案_排在规划器提案之后():
+    from app.application.movement_adjudication import fill_unproposed
+
+    planned = (Proposal(MovementIntent(stance="act", target="room"), ("ai",)),)
+    party = (_snap("ai", human=False), _snap("host", solo=True), _snap("mate", stance="follow"),
+             _snap("trip", travel_scene="far"), _snap("talk", stance="discuss"), _snap("silent", stance="none"))
+    filled = fill_unproposed(planned, party, gates={"host": "攀爬"})
+    assert filled[0] is planned[0]
+    assert [(p.actor_ids, p.intent.stance, p.intent.solo, p.intent.check_skill, p.intent.target)
+            for p in filled[1:]] == [(("host",), "act", True, "攀爬", "")]
+
+
+def test_规划器明确判过的真人不补位_无论判成什么():
+    from app.application.movement_adjudication import fill_unproposed
+
+    for stance in ("approach", "discuss", "conditional", "act"):
+        planned = (Proposal(MovementIntent(stance=stance), ("host",)),)
+        assert fill_unproposed(planned, (_snap("host"),)) == planned
+
+
+def test_补出的提案照常经去向与通行复核():
+    from app.application.movement_adjudication import fill_unproposed
+
+    nav = Map(status="ambiguous", target=None)
+    filled = fill_unproposed((), (_snap("a"),))
+    ((decision, _),) = adjudicate_batch(filled, (_snap("a"),), nav, host_id="a", stayed=frozenset())
+    assert decision.status == "ambiguous" and decision.mover_ids == ("a",)
+    blocked = Map()
+    gated = fill_unproposed((), (_snap("a"),), gates={"a": "攀爬"})
+    ((decision, _),) = adjudicate_batch(gated, (_snap("a"),), blocked, host_id="a", stayed=frozenset())
+    assert (decision.status, decision.skill) == ("pending_check", "攀爬")

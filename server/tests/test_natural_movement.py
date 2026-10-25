@@ -915,7 +915,8 @@ def test_无效movers_拒绝而不是回退成主角或整队(db_factory, monkey
                         text="[SCENE_CHANGE: scene_id=前室, movers=不存在的人]")
     t = _seed_f(db_factory)
     t.say(t.alvin, "我从拱门钻进去")
-    _generate(t, TurnPlan())
+    # 规划器已明确判过阿尔文（只是走近），确定性补位不介入，只验证工具的无效 movers 被拒
+    _generate(t, _plan(MovePlan(actors=["阿尔文"], stance="approach", exit="拱门")))
     locs, moves, _r, _p = _committed_state(t)
     assert set(locs.values()) == {"scene_1"} and moves == []
 
@@ -1217,3 +1218,60 @@ def test_真实模型验收s6_从前室钻回甬道_去向写在同一分句里�
     _generate(t, _plan(MovePlan(actors=["阿尔文"], exit="墙洞", target="scene_1")))
     assert t.loc(t.alvin) == "scene_1"
     assert movement.turn_records(t.session)[0]["status"] == movement.MOVED
+
+
+def test_真实模型验收s1a_规划器只列了跟上的AI队友_漏报房主_按原话补位(db_factory, monkeypatch):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory())
+    t.say(t.alvin, "我抛下队友，从墙洞钻进去")
+    t.say(t.nadia, "我跟上大夫，也从墙洞钻进去")
+    _generate(t, _plan(MovePlan(actors=["纳迪娅"], exit="墙洞", target="scene_2")))
+    assert t.loc(t.alvin) == "scene_2" and t.loc(t.nadia) == "scene_2"
+    assert t.loc(t.karim) == "scene_1" and t.loc(t.hassan) == "scene_1"
+    statuses = sorted((r["status"], tuple(r["mover_names"])) for r in movement.turn_records(t.session))
+    assert statuses == [(movement.MOVED, ("纳迪娅",)), (movement.MOVED, ("阿尔文",))]
+
+
+def test_真实模型验收s2_规划器返回空moves_房主行动照常裁定_留守真人不动(db_factory, monkeypatch):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory(), human_hassan=True)
+    t.say(t.hassan, "我留在甬道守着出口，你们先进去")
+    t.say(t.alvin, "我们走吧，从墙洞钻进去")
+    _generate(t, _plan())
+    assert t.loc(t.alvin) == "scene_2"
+    assert t.loc(t.hassan) == "scene_1"
+    assert "本轮移动裁定" in _system_text(kp.calls[0])
+
+
+def test_规划器明确判为走近时不补位(db_factory, monkeypatch):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory())
+    t.say(t.alvin, "我从墙洞钻进去")
+    _generate(t, _plan(MovePlan(actors=["阿尔文"], stance="approach", exit="墙洞")))
+    assert t.loc(t.alvin) == "scene_1" and t.move_events() == []
+
+
+def test_补位遵守计划要求的检定_投骰前不移动(db_factory, monkeypatch):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory())
+    t.say(t.alvin, "我抛下队友，从墙洞爬进去")
+    plan = _plan(requires_check=True)
+    plan.check.skill = "攀爬"
+    _generate(t, plan)
+    assert t.loc(t.alvin) == "scene_1"
+    (record,) = movement.turn_records(t.session)
+    assert (record["status"], record["skill"]) == (movement.PENDING, "攀爬")
+
+
+def test_补位后KP复述同一目的地且省略movers_不把没表态的房主连同队友搬走(db_factory, monkeypatch):
+    _kp_runtime_no_plan(monkeypatch, db_factory, native=True, args={"scene_id": "前室"},
+                        text="[SCENE_CHANGE: scene_id=前室]")
+    t = _seed_f(db_factory, human_hassan=True)
+    t.say(t.hassan, "我抛下你们，从墙洞钻进去")
+    _generate(t, TurnPlan())
+    assert _locs(t) == {"阿尔文": "scene_1", "纳迪娅": "scene_1", "卡里姆": "scene_1", "哈桑": "scene_2"}
+    assert len(_committed_state(t)[1]) == 1

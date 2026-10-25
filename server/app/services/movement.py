@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.application.movement_plans import movement_proposals as _proposals
 from app.application.movement_adjudication import (
-    ActorSnapshot, Proposal, adjudicate_batch, resolve_statement,
+    ActorSnapshot, Proposal, adjudicate_batch, fill_unproposed, resolve_statement,
 )
 from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch, prepare_movement_batch,
@@ -580,6 +580,21 @@ def _verdict_from_record(record: MoveRecord, party: list[Character]) -> Verdict:
     )
 
 
+def _check_gates(plan, party: list[Character], game_session: GameSession) -> dict[str, str]:
+    """本轮计划要求先过的检定落在谁身上：点了名的人，或「在场/全体」时的全队；空=房主。"""
+    if plan is None or not plan.requires_check or not (plan.check.skill or "").strip():
+        return {}
+    skill = plan.check.skill.strip()
+    chars = (plan.check.chars or "").strip()
+    if not chars:
+        targets = [c for c in party if c.id == game_session.player_character_id]
+    elif chars in ("在场", "全体", "所有人", "全员"):
+        targets = party
+    else:
+        targets = _match_chars(re.split(r"[、，,/\s]+", chars), party)
+    return {c.id: skill for c in targets}
+
+
 def adjudicate_plan(
     db: Session, session_id: str, game_session: GameSession, module: Module | None,
     player_char: Character, teammates: list[Character] | None,
@@ -598,8 +613,6 @@ def adjudicate_plan(
     if existing:
         return [], _render_notes(module, [_verdict_from_record(r, party) for r in existing])
     proposals, legacy = _proposals(plan)
-    if not proposals:
-        return [], ""
     named_terms: set[str] = set()
     for sid in _location_ids(module):
         named_terms |= scene_terms(module, sid)
@@ -607,9 +620,17 @@ def adjudicate_plan(
     legacy_gate = (
         (plan.check.skill or "").strip() if legacy and plan is not None and plan.requires_check else ""
     )
+    snapshots = _actor_snapshots(db, session_id, game_session, party, stmts)
+    planned = tuple(
+        Proposal(p, tuple(c.id for c in _match_chars(list(p.actors), party))) for p in proposals
+    )
+    filled = fill_unproposed(planned, snapshots, gates=_check_gates(plan, party, game_session))
+    for extra in filled[len(planned):]:
+        logger.info("规划器漏报真人移动，按原话补提案：session=%s char=%s", session_id, extra.actor_ids)
+    if not filled:
+        return [], ""
     decisions = adjudicate_batch(
-        tuple(Proposal(p, tuple(c.id for c in _match_chars(list(p.actors), party))) for p in proposals),
-        _actor_snapshots(db, session_id, game_session, party, stmts),
+        filled, snapshots,
         _MovementNavigation(module, game_session), host_id=game_session.player_character_id,
         stayed=frozenset(stayed), legacy=legacy, legacy_gate=legacy_gate,
     )
@@ -804,6 +825,13 @@ def default_movers(
     by_id = {c.id: c for c in party}
     leader = by_id.get(leader_id) or fallback_leader
     lead = stmts.get(leader_id) or Statement()
+    if not lead.acts and any(
+        r.target == target and any(r.status_of(cid) == MOVED for cid in r.mover_ids)
+        for r in turn_moves(game_session)
+    ):
+        # 没人宣告、只是回落到房主，而本轮已有人按裁定去了这个目的地：KP 多半是在复述那次移动，
+        # 不能借此把没表态的房主连同默认跟随的队友一起搬走。
+        return []
     origin = session_service.get_char_location(game_session, leader_id)
     ids = movement_party.select_followers(
         snapshots, leader_id=leader_id, host_id=game_session.player_character_id,
