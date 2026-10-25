@@ -1163,3 +1163,33 @@ def test_真人确认回合不会抹掉暂存的门控移动(db_factory):
     assert ts["turn_confirm"] == {t.hassan.id: True}
     _roll(t, t.alvin, "攀爬", "success")
     assert _locs(t)["阿尔文"] == "scene_2"
+
+
+def test_陵墓_独行后返回队友处_上下文重新合并且重生成不重复移动(db_factory, monkeypatch):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory())
+    t.say(t.alvin, "我抛下队友，从拱门钻进去")
+    _generate(t, _plan(MovePlan(actors=["阿尔文"], exit="拱门", target="scene_2", solo=True)))
+    assert len(kp.calls) == 2
+    assert t.loc(t.alvin) == "scene_2"
+
+    check_gating.begin_turn(t.db, t.session)
+    t.say(t.alvin, "我独自返回甬道，与队友汇合")
+    plan = _plan(MovePlan(actors=["阿尔文"], target="scene_1", solo=True))
+    kp.calls.clear()
+    _generate(t, plan)
+    assert all(t.loc(c) == "scene_1" for c in t.party)
+    assert len(t.move_events()) == 2
+    groups = chat_service._location_groups(t.session, t.module, t.alvin, t.others())
+    assert len(groups) == 1 and groups[0]["scene_id"] == "scene_1"
+    assert len(kp.calls) == 1
+    assert "本轮移动裁定" in _system_text(kp.calls[0])
+    assert "甬道" in _system_text(kp.calls[0])
+
+    session_service.rollback_last_kp_output(t.db, t.sid)
+    kp.calls.clear()
+    _generate(t, plan)
+    assert all(t.loc(c) == "scene_1" for c in t.party)
+    assert len(t.move_events()) == 2
+    assert len(kp.calls) == 1
