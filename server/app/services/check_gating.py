@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.checks import skill_matches as skill_matches
 from app.models.session import GameSession
-from app.services import auto_check_state, movement, planned_effects, world_memory
+from app.services import auto_check_state, movement, reward_settlement, world_memory
 from app.services.auto_check_state import AUTO_CHECKS_KEY as AUTO_CHECKS_KEY, auto_outcome as auto_outcome
 
 
@@ -11,7 +11,7 @@ def begin_turn(db: Session, game_session: GameSession) -> bool:
     """作废各所有者的暂存，一次提交；任何一步失败整体回滚。"""
     try:
         moved = movement.begin_turn(game_session)
-        items = planned_effects.discard_pending_item_gains(db, game_session, commit=False)
+        items = reward_settlement.discard_pending_item_gains(db, game_session, commit=False)
         checks = auto_check_state.clear(game_session)
         world, clues = world_memory.discard_pending_clue_reveals(game_session.world_state)
         if clues:
@@ -30,7 +30,7 @@ def record_auto_check(
     event_id: str, skill: str, succeeded: bool, module=None, on_first_clue=None,
 ) -> list:
     """自动检定与收益由同一事务保存；移动仍由逐人结算入口处理。"""
-    return planned_effects.settle_auto_rewards(
+    return reward_settlement.settle_auto_rewards(
         db, session_id, game_session, skill=skill, succeeded=succeeded,
         module=module, on_first_clue=on_first_clue, event_id=event_id,
     )

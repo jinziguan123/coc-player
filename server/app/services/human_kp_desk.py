@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.models.event_log import EventLog
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import planned_effects, session_service
+from app.services import reward_settlement, session_service
 from app.services.event_protocol import make_chunk as _make_chunk
 
 LEDGER_LIMIT = 60
@@ -192,7 +192,7 @@ def cancel_pending_check(
     if check.get("kind") != "san_check":
         db.refresh(game_session)
         succeeded = bool(check.get("check_any_success"))
-        chunks.extend(planned_effects.settle_check_rewards(
+        chunks.extend(reward_settlement.settle_check_rewards(
             db, session_id, game_session, succeeded, module=module,
         ))
     if len(results) > 1:

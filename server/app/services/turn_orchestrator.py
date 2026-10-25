@@ -53,6 +53,7 @@ from app.services import (
     planned_effects,
     plot_progress,
     combat_service,
+    reward_settlement,
     rule_options_service,
     rulebook_service,
     session_service,
@@ -2173,7 +2174,7 @@ async def _settle_rolled_check(
         fumbled = bool(check.get("check_any_fumble")) or fumbled
     # 「先检定、后发货」的落地：本轮被这次检定门控的收获此前只暂存未入库，
     # 到这里骰子落地才决定给不给（扒窃掷输了，那块表不该在他包里）。
-    for chunk in planned_effects.settle_check_rewards(
+    for chunk in reward_settlement.settle_check_rewards(
         db, session_id, game_session, succeeded,
         module=module, on_first_clue=_maybe_clue_illustration,
     ):

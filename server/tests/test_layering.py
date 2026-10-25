@@ -242,3 +242,16 @@ def test_规则配置不反向依赖会话服务_队员查询不依赖其他服�
                for mod, _ in _import_targets(tree))
     tree = ast.parse((APP / "services" / "party_queries.py").read_text("utf-8"))
     assert all(not mod.startswith("app.services") for mod, _ in _import_targets(tree))
+
+
+def test_收益结算只依赖状态与存储接口_不回调规划或回合编排():
+    path = APP / "services" / "reward_settlement.py"
+    allowed = {"auto_check_state", "effect_channel", "event_store", "event_protocol",
+               "inventory_service", "world_memory"}
+    for mod, line in _import_targets(ast.parse(path.read_text("utf-8"))):
+        assert not mod.startswith("app.ai"), f"{path}:{line} 不得依赖 AI"
+        if mod.startswith("app.services."):
+            assert mod.split(".")[2] in allowed, f"{path}:{line} 收益边界不得依赖 {mod}"
+    for name in ("check_gating", "human_kp_desk"):
+        tree = ast.parse((APP / "services" / f"{name}.py").read_text("utf-8"))
+        assert all(mod != "app.services.planned_effects" for mod, _ in _import_targets(tree))

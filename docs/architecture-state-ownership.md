@@ -1,127 +1,80 @@
-# 移动、检定、回合与位置：状态所有权与事务边界
+# 状态所有权与事务边界（当前实现）
 
-日期：2026-10-25。依据是实际调用与写入（文件与函数见各表），区分**当前实现**与**目标设计**。
-这里只划分实际存在的状态和写入方，不把模块命名成聚合或限界上下文。
+更新日期：2026-10-25。本文描述当前代码；历史过程见 [后续验收记录](architecture-followup-2026-10-25.md)
+和 [历史审计](history/architecture-audit-2026-10-25-before-followup.md)。
 
-## 一、状态清单与所有者（当前实现）
+## 状态所有者
 
-| 状态 | 存放 | 创建 | 修改 | 消费 | 清理 |
-|---|---|---|---|---|---|
-| 回合移动裁定 | `turn_state.turn_moves` | `movement.adjudicate_plan`（经 `prepare_movement_batch`） | `movement.settle_pending_moves`（个人状态与整条状态） | `tool_guard`、`busy_ids`、`has_move_evidence`、`has_verdict_for`、重生成时的说明恢复 | `movement.begin_turn`（由 `check_gating.begin_turn` 调用） |
-| 待检定移动 | `turn_state.pending_moves` | `adjudicate_plan`（新条目替换参与者重叠的旧条目） | `settle_pending_moves` | `pending_unissued`（补挂检定）、`has_pending_moves` | 结算完自动移出；`movement.begin_turn` |
-| 自动检定结果 | `turn_state.auto_checks` | `check_gating.record_auto_check` | — | `check_gating.auto_outcome`（规划物品是否直接给） | `check_gating.begin_turn` |
-| 待检定物品收益 | `turn_state.pending_item_gains` | `planned_effects._ensure_planned_items` | — | `planned_effects.settle_pending_item_gains`（手动投骰、自动检定、人类 KP 台面） | 结算即清；`check_gating.begin_turn`；`_discard_pending_item_gains` |
-| 待检定线索 | `world_state.pending_clue_reveals` | `world_memory` 暂存（经 `turn_context`） | — | `planned_effects.settle_pending_clue_reveals` | 结算即清；`check_gating.begin_turn` |
-| 回合确认 | `turn_state.turn_confirm` | `turn_state_service.set_turn_confirm` | 同上 | `turn_confirm_state` | `turn_state_service.commit_turn` |
-| 角色位置 | `SessionNavigation.party_locations`、`GameSession.current_scene_id`（房主） | `navigation_service.set_char_location` | 见下表 | `get_char_location`（无记录回落到房主所在） | 无（位置不随回合撤销） |
-
-### 位置写入方
-
-| 写入方 | 场景 | 事务 | 是否固定留守者 |
+| 状态 | 存放 | 创建与修改 | 消费与清理 |
 |---|---|---|---|
-| `movement._stage_move`（经 `commit_movement_batch`） | 自然语言移动、检定通过、KP 工具 `scene_change`、大地图前往、人类 KP 强制挪人 | 位置、留守固定、移动事件、裁定与待检定记录一笔提交 | 是：房主移动时先写实同处无记录的人 |
-| `team_turn_service` 队友前往/留守 | AI 队友自主决定 | 位置与行动事件分两次提交 | 不涉及（AI 队友不是房主） |
+| 回合移动裁定 | `turn_state.turn_moves` | movement 经应用层裁定、装配和提交；movement_state 解释存档结构 | movement 查询接口；新回合 movement.begin_turn 清理 |
+| 待检定移动 | `turn_state.pending_moves` | movement 经裁定与检定结算应用用例 | 逐人/共同障碍结算；movement.begin_turn 作废 |
+| 自动检定标记 | `turn_state.auto_checks` | auto_check_state.record，同一事件与技能不重复追加 | auto_outcome 只读仍存活的骰子事件；clear 作废 |
+| 待检定物品 | `turn_state.pending_item_gains` | planned_effects 根据规划暂存 | reward_settlement 消费或作废 |
+| 物品兑现台账 | `turn_state.item_delta_keys` | reward_settlement 与库存、事件同写 | 按回合锚点、物品、角色和增减方向去重 |
+| 待检定线索 | `world_state.pending_clue_reveals` | world_memory 纯变换，由 turn_context 等调用方赋值 | reward_settlement 兑现；world_memory.discard_pending_clue_reveals 作废 |
+| 线索台账 | `world_state.clue_ledger` | world_memory 纯变换，由收益结算或其他确定性揭示入口持久化 | 上下文、结局与复盘读取；不会因新回合清空 |
+| 回合确认 | `turn_state.turn_confirm` | turn_state_service | commit_turn 消费；确认模块不清除其他所有者的状态 |
+| 角色位置 | `SessionNavigation.party_locations`、房主锚点 `GameSession.current_scene_id` | navigation_service 持有底层写入；由下表入口驱动 | 无显式记录时回落到房主锚点；位置不随回合清理或重生成撤销 |
 
-## 二、谁提出、谁裁定、谁写入
+check_gating.begin_turn 只编排各所有者的清理函数，一次提交；任一步失败整体回滚。
+只有移动状态发生清理也返回 True；无变化不提交。空自动检定/线索残留键同样会清除。
 
-- **提出**：规划器 `scene_policy.moves`、KP 工具 `scene_change`、大地图前往、检定结果。
-- **裁定**：`application/movement_adjudication`（证据、出口、通行、检定需求、跟随）；
-  检定落地由 `application/movement_settlement` 结算，规则来自 `domain/movement.settle_check`。
-- **写入**：只经 `commit_movement_batch` 与服务层的 `_MovementWriter`，同一事务。
-  其他模块需要移动状态时只调用 movement 的查询函数（`tool_guard`、`busy_ids`、`has_pending_moves`、
-  `has_verdict_for`、`has_move_evidence`），不解释存档键。
+## 位置写入入口
 
-## 三、必须同事务的操作
+| 入口 | 确定性写入边界 | 提交后的行为 |
+|---|---|---|
+| movement 的批次执行 | 同批移动、留守位置固定、移动事件、裁定与待检定记录更新同事务 | 广播、场景配图；配图失败不撤销移动 |
+| turn_travel.commit_pending_travel | 在动作转正后、KP 上下文构建前调用 movement.travel；每次前往走移动事务 | 原动作事件由前序阶段保存，不声称整批暂存动作与所有前往同事务 |
+| 人工 KP `_exec_move_actor` | 外层事务调用 movement.stage_characters，只暂存位置/留守者；目的地公开、人工操作事件一起提交 | 提交后生成返回消息；不做普通前往的通行校验 |
+| AI 队友 travel/stay | 位置更新或留守固定与 action 事件同事务 | 提交后输出行动与私有记忆钩子；记忆不纳入位置事务 |
 
-1. 一个移动批次内的全部落位、留守固定、移动事件、裁定记录与待检定条目的增删（已满足，数据库测试覆盖回滚与重试）。
-2. 一次检定结算的条目消费、落位与记录更新（已满足）。
-3. 回合开始时作废各类门控暂存：当前由 `check_gating.begin_turn` 一次提交（移动部分 `movement.begin_turn` 只改不提交）。
+房主单独移动时，先固定同处、未显式记录且不同行的队友，防止他们随锚点回落而被带走。
+人工 KP 挪人只移动选中角色；自然语言与地图前往按各自裁定确定跟随者。
 
-不要求同事务：提交后的广播与配图（配图失败不回滚移动）；AI 队友自主前往的事件与位置（当前分两次提交，见目标设计）。
+## 收益结算入口
 
-## 四、重生成、重试、回合切换
+`reward_settlement` 是收益兑现的单一实现，不依赖规划器、回合编排或 session_service。
+它使用库存接口、event_store、auto_check_state、world_memory 和 effect_channel。
 
-| 时机 | 移动裁定 / 待检定移动 | 物品 / 线索暂存 | 位置 |
-|---|---|---|---|
-| 重新生成（同一回合锚点） | 复用裁定记录，不重复落位或写事件 | 已兑现的用 `item_delta_keys` 去重 | 不回滚 |
-| 写入失败重试 | 整批回滚，重试时重新裁定，只执行一次 | 各自提交 | 随批次回滚 |
-| 新的玩家回合 | `movement.begin_turn` 作废 | `check_gating.begin_turn` 作废 | 保留 |
-| 真人回合确认 | 保留（修复前被误删，见「已知问题 1」） | 保留 | 保留 |
+- `settle_check_rewards`：待物品消费、整批库存、事件、去重台账、线索候选消费与线索台账一起提交。
+- `settle_auto_rewards`：在上述事务中追加自动检定标记，仅兑现技能匹配的物品/线索。
+- `settle_pending_item_gains` / `settle_pending_clue_reveals`：保留单类结算的兼容入口，各自拥有事务。
+- `apply_item_change`：即时物品效果仍按单件短事务；批量待收益结算使用 `commit=False`，由外层统一提交。
+- 线索首次发现的配图由调用方注入，在提交后执行。失败记日志并清理配图未提交事务，不撤销收益。
 
-## 五、本轮已收敛的越界
+effect_channel 的 `commit=False` 是“调用方拥有事务”的暂存模式，不是另开嵌套事务。
+调用方必须统一提交/回滚；不能把仍含内部 commit 的函数包在外层事务里声称原子性。
 
-1. **移动模块回调计划效果**：`movement.pending_unissued` 曾用函数内导入回调
-   `planned_effects.requested_check_settled`，形成 movement ↔ planned_effects 互相导入。
-   现在由调用方 `planned_effects._ensure_planned_scene` 注入“是否已挂出检定”的判断，
-   按人/共同障碍的补挂规则移入应用层 `checks_to_issue`（纯函数）。
-2. **其他模块直接解释移动存档键**：`turn_effects` 读 `movement.PENDING_KEY`、
-   `turn_orchestrator` 遍历 `turn_records` 比较 `target`。改为 movement 的查询函数
-   `has_pending_moves`、`has_verdict_for`。
-3. **可执行约束**：结构测试禁止 movement 依赖 planned_effects 与 check_gating；
-   除 `services/movement.py` 与 `application/movement_state.py` 外，任何模块不得出现
-   `turn_moves`/`pending_moves` 字面量或访问 `movement.PENDING_KEY`、`MOVES_KEY`、`turn_records`。
+## 重生成、失败与重试
 
-## 六、已知问题（单独记录，不混入保持行为的重构）
+| 情况 | 行为与保证 |
+|---|---|
+| 同回合重新生成 | 复用移动裁定，不重复移动；已兑现物品按台账去重，不随叙事撤销 |
+| 移动批次失败 | 位置、事件、裁定与待检定记录一起回滚，原提案可重试 |
+| 收益结算失败 | 整批收益回滚，待兑现条目保留；显式重试收益入口不重复发放 |
+| 人工 KP 挪人失败 | 位置、留守者、目的地公开及事件一起回滚 |
+| 新回合开始 | 按所有者作废上一轮未完成的移动、物品、线索、自动检定暂存；位置保留 |
+| 提交后配图失败 | 不重做业务写入；尚无可靠补发队列 |
 
-1. **真人回合确认会抹掉移动与自动检定状态**（已复现并单独修复）：
-   `turn_state_service._write_confirm_map` 为了清理旧迁移铺在顶层的确认键，删除了所有不在
-   `_EPHEMERAL_TURN_STATE_KEYS` 白名单里的顶层键，白名单没有 `turn_moves`、`pending_moves`、`auto_checks`。
-   复现：暂存攀爬移动后另一名真人确认回合，`turn_state` 只剩 `turn_confirm`，之后攀爬成功也不移动。
-   根因是回合确认模块用白名单替其他模块决定哪些键能活下来。
-   修复：`_write_confirm_map` 只清理 `_confirm_map` 会当成旧确认读取的顶层值为 True 的键，读写同一规则；
-   `test_turn_confirm_state_keys.py` 与 `test_natural_movement.py` 的回归用例在旧代码上失败、修复后通过。
-2. **KP 强制挪动房主时会带走无位置记录的队友**（已修复）：`human_kp_actions` 曾直接调用 `set_char_location`，
-   房主的位置即 `current_scene_id`，同处、没有显式位置记录的队友会随之“被移动”。
-   按确认的预期“只挪选中的那一个角色”，改为经 `movement.move_characters` 落位：同一事务里先固定同处队友，
-   不做通行校验。位置与留守固定一笔提交；公开目的地与系统事件仍在其后各自提交。
-   `test_human_kp_flow.py` 的回归用例在旧代码上失败、修复后通过。
-3. `check_gating.begin_turn` 只清理了移动状态时返回 False（返回值目前没有调用方使用，无行为影响）。
+骰子事件、逐人移动与收益仍是顺序执行的不同事务；没有跨整个回合的原子提交。
+没有后台恢复队列，进程崩溃后不会自动续跑未完成结算；重新投骰也不等价于重试原收益。
+人工 KP 已成功请求的重复发送没有请求级幂等键。不能将数据库回滚测试视为分布式“恰好一次”保证。
 
-## 七、目标设计（尚未实施）
+## 查询与兼容边界
 
-- 回合开始作废：各状态所有者各自提供“作废本回合暂存”的函数，`begin_turn` 只做编排与提交；
-  目前移动已如此，物品、线索、自动检定仍由 `check_gating` 直接改键。
-- 位置写入：会改变房主位置的入口都经过固定留守者的同一实现（问题 2 修复后已成立；AI 队友前往不涉及房主）。
-- AI 队友自主前往的位置与事件合并为一次提交。
+- party_queries 持有席位和队员只读查询；session_service 保留原名导出。席位顺序、空席与缺失角色跳过、排除角色语义不变。
+- planned_effects 保留收益函数导出；新编排直接调用 reward_settlement。
+- movement.turn_records、PENDING_KEY、MOVES_KEY 保留兼容，但其他应用模块不解释移动存档键。
+- check_gating 保留 auto_outcome、skill_matches 导出；turn_context 保留旁白标记转换兼容导出。
+- 暂存前往的位置写入已迁出 turn_context，但该模块仍承担世界记忆等职责，尚非纯只读上下文模块。
+- 存档键、数据库结构与模组格式不变，无需迁移或重新导入模组。
 
-## 八、仍保留的兼容入口与迁移限制
+## 验证与架构限制
 
-- `movement.turn_records`、`PENDING_KEY`、`MOVES_KEY` 保留给测试与旧调用方；应用代码中移动模块之外已不再使用
-  （结构测试约束）。`char_status`、`busy_ids` 仍是对外查询函数。
-- `check_gating.skill_matches`、`turn_context._remap_marks_after_rewrite/_snap_offset` 为兼容导出。
-- 存档键与状态字符串不变，无需迁移或重新导入模组。
-- movement 与 turn_context 仍互相导入（`commit_pending_travel` 调 `movement.travel`），
-  强连通分量仍为 28 个模块；本轮没有处理。
+测试覆盖陵墓独行、留守、门控成败、分队重聚、重生成、取消、失败回滚及重试，并检查实际生成时的 KP 输入上下文。
+收益测试在第二件物品、线索更新与最终提交处注入异常；人工 KP 测试在操作事件和提交处注入异常。
+结构测试防止移动状态越界、收益结算回调上层编排、规则配置反向依赖会话服务。
 
-## 后续优化：回合清理与自动检定状态（2026-10-25）
-
-`auto_check_state` 现在负责自动检定记录的追加、按存活骰子读取和作废；`check_gating` 保留兼容查询导出，
-但只负责生命周期编排。`planned_effects` 直接读取状态接口，不再反向依赖 `check_gating`；
-自动收益的技能匹配与兑现由 `planned_effects.settle_auto_rewards` 负责，原有先记录检定再兑现的事务顺序不变。
-这消除了二者直接互相导入，不宣称整个间接依赖环已清除。
-
-新回合清理分别调用移动、物品、自动检定与世界线索的清理函数：物品清理支持 `commit=False`，
-线索清理返回世界状态副本，最终由门控入口统一提交。任何清理或提交失败都会 rollback。
-仅移动记录被清理时现在也返回 True；没有改动不提交。自动检定/线索的空残留键也会被清除并报告变更。
-回归测试验证只提交一次、无变化不提交及中途异常后全部状态恢复。
-
-## 后续优化：位置执行入口与 AI 队友事务（2026-10-25）
-
-暂存前往的执行迁至 `services/turn_travel.py`。AI 回合编排和人工 KP API 直接调用它，
-调用位置仍在玩家动作转正之后、后续上下文构建之前。`chat_service` 经回合编排保留兼容入口；
-`turn_context` 不再依赖 movement，也不再承担这项位置写入。上下文模块还有世界记忆等既有职责，
-此处仅收拢位置执行，不宣称整个模块已经纯只读。
-
-AI 队友自主前往和留守现在用现有 `effect_channel.transaction`：位置固定/更新与 action 事件都只 flush，
-成功后统一提交，再刷新并输出事件。事件暂存后抛错会同时回滚位置和事件，重试只写一条行动事件。
-私有记忆钩子仍在行动提交后执行，不纳入此事务，也不因本次调整重复生成决策。
-`test_ai_teammates.py` 对 travel/stay 两条入口覆盖真实数据库的失败回滚及重试；分层测试防止上下文重新调用位置写入。
-
-以上更新替代前文“位置与行动事件分两次提交”和对应目标项；原导航、通行规则、存档格式没有变化。
-
-## 席位与队员查询边界（2026-10-25）
-
-- `party_queries` 持有 `get_participants` 与 `get_party_members` 的只读实现，仅依赖 ORM 和模型。
-- `session_service` 保留同名导出，原调用入口不变；规则配置直接使用查询模块读取角色持续状态，不再反向依赖会话服务。
-- 查询语义保持原样：席位按 `seat_order` 排序；队员跳过空席、缺失角色及指定排除角色。不新增房主回退、角色类型过滤或去重。
-- 结构测试约束规则配置不得导入会话服务，查询模块不得依赖其他服务。此拆分只是明确查询职责，不代表全部服务已完成六边形架构迁移。
+测试使用确定性模型替身，没有验证真实 LLM 的理解率或叙述质量。当前静态依赖图仍有 22 模块强连通分量，
+不把局部职责提取表述为全项目已完成六边形架构或 DDD。最新方法与范围见 [架构审计](architecture-audit-2026-10-25.md)。

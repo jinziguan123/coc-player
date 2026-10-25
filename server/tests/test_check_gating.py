@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ai.turn_planner import TurnPlan
 from app.models import Base, Character, GameSession, Module  # noqa: F401
-from app.services import check_gating, planned_effects, session_service, turn_effects
+from app.services import check_gating, event_store, planned_effects, session_service, turn_effects
 
 
 @pytest.fixture
@@ -151,16 +151,16 @@ def _gain_plan():
 
 def test_物品获得中途失败整笔回滚_重试只发一次(db, monkeypatch):
     s, pc, _module = _seed(db)
-    real = session_service.add_event
+    real = event_store.add_event
 
     def boom(*a, **k):
         raise RuntimeError("事件写入失败")
 
-    monkeypatch.setattr(session_service, "add_event", boom)
+    monkeypatch.setattr(event_store, "add_event", boom)
     import pytest as _pytest
     with _pytest.raises(RuntimeError):
         _stash_items(db, s, pc, _gain_plan())
-    monkeypatch.setattr(session_service, "add_event", real)
+    monkeypatch.setattr(event_store, "add_event", real)
     db.expire_all()
     s = db.get(GameSession, s.id)
     assert _inventory(db, pc) == []
@@ -241,7 +241,7 @@ def test_自动检定收益中途失败全部回滚_重试不丢失不重复(db,
     calls = []
     with monkeypatch.context() as patch:
         if where == "second_item":
-            original = session_service.add_event
+            original = event_store.add_event
             def fail_event(*args, **kwargs):
                 result = original(*args, **kwargs)
                 if (kwargs.get("metadata") or {}).get("item_gain"):
@@ -249,7 +249,7 @@ def test_自动检定收益中途失败全部回滚_重试不丢失不重复(db,
                     if len(calls) == 2:
                         raise RuntimeError("收益写入失败")
                 return result
-            patch.setattr(session_service, "add_event", fail_event)
+            patch.setattr(event_store, "add_event", fail_event)
         elif where == "clue":
             def fail_clue(*args, **kwargs):
                 raise RuntimeError("收益写入失败")
