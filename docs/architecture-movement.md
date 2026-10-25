@@ -15,7 +15,7 @@
 | `app/domain/movement_evidence.py` | 原话与规划器的行动证据门槛，决定忽略、停止裁定或继续解析出口 |
 | `app/application/movement_space.py` | 将模组 JSON 字段投影为不可变快照，避免保留 ORM 或可变 JSON 引用 |
 | `app/application/movement_plans.py` | AI `TurnPlan` 到领域 `MovementIntent` 的转换，兼容旧 `scene_change` |
-| `app/application/movement_execution.py` | 移动批次提交用例及写入端口；同事务暂存移动与回合状态，提交后返回凭据 |
+| `app/application/movement_execution.py` | 裁定结果装配、批次提交用例及写入端口；同事务暂存移动与回合状态，提交后返回凭据 |
 | `app/application/movement_adjudication.py` | 单条及批次裁定编排，使用参与者快照和只读导航端口，返回角色 ID 裁定 |
 | `app/application/movement_state.py` | 待检定移动与回合裁定记录的类型化读取、旧存档兼容和个人状态写回，保留未处理字段；存档 JSON 键只在此处与原服务的兼容入口出现 |
 | `app/services/movement.py` | 原有公开入口、导航候选集适配、状态加载、位置资格快照、事务写入和提交后的展示 |
@@ -191,3 +191,16 @@
 仍未迁移：工具默认行动者与大地图跟随入口保持现有服务适配；提交命令和记录的装配、角色名字匹配、
 导航适配器和展示仍在原服务。当前已有可独立验证的裁定与提交边界，后续应按实际修改痛点决定是否继续迁移，
 不应只为压缩服务文件而增加接口层。
+
+## 第十一轮：裁定到提交批次的装配
+
+`prepare_movement_batch` 接收 `Decision`、角色姓名映射、回合锚点及旧待检定快照，
+直接生成 `PreparedMovement`（移动命令与类型化状态更新）。服务层不再先把裁定映射回 ORM 角色，
+再通过 `Verdict.record` 装配记录；`Verdict` 仅用于说明展示与日志。
+
+装配保留原规则：只有落位裁定生成移动命令；待检定裁定写个人 pending 状态及共享标志；
+其他裁定只记录结果。新的待检定条目整体替换参与者重叠的旧条目，其他旧条目保留顺序和扩展字段。
+已落位或受阻裁定不额外清理旧待检定条目，避免在结构重构中改变生命周期规则。
+
+新增端口测试验证混合裁定、角色和姓名顺序、记录字段归属、旧待执行条目的保留与替换及输入隔离。
+写入端口、事务范围和提交后广播保持不变。裁定与提交间的状态装配现在可以脱离 ORM 单独验证。

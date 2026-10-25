@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from app.application.movement_plans import movement_proposals as _proposals
 from app.application.movement_adjudication import ActorSnapshot, Proposal, adjudicate_batch
 from app.application.movement_execution import (
-    MoveCommand, MovementStateUpdate, commit_movement_batch,
+    MoveCommand, MovementStateUpdate, commit_movement_batch, prepare_movement_batch,
 )
 from app.application.movement_space import project_scene, project_space
 from app.application.movement_state import (
@@ -435,17 +435,6 @@ class Verdict:
     reason: str = ""
     clues: list[str] = field(default_factory=list)
 
-    def record(
-        self, anchor: int, *, states: tuple[tuple[str, str], ...] | None = None,
-        shared: bool | None = None,
-    ) -> MoveRecord:
-        return MoveRecord.new(
-            anchor=anchor, status=self.status, mover_ids=tuple(c.id for c in self.movers),
-            mover_names=tuple(c.name for c in self.movers), origin=self.origin,
-            target=self.target, stayer_names=tuple(c.name for c in self.stayers),
-            exit=self.exit, skill=self.skill, reason=self.reason, clues=tuple(self.clues),
-            states=states, shared=shared,
-        )
 
 
 def _match_chars(names: list[str], party: list[Character]) -> list[Character]:
@@ -613,29 +602,12 @@ def adjudicate_plan(
     if not verdicts:
         return [], ""
 
-    commands: list[MoveCommand] = []
-    records: list[MoveRecord] = []
-    new_pending: list[PendingMove] = []
-    for verdict, shared in verdicts:
-        ids = tuple(c.id for c in verdict.movers)
-        if verdict.status == MOVED:
-            commands.append(MoveCommand(verdict.target, ids))
-            records.append(verdict.record(anchor, states=tuple((cid, "moved") for cid in ids)))
-        elif verdict.status == PENDING:
-            records.append(verdict.record(
-                anchor, states=tuple((cid, "pending") for cid in ids), shared=shared,
-            ))
-            new_pending.append(PendingMove.new(
-                anchor=anchor, mover_ids=ids, origin=verdict.origin, target=verdict.target,
-                skill=verdict.skill, exit=verdict.exit, shared=shared,
-            ))
-        else:
-            records.append(verdict.record(anchor))
-    taken = {cid for e in new_pending for cid in e.mover_ids}
-    old_pending = [e for e in _pending_moves(game_session) if not (set(e.mover_ids) & taken)]
+    prepared = prepare_movement_batch(
+        decisions, anchor=anchor, names={c.id: c.name for c in party}, pending=_pending_moves(game_session),
+    )
     staged = commit_movement_batch(
-        _MovementWriter(db, session_id, game_session, module, party), tuple(commands),
-        state=MovementStateUpdate(tuple(records), tuple(old_pending + new_pending)),
+        _MovementWriter(db, session_id, game_session, module, party), prepared.commands,
+        state=prepared.state,
     )
     for verdict, _shared in verdicts:
         logger.info(
