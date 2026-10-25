@@ -103,3 +103,39 @@ def test_沉默真人留在原处_AI按房主默认跟随():
     decision = run(Map(), party=(actor(), silent_human, ai))[0][0]
     assert decision.mover_ids == ("a", "c")
     assert decision.stayer_ids == ("b",)
+
+
+class TextMap(Map):
+    """按文本里有没有方位词决定能否解析：只有整句才带「东侧」。"""
+
+    def resolve(self, origin, text, exit_hint=""):
+        self.calls.append(text)
+        if "东侧" in text:
+            return Destination("resolved", "tomb")
+        return Destination("ambiguous", None, clues=["东侧拱门", "北侧拱门"])
+
+
+def test_行动分句对不上去向时用整句解析_真实模型验收s4():
+    nav = TextMap()
+    lead = ActorSnapshot(Participant("a", "hall", True, stance="act"), ("然后钻进去",),
+                         ("推开东侧拱门前的石板，然后钻进去",))
+    ((decision, _),) = run(nav, party=(lead,))
+    assert decision.target == "tomb" and decision.status == "moved"
+    assert nav.calls[:2] == ["然后钻进去", "推开东侧拱门前的石板，然后钻进去"]
+
+
+def test_整句也解析不出时保留原结果_已解析时不再看整句():
+    from app.application.movement_adjudication import resolve_statement
+
+    seen = []
+
+    def resolve(text):
+        seen.append(text)
+        return Destination("ambiguous", None, clues=["甲", "乙"]) if "两" in text else \
+            Destination("unresolved", None)
+
+    assert resolve_statement(resolve, ("钻进去",), ("两道门，钻进去",)).status == "unresolved"
+    assert seen == ["钻进去", "两道门，钻进去"]
+    seen.clear()
+    ok = resolve_statement(lambda t: seen.append(t) or Destination("resolved", "x"), ("钻进去",), ("整句",))
+    assert ok.target == "x" and seen == ["钻进去"]

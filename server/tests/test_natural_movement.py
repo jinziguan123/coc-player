@@ -1193,3 +1193,27 @@ def test_陵墓_独行后返回队友处_上下文重新合并且重生成不重
     assert all(t.loc(c) == "scene_1" for c in t.party)
     assert len(t.move_events()) == 2
     assert len(kp.calls) == 1
+
+
+
+def test_真实模型验收s2_真人说留守并叫别人先走_房主说我们走也不带走她(db_factory, monkeypatch):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory(), human_hassan=True)
+    t.say(t.hassan, "我留在甬道守着出口，你们先进去")
+    t.say(t.alvin, "我们走吧，从墙洞钻进去")
+    _generate(t, _plan(MovePlan(actors=["阿尔文"], exit="墙洞", target="scene_2")))
+    assert t.loc(t.alvin) == "scene_2"
+    assert t.loc(t.hassan) == "scene_1"
+
+
+def test_真实模型验收s6_从前室钻回甬道_去向写在同一分句里也能落位(db_factory, monkeypatch):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory(), human_hassan=True)
+    session_service.set_char_location(t.db, t.sid, t.alvin.id, "scene_2")
+    session_service.set_char_location(t.db, t.sid, t.hassan.id, "scene_1")
+    t.say(t.alvin, "我从墙洞钻回甬道，回到哈桑身边")
+    _generate(t, _plan(MovePlan(actors=["阿尔文"], exit="墙洞", target="scene_1")))
+    assert t.loc(t.alvin) == "scene_1"
+    assert movement.turn_records(t.session)[0]["status"] == movement.MOVED

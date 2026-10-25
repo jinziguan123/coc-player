@@ -1,4 +1,5 @@
 """移动批次裁定：消费参与者快照及只读导航，不持有 ORM 或执行写入。"""
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -12,6 +13,8 @@ from app.domain.movement_space import Destination
 class ActorSnapshot:
     participant: Participant
     sentences: tuple[str, ...]
+    #: 含行动分句的整句；行动分句本身解析不出去向时才用（见 ``resolve_statement``）。
+    context: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,21 @@ class Navigation(Protocol):
     def obstruction_reason(self, origin: str | None, target: str) -> str: ...
 
 
+def resolve_statement(
+    resolve: Callable[[str], Destination], sentences: tuple[str, ...], context: tuple[str, ...],
+) -> Destination:
+    """先只用行动分句解析去向；对不上时退一步用含行动的整句，且只采纳能唯一解析的结果。
+
+    「推开东侧拱门前的石板，然后钻进去」「从墙洞钻回甬道，回到她身边」：去向写在同一句的
+    另一分句里。只在退一步能解析成功时才采纳，所以不会把本来已解析或已判歧义的结果改坏。
+    """
+    dest = resolve("。".join(sentences))
+    if dest.status == "resolved" or not context or tuple(context) == tuple(sentences):
+        return dest
+    wider = resolve("。".join(context))
+    return wider if wider.status == "resolved" and wider.target else dest
+
+
 def adjudicate_one(
     proposal: Proposal, party: tuple[ActorSnapshot, ...], navigation: Navigation, *,
     host_id: str | None, stayed: frozenset[str], busy: frozenset[str], legacy_gate: str,
@@ -57,7 +75,10 @@ def adjudicate_one(
         return None
     if evidence.action == "stop":
         return replace(base, status=evidence.status)
-    dest = navigation.resolve(lead.location, "。".join(actor.sentences), intent.exit)
+    dest = resolve_statement(
+        lambda text: navigation.resolve(lead.location, text, intent.exit),
+        actor.sentences, actor.context,
+    )
     base = replace(base, clues=tuple(dest.clues))
     if dest.status != "resolved" or not dest.target:
         return replace(base, status=dest.status)
@@ -77,7 +98,10 @@ def adjudicate_one(
         member = candidate.participant
         destination = None
         if member.stance == "act" and not member.travel_scene:
-            result = navigation.resolve(lead.location, "。".join(candidate.sentences))
+            result = resolve_statement(
+                lambda text: navigation.resolve(lead.location, text),
+                candidate.sentences, candidate.context,
+            )
             if result.status == "resolved":
                 destination = result.target
         followers.append(replace(member, destination=destination))

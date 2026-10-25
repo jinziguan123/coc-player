@@ -883,12 +883,16 @@ def build_turn_plan_messages(
                 "actors=宣告移动的角色名（「我们一起」可含 AI 队友；**绝不替没表态的其他真人玩家决定**）；"
                 "stance=act（行动宣言：「我抛下队友从拱门钻进去」「我要从拱门钻进去」都是——「我要」不是商量）"
                 "/discuss（商量或提问：「我们要不要进去？」）/conditional（条件未满足：「如果门开了我就进去」）"
-                "/approach（只是走近、观察出口，人仍在原空间）；exit=玩家口中的出口原词"
+                "/approach（只是走近、观察出口，人仍在原空间）——stance **只看移动者本人的原话**："
+                "队友或 NPC 的劝阻、警告、请他等一等不会撤回他的行动宣言，除非他本人改口"
+                "（「好吧，我先等等」）；别人的话只影响别人自己去不去；exit=玩家口中的出口原词"
                 "（「拱门」「墙洞」「那道门」，没提就空）；target=经该出口通往的场景 id——依据移动者所在场景"
                 "（party_positions）的描述、scene_neighbors 与已展示的叙述判断，玩家不必说出房间正式名称；"
                 "去向不唯一或没有依据就留空，不要把「门」随手指到某个相邻场景；solo=明确独行"
-                "（独自/抛下队友/你们留在这）；blocked=通道封闭或有障碍、此刻过不去时写原因；"
+                "（独自/抛下队友/你们留在这）；blocked=通道封闭或有障碍、**无论检定成败**此刻都过不去时写原因；"
                 "check_skill=通过前须先过的检定（攀爬/力量等，无需检定留空；需要时同时照常填 requires_check/check）；"
+                "blocked 与 check_skill **二选一**：检定成功就能过去（推开石板、爬上洞口）只填 check_skill；"
+                "填了 blocked 就是检定也无济于事，不要再为通过它要求检定；"
                 "shared_check 只在这次检定是**解除一道共同障碍**（撬开门锁、推开石板、打开机关，一人成功全员可过）时"
                 "为 true；各自攀爬/挤过去这类个人通行检定一律 false（每人按自己的结果）。"
                 "多名真人同轮去不同地方就分成多项。\n"
@@ -1035,6 +1039,28 @@ def _extract_json_object(raw: Any, salvage_truncated: bool = False) -> dict | No
     return repaired
 
 
+def _unwrap_plan_envelope(data: dict) -> dict:
+    """模型有时把整份计划包进一层外壳：``{"type": "json_object", "decision": {...}}``、
+    ``{"action_plan": {...}, "narration_brief": "..."}``（2026-10-25 真实模型验收，34 次规划里 4 次）。
+
+    TurnPlan 会静默忽略不认识的键，外壳不拆就得到一份全默认的空计划——移动、检定、物品全丢，
+    还不留日志。某个内层 dict 承载的计划字段比外层多时就拆开，外层独有的计划字段（如
+    narration_brief）补进来；内层优先。
+    """
+    fields = set(TurnPlan.model_fields)
+    outer = fields & set(data)
+    inner = max(
+        (v for v in data.values() if isinstance(v, dict)),
+        key=lambda v: len(fields & set(v)), default=None,
+    )
+    if inner is None or len(fields & set(inner)) <= len(outer):
+        return data
+    logger.warning(
+        "KP 回合规划器把计划包在外壳里（外层键：%s），已拆开使用内层", "、".join(list(data)[:6]),
+    )
+    return {**{k: v for k, v in data.items() if k in fields and k not in inner}, **inner}
+
+
 #: 规划器的墙钟预算（秒）。规划器是可选环节：返回 None 就走旧流程，KP 照常叙事。
 #:
 #: 2026-09-05 鬼屋一局：推进后整局停在「KP 正在思考」半小时。抓包看 planner 那次调用：
@@ -1071,6 +1097,8 @@ async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
         return None
 
     data = _extract_json_object(raw, salvage_truncated=True)
+    if data is not None:
+        data = _unwrap_plan_envelope(data)
     if data is None:
         snippet = str(raw)[:200]
         if not snippet.strip():

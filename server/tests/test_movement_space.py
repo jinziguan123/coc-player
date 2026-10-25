@@ -55,3 +55,25 @@ def test_没有连通候选时不能凭空解释出口():
 def test_原话分类独立于存档与模型(text, kind, solo):
     result = analyze(text)
     assert (result.kind, result.solo) == (kind, solo)
+
+
+@pytest.mark.parametrize(("text", "kind", "acted"), [
+    # 真实模型验收 s2：留守者叫别人先走，自己的原话不算行动
+    ("我留在甬道守着出口，你们先进去", "negated", []),
+    ("你们先进去，我留下守着", "none", []),
+    # 含第一人称的第二人称句仍是说话人自己的行动
+    ("你们跟我进去", "act", ["你们跟我进去"]),
+    ("你们留在这，我钻进去", "act", ["我钻进去"]),
+    # 真实模型验收 s6：「钻回」等返回动作
+    ("我从墙洞钻回甬道", "act", ["我从墙洞钻回甬道"]),
+    ("我爬回洞口那边", "act", ["我爬回洞口那边"]),
+])
+def test_第二人称叫别人走不算自己行动_返回动作算行动(text, kind, acted):
+    result = analyze(text)
+    assert (result.kind, result.sentences) == (kind, acted)
+
+
+def test_行动分句所在整句记为去向解析的退路():
+    result = analyze("我用肩膀顶住东侧拱门前的石板，使劲把它推开，然后钻进去。灯给你")
+    assert result.sentences == ["然后钻进去"]
+    assert result.context == ["我用肩膀顶住东侧拱门前的石板，使劲把它推开，然后钻进去"]

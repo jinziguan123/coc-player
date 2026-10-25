@@ -28,7 +28,7 @@ _TRAVERSE = (
     "钻进", "钻入", "钻过", "钻出", "穿过", "穿进", "走进", "走入", "进入", "踏入", "踏进",
     "迈进", "迈入", "跨进", "跨入", "跨过", "爬进", "爬入", "爬过", "爬出", "挤进", "挤过",
     "溜进", "闯进", "闯入", "冲进", "冲入", "跳进", "跳入", "走出", "退出", "退回", "回到",
-    "返回", "进去", "出去", "通过", "离开", "走下", "爬下",
+    "返回", "进去", "出去", "通过", "离开", "走下", "爬下", "钻回", "爬回", "走回", "跑回", "折回",
 )
 #: 点名目的地时额外认的去往动词（「我去七号车厢」）。
 _GO_TO = ("前往", "去往", "前去", "赶往", "抵达", "到达", "来到", "走向", "移动到", "去")
@@ -93,6 +93,9 @@ class Statement:
 
     kind: str = "none"   # act / follow / discuss / conditional / negated / approach / none
     sentences: list[str] = field(default_factory=list)   # 判为行动的那几句
+    #: 含行动分句的整句：行动分句本身对不上去向时（「推开东侧拱门前的石板，然后钻进去」），
+    #: 去向解析可退一步看同一句里的出口与地名。
+    context: list[str] = field(default_factory=list)
     solo: bool = False
     collective: bool = False
     hesitant: bool = False
@@ -120,6 +123,8 @@ _BODY_LEAD = set("钻走爬跨挤溜闯冲跳跑迈踏摸挪跟就也直再先�
 _NEGATION_LEAD = ("别", "不", "没", "勿", "莫", "甭")
 #: 第三人称主语：「凿它的人进去了」说的是别人，不是说话人自己要走。
 _THIRD_PERSON = ("他", "她", "它", "有人", "的人", "那人", "别人", "对方", "人家")
+#: 第二人称主语：「你们先进去」是叫别人走；分句里没有第一人称时，说话人自己并没有动。
+_SECOND_PERSON = ("你们", "你")
 
 
 def _verb_pos(clause: str, verbs) -> tuple[int, int]:
@@ -155,6 +160,8 @@ def _clause_kind(clause: str, named_terms: set[str]) -> str:
         third, first = _first_pos(head, _THIRD_PERSON), _first_pos(c, _FIRST_PERSON)
         if third >= 0 and (first < 0 or third < first):
             return "none"   # 在讲别人怎么走（「有人在我们之前进去过」「凿它的人进去了」）
+        if first < 0 and has_any(head, _SECOND_PERSON):
+            return "none"   # 叫别人走（「你们先进去」）；「你们跟我进去」含第一人称，仍算行动
         after = c[verb_pos + verb_len:]
         if after.startswith(("过", "去过", "来过")) or ("是" in head and c.endswith("的")):
             return "none"   # 经历/判断句（「进去过」「是从这一面打进去的」），不是此刻的行动
@@ -192,6 +199,8 @@ def analyze(text: str, named_terms: set[str] | None = None) -> Statement:
         for clause, kind in _sentence_kinds(sentence, named_terms or set()):
             if kind in ("act", "follow"):
                 stmt.sentences.append(clause)
+                if sentence.strip() not in stmt.context:
+                    stmt.context.append(sentence.strip())
                 if stmt.kind != "act":
                     stmt.kind = kind
             elif _KIND_RANK.get(kind, 0) > _KIND_RANK.get(best, 0):

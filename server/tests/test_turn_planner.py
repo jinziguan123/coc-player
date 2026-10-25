@@ -798,3 +798,43 @@ def test_repair_does_not_touch_healthy_or_hopeless_output():
     assert ex('{"a": "含 \\" 转义引号的值", "b": 2, "c') == {"a": '含 " 转义引号的值', "b": 2}
     # 默认不抢救：只有明确开了 salvage 的调用方才拿半份结果（校验器等成对结果不能开）
     assert turn_planner._extract_json_object('{"a": 1, "b') is None
+
+
+class _RawLLM:
+    def __init__(self, raw):
+        self.raw = raw
+
+    async def complete(self, messages, **kwargs):
+        return self.raw
+
+
+_MOVE = {"actors": ["阿尔文"], "stance": "act", "exit": "墙洞", "target": "scene_1"}
+
+
+@pytest.mark.parametrize("raw", [
+    # 2026-10-25 真实模型验收记录到的三种外壳（精简到相关字段）
+    {"type": "json_object", "decision": {"player_intent": "钻回甬道", "requires_check": False,
+                                         "scene_policy": {"moves": [_MOVE], "scene_change": "scene_1"}}},
+    {"type": "json_object", "plan": {"auto_outcome": "success", "requires_check": False,
+                                     "scene_policy": {"moves": [_MOVE]}}},
+    {"action_plan": {"requires_check": False, "check": None, "scene_policy": {"moves": [_MOVE]}},
+     "narration_brief": "写他钻回甬道"},
+])
+def test_规划器把计划包进外壳时拆开使用_不再得到静默的空计划(raw):
+    import json as _json
+
+    import asyncio
+
+    plan = asyncio.run(turn_planner.run_turn_planner(_RawLLM(_json.dumps(raw, ensure_ascii=False)), []))
+    assert plan is not None
+    assert [(m.actors, m.target) for m in plan.scene_policy.moves] == [(["阿尔文"], "scene_1")]
+    if "narration_brief" in raw:
+        assert plan.narration_brief == ["写他钻回甬道"]   # 外层独有的计划字段补进来
+
+
+def test_正常计划不拆外壳_外层字段多于内层时保持原样():
+    from app.ai.turn_planner import _unwrap_plan_envelope
+
+    data = {"player_intent": "看壁画", "requires_check": True, "check": {"skill": "侦查"},
+            "scene_policy": {"moves": []}}
+    assert _unwrap_plan_envelope(data) is data

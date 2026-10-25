@@ -28,7 +28,9 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.application.movement_plans import movement_proposals as _proposals
-from app.application.movement_adjudication import ActorSnapshot, Proposal, adjudicate_batch
+from app.application.movement_adjudication import (
+    ActorSnapshot, Proposal, adjudicate_batch, resolve_statement,
+)
 from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch, prepare_movement_batch,
 )
@@ -174,8 +176,15 @@ def has_move_evidence(
     if _has(text, terms):
         return True   # 行动宣言里点名了目的地（「我走进图书馆」「（前往：七号车厢）」）
     origin = session_service.get_char_location(game_session, char.id)
-    dest = resolve_destination(module, origin, text)
+    dest = _resolve_statement(module, origin, stmt)
     return dest.status == "resolved" and dest.target == target
+
+
+def _resolve_statement(module: Module | None, origin: str | None, stmt: Statement) -> Destination:
+    return resolve_statement(
+        lambda text: resolve_destination(module, origin, text),
+        tuple(stmt.sentences), tuple(stmt.context),
+    )
 
 
 # ── 执行 ─────────────────────────────────────────────────────────────
@@ -375,7 +384,7 @@ def _participant(
     """只在服务边界读取 ORM 与控制权，领域选择只消费值快照。"""
     destination = None
     if module is not None and stmt.kind == "act" and not stmt.travel_scene and resolve_target:
-        result = resolve_destination(module, resolve_from, "。".join(stmt.sentences))
+        result = _resolve_statement(module, resolve_from, stmt)
         if result.status == "resolved":
             destination = result.target
     return movement_party.Participant(
@@ -495,7 +504,7 @@ def _actor_snapshots(
             human=session_service.is_human_controlled(db, session_id, char.id),
             stance=stmt.kind, solo=stmt.solo, hesitant=stmt.hesitant,
             travel_scene=stmt.travel_scene, collective=stmt.collective,
-        ), tuple(stmt.sentences)))
+        ), tuple(stmt.sentences), tuple(stmt.context)))
     return tuple(snapshots)
 
 
