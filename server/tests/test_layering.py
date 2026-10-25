@@ -234,3 +234,11 @@ def test_上下文模块不依赖位置写入入口():
         assert mod not in {"app.services.movement", "app.services.turn_travel"}
     assert not any(isinstance(n, ast.Attribute) and n.attr in {"set_char_location", "update_scene"}
                    for n in ast.walk(tree))
+
+
+def test_规则配置不反向依赖会话服务_队员查询不依赖其他服务():
+    tree = ast.parse((APP / "services" / "rule_options_service.py").read_text("utf-8"))
+    assert all(not (mod == "app.services.session_service" or mod.startswith("app.services.session_service."))
+               for mod, _ in _import_targets(tree))
+    tree = ast.parse((APP / "services" / "party_queries.py").read_text("utf-8"))
+    assert all(not mod.startswith("app.services") for mod, _ in _import_targets(tree))

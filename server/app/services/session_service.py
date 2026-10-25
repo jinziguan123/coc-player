@@ -12,6 +12,7 @@ from app.models.session import GameSession
 from app.models.session_navigation import SessionNavigation
 from app.models.session_participant import SessionParticipant
 from app.services import scene_kind
+from app.services.party_queries import get_participants, get_party_members  # noqa: F401
 
 
 # ── 拆出的职责簇：本模块保留同名 re-export，旧导入路径继续可用 ──────────────
@@ -491,15 +492,6 @@ def claim_seat(
         # 「幽灵占用」：席位里明明没人用了，候选池里却永远看不到它。
         _reseat_primary(db, session)
     return session
-
-
-def get_participants(db: Session, session_id: str) -> list[SessionParticipant]:
-    return (
-        db.query(SessionParticipant)
-        .filter(SessionParticipant.session_id == session_id)
-        .order_by(SessionParticipant.seat_order.asc())
-        .all()
-    )
 
 
 def _primary_seat(db: Session, session_id: str) -> SessionParticipant | None:
@@ -1097,20 +1089,6 @@ def resolve_token_actor(
     if not char:
         raise ValueError("角色不存在")
     return char
-
-
-def get_party_members(
-    db: Session, session_id: str, exclude_id: str | None = None,
-) -> list[Character]:
-    """会话内所有已填角色（真人 + AI），可排除某角色；用于 KP 整队上下文。"""
-    out: list[Character] = []
-    for p in get_participants(db, session_id):
-        if not p.character_id or p.character_id == exclude_id:
-            continue
-        c = db.get(Character, p.character_id)
-        if c:
-            out.append(c)
-    return out
 
 
 def is_human_controlled(db: Session, session_id: str, char_id: str | None) -> bool:

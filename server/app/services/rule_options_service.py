@@ -19,6 +19,7 @@ from app.models.rulebook import RuleSystemOptions
 from app.models.session import GameSession
 from app.rules import Ruleset, get_system, house_rules
 from app.rules import data as rule_data
+from app.services.party_queries import get_party_members
 
 DEFAULT_RULE_SYSTEM = "coc"
 
@@ -369,10 +370,8 @@ def data_changes_text(changes: list[tuple[str, list[tuple[str, str]]]], limit: i
 
 def _condition_lines(db: Session, game_session: GameSession, rs: Ruleset) -> list[str]:
     """队伍成员角色卡上的持续状态（如流血）各一行，说明由挂上它的组件给（钩子 ``condition_notes``）。"""
-    from app.services import session_service   # 局部导入：session_service 处在更上层
-
     lines: list[str] = []
-    for char in session_service.get_party_members(db, game_session.id):
+    for char in get_party_members(db, game_session.id):
         notes = rs.wound.condition_notes((char.system_data or {}).get("conditions")) if rs.has("wound") else []
         lines += [f"- {char.name}｜{note}" for note in notes]
     return lines
