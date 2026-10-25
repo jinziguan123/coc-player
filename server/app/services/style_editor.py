@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable
 
 from app.ai import call_budget
+from app.application.narration_marks import remap_marks_after_rewrite
 
 from app.ai.turn_validator import (
     _ANTITHESIS_RE, _SIMILE_RE, _VAGUE_RE, TIC_CATALOG,
@@ -191,10 +192,9 @@ async def polish_result(
         new = await polish_narration(provider, result[0], on_start=on_start)
         if new is None:
             return False
-        from app.services.turn_context import _remap_marks_after_rewrite
         old = result[0]
         result[0] = new
-        _remap_marks_after_rewrite(result, old, event_order)
+        remap_marks_after_rewrite(result, old, event_order)
         logger.info("去口癖编辑器已改写落库旁白：%d → %d 处口癖", tic_score(old), tic_score(new))
         return True
     except Exception:

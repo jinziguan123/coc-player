@@ -146,3 +146,21 @@ def test_领域核心只依赖标准库与领域模块():
                 mod.split(".")[0] in sys.stdlib_module_names
                 or mod == "app.domain" or mod.startswith("app.domain.")
             ), f"{path}:{line} 领域不得依赖 {mod}"
+
+
+def test_润色器不能反向依赖回合上下文且位置变换仅依赖标准库():
+    import sys
+
+    transform = ast.parse((APP / "application" / "narration_marks.py").read_text("utf-8"))
+    assert all(mod.split(".")[0] in sys.stdlib_module_names for mod, _, _ in _imports(transform))
+    assert not any(isinstance(n, ast.ImportFrom) and n.level for n in ast.walk(transform))
+    editor = ast.parse((APP / "services" / "style_editor.py").read_text("utf-8"))
+    targets = []
+    for node in ast.walk(editor):
+        if isinstance(node, ast.Import):
+            targets.extend(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            targets.append(node.module or "")
+            targets.extend(f"{node.module}.{a.name}" for a in node.names)
+    assert not any(t == "app.services.turn_context" or t.startswith("app.services.turn_context.")
+                   for t in targets)
