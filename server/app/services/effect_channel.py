@@ -92,11 +92,12 @@ class EffectProposal:
 def execute(
     db: Session, session_id: str, proposal: EffectProposal,
     apply: Callable[[dict], T], *, duplicate: T,
-    already: Callable[[], bool] | None = None,
+    already: Callable[[], bool] | None = None, commit: bool = True,
 ) -> T:
     """apply 只 flush，并将 receipt 写到效果事件；本函数拥有提交/回滚权。
 
     ``already`` 给定时用它判重（物品用 turn_state 台账），否则按效果事件上的凭据判重。
+    ``commit=False`` 时仅暂存，由调用方的事务统一提交；不得单独使用而遗漏提交。
     """
     receipt = proposal.receipt()
     try:
@@ -112,7 +113,10 @@ def execute(
             if any((ev.metadata_ or {}).get("effect", {}).get("key") == receipt["key"] for ev in rows):
                 return duplicate
         result = apply(receipt)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return result
     except BaseException:
         db.rollback()

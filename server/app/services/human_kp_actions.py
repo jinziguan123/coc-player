@@ -14,6 +14,7 @@ from app.services import (
     chase_service,
     combat_service,
     dice_runtime,
+    effect_channel,
     human_kp_desk,
     human_kp_service,
     illustration_service,
@@ -708,7 +709,7 @@ def _exec_move_actor(
     目的地顺带对玩家公开：人都在那儿了，地图上还藏着它没有意义。
 
     只挪选中的这一个人。房主的位置就是 ``current_scene_id``，同处、没有位置记录的队友
-    会随之被回落「带走」，所以经 ``movement.move_characters`` 落位：它在同一笔事务里先写实
+    会随之被回落「带走」，所以经 ``movement.stage_characters`` 落位：在同一笔事务里先写实
     这些人的原位置（与自然语言移动同一实现），且不做通行校验。
     """
     scene = _find_scene(module, ref)
@@ -724,15 +725,16 @@ def _exec_move_actor(
     party = session_service.get_party_members(db, session_id)
     if char not in party:
         party.append(char)
-    movement.move_characters(db, session_id, game_session, module, [char], sid, party, announce=False)
-    ws = dict(game_session.world_state or {})
-    revealed = list(ws.get("kp_revealed") or [])
-    if sid not in revealed:
-        revealed.append(sid)
-        ws["kp_revealed"] = revealed
-        game_session.world_state = ws
-        db.commit()
-    return [event_to_chunk(session_service.add_event(
-        db, session_id, "system", f"{char.name} 现在在{name}。",
-        actor_name="KP", metadata={"kp_manual": True, "moved_to": sid, "char_id": char_id},
-    ))], f"{char.name} 已移动到 {name}"
+    with effect_channel.transaction(db):
+        movement.stage_characters(db, session_id, game_session, module, [char], sid, party)
+        ws = dict(game_session.world_state or {})
+        revealed = list(ws.get("kp_revealed") or [])
+        if sid not in revealed:
+            revealed.append(sid)
+            ws["kp_revealed"] = revealed
+            game_session.world_state = ws
+        event = session_service.add_event(
+            db, session_id, "system", f"{char.name} 现在在{name}。", commit=False,
+            actor_name="KP", metadata={"kp_manual": True, "moved_to": sid, "char_id": char_id},
+        )
+    return [event_to_chunk(event)], f"{char.name} 已移动到 {name}"

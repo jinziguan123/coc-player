@@ -29,10 +29,8 @@ def record_auto_check(
     db: Session, session_id: str, game_session: GameSession, *,
     event_id: str, skill: str, succeeded: bool, module=None, on_first_clue=None,
 ) -> list:
-    """保存自动检定，再让收益所有者兑现匹配条目；移动由逐人结算入口处理。"""
-    auto_check_state.record(game_session, event_id=event_id, skill=skill, succeeded=succeeded)
-    db.commit()
+    """自动检定与收益由同一事务保存；移动仍由逐人结算入口处理。"""
     return planned_effects.settle_auto_rewards(
         db, session_id, game_session, skill=skill, succeeded=succeeded,
-        module=module, on_first_clue=on_first_clue,
+        module=module, on_first_clue=on_first_clue, event_id=event_id,
     )

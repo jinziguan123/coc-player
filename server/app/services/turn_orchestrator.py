@@ -2173,15 +2173,11 @@ async def _settle_rolled_check(
         fumbled = bool(check.get("check_any_fumble")) or fumbled
     # 「先检定、后发货」的落地：本轮被这次检定门控的收获此前只暂存未入库，
     # 到这里骰子落地才决定给不给（扒窃掷输了，那块表不该在他包里）。
-    for chunk in planned_effects.settle_pending_item_gains(
-        db, session_id, game_session, succeeded,
-    ):
-        room_hub.broadcast(session_id, chunk)
-    # 同理「先检定、后记账」：这次检定门控的线索，骰子落地才决定进不进台账。
-    planned_effects.settle_pending_clue_reveals(
+    for chunk in planned_effects.settle_check_rewards(
         db, session_id, game_session, succeeded,
         module=module, on_first_clue=_maybe_clue_illustration,
-    )
+    ):
+        room_hub.broadcast(session_id, chunk)
     if game_session.kp_mode == "human":
         # 真人 KP 模式下掷骰只完成确定性结算，不自动生成后续叙事；KP 可据结果手动发布。
         room_hub.broadcast(

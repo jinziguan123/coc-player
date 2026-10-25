@@ -225,3 +225,86 @@ def test_新回合清理中途失败回滚所有已改状态(db, monkeypatch):
     db.refresh(s)
     assert s.turn_state == state
     assert s.world_state == {"pending_clue_reveals": {"ids": ["c"]}, "keep": True}
+
+
+@pytest.mark.parametrize("where", ["second_item", "clue", "commit"])
+def test_自动检定收益中途失败全部回滚_重试不丢失不重复(db, monkeypatch, where):
+    from app.services import world_memory
+    s, pc, module = _seed(db)
+    plan = _plan()
+    plan.items_gained.append(plan.items_gained[0].model_copy(update={"name": "密信"}))
+    _stash_items(db, s, pc, plan)
+    s.world_state = world_memory.stage_clue_reveal({}, ["clue_letter"], [pc.id], 1, skill="侦查")
+    db.commit()
+    event = session_service.add_event(db, s.id, "dice", "侦查成功", actor_id=pc.id)
+    pending = list(s.turn_state["pending_item_gains"])
+    calls = []
+    with monkeypatch.context() as patch:
+        if where == "second_item":
+            original = session_service.add_event
+            def fail_event(*args, **kwargs):
+                result = original(*args, **kwargs)
+                if (kwargs.get("metadata") or {}).get("item_gain"):
+                    calls.append(result.id)
+                    if len(calls) == 2:
+                        raise RuntimeError("收益写入失败")
+                return result
+            patch.setattr(session_service, "add_event", fail_event)
+        elif where == "clue":
+            def fail_clue(*args, **kwargs):
+                raise RuntimeError("收益写入失败")
+            patch.setattr(world_memory, "record_clue_reveal", fail_clue)
+        else:
+            def fail_commit():
+                raise RuntimeError("收益写入失败")
+            patch.setattr(db, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="收益写入失败"):
+            check_gating.record_auto_check(db, s.id, s, event_id=event.id, skill="侦查",
+                                         succeeded=True, module=module)
+    db.expire_all()
+    assert _inventory(db, pc) == []
+    assert s.turn_state.get("pending_item_gains") == pending
+    assert not s.turn_state.get("item_delta_keys")
+    assert not s.turn_state.get("auto_checks")
+    assert "pending_clue_reveals" in s.world_state
+    assert not s.world_state.get("clue_ledger")
+    assert not [e for e in session_service.get_session_events(db, s.id)
+                if (e.metadata_ or {}).get("item_gain")]
+    for _ in range(2):
+        check_gating.record_auto_check(db, s.id, s, event_id=event.id, skill="侦查",
+                                     succeeded=True, module=module)
+    assert _inventory(db, pc) == [("黄铜钥匙", 1), ("密信", 1)]
+    assert not s.turn_state.get("pending_item_gains")
+    assert len(s.turn_state["auto_checks"]) == 1
+    assert s.world_state["clue_ledger"]["clue_letter"]["status"] == "known"
+    assert len([e for e in session_service.get_session_events(db, s.id)
+                if (e.metadata_ or {}).get("item_gain")]) == 2
+
+
+def test_手动检定收益同提交_配图失败不撤销或重复兑现(db, monkeypatch):
+    from app.services import world_memory
+    s, pc, module = _seed(db)
+    _stash_items(db, s, pc, _plan())
+    s.world_state = world_memory.stage_clue_reveal({}, ["clue_letter"], [pc.id], 1, skill="侦查")
+    db.commit()
+    real_commit = db.commit
+    commits, pictures = [], []
+    def commit():
+        commits.append(True)
+        real_commit()
+    def picture(*args):
+        pictures.append(args[-1])
+        assert _inventory(db, pc) == [("黄铜钥匙", 1)]
+        raise RuntimeError("配图服务不可用")
+    monkeypatch.setattr(db, "commit", commit)
+    chunks = planned_effects.settle_check_rewards(
+        db, s.id, s, True, module=module, on_first_clue=picture,
+    )
+    assert len(commits) == 1
+    assert pictures == ["clue_letter"]
+    assert chunks and _inventory(db, pc) == [("黄铜钥匙", 1)]
+    assert s.world_state["clue_ledger"]["clue_letter"]["status"] == "known"
+    assert planned_effects.settle_check_rewards(
+        db, s.id, s, True, module=module, on_first_clue=picture,
+    ) == []
+    assert pictures == ["clue_letter"]

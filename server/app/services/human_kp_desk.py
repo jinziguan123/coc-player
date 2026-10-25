@@ -192,8 +192,9 @@ def cancel_pending_check(
     if check.get("kind") != "san_check":
         db.refresh(game_session)
         succeeded = bool(check.get("check_any_success"))
-        chunks.extend(planned_effects.settle_pending_item_gains(db, session_id, game_session, succeeded))
-        planned_effects.settle_pending_clue_reveals(db, session_id, game_session, succeeded, module=module)
+        chunks.extend(planned_effects.settle_check_rewards(
+            db, session_id, game_session, succeeded, module=module,
+        ))
     if len(results) > 1:
         desc = "\n".join(str(r) for r in results)
         chunks.append(_make_chunk(

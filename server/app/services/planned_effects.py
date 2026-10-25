@@ -993,7 +993,7 @@ async def _ensure_planned_items(
 
 def _apply_item_change(
     db: Session, session_id: str, game_session: GameSession, target: Character,
-    change: "effect_channel.ItemChange", anchor: int, source: str = "planner",
+    change: "effect_channel.ItemChange", anchor: int, source: str = "planner", *, commit: bool = True,
 ) -> list[str]:
     """物品增减的确定性执行（效果通道）。按台账键幂等；失去时即便没匹配到也记键，避免反复尝试。"""
     def already() -> bool:
@@ -1027,7 +1027,7 @@ def _apply_item_change(
 
     return effect_channel.execute(
         db, session_id, effect_channel.EffectProposal(change, source, anchor),
-        apply, duplicate=[], already=already,
+        apply, duplicate=[], already=already, commit=commit,
     )
 
 
@@ -1046,22 +1046,16 @@ def discard_pending_item_gains(db: Session, game_session: GameSession, *, commit
 _discard_pending_item_gains = discard_pending_item_gains
 
 
-def settle_pending_item_gains(
+def _stage_pending_items(
     db: Session, session_id: str, game_session: GameSession, succeeded: bool,
 ) -> list[str]:
-    """检定落地后结算暂存收益：成功才入库，失败一律作废。返回要广播的 chunk 列表。
-
-    这是「先检定、后发货」的另一半——`_ensure_planned_items` 在有未决检定时只暂存不入库，
-    真正决定给不给的是这里的骰子结果。玩家扒窃掷输了，那块表就不该在他包里。
-    """
+    """消费暂存、库存、事件与台账仅暂存，由收益入口统一提交。"""
     ws = dict(game_session.turn_state or {})
     pending = list(ws.get("pending_item_gains") or [])
     if not pending:
         return []
-    # 先摘掉暂存再逐件结算：即便某件结算失败，也不会在下次投骰时被重复兑现。
     ws["pending_item_gains"] = []
     game_session.turn_state = ws
-    db.commit()
     if not succeeded:
         return [_make_chunk("inventory_update")]
     chunks: list[str] = []
@@ -1073,28 +1067,15 @@ def settle_pending_item_gains(
         key = str(item.get("key") or "") or f"g|stash|{name}|{target.id}"
         chunks += _apply_item_change(db, session_id, game_session, target, effect_channel.ItemChange(
             target.id, name, int(item.get("qty") or 1), "gain", key, str(item.get("kind") or ""),
-        ), 0, source="planner")
+        ), 0, source="planner", commit=False)
     return chunks
 
 
-def settle_pending_clue_reveals(
-    db: Session,
-    session_id: str,
-    game_session: GameSession,
-    succeeded: bool,
-    module: Module | None = None,
-    on_first_clue=None,
-) -> None:
-    """检定落地后兑现暂存的线索候选：成功记入台账（known），失败丢弃。
-
-    「先检定、后记账」——与 `settle_pending_item_gains` 同一范式。规划器在挂检定的那一轮
-    只能写 reveal_level=none（写别的就是提前泄底），所以线索是否被掌握只有骰子知道。
-    台账不是给玩家看的通知（线索内容由 KP 叙事给出），是喂给结局判定/卡关检测/复盘的账本，
-    因此这里不广播 chunk，只在**首次入账**时补一张发现配图卡。
-    """
+def _stage_pending_clues(game_session: GameSession, succeeded: bool) -> list[str]:
+    """线索候选消费与台账更新仅暂存，返回提交后需要配图的首次发现。"""
     ws = dict(game_session.world_state or {})
     staged = ws.get("pending_clue_reveals") or {}
-    ids = [str(c) for c in (staged.get("ids") or []) if str(c or "").strip()]
+    ids = list(dict.fromkeys(str(c) for c in (staged.get("ids") or []) if str(c or "").strip()))
     ws.pop("pending_clue_reveals", None)
     before = set(ws.get("clue_ledger") or {})
     if ids and succeeded:
@@ -1103,11 +1084,60 @@ def settle_pending_clue_reveals(
             int(staged.get("seq") or 0), note=str(staged.get("note") or ""),
         )
     game_session.world_state = ws
-    db.commit()
-    if ids and succeeded and module is not None and on_first_clue:
-        for cid in ids:
-            if cid not in before:
-                on_first_clue(db, session_id, module, cid)
+    return [cid for cid in ids if cid not in before] if succeeded else []
+
+
+def _notify_first_clues(db, session_id, module, ids, on_first_clue):
+    """配图是提交后的可选副作用，失败不能让调用方误以为收益未落库。"""
+    if module is None or on_first_clue is None:
+        return
+    for cid in ids:
+        try:
+            on_first_clue(db, session_id, module, cid)
+        except Exception:
+            db.rollback()
+            logger.exception("线索配图失败（收益已提交）：session=%s clue=%s", session_id, cid)
+
+
+def settle_pending_item_gains(
+    db: Session, session_id: str, game_session: GameSession, succeeded: bool,
+) -> list[str]:
+    """兼容物品单独结算入口；整个待兑现批次要么成功，要么保留供重试。"""
+    with effect_channel.transaction(db):
+        chunks = _stage_pending_items(db, session_id, game_session, succeeded)
+    return chunks
+
+
+def settle_pending_clue_reveals(
+    db: Session, session_id: str, game_session: GameSession, succeeded: bool,
+    module: Module | None = None, on_first_clue=None,
+) -> None:
+    """兼容线索单独结算入口；首次发现的配图仅在提交后执行。"""
+    with effect_channel.transaction(db):
+        ids = _stage_pending_clues(game_session, succeeded)
+    _notify_first_clues(db, session_id, module, ids, on_first_clue)
+
+
+def settle_check_rewards(
+    db: Session, session_id: str, game_session: GameSession, succeeded: bool, *,
+    module: Module | None = None, on_first_clue=None, skill: str | None = None,
+    event_id: str | None = None,
+) -> list[str]:
+    """一次检定的收益同事务；自动检定按技能筛选，并与检定标记一起落库。"""
+    from app.domain.checks import skill_matches
+
+    chunks, ids = [], []
+    with effect_channel.transaction(db):
+        if event_id is not None:
+            auto_check_state.record(game_session, event_id=event_id, skill=skill or "", succeeded=succeeded)
+        gains = list((game_session.turn_state or {}).get("pending_item_gains") or [])
+        if skill is None or (gains and all(skill_matches(g.get("skill", ""), skill) for g in gains)):
+            chunks = _stage_pending_items(db, session_id, game_session, succeeded)
+        staged = (game_session.world_state or {}).get("pending_clue_reveals") or {}
+        if skill is None or (staged and skill_matches(staged.get("skill", ""), skill)):
+            ids = _stage_pending_clues(game_session, succeeded)
+    _notify_first_clues(db, session_id, module, ids, on_first_clue)
+    return chunks
 
 
 async def _ensure_planned_combat_damage(
@@ -1341,17 +1371,10 @@ async def _ensure_scene_entry_checks(
 
 def settle_auto_rewards(
     db: Session, session_id: str, game_session: GameSession, *, skill: str, succeeded: bool,
-    module=None, on_first_clue=None,
+    module=None, on_first_clue=None, event_id: str | None = None,
 ) -> list:
-    """按自动检定技能兑现本模块负责的物品和线索，保持原有顺序与事务。"""
-    from app.domain.checks import skill_matches
-
-    chunks = []
-    gains = list((game_session.turn_state or {}).get("pending_item_gains") or [])
-    if gains and all(skill_matches(g.get("skill", ""), skill) for g in gains):
-        chunks.extend(settle_pending_item_gains(db, session_id, game_session, succeeded))
-    staged = (game_session.world_state or {}).get("pending_clue_reveals") or {}
-    if staged and skill_matches(staged.get("skill", ""), skill):
-        settle_pending_clue_reveals(db, session_id, game_session, succeeded,
-                                   module=module, on_first_clue=on_first_clue)
-    return chunks
+    """自动检定标记、匹配的物品和线索一次提交。"""
+    return settle_check_rewards(
+        db, session_id, game_session, succeeded, skill=skill, event_id=event_id,
+        module=module, on_first_clue=on_first_clue,
+    )

@@ -292,6 +292,17 @@ class _MovementWriter:
         self.db.refresh(self.game_session)
 
 
+def stage_characters(
+    db: Session, session_id: str, game_session: GameSession, module: Module | None,
+    movers: list[Character], target: str, party: list[Character],
+) -> None:
+    """调用方事务内落位并固定留守者；不提交、不广播，由调用方保存自己的操作事件。
+
+    用于人工 KP 等需要同时公开场景和写操作记录的入口。调用方必须持有事务并处理回滚。
+    """
+    _stage_move(db, session_id, game_session, module, movers, target, party, announce=False)
+
+
 def move_characters(
     db: Session, session_id: str, game_session: GameSession, module: Module | None,
     movers: list[Character], target: str, party: list[Character], *, announce: bool = True,

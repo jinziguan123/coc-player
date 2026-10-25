@@ -18,7 +18,10 @@ def clear(game_session: GameSession) -> bool:
 
 def record(game_session: GameSession, *, event_id: str, skill: str, succeeded: bool) -> None:
     state = dict(game_session.turn_state or {})
-    state[AUTO_CHECKS_KEY] = [*(state.get(AUTO_CHECKS_KEY) or []),
+    records = list(state.get(AUTO_CHECKS_KEY) or [])
+    if any(r.get("event_id") == event_id and r.get("skill") == skill for r in records):
+        return
+    state[AUTO_CHECKS_KEY] = [*records,
                               {"event_id": event_id, "skill": skill, "succeeded": bool(succeeded)}]
     game_session.turn_state = state
 

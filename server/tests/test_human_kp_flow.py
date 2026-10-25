@@ -500,3 +500,39 @@ def test_dice_check_passes_modifier_reason(db_factory):
 
 
 _ = (SessionParticipant,)
+
+
+@pytest.mark.parametrize("where", ["event", "commit"])
+def test_KP挪人公开目的地与事件失败一起回滚_可重试(db_factory, monkeypatch, where):
+    db = db_factory()
+    module, hero, mate, session = _seed(db, with_ai_mate=True)
+    before = session_service.get_party_locations(session)
+    original = session_service.add_event
+    with monkeypatch.context() as patch:
+        if where == "event":
+            def fail_event(*args, **kwargs):
+                event = original(*args, **kwargs)
+                if (kwargs.get("metadata") or {}).get("moved_to"):
+                    raise RuntimeError("挪人写入失败")
+                return event
+            patch.setattr(session_service, "add_event", fail_event)
+        else:
+            def fail_commit():
+                raise RuntimeError("挪人写入失败")
+            patch.setattr(db, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="挪人写入失败"):
+            _run(db, session, module, "move_actor", {"character_id": hero.id, "scene_id": "s2"})
+    db.expire_all()
+    assert session_service.get_char_location(session, hero.id) == "s1"
+    assert session_service.get_char_location(session, mate.id) == "s1"
+    assert session_service.get_party_locations(session) == before
+    assert "s2" not in (session.world_state or {}).get("kp_revealed", [])
+    assert not [e for e in session_service.get_session_events(db, session.id)
+                if (e.metadata_ or {}).get("moved_to")]
+    _run(db, session, module, "move_actor", {"character_id": hero.id, "scene_id": "s2"})
+    db.expire_all()
+    assert session_service.get_char_location(session, hero.id) == "s2"
+    assert session_service.get_char_location(session, mate.id) == "s1"
+    assert "s2" in session.world_state["kp_revealed"]
+    assert len([e for e in session_service.get_session_events(db, session.id)
+                if (e.metadata_ or {}).get("moved_to")]) == 1
