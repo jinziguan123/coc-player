@@ -31,7 +31,7 @@ import pytest
 APP = Path(__file__).resolve().parent.parent / "app"
 
 
-_PURE_APPLICATION = ["movement_execution.py", "movement_state.py"]
+_PURE_APPLICATION = ["movement_execution.py", "movement_state.py", "movement_adjudication.py"]
 
 
 @pytest.mark.parametrize("filename", _PURE_APPLICATION)

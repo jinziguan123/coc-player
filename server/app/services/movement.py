@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.application.movement_plans import movement_proposals as _proposals
+from app.application.movement_adjudication import ActorSnapshot, Proposal, adjudicate_batch
 from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch,
 )
@@ -35,11 +36,11 @@ from app.application.movement_state import (
     MoveRecord, PendingMove, busy_ids as _busy_ids, load_move_records,
 )
 from app.domain import movement_party
-from app.domain.movement_evidence import NON_MOVING as NON_MOVING, assess_evidence
+from app.domain.movement_evidence import NON_MOVING as NON_MOVING
 from app.domain.movement_language import Statement, analyze, has_any as _has
 from app.domain.movement_space import Destination, resolve_destination as resolve_space_destination
 from app.domain.movement import (
-    CheckOutcome, MovementIntent, assess_passage, settle_check,
+    CheckOutcome, settle_check,
 )
 from app.models.character import Character
 from app.models.module import Module
@@ -461,85 +462,42 @@ def _match_chars(names: list[str], party: list[Character]) -> list[Character]:
     return out
 
 
-def _leader(
-    db: Session, session_id: str, actors: list[Character], stmts: dict[str, Statement],
-    party: list[Character],
-) -> Character | None:
-    """提案的带头人：规划器点了名就只在点名的人里找（不借别人的原话），没点名才在全队里找；
-    按「有移动原话、真人」优先。"""
-    pool = actors or party
-    snapshots = tuple(
-        movement_party.Participant(
-            id=c.id, location=None,
-            human=session_service.is_human_controlled(db, session_id, c.id),
-            stance=(stmts.get(c.id) or Statement()).kind,
-            travel_scene=(stmts.get(c.id) or Statement()).travel_scene,
-        )
-        for c in pool
-    )
-    leader_id = movement_party.proposal_leader(snapshots, named_ids=tuple(c.id for c in actors))
-    return next((c for c in pool if c.id == leader_id), None)
+@dataclass
+class _MovementNavigation:
+    module: Module | None
+    game_session: GameSession
 
+    def resolve(self, origin: str | None, text: str, exit_hint: str = "") -> Destination:
+        return resolve_destination(self.module, origin, text, exit_hint)
 
-def _adjudicate_one(
-    db: Session, session_id: str, game_session: GameSession, module: Module | None,
-    proposal: MovementIntent, party: list[Character], stmts: dict[str, Statement],
-    stayed: set[str], busy: set[str], *, legacy_gate: str,
-) -> Verdict | None:
-    actors = _match_chars(list(proposal.actors), party)
-    leader = _leader(db, session_id, actors, stmts, party)
-    if leader is None:
-        return None
-    stmt = stmts.get(leader.id) or Statement()
-    origin = session_service.get_char_location(game_session, leader.id)
-    base = Verdict("no_evidence", [leader], origin, exit=proposal.exit)
-    evidence = assess_evidence(
-        stance=stmt.kind, travel_scene=stmt.travel_scene, planned_stance=proposal.stance,
-    )
-    if evidence.action == "ignore":
-        return None   # 大地图前往另有确定性入口（commit_pending_travel），这里不重复裁定
-    if evidence.action == "stop":
-        base.status = evidence.status
-        return base
-    text = "。".join(stmt.sentences)
-    dest = resolve_destination(module, origin, text, proposal.exit)
-    base.clues = dest.clues
-    if dest.status != "resolved" or not dest.target:
-        base.status = dest.status
-        return base
-    target = dest.target
-    base.target = target
-    if target == origin:
-        return None
-    reachable = session_service.find_scene_path(
-        module, origin, target, via_allowed=session_service.passable_scene_ids(game_session),
-    ) is not None
-    passage = assess_passage(proposal, reachable=reachable, legacy_gate=legacy_gate)
-    base.status = passage.status
-    base.skill = passage.skill
-    base.reason = passage.reason
-    if passage.status == "unreachable":
-        blocker = session_service.travel_blocker(module, game_session, origin, target)
-        base.reason = (
-            f"要先经过{turn_context._scene_name(module, blocker[0])}（{blocker[1]}）" if blocker
+    def reachable(self, origin: str | None, target: str) -> bool:
+        return session_service.find_scene_path(
+            self.module, origin, target,
+            via_allowed=session_service.passable_scene_ids(self.game_session),
+        ) is not None
+
+    def obstruction_reason(self, origin: str | None, target: str) -> str:
+        blocker = session_service.travel_blocker(self.module, self.game_session, origin, target)
+        return (
+            f"要先经过{turn_context._scene_name(self.module, blocker[0])}（{blocker[1]}）" if blocker
             else "与当前位置不连通"
         )
-        return base
-    if passage.status == "blocked":
-        return base
-    solo = proposal.solo or stmt.solo
-    followers = select_followers(
-        db, session_id, game_session, leader, party, origin=origin, solo=solo,
-        collective=stmt.collective, stmts=stmts, stayed=stayed,
-        named=[a for a in actors if a.id != leader.id], busy=busy, module=module, target=target,
-    )
-    movers = [leader, *followers]
-    base.movers = movers
-    base.stayers = [
-        c for c in party
-        if c not in movers and session_service.get_char_location(game_session, c.id) == origin
-    ]
-    return base
+
+
+def _actor_snapshots(
+    db: Session, session_id: str, game_session: GameSession,
+    party: list[Character], stmts: dict[str, Statement],
+) -> tuple[ActorSnapshot, ...]:
+    snapshots = []
+    for char in party:
+        stmt = stmts.get(char.id) or Statement()
+        snapshots.append(ActorSnapshot(movement_party.Participant(
+            id=char.id, location=session_service.get_char_location(game_session, char.id),
+            human=session_service.is_human_controlled(db, session_id, char.id),
+            stance=stmt.kind, solo=stmt.solo, hesitant=stmt.hesitant,
+            travel_scene=stmt.travel_scene, collective=stmt.collective,
+        ), tuple(stmt.sentences)))
+    return tuple(snapshots)
 
 
 def _note(module: Module | None, verdict: Verdict) -> str:
@@ -641,17 +599,17 @@ def adjudicate_plan(
     legacy_gate = (
         (plan.check.skill or "").strip() if legacy and plan is not None and plan.requires_check else ""
     )
-    verdicts: list[tuple[Verdict, bool]] = []
-    busy: set[str] = set()
-    for proposal in proposals:
-        verdict = _adjudicate_one(
-            db, session_id, game_session, module, proposal, party, stmts, stayed, busy,
-            legacy_gate=legacy_gate,
-        )
-        if verdict is None or any(c.id in busy for c in verdict.movers):
-            continue
-        busy |= {c.id for c in verdict.movers}
-        verdicts.append((verdict, bool(proposal.shared_check) and not legacy))
+    decisions = adjudicate_batch(
+        tuple(Proposal(p, tuple(c.id for c in _match_chars(list(p.actors), party))) for p in proposals),
+        _actor_snapshots(db, session_id, game_session, party, stmts),
+        _MovementNavigation(module, game_session), host_id=game_session.player_character_id,
+        stayed=frozenset(stayed), legacy=legacy, legacy_gate=legacy_gate,
+    )
+    by_id = {c.id: c for c in party}
+    verdicts = [(Verdict(
+        d.status, [by_id[cid] for cid in d.mover_ids], d.origin, d.target,
+        [by_id[cid] for cid in d.stayer_ids], d.exit, d.skill, d.reason, list(d.clues),
+    ), shared) for d, shared in decisions]
     if not verdicts:
         return [], ""
 
