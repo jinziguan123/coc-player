@@ -95,6 +95,14 @@ def record_clue_reveal(
     return ws
 
 
+def discard_pending_clue_reveals(ws: dict | None) -> tuple[dict, bool]:
+    """作废门控线索候选，返回副本及是否删除了键，不改其他世界状态。"""
+    updated = dict(ws or {})
+    changed = "pending_clue_reveals" in updated
+    updated.pop("pending_clue_reveals", None)
+    return updated, changed
+
+
 def stage_clue_reveal(
     ws: dict, clue_ids: list[str], discovered_by: list[str], seq: int, note: str = "",
     skill: str = "",

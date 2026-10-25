@@ -16,7 +16,7 @@ from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
 from app.services import (
     agent_trace,
-    check_gating,
+    auto_check_state,
     effect_channel,
     dice_runtime,
     entity_state,
@@ -947,7 +947,7 @@ async def _ensure_planned_items(
     # 检定若已在叙事中由系统自动掷过（AI 队友 / 暗投），直接按已知成败结算，不再暂存到下轮作废。
     gate_skill = (plan.check.skill or plan.player_check_request or "").strip()
     gate_known = (
-        check_gating.auto_outcome(db, game_session, gate_skill) if plan.requires_check else None
+        auto_check_state.auto_outcome(db, game_session, gate_skill) if plan.requires_check else None
     )
     gains_now = plan.items_gained if (not plan.requires_check or gate_known) else []
     deferred = []
@@ -1031,15 +1031,19 @@ def _apply_item_change(
     )
 
 
-def _discard_pending_item_gains(db: Session, game_session: GameSession) -> bool:
+def discard_pending_item_gains(db: Session, game_session: GameSession, *, commit: bool = True) -> bool:
     """作废暂存的待检定收益（检定失败 / 玩家干脆没投就又行动了）。返回是否真的清掉了东西。"""
     ws = dict(game_session.turn_state or {})
     if not ws.get("pending_item_gains"):
         return False
     ws["pending_item_gains"] = []
     game_session.turn_state = ws
-    db.commit()
+    if commit:
+        db.commit()
     return True
+
+
+_discard_pending_item_gains = discard_pending_item_gains
 
 
 def settle_pending_item_gains(
@@ -1333,3 +1337,21 @@ async def _ensure_scene_entry_checks(
             done = recorded
             for chunk in chunks:
                 yield chunk
+
+
+def settle_auto_rewards(
+    db: Session, session_id: str, game_session: GameSession, *, skill: str, succeeded: bool,
+    module=None, on_first_clue=None,
+) -> list:
+    """按自动检定技能兑现本模块负责的物品和线索，保持原有顺序与事务。"""
+    from app.domain.checks import skill_matches
+
+    chunks = []
+    gains = list((game_session.turn_state or {}).get("pending_item_gains") or [])
+    if gains and all(skill_matches(g.get("skill", ""), skill) for g in gains):
+        chunks.extend(settle_pending_item_gains(db, session_id, game_session, succeeded))
+    staged = (game_session.world_state or {}).get("pending_clue_reveals") or {}
+    if staged and skill_matches(staged.get("skill", ""), skill):
+        settle_pending_clue_reveals(db, session_id, game_session, succeeded,
+                                   module=module, on_first_clue=on_first_clue)
+    return chunks

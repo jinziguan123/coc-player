@@ -188,3 +188,40 @@ def test_每类效果载荷都在权威表登记():
     for cls in payloads:
         entry = effect_channel.AUTHORITY[cls]
         assert entry.sources and entry.dedupe and entry.on_regenerate
+
+
+def test_仅移动状态也报告变更且只提交一次(db, monkeypatch):
+    from app.services import movement
+    s, _, _ = _seed(db)
+    s.turn_state = {movement.MOVES_KEY: [{"status": "blocked"}], "keep": {"x": 1}}
+    db.commit()
+    commits = []
+    original = db.commit
+    def commit():
+        commits.append(True)
+        original()
+    monkeypatch.setattr(db, "commit", commit)
+    assert check_gating.begin_turn(db, s) is True
+    assert commits == [True]
+    db.refresh(s)
+    assert s.turn_state == {"keep": {"x": 1}}
+    assert check_gating.begin_turn(db, s) is False
+    assert commits == [True]
+
+
+def test_新回合清理中途失败回滚所有已改状态(db, monkeypatch):
+    from app.services import auto_check_state, movement
+    s, _, _ = _seed(db)
+    state = {movement.MOVES_KEY: [{"status": "pending_check"}],
+             "pending_item_gains": [{"name": "钥匙"}], "auto_checks": [{"event_id": "e"}]}
+    s.turn_state = state
+    s.world_state = {"pending_clue_reveals": {"ids": ["c"]}, "keep": True}
+    db.commit()
+    def fail(_session):
+        raise RuntimeError("清理失败")
+    monkeypatch.setattr(auto_check_state, "clear", fail)
+    with pytest.raises(RuntimeError, match="清理失败"):
+        check_gating.begin_turn(db, s)
+    db.refresh(s)
+    assert s.turn_state == state
+    assert s.world_state == {"pending_clue_reveals": {"ids": ["c"]}, "keep": True}

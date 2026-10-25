@@ -215,3 +215,14 @@ def test_移动回合状态的存档键只由移动模块解释():
                     and isinstance(node.value, ast.Name) and node.value.id == "movement":
                 offenders.append(f"{path.relative_to(APP)}:{node.lineno} movement.{node.attr}")
     assert not offenders, "\n".join(offenders)
+
+
+def test_计划效果只读自动检定状态_不反向调用门控编排():
+    tree = ast.parse((APP / "services" / "planned_effects.py").read_text("utf-8"))
+    assert all(not (mod == "app.services.check_gating" or mod.startswith("app.services.check_gating."))
+               for mod, _ in _import_targets(tree))
+
+
+def test_自动检定状态不驱动收益或回合编排():
+    tree = ast.parse((APP / "services" / "auto_check_state.py").read_text("utf-8"))
+    assert all(not mod.startswith("app.services") for mod, _ in _import_targets(tree))
