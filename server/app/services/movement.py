@@ -31,6 +31,7 @@ from app.application.movement_adjudication import ActorSnapshot, Proposal, adjud
 from app.application.movement_execution import (
     MoveCommand, MovementStateUpdate, commit_movement_batch, prepare_movement_batch,
 )
+from app.application.movement_settlement import settle_pending_checks
 from app.application.movement_space import project_scene, project_space
 from app.application.movement_state import (
     MoveRecord, PendingMove, busy_ids as _busy_ids, load_move_records,
@@ -39,14 +40,11 @@ from app.domain import movement_party
 from app.domain.movement_evidence import NON_MOVING as NON_MOVING
 from app.domain.movement_language import Statement, analyze, has_any as _has
 from app.domain.movement_space import Destination, resolve_destination as resolve_space_destination
-from app.domain.movement import (
-    CheckOutcome, settle_check,
-)
+from app.domain.movement import CheckOutcome
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
-    check_gating,
     effect_channel,
     illustration_service,
     scene_kind,
@@ -635,46 +633,26 @@ def settle_pending_moves(
     if not char_ids:
         return []
     db.refresh(game_session)
-    pending = list(_pending_moves(game_session))
+    pending = _pending_moves(game_session)
     if not pending:
         return []
-    records = list(turn_moves(game_session))
-    by_id = {c.id: c for c in party}
-    moves: list[tuple[str, list[Character]]] = []
-    touched = False
-    for index, entry in enumerate(pending):
-        if not check_gating.skill_matches(entry.skill, skill):
-            continue
-        resolution = settle_check(
-            dict(entry.states), CheckOutcome(frozenset(char_ids), succeeded),
-            shared=entry.shared,
-            eligible_ids=frozenset(
-                cid for cid, _status in entry.states if cid in by_id
-                and session_service.get_char_location(game_session, cid) == entry.origin
-            ),
-        )
-        if not resolution.changed:
-            continue
-        touched = True
-        pending[index] = entry.with_states(resolution.states)
-        rollers = resolution.roller_ids
-        if resolution.mover_ids:
-            moves.append((str(entry.target or ""),
-                          [by_id[cid] for cid in resolution.mover_ids]))
-        records = [r.with_states(resolution.states) if r.concerns(entry) else r for r in records]
+    settlement = settle_pending_checks(
+        pending, turn_moves(game_session), skill=skill,
+        outcome=CheckOutcome(frozenset(char_ids), succeeded),
+        locations={c.id: session_service.get_char_location(game_session, c.id) for c in party},
+    )
+    if settlement is None:
+        return []
+    staged = commit_movement_batch(
+        _MovementWriter(db, session_id, game_session, module, party), settlement.commands,
+        state=settlement.state,
+    )
+    names = {c.id: c.name for c in party}
+    for rollers in settlement.rollers:
         logger.info(
             "门控移动结算：session=%s %s %s → %s", session_id,
-            "、".join(by_id[c].name for c in rollers if c in by_id), skill,
-            "成功" if succeeded else "失败",
+            "、".join(names[c] for c in rollers if c in names), skill, "成功" if succeeded else "失败",
         )
-    if not touched:
-        return []
-    remaining = [e for e in pending if e.waiting_ids]
-    staged = commit_movement_batch(
-        _MovementWriter(db, session_id, game_session, module, party),
-        tuple(MoveCommand(target, tuple(c.id for c in movers)) for target, movers in moves),
-        state=MovementStateUpdate(tuple(records), tuple(remaining)),
-    )
     return _announce(db, session_id, module, list(staged))
 
 

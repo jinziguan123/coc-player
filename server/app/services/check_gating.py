@@ -10,23 +10,13 @@
 """
 from __future__ import annotations
 
-import re
-
 from sqlalchemy.orm import Session
 
+from app.domain.checks import normalize_skill, skill_matches as skill_matches   # 兼容入口：规则在领域层
 from app.models.event_log import EventLog
 from app.models.session import GameSession
 
 AUTO_CHECKS_KEY = "auto_checks"
-
-
-def _norm(skill: str) -> str:
-    return re.sub(r"\s+", "", str(skill or "")).lower()
-
-
-def skill_matches(expected: str, rolled: str) -> bool:
-    a, b = _norm(expected), _norm(rolled)
-    return bool(a and b) and (a in b or b in a)
 
 
 def begin_turn(db: Session, game_session: GameSession) -> bool:
@@ -54,7 +44,7 @@ def begin_turn(db: Session, game_session: GameSession) -> bool:
 def auto_outcome(db: Session, game_session: GameSession, skill: str) -> bool | None:
     """本回合系统自动掷过的匹配检定的成败；没有（或其骰子事件已随重生成回滚）返回 None。"""
     records = list((game_session.turn_state or {}).get(AUTO_CHECKS_KEY) or [])
-    if not records or not _norm(skill):
+    if not records or not normalize_skill(skill):
         return None
     ids = [r.get("event_id") for r in records if r.get("event_id")]
     alive = {

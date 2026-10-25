@@ -16,6 +16,8 @@
 | `app/application/movement_space.py` | 将模组 JSON 字段投影为不可变快照，避免保留 ORM 或可变 JSON 引用 |
 | `app/application/movement_plans.py` | AI `TurnPlan` 到领域 `MovementIntent` 的转换，兼容旧 `scene_change` |
 | `app/application/movement_execution.py` | 裁定结果装配、批次提交用例及写入端口；同事务暂存移动与回合状态，提交后返回凭据 |
+| `app/domain/checks.py` | 检定通用规则：技能名归一与匹配（`check_gating.skill_matches` 为兼容导出） |
+| `app/application/movement_settlement.py` | 检定落地时的门控移动批次结算：按技能匹配逐条结算，产出移动命令与类型化状态更新 |
 | `app/application/movement_adjudication.py` | 单条及批次裁定编排，使用参与者快照和只读导航端口，返回角色 ID 裁定 |
 | `app/application/movement_state.py` | 待检定移动与回合裁定记录的类型化读取、旧存档兼容和个人状态写回，保留未处理字段；存档 JSON 键只在此处与原服务的兼容入口出现 |
 | `app/services/movement.py` | 原有公开入口、导航候选集适配、状态加载、位置资格快照、事务写入和提交后的展示 |
@@ -204,3 +206,26 @@
 
 新增端口测试验证混合裁定、角色和姓名顺序、记录字段归属、旧待执行条目的保留与替换及输入隔离。
 写入端口、事务范围和提交后广播保持不变。裁定与提交间的状态装配现在可以脱离 ORM 单独验证。
+
+## 第十二轮：检定结算批次协调（架构优化第二阶段）
+
+`settle_pending_checks` 接收待检定快照、裁定记录快照、投出的技能、`CheckOutcome` 及写入前的位置快照，
+返回 `CheckSettlement`（移动命令、`MovementStateUpdate`、每条被结算条目的投骰者）。
+它复用领域 `settle_check` 与 `MoveRecord.with_states`，不复制结算规则；没有任何条目变化时返回 None，
+调用方不开事务。`settle_pending_moves` 只保留数据库刷新、位置快照装配、统一提交、日志和提交后的展示。
+
+位置快照只含队伍成员：不在快照中或已离开出发处的人没有通过资格，与原来“在队伍里且仍在出发处”的判断一致。
+结算日志移到提交之后，与第六轮裁定日志的处理一致，回滚的批次不再留下貌似成功的日志。
+
+技能匹配是纯规则，移到 `domain/checks.py`；`check_gating` 保留 `skill_matches` 兼容导出。
+`services/movement.py` 因此不再导入 `check_gating`，两者的互相导入消失（`check_gating.begin_turn`
+调 `movement.begin_turn` 的单向依赖仍在）。结构测试禁止移动服务重新依赖检定门控，并把新应用模块纳入纯边界约束。
+
+`test_movement_settlement.py` 不用数据库验证：多人个人检定、个人失败后他人成功不带走失败者、
+共享障碍先失败后通过及已离场者判失败、全员尝试失败、重复/无关/无投骰者结果无副作用、
+不在队伍快照者无资格、同一结果结算多条条目且不同技能与无关旧记录原样保留、扩展字段与输入隔离、技能匹配规则。
+原数据库测试继续覆盖事务回滚、重试与提交后广播。
+
+仍未迁移：`pending_unissued` 仍通过函数内导入回调 `planned_effects.requested_check_settled`，
+是 movement 与 planned_effects 互相导入的原因；回合开始清理仍由 `check_gating.begin_turn` 调用 `movement.begin_turn`。
+这两处属于回合生命周期与状态所有权，留到第三阶段一起梳理。

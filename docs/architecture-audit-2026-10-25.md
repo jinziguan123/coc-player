@@ -51,11 +51,23 @@
 这消除了 style_editor → turn_context 的直接依赖，**不宣称消除了整个强连通分量**。
 现有润色测试验证真实接线，独立测试验证空原文、句界、事件顺序与偏移边界，结构测试防止反向依赖重新出现。
 
+## 第二阶段：检定结算批次协调
+
+技能匹配、待执行记录、位置资格、个人状态、裁定记录更新与事务提交的路径为：
+手动投骰 `turn_orchestrator._settle_rolled_check` / 自动掷 `turn_effects` → `movement.settle_pending_moves`
+→（原）逐条 `check_gating.skill_matches` + 领域 `settle_check` + 记录更新 → `commit_movement_batch`。
+
+现在中间的协调是应用层纯函数 `application/movement_settlement.settle_pending_checks`，
+输入为待检定与裁定记录快照、技能、结果和位置快照，输出移动命令和状态更新；数据库刷新、位置读取、
+提交、日志和展示留在服务适配边界。技能匹配迁入 `domain/checks.py`，消除 movement ↔ check_gating 互相导入。
+互相导入从五对降为四对；强连通分量仍为 28 个模块（movement 还经 planned_effects、turn_context 等成环）。
+详见 `docs/architecture-movement.md` 第十二轮。
+
 ## 持续进度
 
 - 第一阶段：已完成。验证：后端全量 2891 通过、11 跳过；Ruff 通过；`git diff --check` 通过。提交号见 Git 日志（「第一阶段」提交）。
-- 第二阶段：进行中。处理 `settle_pending_moves` 的批次协调；复用领域 settle_check、类型化状态及统一提交端口。
+- 第二阶段：已完成。验证：后端全量 2908 通过、11 跳过；Ruff 通过；`git diff --check` 通过。提交号见 Git 日志（「第二阶段」提交）。
 - 第三阶段：待整理移动、检定、回合与导航状态所有权，选择一个明确的越界写入或重复解释收敛。
 - 未解决：上表其余四对互相导入；`check_gating.begin_turn` 只清理了移动状态时返回值仍为 False（待第三阶段核实影响）。
 - 已知无关文件：既有 2026-10-22 计划草稿与 tmp 下审计/截图文件，不纳入提交。
-- 下一条操作：把纯技能匹配规则移到领域层，再把检定结算的批次协调抽成应用层纯函数。
+- 下一条操作：第三阶段，追踪 turn_moves / pending_moves / auto_checks / pending_item_gains 等回合状态的创建、修改、消费与清理。

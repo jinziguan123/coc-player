@@ -31,7 +31,9 @@ import pytest
 APP = Path(__file__).resolve().parent.parent / "app"
 
 
-_PURE_APPLICATION = ["movement_execution.py", "movement_state.py", "movement_adjudication.py"]
+_PURE_APPLICATION = [
+    "movement_execution.py", "movement_state.py", "movement_adjudication.py", "movement_settlement.py",
+]
 
 
 @pytest.mark.parametrize("filename", _PURE_APPLICATION)
@@ -164,3 +166,16 @@ def test_润色器不能反向依赖回合上下文且位置变换仅依赖标�
             targets.extend(f"{node.module}.{a.name}" for a in node.names)
     assert not any(t == "app.services.turn_context" or t.startswith("app.services.turn_context.")
                    for t in targets)
+
+
+def test_移动服务不依赖检定门控_避免两者互相导入():
+    """技能匹配规则在领域层；check_gating 在回合开始时调用 movement，反方向不得再出现。"""
+    tree = ast.parse((APP / "services" / "movement.py").read_text("utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            targets = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            targets = [node.module, *(f"{node.module}.{a.name}" for a in node.names)]
+        else:
+            continue
+        assert "app.services.check_gating" not in targets, f"movement.py:{node.lineno} 不得依赖 check_gating"
