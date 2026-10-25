@@ -50,11 +50,15 @@ def _confirm_map(turn_state: dict | None) -> dict:
 
 
 def _write_confirm_map(ts: dict, confirm: dict) -> dict:
-    """写回合确认表并把旧迁移铺在顶层的确认键清掉（保留 pending 等常驻键）。"""
+    """写回合确认表并把旧迁移铺在顶层的确认键清掉。
+
+    只清 ``_confirm_map`` 会当成旧确认读的那些（顶层、值恰为 True）；其他模块的状态
+    （移动裁定、待检定移动、自动检定……）不归回合确认管，一律保留。
+    """
     ts = dict(ts)
     ts["turn_confirm"] = confirm
-    for key in list(ts):
-        if key != "turn_confirm" and key not in _EPHEMERAL_TURN_STATE_KEYS:
+    for key, value in list(ts.items()):
+        if key != "turn_confirm" and key not in _EPHEMERAL_TURN_STATE_KEYS and value is True:
             ts.pop(key, None)
     return ts
 

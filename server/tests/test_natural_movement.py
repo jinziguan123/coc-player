@@ -1147,3 +1147,19 @@ def test_叙事后补挂门控检定_只给本轮还没有检定的人(db_factor
         t.db, t.sid, t.session, t.module, t.alvin, t.others(), plan, pre_gen_seq=pre,
     )))
     assert [(kv["skill"], kv["chars"], kv["source"]) for kv in issued] == [("攀爬", "哈桑", "通过出口")]
+
+
+def test_真人确认回合不会抹掉暂存的门控移动(db_factory):
+    """回归：回合确认曾删除白名单外的顶层键，待检定移动与裁定记录随之丢失，之后检定成功也不移动。"""
+    from app.services import turn_state_service
+
+    t = _seed_f(db_factory, human_hassan=True)
+    t.say(t.alvin, "我和哈桑从墙洞爬进去，你们留在这儿")
+    t.say(t.hassan, "我也从墙洞爬进去")
+    _stage_climb(t, ["阿尔文", "哈桑"])
+    turn_state_service.set_turn_confirm(t.db, t.sid, t.hassan.id, True)
+    ts = t.session.turn_state or {}
+    assert ts[movement.PENDING_KEY] and ts[movement.MOVES_KEY]
+    assert ts["turn_confirm"] == {t.hassan.id: True}
+    _roll(t, t.alvin, "攀爬", "success")
+    assert _locs(t)["阿尔文"] == "scene_2"
