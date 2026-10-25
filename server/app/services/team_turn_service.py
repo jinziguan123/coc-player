@@ -20,6 +20,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
     agent_runtime,
+    effect_channel,
     intent as team_intent,
     intent_ledger,
     agent_trace,
@@ -395,13 +396,14 @@ async def _run_team_turn(
                     via_allowed=session_service.passable_scene_ids(game_session),
                 ) is not None
             ):
-                session_service.set_char_location(db, session_id, teammate.id, sid)
-                db.refresh(game_session)
                 label = _scene_name(module, sid)
-                ev = session_service.add_event(
-                    db, session_id, "action", f"（前往：{label}）",
-                    actor_id=teammate.id, actor_name=teammate.name,
-                )
+                with effect_channel.transaction(db):
+                    session_service.set_char_location(db, session_id, teammate.id, sid, commit=False)
+                    ev = session_service.add_event(
+                        db, session_id, "action", f"（前往：{label}）",
+                        actor_id=teammate.id, actor_name=teammate.name, commit=False,
+                    )
+                db.refresh(game_session)
                 yield _make_chunk(
                     "action", f"（前往：{label}）", actor_name=teammate.name,
                     event_id=ev.id, actor_id=teammate.id,
@@ -419,16 +421,17 @@ async def _run_team_turn(
         # 这也是分头行动唯一能被真正触发的入口之一：他留在原地，队伍走到别处，归并才会出现两组。
         if action == "stay":
             here = session_service.get_char_location(game_session, teammate.id)
-            if here:
-                session_service.set_char_location(db, session_id, teammate.id, here)
-                db.refresh(game_session)
             label = _scene_name(module, here) if here else ""
             text = content or f"（留在{label}）"
-            ev = session_service.add_event(
-                db, session_id, "action", text,
-                actor_id=teammate.id, actor_name=teammate.name,
-                metadata={session_service.STAY_META_KEY: True, "scene_id": here},
-            )
+            with effect_channel.transaction(db):
+                if here:
+                    session_service.set_char_location(db, session_id, teammate.id, here, commit=False)
+                ev = session_service.add_event(
+                    db, session_id, "action", text,
+                    actor_id=teammate.id, actor_name=teammate.name,
+                    metadata={session_service.STAY_META_KEY: True, "scene_id": here}, commit=False,
+                )
+            db.refresh(game_session)
             yield _make_chunk(
                 "action", text, actor_name=teammate.name,
                 event_id=ev.id, actor_id=teammate.id,

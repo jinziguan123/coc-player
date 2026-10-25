@@ -36,7 +36,7 @@ from app.services.event_protocol import (
     split_speech_action,
 )
 from app.services.human_kp_actions import execute_human_kp_action
-from app.services.turn_context import commit_pending_travel
+from app.services.turn_travel import commit_pending_travel
 from app.services.turn_orchestrator import (
     run_chat_generation,
     run_check_request_generation,

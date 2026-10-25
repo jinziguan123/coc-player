@@ -116,7 +116,7 @@ _current_turn_events = turn_context._current_turn_events
 _shown_turn_dialogues = turn_context._shown_turn_dialogues
 _shown_turn_context = turn_context._shown_turn_context
 _settled_checks_context = turn_context._settled_checks_context
-commit_pending_travel = turn_context.commit_pending_travel
+from app.services.turn_travel import commit_pending_travel
 _location_groups = turn_context._location_groups
 _augment_plan_with_backstage = turn_context._augment_plan_with_backstage
 _team_blind_message = turn_context._team_blind_message

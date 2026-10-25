@@ -1094,3 +1094,51 @@ def test_队友父回合取消或超时会等待所有子任务退出(db_factory
 
     asyncio.run(run())
     db.close()
+
+
+@pytest.mark.parametrize("action", ["travel", "stay"])
+def test_队友位置与事件写入失败一起回滚_重试仅一条事件(db_factory, monkeypatch, action):
+    import json
+
+    db = db_factory()
+    module, hero, teammates, session = _seed(db)
+    mate = teammates[0]
+    module.scenes = [{"id": "hall", "title": "门厅"}, {"id": "room", "title": "房间"}]
+    session.current_scene_id = "hall"
+    db.commit()
+    mate_id, session_id = mate.id, session.id
+    original_locations = session_service.get_party_locations(session)
+    monkeypatch.setattr(session_service, "known_scene_ids", lambda *_: {"hall", "room"})
+
+    async def decide(self, messages):
+        return json.dumps({"action": action, "target": "room", "content": "我去房间" if action == "travel" else "我留守"})
+    monkeypatch.setattr(chat_service.TeamAgent, "decide", decide)
+    original = session_service.add_event
+    def fail_after_event(*args, **kwargs):
+        event = original(*args, **kwargs)
+        if kwargs.get("actor_id") == mate_id and args[2] == "action":
+            raise RuntimeError("事件暂存后失败")
+        return event
+    monkeypatch.setattr(session_service, "add_event", fail_after_event)
+
+    with pytest.raises(RuntimeError, match="事件暂存后失败"):
+        asyncio.run(_collect(chat_service._run_team_turn(
+            db, session_id, session, module, hero, [mate], llm=None,
+        )))
+    db.expire_all()
+    session = db.get(GameSession, session_id)
+    assert session_service.get_party_locations(session) == original_locations
+    assert session_service.get_char_location(session, mate_id) == "hall"
+    assert not [e for e in session_service.get_session_events(db, session_id)
+                if e.actor_id == mate_id and e.event_type == "action"]
+
+    monkeypatch.setattr(session_service, "add_event", original)
+    asyncio.run(_collect(chat_service._run_team_turn(
+        db, session_id, session, module, hero, [mate], llm=None,
+    )))
+    db.expire_all()
+    session = db.get(GameSession, session_id)
+    assert session_service.get_char_location(session, mate_id) == ("room" if action == "travel" else "hall")
+    assert mate_id in session_service.get_party_locations(session)
+    assert len([e for e in session_service.get_session_events(db, session_id)
+                if e.actor_id == mate_id and e.event_type == "action"]) == 1

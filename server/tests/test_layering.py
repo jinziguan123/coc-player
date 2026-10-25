@@ -226,3 +226,11 @@ def test_计划效果只读自动检定状态_不反向调用门控编排():
 def test_自动检定状态不驱动收益或回合编排():
     tree = ast.parse((APP / "services" / "auto_check_state.py").read_text("utf-8"))
     assert all(not mod.startswith("app.services") for mod, _ in _import_targets(tree))
+
+
+def test_上下文模块不依赖位置写入入口():
+    tree = ast.parse((APP / "services" / "turn_context.py").read_text("utf-8"))
+    for mod, _ in _import_targets(tree):
+        assert mod not in {"app.services.movement", "app.services.turn_travel"}
+    assert not any(isinstance(n, ast.Attribute) and n.attr in {"set_char_location", "update_scene"}
+                   for n in ast.walk(tree))
