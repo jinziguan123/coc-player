@@ -66,6 +66,8 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 "app/rules/**" = ["TID251"]
 "tests/**" = ["TID251"]
+# 评测脚本与测试同理：要钉死骰值（check.roll_percentile），不是业务层
+"evals/**" = ["TID251"]
 
 [tool.pytest.ini_options]
 markers = [
