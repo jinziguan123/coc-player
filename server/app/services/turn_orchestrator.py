@@ -17,7 +17,7 @@ from app.ai.llm_factory import get_fast_llm, get_llm
 from app.ai.provider import StreamStalled, model_name
 from app.services import style_editor as style_editor  # 兼容测试与插件的旧注入点
 from app.ai.providers import openai_compat
-from app.config import settings
+from app import agent_settings
 from app.ai.prompts.kp_system import (
     CHECK_REQUEST_PROMPT,
     COMBAT_AFTERMATH_PROMPT,
@@ -404,15 +404,16 @@ async def _run_narration_stage(
 ):
     """所有入口共用校验、持久化、重排和 NPC 记忆处理；兼容注入点在编排层保留。"""
     order = event_order if event_order is not None else []
+    options = agent_settings.current()
     # 高风险回合（本轮有明确不可泄露的内容）：整段缓冲到终检完成再放出，牺牲首字延迟换取可拦截。
     high_risk = bool(
-        settings.narration_buffer_high_risk and plan is not None and plan.safety.do_not_reveal
+        options.narration_buffer_high_risk and plan is not None and plan.safety.do_not_reveal
     )
     ctx = turn_pipeline.TurnContext(
         session_id, result, turn_pipeline.TurnSpec(
             "KP 叙事", hold_for_check=hold, buffer_until_validated=high_risk,
-            validate_timeout=settings.narration_buffer_timeout_seconds if high_risk else None,
-            on_validation_failure=settings.narration_buffer_on_failure,
+            validate_timeout=options.narration_buffer_timeout_seconds if high_risk else None,
+            on_validation_failure=options.narration_buffer_on_failure,
         ),
         pre_gen_seq=base_seq, event_order=order, group=group,
     )

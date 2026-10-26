@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 import httpx
 
 from app.ai import usage_tracker, call_budget
-from app.config import settings
+from app import agent_settings
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,8 @@ class HousekeepingManager:
             started_at = time.monotonic()
             try:
                 with usage_tracker.phase("收尾"), call_budget.scope(
-                    max_calls=12, max_tokens=100000, seconds=settings.housekeeping_max_seconds,
+                    max_calls=12, max_tokens=100000,
+                    seconds=agent_settings.current().housekeeping_max_seconds,
                 ) as budget:
                     await asyncio.wait_for(summarize(db, session_id, llm), budget.remaining_seconds)
                     await asyncio.wait_for(backstage(db, session_id, llm), budget.remaining_seconds)

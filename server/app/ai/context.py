@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 from app.ai.token_estimate import estimate_text_tokens as _estimate_tokens
 
+from app import agent_settings
 from app.ai import profile_store
 from app.ai.provider import CACHE_BLOCKS_KEY, CACHE_BREAK_KEY
 from app.config import settings
@@ -73,16 +74,44 @@ CONTEXT_BUDGET_WINDOW_FRACTION = 0.6
 CONTEXT_BUDGET_CEIL = 150_000
 
 
-def resolve_context_budget(context_window: int) -> int:
+def resolve_context_budget(context_window: int, ceiling: int | None = None) -> int:
     """按模型上下文窗口自适应解析组装预算（估算单位）。
 
-    窗口越大留越多逐字记忆，但 clamp 在 [CONTEXT_TOKEN_BUDGET, CONTEXT_BUDGET_CEIL] 内：
+    窗口越大留越多逐字记忆，但 clamp 在 [CONTEXT_TOKEN_BUDGET, 上限] 内：
     ≤64K 窗口回落下限（行为与放宽前完全一致），超大窗口封顶避免塞满。窗口非法时回落下限。
+    ``ceiling`` 默认取当前上下文档位的预算上限（均衡档即 CONTEXT_BUDGET_CEIL）。
     """
     if not context_window or context_window <= 0:
         return CONTEXT_TOKEN_BUDGET
+    ceil = ceiling if ceiling is not None else context_preset_values().budget_ceiling
     scaled = int(context_window * CONTEXT_BUDGET_WINDOW_FRACTION)
-    return max(CONTEXT_TOKEN_BUDGET, min(scaled, CONTEXT_BUDGET_CEIL))
+    return max(CONTEXT_TOKEN_BUDGET, min(scaled, ceil))
+
+
+@dataclass(frozen=True)
+class ContextPresetValues:
+    """上下文档位落到的四个联动值（见设置页「高级」）。"""
+    budget_ceiling: int        # 事件组装预算上限（估算 token），对应 CONTEXT_BUDGET_CEIL
+    min_recent_events: int     # 最近原文保底条数，对应 MIN_RECENT_EVENTS
+    max_summary_tokens: int    # 兜底摘要预算，对应 MAX_SUMMARY_TOKENS
+    visited_scene_window: int  # 最近去过场景的保留数，对应 VISITED_SCENE_WINDOW
+
+
+#: 省钱 / 完整两档的取值；均衡档不在表里，实时读本模块常量（等于现状，测试可 monkeypatch）。
+CONTEXT_PRESETS: dict[str, ContextPresetValues] = {
+    "economy": ContextPresetValues(64_000, 6, 1200, 3),
+    "full": ContextPresetValues(200_000, 16, 3000, 10),
+}
+
+
+def context_preset_values(preset: str | None = None) -> ContextPresetValues:
+    """当前（或指定）上下文档位的取值；未知档位按均衡。"""
+    name = preset if preset is not None else agent_settings.current().context_preset
+    if name in CONTEXT_PRESETS:
+        return CONTEXT_PRESETS[name]
+    return ContextPresetValues(
+        CONTEXT_BUDGET_CEIL, MIN_RECENT_EVENTS, MAX_SUMMARY_TOKENS, VISITED_SCENE_WINDOW,
+    )
 
 
 # ── 估算口径的在线校准 ──────────────────────────────────────────────────
@@ -550,7 +579,8 @@ def _visible_scenes(session: GameSession, scene_id: str | None, module: Module) 
     """
     nav = session.navigation
     visited = list(nav.visited_scenes if nav else [])
-    visible = set(visited[-VISITED_SCENE_WINDOW:])
+    window = context_preset_values().visited_scene_window
+    visible = set(visited[-window:]) if window > 0 else set()
     if scene_id:
         visible.add(scene_id)
 
@@ -1672,11 +1702,13 @@ def _assemble_kp_messages(
             recent_pool, primary_char_id=player_char.id, party_char_ids=party_char_ids,
         )
 
-        if len(all_msgs) <= MIN_RECENT_EVENTS:
+        preset = context_preset_values()
+        min_recent = preset.min_recent_events
+        if len(all_msgs) <= min_recent:
             recent_msgs = all_msgs
             older_summary = ""
         else:
-            recent_msgs = all_msgs[-MIN_RECENT_EVENTS:]
+            recent_msgs = all_msgs[-min_recent:]
             recent_tokens = sum(_estimate_tokens(m["content"]) for m in recent_msgs)
 
             remaining = event_budget - recent_tokens
@@ -1684,7 +1716,7 @@ def _assemble_kp_messages(
                 next_idx = len(all_msgs) - len(recent_msgs) - 1
                 next_msg = all_msgs[next_idx]
                 msg_tokens = _estimate_tokens(next_msg["content"])
-                if remaining - msg_tokens < 0 and len(recent_msgs) >= MIN_RECENT_EVENTS:
+                if remaining - msg_tokens < 0 and len(recent_msgs) >= min_recent:
                     break
                 recent_msgs.insert(0, next_msg)
                 remaining -= msg_tokens
@@ -1692,7 +1724,7 @@ def _assemble_kp_messages(
             if len(recent_msgs) < len(all_msgs):
                 # 第一条放进全文的消息起始于哪条事件，它之前的事件才交给兜底摘要
                 older_events = recent_pool[:msg_starts[len(all_msgs) - len(recent_msgs)]]
-                older_summary = _summarize_old_events(older_events, max_tokens=min(MAX_SUMMARY_TOKENS, max(remaining, 500)))
+                older_summary = _summarize_old_events(older_events, max_tokens=min(preset.max_summary_tokens, max(remaining, 500)))
             else:
                 older_summary = ""
 

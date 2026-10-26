@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from app import agent_settings
 from app.ai import director_signals
 from app.ai.context import _active_flags, _resolve_state
 from app.models import Character, GameSession, Module
@@ -1068,7 +1069,13 @@ def _unwrap_plan_envelope(data: dict) -> dict:
 #: 推理模型对这份 JSON 任务思考失控。同一份请求走 api.deepseek.com 直连 53s 返回；走中转代理时
 #: 连 thinking={"type":"disabled"} 都被代理吞掉，客户端关不了思考。所以这里必须自己设上限：
 #: 直连 53s 能回，取 120s 留足余量；超过就是失控，再等下去也不会有正文。
-PLANNER_TIMEOUT_SECONDS = 120.0
+PLANNER_TIMEOUT_SECONDS = agent_settings.PLANNER_TIMEOUT_DEFAULT
+
+
+def planner_timeout_seconds() -> float:
+    """生效的规划器超时：设置页显式改过就用它，否则用本模块常量（测试可 monkeypatch）。"""
+    options = agent_settings.current()
+    return options.overrides.get("planner_timeout_seconds", PLANNER_TIMEOUT_SECONDS)
 
 
 async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
@@ -1078,18 +1085,19 @@ async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
         ).fit().for_model()
         # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限（原为 1200）会让
         # content 被 reasoning 耗空、返回空串（表现为「原始片段为空」）。交由服务端默认上限。
+        timeout = planner_timeout_seconds()
         raw = await asyncio.wait_for(
             llm.complete(
                 messages,
                 temperature=0,
                 response_format={"type": "json_object"},
             ),
-            timeout=PLANNER_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except asyncio.TimeoutError:
         logger.warning(
             "KP 回合规划器 %.0fs 未完成，已回退旧流程（多为推理模型思考失控，或中转代理过慢；"
-            "把快模型槽位指向直连端点并关闭思考可根治）", PLANNER_TIMEOUT_SECONDS,
+            "把快模型槽位指向直连端点并关闭思考可根治）", timeout,
         )
         return None
     except Exception:

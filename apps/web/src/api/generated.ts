@@ -2568,6 +2568,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Agent Settings */
+        get: operations["get_agent_settings_api_settings_agent_get"];
+        /** Update Agent Settings */
+        put: operations["update_agent_settings_api_settings_agent_put"];
+        post?: never;
+        /**
+         * Reset Agent Settings
+         * @description 恢复默认：带 ``key`` 只恢复该项（含 ``context_preset``），不带则全部恢复。
+         */
+        delete: operations["reset_agent_settings_api_settings_agent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/ai/image-profiles": {
         parameters: {
             query?: never;
@@ -3159,6 +3181,60 @@ export interface components {
             /** Label */
             label: string;
         };
+        /** AgentParam */
+        AgentParam: {
+            /**
+             * Choices
+             * @default []
+             */
+            choices: string[];
+            /** Default */
+            default: unknown;
+            /** Description */
+            description: string;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Maximum */
+            maximum?: number | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Overridden */
+            overridden: boolean;
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+            /** Value */
+            value: unknown;
+        };
+        /** AgentSettingsUpdate */
+        AgentSettingsUpdate: {
+            /** Context Preset */
+            context_preset?: string | null;
+            /**
+             * Values
+             * @default {}
+             */
+            values: {
+                [key: string]: unknown;
+            };
+        };
+        /** AgentSettingsView */
+        AgentSettingsView: {
+            /** Context Preset */
+            context_preset: string;
+            /** Context Presets */
+            context_presets: components["schemas"]["ContextPresetInfo"][];
+            /** Default Context Preset */
+            default_context_preset: string;
+            /** Params */
+            params: components["schemas"]["AgentParam"][];
+        };
         /** ApplyAgeRequest */
         ApplyAgeRequest: {
             /**
@@ -3434,6 +3510,19 @@ export interface components {
             type: string;
             /** Weapon */
             weapon?: string | null;
+        };
+        /** ContextPresetInfo */
+        ContextPresetInfo: {
+            /** Budget Ceiling */
+            budget_ceiling: number;
+            /** Key */
+            key: string;
+            /** Max Summary Tokens */
+            max_summary_tokens: number;
+            /** Min Recent Events */
+            min_recent_events: number;
+            /** Visited Scene Window */
+            visited_scene_window: number;
         };
         /** DerivedStatsRequest */
         DerivedStatsRequest: {
@@ -9234,6 +9323,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_settings_api_settings_agent_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSettingsView"];
+                };
+            };
+        };
+    };
+    update_agent_settings_api_settings_agent_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_agent_settings_api_settings_agent_delete: {
+        parameters: {
+            query?: {
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSettingsView"];
                 };
             };
             /** @description Validation Error */

@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Callable
 
 from sqlalchemy.orm import Session
 
+from app import agent_settings
 from app.ai import profile_store, turn_planner
 from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import _CHECK_TURN_TEMPERATURE
@@ -172,7 +173,12 @@ def _module_lookup_passages(
 # 单轮 loop 的步数上限：超限注入「请直接收束」再生成一次收尾。只作防失控的保险丝
 # （模型反复调 say/set_flag/npc_act 等无配额工具时兜住），正常回合远碰不到——掷骰续写链、
 # 查阅后续写都在这条循环里自然收束，不另设专用深度上限。
-MAX_TOOL_LOOP_STEPS = 20
+MAX_TOOL_LOOP_STEPS = agent_settings.KP_TOOL_LOOP_STEPS_DEFAULT
+
+
+def tool_loop_max_steps() -> int:
+    """生效的工具循环步数上限：设置页显式改过就用它，否则用本模块常量（测试可 monkeypatch）。"""
+    return agent_settings.current().overrides.get("kp_tool_loop_max_steps", MAX_TOOL_LOOP_STEPS)
 
 
 def _tool_loop_active(llm) -> bool:
@@ -702,7 +708,7 @@ async def _run_kp_agent_loop(
     npcs: list[dict] | None = None,
     group_label: str | None = None,
     plan: turn_planner.TurnPlan | None = None,
-    max_steps: int = MAX_TOOL_LOOP_STEPS,
+    max_steps: int | None = None,
     party_names: set[str] | None = None,
     shown_dialogues: list[str] | None = None,
     event_order: list | None = None,
@@ -736,6 +742,8 @@ async def _run_kp_agent_loop(
     """
     # 整个工具循环记一段（各步调用的合计）；工具里调起的 NPC 代演、查规则续写各自另记一段，
     # 独占口径下不会重复算进这里。
+    if max_steps is None:
+        max_steps = tool_loop_max_steps()
     with agent_trace.span("kp", "主叙事（工具循环）") as trace:
         async for chunk in _kp_agent_loop_body(
             llm, messages, result, execute_tool, trace, tools=tools, npcs=npcs,

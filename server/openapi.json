@@ -442,6 +442,139 @@
         "title": "AgeNote",
         "type": "object"
       },
+      "AgentParam": {
+        "properties": {
+          "choices": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "default": {
+            "title": "Default"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "overridden": {
+            "title": "Overridden",
+            "type": "boolean"
+          },
+          "unit": {
+            "default": "",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "description",
+          "kind",
+          "value",
+          "default",
+          "overridden"
+        ],
+        "title": "AgentParam",
+        "type": "object"
+      },
+      "AgentSettingsUpdate": {
+        "properties": {
+          "context_preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Preset"
+          },
+          "values": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "title": "AgentSettingsUpdate",
+        "type": "object"
+      },
+      "AgentSettingsView": {
+        "properties": {
+          "context_preset": {
+            "title": "Context Preset",
+            "type": "string"
+          },
+          "context_presets": {
+            "items": {
+              "$ref": "#/components/schemas/ContextPresetInfo"
+            },
+            "title": "Context Presets",
+            "type": "array"
+          },
+          "default_context_preset": {
+            "title": "Default Context Preset",
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/AgentParam"
+            },
+            "title": "Params",
+            "type": "array"
+          }
+        },
+        "required": [
+          "params",
+          "context_preset",
+          "default_context_preset",
+          "context_presets"
+        ],
+        "title": "AgentSettingsView",
+        "type": "object"
+      },
       "ApplyAgeRequest": {
         "properties": {
           "age": {
@@ -1108,6 +1241,39 @@
           }
         },
         "title": "CombatActionRequest",
+        "type": "object"
+      },
+      "ContextPresetInfo": {
+        "properties": {
+          "budget_ceiling": {
+            "title": "Budget Ceiling",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "max_summary_tokens": {
+            "title": "Max Summary Tokens",
+            "type": "integer"
+          },
+          "min_recent_events": {
+            "title": "Min Recent Events",
+            "type": "integer"
+          },
+          "visited_scene_window": {
+            "title": "Visited Scene Window",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "budget_ceiling",
+          "min_recent_events",
+          "max_summary_tokens",
+          "visited_scene_window"
+        ],
+        "title": "ContextPresetInfo",
         "type": "object"
       },
       "DerivedStatsRequest": {
@@ -10752,6 +10918,114 @@
         "summary": "Typing",
         "tags": [
           "sessions"
+        ]
+      }
+    },
+    "/api/settings/agent": {
+      "delete": {
+        "description": "恢复默认：带 ``key`` 只恢复该项（含 ``context_preset``），不带则全部恢复。",
+        "operationId": "reset_agent_settings_api_settings_agent_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Agent Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "operationId": "get_agent_settings_api_settings_agent_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Agent Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_agent_settings_api_settings_agent_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Agent Settings",
+        "tags": [
+          "settings"
         ]
       }
     },

@@ -9,7 +9,8 @@ import logging
 from app.ai import profile_store
 from app.ai.provider import LLMProvider
 from app.ai.providers.openai_compat import OpenAICompatProvider
-from app.config import settings
+from app import agent_settings
+from app.config import settings  # noqa: F401 -- 测试经 llm_factory.settings 打桩；默认值由 agent_settings 实时读取
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def check_llm_pair(main_llm: LLMProvider) -> tuple[LLMProvider, LLMProvider | No
     创作；快模型槽位通常关着思考，而这两步实测各要 20~40s。回退条件由调用方定，
     但都必须是确定性的（解析失败、改写稿为空/长度失真/口癖没减少），不能靠感觉。
     """
-    if not settings.checks_use_fast_model:
+    if not agent_settings.current().checks_use_fast_model:
         return main_llm, None
     try:
         if profile_store.load_fast_profile() is None:

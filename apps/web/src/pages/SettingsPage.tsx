@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { AlertTriangle, Copy, RefreshCw } from 'lucide-react'
-import { GiArtificialIntelligence, GiNetworkBars, GiPaintBrush, GiArchiveResearch } from 'react-icons/gi'
+import { GiArtificialIntelligence, GiNetworkBars, GiPaintBrush, GiArchiveResearch, GiGears } from 'react-icons/gi'
 import { toast } from 'sonner'
 import { m } from 'motion/react'
 import { spring } from '@/lib/motion'
@@ -23,6 +23,7 @@ import { LanRosterPanel } from '@/features/settings/LanRosterPanel'
 import { MusicCreditsPanel } from '@/features/settings/MusicCreditsPanel'
 import { GameDisplayPanel } from '@/features/settings/GameDisplayPanel'
 import { NetlinkPanel } from '@/features/settings/NetlinkPanel'
+import { AgentAdvancedPanel } from '@/features/settings/AgentAdvancedPanel'
 
 /* ---------- 二级导航项 ---------- */
 
@@ -31,6 +32,7 @@ const SETTINGS_TABS = [
   { key: 'network', label: '联机', Icon: GiNetworkBars },
   { key: 'appearance', label: '外观', Icon: GiPaintBrush },
   { key: 'rag', label: 'RAG 统计', Icon: GiArchiveResearch },
+  { key: 'advanced', label: '高级', Icon: GiGears },
   // 未来扩展：{ key: 'game', label: '游戏设置' },
 ] as const
 
@@ -72,6 +74,7 @@ export function SettingsPage() {
         {activeTab === 'network' && <NetworkSettingsPanel />}
         {activeTab === 'appearance' && <AppearanceSettingsPanel />}
         {activeTab === 'rag' && <RagStatsPanel />}
+        {activeTab === 'advanced' && <AgentAdvancedPanel />}
       </div>
     </div>
   )

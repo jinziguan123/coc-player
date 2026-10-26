@@ -54,6 +54,15 @@ def isolate_ai_settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_agent_settings(tmp_path, monkeypatch):
+    """agent 高级设置同理：指向临时路径，开发机上改过的预算与上下文档位不得影响测试。"""
+    from app import agent_settings
+
+    monkeypatch.setattr(agent_settings, "SETTINGS_FILE", tmp_path / "agent_settings.json")
+    monkeypatch.setattr(agent_settings, "_cache", None)
+
+
+@pytest.fixture(autouse=True)
 def isolate_dev_db(tmp_path, monkeypatch):
     """把 ``SessionLocal`` 指向一次性临时库，任何测试都别想写到开发库上。
 

@@ -8605,6 +8605,20 @@ select.input option {
 .display-mode b { font-family: var(--font-title); font-size: 0.9rem; color: var(--color-text-primary); }
 .display-mode.is-on b { color: var(--color-text-accent); }
 .display-mode > span:last-child { font-size: 0.72rem; line-height: 1.5; color: var(--color-text-secondary); }
+/* 设置 · 高级：档位数值行 + 运行预算参数行 */
+.agent-preset-figures { font-size: 0.7rem; color: var(--color-text-accent); font-variant-numeric: tabular-nums; }
+.agent-params { display: flex; flex-direction: column; }
+.agent-param { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 0; border-top: 1px solid var(--color-border); }
+.agent-param:first-child { border-top: none; padding-top: 0; }
+.agent-param__text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.agent-param__control { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.agent-param__number { display: inline-flex; align-items: center; gap: 0.35rem; }
+.agent-param__number .input { width: 7.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.agent-param__reset { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; padding: 0.3rem 0.6rem; }
+@media (max-width: 640px) {
+  .agent-param { flex-direction: column; align-items: stretch; }
+  .agent-param__control { justify-content: flex-end; }
+}
 .display-mode-art {
   position: relative;
   display: block;
