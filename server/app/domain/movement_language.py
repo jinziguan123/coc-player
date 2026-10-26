@@ -93,8 +93,9 @@ class Statement:
 
     kind: str = "none"   # act / follow / discuss / conditional / negated / approach / none
     sentences: list[str] = field(default_factory=list)   # 判为行动的那几句
-    #: 含行动分句的整句：行动分句本身对不上去向时（「推开东侧拱门前的石板，然后钻进去」），
-    #: 去向解析可退一步看同一句里的出口与地名。
+    #: 含行动分句的那句话里、仍可能描述说话人自己去向的分句（行动、跟随、走近与中性分句）：
+    #: 行动分句本身对不上去向时（「推开东侧拱门前的石板，然后钻进去」），去向解析可退一步看它们。
+    #: 否定、商量和别人的行动（「我不去墓室」「你们去墓室」）已被排除，不会混进来。
     context: list[str] = field(default_factory=list)
     solo: bool = False
     collective: bool = False
@@ -106,6 +107,9 @@ class Statement:
         return self.kind in ("act", "follow")
 
 
+#: 分句的内部类别 ``other``：说的是别人或过去（「你们先进去」「有人进去过」）。对外与 none 同级，
+#: 但不能作为说话人去向的线索。
+_OWN_ROUTE_KINDS = ("act", "follow", "approach", "none")
 #: 非行动类别的优先级：一句话里同时有多种信号时，取最能说明「人没动」的那一种。
 _KIND_RANK = {"conditional": 5, "discuss": 4, "negated": 3, "approach": 2, "none": 0}
 
@@ -159,12 +163,12 @@ def _clause_kind(clause: str, named_terms: set[str]) -> str:
             return "discuss"
         third, first = _first_pos(head, _THIRD_PERSON), _first_pos(c, _FIRST_PERSON)
         if third >= 0 and (first < 0 or third < first):
-            return "none"   # 在讲别人怎么走（「有人在我们之前进去过」「凿它的人进去了」）
+            return "other"   # 在讲别人怎么走（「有人在我们之前进去过」「凿它的人进去了」）
         if first < 0 and has_any(head, _SECOND_PERSON):
-            return "none"   # 叫别人走（「你们先进去」）；「你们跟我进去」含第一人称，仍算行动
+            return "other"   # 叫别人走（「你们先进去」）；「你们跟我进去」含第一人称，仍算行动
         after = c[verb_pos + verb_len:]
         if after.startswith(("过", "去过", "来过")) or ("是" in head and c.endswith("的")):
-            return "none"   # 经历/判断句（「进去过」「是从这一面打进去的」），不是此刻的行动
+            return "other"   # 经历/判断句（「进去过」「是从这一面打进去的」），不是此刻的行动
         return "act"
     if has_any(c, _STAY):
         return "negated"
@@ -196,11 +200,14 @@ def analyze(text: str, named_terms: set[str] | None = None) -> Statement:
         return stmt
     best = "none"
     for sentence in SENTENCE_SPLIT.split(text):
-        for clause, kind in _sentence_kinds(sentence, named_terms or set()):
+        kinds = _sentence_kinds(sentence, named_terms or set())
+        if any(kind in ("act", "follow") for _clause, kind in kinds):
+            own = "，".join(clause for clause, kind in kinds if kind in _OWN_ROUTE_KINDS)
+            if own and own not in stmt.context:
+                stmt.context.append(own)
+        for clause, kind in kinds:
             if kind in ("act", "follow"):
                 stmt.sentences.append(clause)
-                if sentence.strip() not in stmt.context:
-                    stmt.context.append(sentence.strip())
                 if stmt.kind != "act":
                     stmt.kind = kind
             elif _KIND_RANK.get(kind, 0) > _KIND_RANK.get(best, 0):

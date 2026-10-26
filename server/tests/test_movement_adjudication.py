@@ -151,10 +151,10 @@ def test_规划器漏报的真人行动宣言按原话补提案_排在规划器�
     planned = (Proposal(MovementIntent(stance="act", target="room"), ("ai",)),)
     party = (_snap("ai", human=False), _snap("host", solo=True), _snap("mate", stance="follow"),
              _snap("trip", travel_scene="far"), _snap("talk", stance="discuss"), _snap("silent", stance="none"))
-    filled = fill_unproposed(planned, party, gates={"host": "攀爬"})
+    filled = fill_unproposed(planned, party)
     assert filled[0] is planned[0]
-    assert [(p.actor_ids, p.intent.stance, p.intent.solo, p.intent.check_skill, p.intent.target)
-            for p in filled[1:]] == [(("host",), "act", True, "攀爬", "")]
+    assert [(p.actor_ids, p.intent.stance, p.intent.solo, p.intent.check_skill, p.intent.target, p.inferred)
+            for p in filled[1:]] == [(("host",), "act", True, "", "", True)]
 
 
 def test_规划器明确判过的真人不补位_无论判成什么():
@@ -165,14 +165,16 @@ def test_规划器明确判过的真人不补位_无论判成什么():
         assert fill_unproposed(planned, (_snap("host"),)) == planned
 
 
-def test_补出的提案照常经去向与通行复核():
+@pytest.mark.parametrize(("nav", "status"), [
+    (Map(status="ambiguous", target=None), "ambiguous"),
+    (Map(status="unresolved", target=None), "unresolved"),
+    (Map(reachable=False), "unreachable"),
+    (Map(), "unconfirmed"),   # 去向明确且可达：仍不落位，交 KP 裁定通道
+])
+def test_补位提案照常复核_但去向明确也不直接落位且不带跟随者(nav, status):
     from app.application.movement_adjudication import fill_unproposed
 
-    nav = Map(status="ambiguous", target=None)
-    filled = fill_unproposed((), (_snap("a"),))
-    ((decision, _),) = adjudicate_batch(filled, (_snap("a"),), nav, host_id="a", stayed=frozenset())
-    assert decision.status == "ambiguous" and decision.mover_ids == ("a",)
-    blocked = Map()
-    gated = fill_unproposed((), (_snap("a"),), gates={"a": "攀爬"})
-    ((decision, _),) = adjudicate_batch(gated, (_snap("a"),), blocked, host_id="a", stayed=frozenset())
-    assert (decision.status, decision.skill) == ("pending_check", "攀爬")
+    party = (_snap("a"), _snap("ai", human=False, stance="none"))
+    ((decision, _),) = adjudicate_batch(fill_unproposed((), party), party, nav, host_id="a",
+                                        stayed=frozenset())
+    assert decision.status == status and decision.mover_ids == ("a",)

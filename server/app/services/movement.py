@@ -521,6 +521,12 @@ def _note(module: Module | None, verdict: Verdict) -> str:
             f"- {who} {via}已来到「{there}」（系统已更新位置）{stay}。按新位置叙述：{who} 眼前是"
             f"「{there}」的景象；留在原处的人只写他们所在之处能感知到的。不要再为此调用 scene_change。"
         )
+    if s == "unconfirmed":
+        return (
+            f"- {who} 宣告要{via}前往「{there}」（系统按原话认定了去向，但未确认通道是否畅通，人仍在「{here}」）。"
+            "这是玩家明确的行动，必须回应：按场景实际裁定——通道无阻就调用 scene_change"
+            f"（movers={who}）让其进入；有阻碍就描写阻碍，需要检定就发起检定。不要无视这次行动。"
+        )
     if s == PENDING:
         return (
             f"- {who} 想{via}前往「{there}」，但须先过「{verdict.skill}」检定：系统已暂存这次移动，"
@@ -580,21 +586,6 @@ def _verdict_from_record(record: MoveRecord, party: list[Character]) -> Verdict:
     )
 
 
-def _check_gates(plan, party: list[Character], game_session: GameSession) -> dict[str, str]:
-    """本轮计划要求先过的检定落在谁身上：点了名的人，或「在场/全体」时的全队；空=房主。"""
-    if plan is None or not plan.requires_check or not (plan.check.skill or "").strip():
-        return {}
-    skill = plan.check.skill.strip()
-    chars = (plan.check.chars or "").strip()
-    if not chars:
-        targets = [c for c in party if c.id == game_session.player_character_id]
-    elif chars in ("在场", "全体", "所有人", "全员"):
-        targets = party
-    else:
-        targets = _match_chars(re.split(r"[、，,/\s]+", chars), party)
-    return {c.id: skill for c in targets}
-
-
 def adjudicate_plan(
     db: Session, session_id: str, game_session: GameSession, module: Module | None,
     player_char: Character, teammates: list[Character] | None,
@@ -624,7 +615,7 @@ def adjudicate_plan(
     planned = tuple(
         Proposal(p, tuple(c.id for c in _match_chars(list(p.actors), party))) for p in proposals
     )
-    filled = fill_unproposed(planned, snapshots, gates=_check_gates(plan, party, game_session))
+    filled = fill_unproposed(planned, snapshots)
     for extra in filled[len(planned):]:
         logger.info("规划器漏报真人移动，按原话补提案：session=%s char=%s", session_id, extra.actor_ids)
     if not filled:

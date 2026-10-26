@@ -1220,29 +1220,36 @@ def test_真实模型验收s6_从前室钻回甬道_去向写在同一分句里�
     assert movement.turn_records(t.session)[0]["status"] == movement.MOVED
 
 
-def test_真实模型验收s1a_规划器只列了跟上的AI队友_漏报房主_按原话补位(db_factory, monkeypatch):
+def test_真实模型验收s1a_规划器只列了跟上的AI队友_漏报房主_补位交KP裁定_KP放行才移动(db_factory, monkeypatch):
     kp = _KP()
     _runtime(monkeypatch, db_factory, kp)
     t = _seed(db_factory())
     t.say(t.alvin, "我抛下队友，从墙洞钻进去")
     t.say(t.nadia, "我跟上大夫，也从墙洞钻进去")
     _generate(t, _plan(MovePlan(actors=["纳迪娅"], exit="墙洞", target="scene_2")))
-    assert t.loc(t.alvin) == "scene_2" and t.loc(t.nadia) == "scene_2"
-    assert t.loc(t.karim) == "scene_1" and t.loc(t.hassan) == "scene_1"
-    statuses = sorted((r["status"], tuple(r["mover_names"])) for r in movement.turn_records(t.session))
-    assert statuses == [(movement.MOVED, ("纳迪娅",)), (movement.MOVED, ("阿尔文",))]
+    assert t.loc(t.nadia) == "scene_2"            # 规划器给出的提案照常落位
+    assert t.loc(t.alvin) == "scene_1"            # 补位提案不直接落位
+    records = {tuple(r["mover_names"]): r for r in movement.turn_records(t.session)}
+    assert records[("阿尔文",)]["status"] == "unconfirmed"
+    assert records[("阿尔文",)]["target"] == "scene_2"
+    assert any("未确认通道" in _system_text(call) for call in kp.calls)
+    _scene_change_tool(t, "[SCENE_CHANGE: scene_id=前室, movers=阿尔文]")   # KP 判定通道无阻
+    assert t.loc(t.alvin) == "scene_2" and t.loc(t.karim) == "scene_1"
 
 
-def test_真实模型验收s2_规划器返回空moves_房主行动照常裁定_留守真人不动(db_factory, monkeypatch):
+def test_真实模型验收s2_规划器返回空moves_房主行动交KP裁定_留守真人不动(db_factory, monkeypatch):
     kp = _KP()
     _runtime(monkeypatch, db_factory, kp)
     t = _seed(db_factory(), human_hassan=True)
     t.say(t.hassan, "我留在甬道守着出口，你们先进去")
     t.say(t.alvin, "我们走吧，从墙洞钻进去")
     _generate(t, _plan())
-    assert t.loc(t.alvin) == "scene_2"
-    assert t.loc(t.hassan) == "scene_1"
-    assert "本轮移动裁定" in _system_text(kp.calls[0])
+    assert t.move_events() == []
+    (record,) = movement.turn_records(t.session)
+    assert (record["status"], record["target"], record["mover_names"]) == ("unconfirmed", "scene_2", ["阿尔文"])
+    assert "未确认通道" in _system_text(kp.calls[0])
+    _scene_change_tool(t, "[SCENE_CHANGE: scene_id=前室, movers=阿尔文]")
+    assert t.loc(t.alvin) == "scene_2" and t.loc(t.hassan) == "scene_1"
 
 
 def test_规划器明确判为走近时不补位(db_factory, monkeypatch):
@@ -1254,17 +1261,28 @@ def test_规划器明确判为走近时不补位(db_factory, monkeypatch):
     assert t.loc(t.alvin) == "scene_1" and t.move_events() == []
 
 
-def test_补位遵守计划要求的检定_投骰前不移动(db_factory, monkeypatch):
+def test_验收反例_空计划推开石板钻进墓室_补位不绕过障碍_不带走跟随者(db_factory, monkeypatch):
     kp = _KP()
     _runtime(monkeypatch, db_factory, kp)
-    t = _seed(db_factory())
-    t.say(t.alvin, "我抛下队友，从墙洞爬进去")
-    plan = _plan(requires_check=True)
-    plan.check.skill = "攀爬"
-    _generate(t, plan)
-    assert t.loc(t.alvin) == "scene_1"
+    t = _seed(db_factory(), start="scene_2")
+    t.say(t.alvin, "我推开东侧拱门前的石板，然后钻进去")
+    _generate(t, _plan())
+    assert {c.name: t.loc(c) for c in t.party} == dict.fromkeys(["阿尔文", "纳迪娅", "卡里姆", "哈桑"], "scene_2")
+    assert t.move_events() == []
     (record,) = movement.turn_records(t.session)
-    assert (record["status"], record["skill"]) == (movement.PENDING, "攀爬")
+    assert (record["status"], record["target"]) == ("unconfirmed", "scene_4")
+
+
+@pytest.mark.parametrize("text", ["我不去墓室，我从拱门进去", "你们去墓室，我从拱门进去"])
+def test_验收反例_整句回退不用否定或别人行动的分句_去向不明就澄清(db_factory, monkeypatch, text):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory(), start="scene_2")
+    t.say(t.alvin, text)
+    _generate(t, _plan(MovePlan(actors=["阿尔文"], exit="拱门")))
+    assert t.loc(t.alvin) == "scene_2"
+    (record,) = movement.turn_records(t.session)
+    assert record["status"] == "ambiguous" and record["target"] is None
 
 
 def test_补位后KP复述同一目的地且省略movers_不把没表态的房主连同队友搬走(db_factory, monkeypatch):
