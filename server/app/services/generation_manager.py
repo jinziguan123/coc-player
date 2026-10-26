@@ -6,10 +6,22 @@ import logging
 from app.ai import usage_tracker, call_budget
 from app import agent_settings
 from app.services.event_protocol import make_chunk
-from app.services import ai_quota
+from app.services import ai_quota, generation_notice
 from app.services.room_hub import room_hub
 
 logger = logging.getLogger(__name__)
+
+
+def _persist_budget_pause(room_id: str) -> str | None:
+    # 等待被取消任务完成清理后，使用独立会话写暂停事件，避免复用已关闭或失败的事务。
+    from app.database import SessionLocal
+
+    try:
+        with SessionLocal() as db:
+            return generation_notice.persist_budget_pause(db, room_id)
+    except Exception:
+        logger.exception("落库回合预算暂停说明失败：room=%s", room_id)
+        return None  # 数据库不可用时仍广播提示并释放生成锁
 
 
 class AlreadyGenerating(ValueError):
@@ -70,7 +82,11 @@ class GenerationManager:
                         raise asyncio.TimeoutError
                 except (asyncio.TimeoutError, call_budget.BudgetExceeded):
                     logger.warning("回合预算用尽: room=%s calls=%d tokens=%d", room_id, budget.calls, budget.tokens)
-                    room_hub.broadcast(room_id, make_chunk("system", call_budget.BUDGET_PAUSE_NOTICE))
+                    event_id = _persist_budget_pause(room_id)
+                    room_hub.broadcast(room_id, make_chunk(
+                        "system", call_budget.BUDGET_PAUSE_NOTICE, event_id=event_id,
+                        metadata={"kind": "generation_budget_paused"},
+                    ))
                     room_hub.broadcast(room_id, make_chunk("done"))
 
         task = asyncio.create_task(run_bounded())

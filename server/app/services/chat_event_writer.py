@@ -8,12 +8,12 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
-from app.ai import tools
+from app.ai import call_budget, tools
 from app.ai.provider import model_meta, model_name  # noqa: F401  # kp_tool_loop 经本模块取用
 from app.models.character import Character
 from app.models.module import Module
 from app.models.session import GameSession
-from app.services import session_service, world_memory
+from app.services import generation_notice, session_service, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,10 @@ def persist_error_notice(db: Session, session_id: str, text: str) -> None:
     try:
         # 上游 flush/commit 失败后 Session 处于 failed transaction 状态；补偿写入前必须回滚。
         db.rollback()
-        session_service.add_event(db, session_id, "system", text, actor_name="系统")
+        if text == call_budget.BUDGET_PAUSE_NOTICE:
+            generation_notice.persist_budget_pause(db, session_id)
+        else:
+            session_service.add_event(db, session_id, "system", text, actor_name="系统")
     except Exception:
         logger.exception("落库生成中断提示失败: session=%s", session_id)
 

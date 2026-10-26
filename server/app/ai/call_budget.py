@@ -29,6 +29,7 @@ class CallBudget:
     calls: int = 0
     tokens: int = 0
     started: float = field(default_factory=time.monotonic)
+    pause_event_ids: dict[str, str] = field(default_factory=dict)
 
     @property
     def remaining_seconds(self) -> float:
@@ -51,6 +52,11 @@ def scope(*, max_calls: int, max_tokens: int, seconds: float):
         yield budget
     finally:
         _current.reset(token)
+
+
+def current_budget() -> CallBudget | None:
+    """当前生成共享的预算对象；子任务与外层管理器共享同一份暂停事件凭据。"""
+    return _current.get()
 
 
 def reserve() -> None:
