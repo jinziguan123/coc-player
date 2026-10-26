@@ -1,5 +1,5 @@
 """移动批次裁定：消费参与者快照及只读导航，不持有 ORM 或执行写入。"""
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -21,7 +21,7 @@ class ActorSnapshot:
 class Proposal:
     intent: MovementIntent
     actor_ids: tuple[str, ...]
-    #: 规划器漏报、按本人原话补出的提案：只知道想去哪，不知道通道有没有阻碍、要不要检定。
+    #: 规划器漏报、按本人原话补出的提案：只知道想去哪；可携带计划里已明确绑定的检定，不能自行认定畅通。
     inferred: bool = False
 
 
@@ -95,8 +95,11 @@ def adjudicate_one(
         return replace(base, reason=navigation.obstruction_reason(lead.location, target))
     if passage.status == "blocked":
         return base
+    if proposal.inferred and passage.status == "pending_check":
+        # 已知检定不能退化成可由工具直接放行的未知通行状态；只暂存本人，不推断队友资格。
+        return base
     if proposal.inferred:
-        # 能确定去向不等于满足进入条件：补位提案没有障碍与检定信息，不落位、不带跟随者，
+        # 能确定去向不等于满足进入条件：补位提案没有可用的检定或障碍裁定，不落位、不带跟随者，
         # 交给 KP 按场景实际裁定（通行就调 scene_change，有阻碍就描写或要检定）。
         return replace(base, status="unconfirmed", skill="", reason="")
     followers = []
@@ -122,18 +125,20 @@ def adjudicate_one(
 
 
 def fill_unproposed(
-    proposals: tuple[Proposal, ...], party: tuple[ActorSnapshot, ...],
+    proposals: tuple[Proposal, ...], party: tuple[ActorSnapshot, ...], *,
+    gates: Mapping[str, str] | None = None,
 ) -> tuple[Proposal, ...]:
     """规划器漏报的真人行动宣言：按本人原话补一条提案，排在规划器提案之后。
 
     只补真人、本人原话是明确行动（不含仅表态跟随）、不是大地图前往、且没有出现在任何规划器提案里
     （无论 stance）的人——规划器明确判过的（走近、商量、受阻……）照旧以规划器为准。
-    补出的提案照常经证据、去向与可达复核，但永远不直接落位：去向明确时裁定为 ``unconfirmed``，
+    补出的提案照常经证据、去向与可达复核，但永远不直接落位：有已知检定时保留待检定移动；否则去向明确时裁定为 ``unconfirmed``，
     由 KP 裁定通道（见 ``adjudicate_one``），歧义或找不到出口时照常请 KP 澄清。
     """
     covered = {cid for proposal in proposals for cid in proposal.actor_ids}
     added = tuple(
-        Proposal(MovementIntent(stance="act", solo=actor.participant.solo),
+        Proposal(MovementIntent(stance="act", solo=actor.participant.solo,
+                                check_skill=(gates or {}).get(actor.participant.id, "")),
                  (actor.participant.id,), inferred=True)
         for actor in party
         if actor.participant.human and actor.participant.stance == "act"

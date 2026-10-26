@@ -621,6 +621,20 @@ def _verdict_from_record(record: MoveRecord, party: list[Character]) -> Verdict:
     )
 
 
+def _check_gates(plan, party: list[Character], game_session: GameSession) -> dict[str, str]:
+    """保留本轮计划明确要求的检定，按角色范围绑定；未指定时沿用房主默认值。"""
+    if plan is None or not plan.requires_check or not (plan.check.skill or "").strip():
+        return {}
+    chars = (plan.check.chars or "").strip()
+    if not chars:
+        targets = [c for c in party if c.id == game_session.player_character_id]
+    elif chars in ("在场", "全体", "所有人", "全员"):
+        targets = party
+    else:
+        targets = _match_chars(re.split(r"[、，,/\s]+", chars), party)
+    return {c.id: plan.check.skill.strip() for c in targets}
+
+
 def adjudicate_plan(
     db: Session, session_id: str, game_session: GameSession, module: Module | None,
     player_char: Character, teammates: list[Character] | None,
@@ -650,7 +664,7 @@ def adjudicate_plan(
     planned = tuple(
         Proposal(p, tuple(c.id for c in _match_chars(list(p.actors), party))) for p in proposals
     )
-    filled = fill_unproposed(planned, snapshots)
+    filled = fill_unproposed(planned, snapshots, gates=_check_gates(plan, party, game_session))
     for extra in filled[len(planned):]:
         logger.info("规划器漏报真人移动，按原话补提案：session=%s char=%s", session_id, extra.actor_ids)
     if not filled:

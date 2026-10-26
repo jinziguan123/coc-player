@@ -1332,3 +1332,40 @@ def test_工具切换被拒或未切换时回注原因不变(db_factory, monkeyp
     (result,) = _tool_results(kp.calls[1])
     assert not result.startswith("ok：") and "已来到" not in result
     assert t.loc(t.alvin) == "scene_1"
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_补位保留已知检定_工具不能抢跑或绕过失败_成功仅落位一次(db_factory, monkeypatch, outcome):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory())
+    t.say(t.alvin, "我抛下队友，从墙洞爬进去")
+    plan = _plan(requires_check=True)
+    plan.check.skill = "攀爬"
+    _generate(t, plan)
+    (record,) = movement.turn_records(t.session)
+    assert (record["status"], record["skill"]) == (movement.PENDING, "攀爬")
+    _scene_change_tool(t, "[SCENE_CHANGE: scene_id=前室, movers=阿尔文]")
+    assert t.loc(t.alvin) == "scene_1" and not t.move_events()
+    _roll(t, t.alvin, "侦查", "success")
+    assert t.loc(t.alvin) == "scene_1"
+    _roll(t, t.alvin, "攀爬", outcome)
+    _scene_change_tool(t, "[SCENE_CHANGE: scene_id=前室, movers=阿尔文]")
+    assert t.loc(t.alvin) == ("scene_2" if outcome == "success" else "scene_1")
+    assert len(t.move_events()) == (1 if outcome == "success" else 0)
+    assert all(t.loc(c) == "scene_1" for c in t.others())
+
+
+@pytest.mark.parametrize("chars,expected", [("", "unconfirmed"), ("哈桑", movement.PENDING),
+                                           ("全体", movement.PENDING), ("纳迪娅", "unconfirmed")])
+def test_补位检定按角色范围绑定_不把别人的检定套给行动者(db_factory, monkeypatch, chars, expected):
+    kp = _KP()
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory(), human_hassan=True)
+    t.say(t.hassan, "我抛下队友，从墙洞爬进去")
+    plan = _plan(requires_check=True)
+    plan.check.skill, plan.check.chars = "攀爬", chars
+    movement.adjudicate_plan(t.db, t.sid, t.session, t.module, t.alvin, t.others(), plan)
+    (record,) = movement.turn_records(t.session)
+    assert record["status"] == expected
+    assert t.loc(t.hassan) == "scene_1"
