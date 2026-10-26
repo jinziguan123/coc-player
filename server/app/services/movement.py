@@ -525,7 +525,8 @@ def _note(module: Module | None, verdict: Verdict) -> str:
         return (
             f"- {who} 宣告要{via}前往「{there}」（系统按原话认定了去向，但未确认通道是否畅通，人仍在「{here}」）。"
             "这是玩家明确的行动，必须回应：按场景实际裁定——通道无阻就调用 scene_change"
-            f"（movers={who}）让其进入；有阻碍就描写阻碍，需要检定就发起检定。不要无视这次行动。"
+            f"（movers={who}）让其进入，放行后接着叙述其进入与眼前所见；有阻碍就描写阻碍，"
+            "需要检定就发起检定。不要无视这次行动。"
         )
     if s == PENDING:
         return (
@@ -564,6 +565,40 @@ def _note(module: Module | None, verdict: Verdict) -> str:
                  "negated": "表态不进去"}[s]
         return f"- {who} {label}，人仍在「{here}」，本轮不移动。"
     return ""
+
+
+#: 工具抵达说明里附带的目标场景描述长度上限（与叙事前落位时 KP 拿到的场景资料同源，只截断不改写）。
+_ARRIVAL_DESCRIPTION_MAX = 300
+
+
+def arrival_note(
+    module: Module | None, game_session: GameSession, party: list[Character],
+    moved: list[Character], target: str, origin: str | None,
+) -> str:
+    """KP 叙事中途用 scene_change 搬了人之后回给它的说明：谁到了哪、谁留在哪、目标场景是什么样、怎么接着写。
+
+    叙事前落位的路径里，分组在移动之后才定，KP 拿到的就是新场景的资料；工具中途切换没有这一步，
+    只回一句「已切换」时 KP 既不知道新空间的样子，又受「不替玩家移动」约束，往往不写抵达。
+    """
+    there = turn_context._scene_name(module, target) if module else target
+    here = turn_context._scene_name(module, origin) if module and origin else "原处"
+    stayers = [
+        c for c in party
+        if c not in moved and session_service.get_char_location(game_session, c.id) == origin
+    ]
+    scene = next((x for x in (module.scenes if module else None) or [] if x.get("id") == target), {})
+    description = str(scene.get("description") or "").strip()[:_ARRIVAL_DESCRIPTION_MAX]
+    who = _names(moved)
+    lines = [f"ok：{who} 已来到「{there}」（系统已更新位置，这不是替玩家行动）。"]
+    if stayers:
+        lines.append(f"{_names(stayers)} 仍留在「{here}」。")
+    if description:
+        lines.append(f"「{there}」：{description}")
+    lines.append(
+        f"请接着叙述：{who} 进入「{there}」、眼前所见；留在原处的人只写他们所在之处能感知到的。"
+        "不要再为此调用 scene_change。"
+    )
+    return "\n".join(lines)
 
 
 def _render_notes(module: Module | None, verdicts: list[Verdict]) -> str:

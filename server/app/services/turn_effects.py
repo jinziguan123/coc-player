@@ -1139,6 +1139,9 @@ async def exec_tool_scene_change(
 ) -> tuple[list[str], str | None, str]:
     """KP 的 scene_change（原生工具 / 文本指令适配层 / 分头协调器共用）。
 
+    返回 ``(chunks, 切换到的 scene_id 或 None, 说明)``：切换成功时说明是给 KP 的抵达说明
+    （``movement.arrival_note``），未切换时是拒绝或失败原因。
+
     - ``movers`` 写了：必须全部认得出，认不出的名字直接拒绝——绝不静默回退成主角或整队；
     - ``movers`` 没写：按本轮原话推定移动者（独行、「我们一起」、默认跟随都在这里判）；
     - 分头协调器给 ``scope_ids``：只能动本组的人；本组没人宣告移动、也不含主角时拒绝；
@@ -1170,11 +1173,15 @@ async def exec_tool_scene_change(
     refusal, settled = movement.tool_guard(game_session, target, movers)
     if refusal:
         return [], None, refusal
+    origin = session_service.get_char_location(game_session, movers[0].id)
     chunks, sid, note = await _exec_scene_change(
         db, session_id, game_session, module, ref, player_char, teammates, movers=movers,
     )
     if sid:
-        return chunks, sid, ""
+        everyone = [player_char, *(teammates or [])]
+        moved = [c for c in everyone if session_service.get_char_location(game_session, c.id) == sid
+                 and c in movers]
+        return chunks, sid, movement.arrival_note(module, game_session, everyone, moved, sid, origin)
     if settled is not None and note.startswith("已身处"):
         return [], None, "本轮移动已由系统落位，无需再切换。"
     return chunks, None, note

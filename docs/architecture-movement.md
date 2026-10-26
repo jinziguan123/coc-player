@@ -263,3 +263,10 @@ movement 因此不再导入 planned_effects，两者的互相导入消失。签�
 测试：`test_movement_adjudication.py` 覆盖补位范围、规划器已判不补、补位照常复核且去向明确也不落位；
 `test_natural_movement.py` 覆盖规划器只列 AI 队友、返回空 moves、明确判走近、空计划推石板不绕过障碍、
 两条整句回退反例、KP 复述移动等情形；`test_movement_space.py` 覆盖回退分句范围。
+
+## 第十五轮：叙事中途工具切场景后的抵达说明
+
+KP 在叙事中途调用 scene_change 并成功切换时，`exec_tool_scene_change` 返回 `movement.arrival_note` 生成的说明，
+由工具循环原样回注：移动者已到目标（系统已更新位置）、留在原处者、目标场景模组描述（截断 300 字）、接着叙述的要求。
+这补上了叙事前落位路径天然具备、而工具路径缺少的新场景资料与叙述指引；拒绝与未切换的回注不变，分组不重算。
+分头协调器只在未切换且有说明时记「未执行」日志。

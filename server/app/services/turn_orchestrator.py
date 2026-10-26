@@ -812,7 +812,7 @@ async def _apply_coordinator_intents(
             )
             for chunk in chunks:
                 room_hub.broadcast(session_id, chunk)
-            if note:
+            if note and not _sid:
                 logger.info("协调器场景切换未执行：%s", note)
         elif intent.kind == "start_combat":
             chunks = await _exec_start_combat(

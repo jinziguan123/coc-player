@@ -514,7 +514,7 @@ def _build_kp_tool_executor(
             kv.get("movers", ""), player_char, teammates,
         )
         if sid:
-            return kp_tools.ToolOutcome(f"ok：场景已切换至 {_scene_name(module, sid)}", chunks=chunks)
+            return kp_tools.ToolOutcome(note or f"ok：场景已切换至 {_scene_name(module, sid)}", chunks=chunks)
         return kp_tools.ToolOutcome(note or "场景引用无法解析或未变化（保持当前场景）。", chunks=chunks)
 
     async def _h_flag(name, kv):

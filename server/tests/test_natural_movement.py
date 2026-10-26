@@ -1293,3 +1293,42 @@ def test_补位后KP复述同一目的地且省略movers_不把没表态的房�
     _generate(t, TurnPlan())
     assert _locs(t) == {"阿尔文": "scene_1", "纳迪娅": "scene_1", "卡里姆": "scene_1", "哈桑": "scene_2"}
     assert len(_committed_state(t)[1]) == 1
+
+
+def _tool_results(messages: list[dict]) -> list[str]:
+    return [str(m.get("content") or "") for m in messages if m.get("role") == "tool"]
+
+
+def test_叙事中途工具放行unconfirmed_回给KP的是抵达说明_谁到了哪_谁留下_新场景描述(db_factory, monkeypatch):
+    """真实模型验收第 6 批：工具只回「已切换」时 KP 不写抵达。现在回注完整的抵达说明。"""
+    call = ToolCall(id="c1", name="scene_change", arguments={"scene_id": "scene_2", "movers": "阿尔文"})
+    kp = _KP(scripts=[[StreamDelta(kind="tool_call", tool_call=call)],
+                      [StreamDelta(kind="text", text="他钻进前室。")]])
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory(), human_hassan=True)
+    t.say(t.hassan, "我留在甬道守着出口，你们先进去")
+    t.say(t.alvin, "我们走吧，从墙洞钻进去")
+    _generate(t, _plan())
+
+    first_system = _system_text(kp.calls[0])
+    assert "未确认通道" in first_system and "放行后接着叙述其进入与眼前所见" in first_system
+    assert t.loc(t.alvin) == "scene_2" and t.loc(t.hassan) == "scene_1"
+    (result,) = _tool_results(kp.calls[1])
+    assert result.startswith("ok：阿尔文 已来到「前室」")
+    assert "这不是替玩家行动" in result
+    assert "仍留在「甬道」" in result and "哈桑" in result and "纳迪娅" in result
+    assert "金制战车" in result                 # 目标场景的模组描述
+    assert "请接着叙述：阿尔文 进入「前室」" in result and "不要再为此调用 scene_change" in result
+
+
+def test_工具切换被拒或未切换时回注原因不变(db_factory, monkeypatch):
+    call = ToolCall(id="c1", name="scene_change", arguments={"scene_id": "scene_5"})
+    kp = _KP(scripts=[[StreamDelta(kind="tool_call", tool_call=call)],
+                      [StreamDelta(kind="text", text="（叙事）")]])
+    _runtime(monkeypatch, db_factory, kp)
+    t = _seed(db_factory())
+    t.say(t.alvin, "我直接去藏宝室")
+    _generate(t, _plan(MovePlan(actors=["阿尔文"], target="scene_5")))
+    (result,) = _tool_results(kp.calls[1])
+    assert not result.startswith("ok：") and "已来到" not in result
+    assert t.loc(t.alvin) == "scene_1"
