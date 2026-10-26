@@ -70,7 +70,7 @@ class GenerationManager:
                         raise asyncio.TimeoutError
                 except (asyncio.TimeoutError, call_budget.BudgetExceeded):
                     logger.warning("回合预算用尽: room=%s calls=%d tokens=%d", room_id, budget.calls, budget.tokens)
-                    room_hub.broadcast(room_id, make_chunk("system", "本回合生成已达到预算上限，已保留结算结果。"))
+                    room_hub.broadcast(room_id, make_chunk("system", call_budget.BUDGET_PAUSE_NOTICE))
                     room_hub.broadcast(room_id, make_chunk("done"))
 
         task = asyncio.create_task(run_bounded())

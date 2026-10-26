@@ -11,6 +11,16 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+#: 回合调用预算（次数/token/时长）耗尽时给玩家的说明。只陈述事实：已结算的保留、未执行的没有完成，
+#: 不承诺重发请求会自动续跑，也不推断一份并不存在的待办清单。
+BUDGET_PAUSE_NOTICE = (
+    "（本回合 AI 调用已达到预算上限，已停止继续请求；已结算的结果保留，未执行的操作尚未完成。"
+    "请查看当前状态后再继续）"
+)
+#: KP 工具循环步数耗尽时的系统说明（不是 KP 旁白，单独落成系统事件）。
+TOOL_LOOP_PAUSE_NOTICE = "（本轮自动处理已暂停。已执行的操作以系统记录为准，未执行的操作尚未完成。）"
+
+
 @dataclass
 class CallBudget:
     max_calls: int

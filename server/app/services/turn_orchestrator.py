@@ -609,6 +609,7 @@ async def _run_generation(
         masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
         usage_probe=usage_probe,
         npc_guard=_npc_dialogue_guard(db, session_id, game_session, module, llm, player_char),
+        pause_sink=_tool_loop_pause_sink(db, session_id),
     )
     await _run_narration_stage(
         db, session_id, game_session, module, player_char, teammates, llm, stream, result,
@@ -940,6 +941,7 @@ async def _run_split_narrations_tool_loop(
             event_order=event_order,
             masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
             npc_guard=_npc_dialogue_guard(db, session_id, game_session, module, llm, player_char),
+            pause_sink=_tool_loop_pause_sink(db, session_id, group=label),
         )
         await _run_narration_stage(
             db, session_id, game_session, module, player_char, teammates, llm, stream, result,
@@ -1054,6 +1056,25 @@ def _stashed_check_request(turn: list, actor_id: str | None) -> str:
     return skill
 
 
+def _tool_loop_pause_sink(db: Session, session_id: str, group: str | None = None):
+    """工具循环步数耗尽时，把系统暂停说明落成一条系统事件（重连后仍可见），返回事件 id。"""
+    def sink(text: str) -> str:
+        ev = session_service.add_event(
+            db, session_id, "system", text, actor_name="系统",
+            metadata={"kind": "tool_loop_paused"}, group=group,
+        )
+        return ev.id
+    return sink
+
+
+def _budget_pause_notice(db: Session, session_id: str, exc: BaseException) -> bool:
+    """回合调用预算耗尽：落库统一的暂停说明（各入口共用）。是预算耗尽返回 True。"""
+    if not isinstance(exc, call_budget.BudgetExceeded):
+        return False
+    _persist_error_notice(db, session_id, call_budget.BUDGET_PAUSE_NOTICE)
+    return True
+
+
 def _failure_notice(exc: BaseException) -> str:
     """把失败原因翻成玩家看得懂的一句话。
 
@@ -1063,7 +1084,7 @@ def _failure_notice(exc: BaseException) -> str:
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return "（连不上模型服务——请检查网络或代理，然后重试）"
     if isinstance(exc, call_budget.BudgetExceeded):
-        return "（本回合 AI 调用已达到预算上限，已停止继续请求；已结算的结果保留。可直接继续输入）"
+        return call_budget.BUDGET_PAUSE_NOTICE
     if isinstance(exc, StreamStalled):
         return "（模型服务只回心跳不回内容，已放弃等待。多见于中转代理处理长请求出错：到设置页换直连端点后重试）"
     return "（KP 生成中断，请重试或继续输入）"
@@ -1460,6 +1481,7 @@ async def _run_kp_turn_tool_loop(
         event_order=event_order,
         masker_factory=lambda: npc_identity.build_masker(db, session_id, module),
         npc_guard=_npc_dialogue_guard(db, session_id, game_session, module, llm, player_char),
+        pause_sink=_tool_loop_pause_sink(db, session_id),
     )
     await _run_narration_stage(
         db, session_id, game_session, module, player_char, party_others, llm, stream, res,
@@ -1707,8 +1729,9 @@ async def _run_combat_aftermath_generation(session_id: str) -> None:
         await _finish_generation(db, session_id, get_llm())
     except asyncio.CancelledError:
         logger.info("战斗余波生成被取消: session=%s", session_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("战斗余波生成失败: session=%s", session_id)
+        _budget_pause_notice(db, session_id, exc)
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
@@ -1921,8 +1944,9 @@ async def _run_roll_generation(session_id: str, check_id: str, proxy: bool = Fal
     except asyncio.CancelledError:
         logger.info("投骰生成被取消: session=%s", session_id)
         room_hub.broadcast(session_id, _make_chunk("done"))
-    except Exception:
+    except Exception as exc:
         logger.exception("投骰生成失败: session=%s", session_id)
+        _budget_pause_notice(db, session_id, exc)
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
@@ -2011,9 +2035,10 @@ async def _run_luck_decision(session_id: str, spend: bool, reroll: bool = False)
     except asyncio.CancelledError:
         logger.info("幸运消费后续生成被取消: session=%s", session_id)
         room_hub.broadcast(session_id, _make_chunk("done"))
-    except Exception:
+    except Exception as exc:
         logger.exception("幸运消费结算失败: session=%s", session_id)
-        room_hub.broadcast(session_id, _make_chunk("system", "结算出错，请重试"))
+        if not _budget_pause_notice(db, session_id, exc):
+            room_hub.broadcast(session_id, _make_chunk("system", "结算出错，请重试"))
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
@@ -2486,9 +2511,10 @@ async def _run_travel_generation(
         )
     except asyncio.CancelledError:
         logger.info("前往生成被取消: session=%s", session_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("前往生成失败: session=%s", session_id)
-        _persist_error_notice(db, session_id, "（前往生成中断，请重试）")
+        if not _budget_pause_notice(db, session_id, exc):
+            _persist_error_notice(db, session_id, "（前往生成中断，请重试）")
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()
@@ -2542,9 +2568,10 @@ async def run_regenerate_generation(session_id: str) -> None:
         usage_tracker.warn_if_reasoning_dominates(turn_usage)
     except asyncio.CancelledError:
         logger.info("重新生成被取消: session=%s", session_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("重新生成失败: session=%s", session_id)
-        _persist_error_notice(db, session_id, "（重新生成中断，请重试）")
+        if not _budget_pause_notice(db, session_id, exc):
+            _persist_error_notice(db, session_id, "（重新生成中断，请重试）")
         room_hub.broadcast(session_id, _make_chunk("done"))
     finally:
         db.close()

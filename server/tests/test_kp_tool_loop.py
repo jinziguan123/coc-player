@@ -202,21 +202,131 @@ def test_loop_natural_end_single_step():
 
 
 def test_step_cap_forces_wrap_up():
-    """连续 N 步（默认上限）都发工具调用 → 注入「收束」指令、第 N+1 次不带工具生成收尾。"""
+    """上限内工具照常执行；超限由系统暂停，不再请求模型编造完成叙述。
+
+    暂停说明是系统事件而非 KP 旁白：不并入 result（不落进叙事、不被终检润色改写）。
+    """
+    from app.ai import call_budget
+
     cap = chat_service.MAX_TOOL_LOOP_STEPS
-    assert cap == 20                            # 防失控保险丝，不再兼作续写深度限制
-    scripts = [[_call("set_flag", {"flag": f"f{i}"}, cid=f"c{i}")] for i in range(cap)]
-    scripts.append([_text("夜色沉了下来。")])
+    assert cap == 20
+    scripts = [[_text("已处理一项。"), _call("set_flag", {"flag": f"f{i}"}, cid=f"c{i}")]
+               for i in range(cap)]
+    scripts.append([_text("所有任务都完成了。")])
     llm = _FakeToolLLM(scripts)
     executor = _RecordingExecutor()
-    result, _ = asyncio.run(_run_loop(llm, executor, max_steps=cap))
+    result, chunks = asyncio.run(_run_loop(llm, executor, max_steps=cap))
 
-    assert len(executor.received) == cap        # 只执行了上限内的 N 次
-    assert len(llm.calls) == cap + 1            # N 步 + 1 次强制收尾
-    assert llm.calls[cap]["tools"] is None      # 收尾不带工具
-    last_sys = [m for m in llm.calls[cap]["messages"] if m["role"] == "system"][-1]
-    assert "收束" in last_sys["content"]
-    assert result[0].endswith("夜色沉了下来。")
+    assert len(executor.received) == cap
+    assert len(llm.calls) == cap                     # 超限后没有额外的模型请求
+    assert "已处理一项" in result[0]                 # 已生成内容保留
+    assert "所有任务都完成了" not in result[0]
+    assert call_budget.TOOL_LOOP_PAUSE_NOTICE not in result[0]
+    pauses = [c for c in chunks if c.type == "system" and (c.metadata or {}).get("kind") == "tool_loop_paused"]
+    assert [c.content for c in pauses] == [call_budget.TOOL_LOOP_PAUSE_NOTICE]
+
+
+def test_步数耗尽的暂停说明落成系统事件并排在已生成旁白之后(db_factory, monkeypatch):
+    """真实编排：工具循环步数耗尽 → 已执行的工具效果与旁白保留，暂停说明单独落库，不混进 KP 旁白。"""
+    from app.ai import call_budget
+
+    monkeypatch.setattr(chat_service, "MAX_TOOL_LOOP_STEPS", 2)
+    monkeypatch.setattr(chat_service.kp_tool_loop, "MAX_TOOL_LOOP_STEPS", 2)
+    llm = _FakeToolLLM([
+        [_text("你翻开第一本册子。"), _call("set_mood", {"mood": "horror"}, cid="m1")],
+        [_text("又翻开一本。"), _call("set_mood", {"mood": "sorrow"}, cid="m2")],
+        [_text("这一句不该出现。")],
+    ])
+    _patch_runtime(monkeypatch, db_factory, llm)
+    monkeypatch.setattr(profile_store, "load_active_profile", lambda: _Profile(True))
+    db = db_factory()
+    session_id, session, module, hero = _seed(db)
+    session_service.add_event(db, session_id, "action", "我翻书", actor_id=hero.id, actor_name="伊芙琳")
+    events = session_service.get_session_events(db, session_id)
+    asyncio.run(chat_service._run_generation(db, session_id, session, module, hero, events))
+
+    assert len(llm.calls) == 2
+    saved = session_service.get_session_events(db_factory(), session_id)
+    narr = [e.content for e in saved if e.event_type == "narration"]
+    assert narr and "又翻开一本" in narr[-1] and "不该出现" not in narr[-1]
+    assert call_budget.TOOL_LOOP_PAUSE_NOTICE not in "".join(narr)
+    kinds = [(e.event_type, (e.metadata_ or {}).get("kind")) for e in saved if e.sequence_num]
+    assert ("system", "tool_loop_paused") in kinds
+    # 交错顺序：暂停说明在本轮旁白之后
+    last_narr = max(i for i, (t, _k) in enumerate(kinds) if t == "narration")
+    pause_at = kinds.index(("system", "tool_loop_paused"))
+    assert pause_at > last_narr
+
+
+def test_回合调用预算硬上限仍生效_超限不再追加请求():
+    """预算由运行框架管：模型不知道上限，但第 N+1 次请求在 Provider 调用前被拒，已执行的工具效果保留。"""
+    from app.ai import call_budget
+
+    class _BudgetedLLM(_FakeToolLLM):
+        async def stream_chat(self, messages, tools=None, temperature=0.7, max_tokens=None):
+            call_budget.reserve()   # 与真实 Provider 相同：每次请求前预占
+            async for delta in super().stream_chat(messages, tools, temperature, max_tokens):
+                yield delta
+
+    llm = _BudgetedLLM([[_call("set_flag", {"flag": f"f{i}"}, cid=f"c{i}")] for i in range(5)])
+    executor = _RecordingExecutor()
+
+    async def run():
+        with call_budget.scope(max_calls=2, max_tokens=10**6, seconds=60):
+            return await _run_loop(llm, executor)
+
+    import pytest as _pytest
+    with _pytest.raises(call_budget.BudgetExceeded):
+        asyncio.run(run())
+    assert len(llm.calls) == 2 and len(executor.received) == 2
+
+
+def test_预算耗尽时各入口落库统一的暂停说明(db_factory, monkeypatch):
+    """总预算耗尽不是「请重试」：重新生成等旁路入口也落库准确的暂停说明（重连后可见）。"""
+    from app.ai import call_budget
+
+    llm = _FakeToolLLM([[_text("x")]])
+    _patch_runtime(monkeypatch, db_factory, llm)
+
+    async def exhausted(*a, **k):
+        raise call_budget.BudgetExceeded("预算耗尽")
+
+    monkeypatch.setattr(chat_service, "_run_generation", exhausted)
+    db = db_factory()
+    session_id, _session, _module, hero = _seed(db)
+    session_service.add_event(db, session_id, "action", "我翻书", actor_id=hero.id, actor_name="伊芙琳")
+    asyncio.run(chat_service.run_regenerate_generation(session_id))
+    notes = [e.content for e in session_service.get_session_events(db_factory(), session_id)
+             if e.event_type == "system"]
+    assert call_budget.BUDGET_PAUSE_NOTICE in notes
+    assert "（重新生成中断，请重试）" not in notes
+
+
+def test_KP实际上下文与工具说明不提前宣告配额_强调必要执行(db_factory):
+    from app.ai.context import build_kp_context
+
+    db = db_factory()
+    _sid, session, module, hero = _seed(db)
+    messages = build_kp_context(session, module, hero, [], rules_lookup_enabled=True,
+                                module_lookup_enabled=True)
+    llm = _FakeToolLLM([[_text("等待行动。")]])
+    asyncio.run(_run_loop(llm, _RecordingExecutor(), messages=messages))
+    actual = "\n".join(str(m.get("content") or "") for m in llm.calls[0]["messages"])
+    assert "不要为了节省调用而省略必要查询或操作" in actual
+    assert "叙述不能代替执行" in actual
+    assert "最多 2 次" not in actual
+    for schema in llm.calls[0]["tools"]:
+        if schema["function"]["name"] in {"rule_lookup", "module_lookup"}:
+            assert "最多" not in schema["function"]["description"]
+
+
+def test_工具拒绝结果如实回注_不要求模型编造缺失资料():
+    refusal = "本次未取得新资料，不得编造内容或声称查阅成功。"
+    llm = _FakeToolLLM([[_call("module_lookup", {"query": "缺失线索"})], [_text("尚不能确定。")]])
+    executor = _RecordingExecutor({"module_lookup": kp_tools.ToolOutcome(refusal)})
+    result, _ = asyncio.run(_run_loop(llm, executor))
+    assert any(m.get("role") == "tool" and m.get("content") == refusal for m in llm.calls[1]["messages"])
+    assert "尚不能确定" in result[0]
 
 
 # ── 查阅配额（真实执行器）─────────────────────────────────────────────────

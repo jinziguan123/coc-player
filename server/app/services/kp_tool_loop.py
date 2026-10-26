@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator, Callable
 from sqlalchemy.orm import Session
 
 from app import agent_settings
-from app.ai import profile_store, turn_planner
+from app.ai import call_budget, profile_store, turn_planner
 from app.ai import tools as kp_tools
 from app.ai.agents.kp_agent import _CHECK_TURN_TEMPERATURE
 from app.ai.prompts.kp_system import (
@@ -170,7 +170,7 @@ def _module_lookup_passages(
 
 # ── KP agent loop（tool use 新路径，use_tool_calls 开关控制）──────────────────
 
-# 单轮 loop 的步数上限：超限注入「请直接收束」再生成一次收尾。只作防失控的保险丝
+# 单轮 loop 的步数上限：超限由系统直接输出暂停说明，不再追加生成。只作防失控的保险丝
 # （模型反复调 say/set_flag/npc_act 等无配额工具时兜住），正常回合远碰不到——掷骰续写链、
 # 查阅后续写都在这条循环里自然收束，不另设专用深度上限。
 MAX_TOOL_LOOP_STEPS = agent_settings.KP_TOOL_LOOP_STEPS_DEFAULT
@@ -427,8 +427,8 @@ def _build_kp_tool_executor(
         nonlocal lookup_used
         if lookup_used >= MAX_RULE_LOOKUPS:
             return kp_tools.ToolOutcome(
-                f"本轮查阅配额已用完（规则书与模组原文合计最多 {MAX_RULE_LOOKUPS} 次），"
-                "请依据既有资料直接续写，不要再查阅。"
+                "本轮查阅配额已用完，本次未取得新资料。不要重复此查询。"
+                "只能依据已取得的资料处理；仍缺少必要事实时说明尚不能确定，不得编造内容或声称查阅成功。"
             )
         query = kv.get("query", "").strip()
         if not query:
@@ -715,6 +715,7 @@ async def _run_kp_agent_loop(
     masker_factory: Callable[[], npc_identity.NameMasker] | None = None,
     usage_probe: dict | None = None,
     npc_guard=None,
+    pause_sink: Callable[[str], str | None] | None = None,
 ) -> AsyncIterator[str]:
     """KP agent loop：与 _stream_narration_filtered 并列的新路径（use_tool_calls 开启时用）。
 
@@ -722,7 +723,8 @@ async def _run_kp_agent_loop(
     执行器执行 → 结果作为 role="tool" 消息回注 → 继续循环。DICE_CHECK/RULE_LOOKUP/
     MODULE_LOOKUP 由此天然取代旧路径的「续写 prompt」模式。
 
-    - 步数上限 max_steps（默认 MAX_TOOL_LOOP_STEPS）：超限注入「请直接收束本轮叙述」再无工具生成一次收尾；
+    - 步数上限 max_steps（默认 MAX_TOOL_LOOP_STEPS）：超限由系统直接输出暂停说明，不追加模型请求；
+      ``pause_sink(text) -> event_id`` 给定时把暂停说明落成系统事件（编排层传入），否则只广播；
     - 裁定轮（plan.requires_check）：采样降温 _CHECK_TURN_TEMPERATURE，且若模型始终没
       发起 dice_check/opposed_check，则按计划确定性补掷（等价 KPAgent 的补指令兜底）；
     - 模型把指令写成文本时（手写 prompt 旧习惯）：解析成合成 ToolCall 走同一执行器，
@@ -750,6 +752,7 @@ async def _run_kp_agent_loop(
             group_label=group_label, plan=plan, max_steps=max_steps, party_names=party_names,
             shown_dialogues=shown_dialogues, event_order=event_order,
             masker_factory=masker_factory, usage_probe=usage_probe, npc_guard=npc_guard,
+            pause_sink=pause_sink,
         ):
             yield chunk
 
@@ -757,7 +760,7 @@ async def _run_kp_agent_loop(
 async def _kp_agent_loop_body(
     llm, messages: list[dict], result: list, execute_tool, trace, *,
     tools, npcs, group_label, plan, max_steps, party_names, shown_dialogues,
-    event_order, masker_factory, usage_probe, npc_guard,
+    event_order, masker_factory, usage_probe, npc_guard, pause_sink=None,
 ) -> AsyncIterator[str]:
     tools = tools if tools is not None else kp_tools.openai_tool_schemas()
     requires_check = bool(plan is not None and plan.requires_check)
@@ -889,35 +892,18 @@ async def _kp_agent_loop_body(
 
     _log_rounds()
     if not natural_end:
-        # 步数超限：注入收束指令，最后一次不带工具生成收尾
-        messages.append({
-            "role": "system",
-            "content": (
-                "（工具调用步数已达上限）请不要再调用任何工具、也不要输出任何指令，"
-                "直接收束本轮叙述：自然交代当前处境，停在等待玩家行动处。"
-            ),
-        })
-        step = NarrationResult()
-
-        async def _plain_deltas():
-            async for delta in llm.stream_chat(messages, tools=None, temperature=temperature):
-                if delta.kind == "text" and delta.text:
-                    yield delta.text
-
-        try:
-            async for chunk in _filter_narration_stream(
-                _plain_deltas(), step, npcs=npcs, group_label=group_label,
-                guess_speakers=False, party_names=party_names,
-                shown_dialogues=shown_dialogues,
-                prior_narration=result[0],
-                masker=_step_masker(),
-                npc_guard=npc_guard,
-            ):
-                yield chunk
-        except BaseException:
-            _merge_step_result(result, step)
-            raise
-        _merge_step_result(result, step)
+        # 系统确定性暂停：不再额外请求模型生成收尾——那一次生成会把未执行的动作叙述成已完成。
+        # 暂停说明是系统事实而非 KP 旁白：不并入 result（不进叙事、不被终检/润色改写、下一轮
+        # 也不会被当成 KP 说过的话），由 pause_sink 落成系统事件并按广播位置排回交错顺序。
+        trace.fields["paused"] = True
+        notice = call_budget.TOOL_LOOP_PAUSE_NOTICE
+        event_id = pause_sink(notice) if pause_sink is not None else None
+        chunk = _make_chunk(
+            "system", notice, event_id=event_id, metadata={"kind": "tool_loop_paused"},
+        )
+        if event_order is not None and event_id:
+            _record_chunk_event(event_order, chunk, len(result[0]))
+        yield chunk
 
     for card in deferred_cards:
         yield card
