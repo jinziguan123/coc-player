@@ -63,6 +63,18 @@ def isolate_agent_settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_embedding_store(tmp_path, monkeypatch):
+    """嵌入模型设置与模型目录指向临时路径：测试不得读写开发机上下载的模型与切换状态。"""
+    from app.ai import embedding, embedding_store
+
+    monkeypatch.setattr(embedding_store, "SETTINGS_FILE", tmp_path / "embedding_settings.json")
+    monkeypatch.setattr(embedding_store, "MODELS_DIR", tmp_path / "models")
+    monkeypatch.setattr(embedding_store, "_cache", None)
+    monkeypatch.setattr(embedding_store, "_jobs", {})
+    monkeypatch.setattr(embedding, "_embedders", {})
+
+
+@pytest.fixture(autouse=True)
 def isolate_dev_db(tmp_path, monkeypatch):
     """把 ``SessionLocal`` 指向一次性临时库，任何测试都别想写到开发库上。
 

@@ -2927,6 +2927,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/embedding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Embedding Settings */
+        get: operations["get_embedding_settings_api_settings_embedding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/embedding/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Model */
+        delete: operations["delete_model_api_settings_embedding_models__model_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/embedding/models/{model_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Download */
+        post: operations["cancel_download_api_settings_embedding_models__model_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/embedding/models/{model_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download Model */
+        post: operations["download_model_api_settings_embedding_models__model_id__download_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/embedding/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Rebuild
+         * @description 重建失败后手动重试（或补建与当前模型不一致的旧索引）。
+         */
+        post: operations["retry_rebuild_api_settings_embedding_rebuild_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/embedding/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Source */
+        put: operations["update_source_api_settings_embedding_source_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/embedding/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch Model
+         * @description 切换检索模型（后台重建索引）；传当前模型即取消进行中的切换。
+         */
+        post: operations["switch_model_api_settings_embedding_switch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3555,6 +3680,62 @@ export interface components {
             mp: number;
             /** San */
             san: number;
+        };
+        /** DownloadView */
+        DownloadView: {
+            /** Done Bytes */
+            done_bytes: number;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /** State */
+            state: string;
+            /** Total Bytes */
+            total_bytes: number;
+        };
+        /** EmbedModelView */
+        EmbedModelView: {
+            /** Active */
+            active: boolean;
+            /** Description */
+            description: string;
+            /** Dim */
+            dim: number;
+            download?: components["schemas"]["DownloadView"] | null;
+            /** Id */
+            id: string;
+            /** Index Speed */
+            index_speed: string;
+            /** Installed */
+            installed: boolean;
+            /** Label */
+            label: string;
+            /** Memory */
+            memory: string;
+            /** Recommended */
+            recommended: boolean;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Target */
+            target: boolean;
+        };
+        /** EmbeddingSettingsView */
+        EmbeddingSettingsView: {
+            /** Active */
+            active: string;
+            /** Hf Endpoint */
+            hf_endpoint: string;
+            /** Models */
+            models: components["schemas"]["EmbedModelView"][];
+            rebuild: components["schemas"]["RebuildView"];
+            /** Source */
+            source: string;
+            /** Stale */
+            stale: number;
+            /** Target */
+            target: string | null;
         };
         /**
          * EndVoteRequest
@@ -4301,6 +4482,21 @@ export interface components {
              */
             ready: boolean;
         };
+        /** RebuildView */
+        RebuildView: {
+            /** Current */
+            current: string;
+            /** Done */
+            done: number;
+            /** Error */
+            error: string;
+            /** Running */
+            running: boolean;
+            /** Target */
+            target: string;
+            /** Total */
+            total: number;
+        };
         /** RollAttributesResponse */
         RollAttributesResponse: {
             /** Sets */
@@ -4709,6 +4905,21 @@ export interface components {
             };
             /** Occupation */
             occupation: string;
+        };
+        /** SourceUpdate */
+        SourceUpdate: {
+            /**
+             * Hf Endpoint
+             * @default
+             */
+            hf_endpoint: string;
+            /** Source */
+            source: string;
+        };
+        /** SwitchRequest */
+        SwitchRequest: {
+            /** Model Id */
+            model_id: string;
         };
         /** TestResult */
         TestResult: {
@@ -10039,6 +10250,205 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AIStatus"];
+                };
+            };
+        };
+    };
+    get_embedding_settings_api_settings_embedding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+        };
+    };
+    delete_model_api_settings_embedding_models__model_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_download_api_settings_embedding_models__model_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_model_api_settings_embedding_models__model_id__download_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_rebuild_api_settings_embedding_rebuild_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+        };
+    };
+    update_source_api_settings_embedding_source_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_model_api_settings_embedding_switch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

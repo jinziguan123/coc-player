@@ -24,6 +24,7 @@ import { MusicCreditsPanel } from '@/features/settings/MusicCreditsPanel'
 import { GameDisplayPanel } from '@/features/settings/GameDisplayPanel'
 import { NetlinkPanel } from '@/features/settings/NetlinkPanel'
 import { AgentAdvancedPanel } from '@/features/settings/AgentAdvancedPanel'
+import { EmbeddingModelPanel } from '@/features/settings/EmbeddingModelPanel'
 
 /* ---------- 二级导航项 ---------- */
 
@@ -31,7 +32,7 @@ const SETTINGS_TABS = [
   { key: 'ai', label: 'AI 配置', Icon: GiArtificialIntelligence },
   { key: 'network', label: '联机', Icon: GiNetworkBars },
   { key: 'appearance', label: '外观', Icon: GiPaintBrush },
-  { key: 'rag', label: 'RAG 统计', Icon: GiArchiveResearch },
+  { key: 'rag', label: '检索', Icon: GiArchiveResearch },
   { key: 'advanced', label: '高级', Icon: GiGears },
   // 未来扩展：{ key: 'game', label: '游戏设置' },
 ] as const
@@ -73,7 +74,7 @@ export function SettingsPage() {
         )}
         {activeTab === 'network' && <NetworkSettingsPanel />}
         {activeTab === 'appearance' && <AppearanceSettingsPanel />}
-        {activeTab === 'rag' && <RagStatsPanel />}
+        {activeTab === 'rag' && <><h2 className="page-title">检索</h2><EmbeddingModelPanel /><RagStatsPanel /></>}
         {activeTab === 'advanced' && <AgentAdvancedPanel />}
       </div>
     </div>
@@ -565,7 +566,6 @@ function RagStatsPanel() {
 
   return (
     <div>
-      <h2 className="page-title">RAG 统计</h2>
       <div className="card">
         <h3 className="card-title">检索用量与命中质量</h3>
         <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}>

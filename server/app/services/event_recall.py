@@ -23,9 +23,9 @@ import logging
 import numpy as np
 from sqlalchemy.orm import Session
 
-from app.ai.embedding import Embedder, get_embedder
+from app.ai.embedding import Embedder, embedder_for, get_embedder
 from app.models.event_log import EventLog
-from app.services.vector_search import cosine_top_k
+from app.services.vector_search import grouped_top_k
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,7 @@ def index_pending(db: Session, session_id: str, embedder: Embedder | None = None
         vectors = embedder.embed_passages([(e.content or "").strip() for e in todo])
         for ev, vec in zip(todo, vectors):
             ev.embedding = np.asarray(vec, dtype=np.float32).tobytes()
+            ev.embed_model = embedder.model_name
         db.commit()
         logger.info("事件向量索引：session=%s 新增 %s 条", session_id, len(todo))
         return len(todo)
@@ -122,15 +123,17 @@ def recall(
         if not rows:
             return []
 
-        embedder = embedder or get_embedder()
         weights = None
         if scene_id:
             weights = [
                 SCENE_BOOST if (r.metadata_ or {}).get("scene_id") == scene_id else 1.0
                 for r in rows
             ]
-        top = cosine_top_k(
-            [r.embedding for r in rows], embedder.embed_query(query), k, weights=weights,
+        # 按建向量的模型分组查询（切换模型的重建期间新旧并存；显式传 embedder 时一律用它）
+        top = grouped_top_k(
+            [r.embedding for r in rows], [r.embed_model for r in rows], query, k,
+            resolve=(lambda _m: embedder) if embedder is not None else embedder_for,
+            weights=weights,
         )
 
         # 窗口在**完整事件流**上展开，而不是在已索引的子集上。短台词与骰点结果不进索引

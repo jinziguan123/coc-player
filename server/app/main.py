@@ -134,6 +134,11 @@ async def lifespan(_app: FastAPI):
         logger.exception("启动自动迁移失败，请手动执行 alembic upgrade head")
         # 不以半新半旧 schema 运行，进入维护模式，请求返回可读错误页。
         _MIGRATION_ERROR = str(e)
+    if _MIGRATION_ERROR is None:
+        # 上次没做完的嵌入模型切换（或与当前模型不一致的索引）：后台接着重建，不阻塞启动
+        from app.services import embedding_switch
+
+        embedding_switch.resume_if_needed()
     # 第三方规则插件：逐个校验、失败隔离（坏插件只会让它自己不加载，不影响启动）
     try:
         from app.ai.tools import TOOLS_BY_NAME

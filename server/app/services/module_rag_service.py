@@ -16,7 +16,7 @@ import re
 import numpy as np
 from sqlalchemy.orm import Session
 
-from app.ai.embedding import Embedder, get_embedder
+from app.ai.embedding import Embedder, embedder_for, get_embedder
 from app.models.module import Module, ModuleChunk
 from app.services.vector_search import cosine_top_k
 
@@ -107,8 +107,8 @@ def ingest_module(
     成功置 rag_status=ready，失败置 failed。fail-open：本函数吞掉一切异常只落
     状态，绝不向上抛——建索引失败不得阻塞模组解析/跑团主流程。
     """
-    embedder = embedder or get_embedder()
     try:
+        embedder = embedder or get_embedder()
         chunks = backfill_scene_hints(
             chunk_text(module.raw_content or ""), module.scenes,
         )
@@ -133,6 +133,7 @@ def ingest_module(
                 )
             )
         module.rag_status = "ready"
+        module.rag_embed_model = embedder.model_name
         db.commit()
         db.refresh(module)
         logger.info("模组原文索引完成：%s（%d 块）", module.title, len(chunks))
@@ -169,7 +170,13 @@ def retrieve(
     if not rows:
         return []
 
-    embedder = embedder or get_embedder()
+    if embedder is None:
+        # 必须用建这份索引的模型嵌入查询；模型不可用（未下载/未知）就不检索，等后台重建
+        model = db.query(Module.rag_embed_model).filter(Module.id == module_id).scalar() or ""
+        embedder = embedder_for(model)
+        if embedder is None:
+            logger.warning("模组原文索引的模型不可用（%s），本次不检索：%s", model or "未记录", module_id)
+            return []
     weights = None
     if scene_id:
         weights = [

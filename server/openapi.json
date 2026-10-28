@@ -1341,6 +1341,159 @@
         "title": "DerivedStatsResponse",
         "type": "object"
       },
+      "DownloadView": {
+        "properties": {
+          "done_bytes": {
+            "title": "Done Bytes",
+            "type": "integer"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "total_bytes": {
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "done_bytes",
+          "total_bytes"
+        ],
+        "title": "DownloadView",
+        "type": "object"
+      },
+      "EmbedModelView": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "dim": {
+            "title": "Dim",
+            "type": "integer"
+          },
+          "download": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DownloadView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "index_speed": {
+            "title": "Index Speed",
+            "type": "string"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "memory": {
+            "title": "Memory",
+            "type": "string"
+          },
+          "recommended": {
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "target": {
+            "title": "Target",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "dim",
+          "size_bytes",
+          "recommended",
+          "index_speed",
+          "memory",
+          "installed",
+          "active",
+          "target"
+        ],
+        "title": "EmbedModelView",
+        "type": "object"
+      },
+      "EmbeddingSettingsView": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "string"
+          },
+          "hf_endpoint": {
+            "title": "Hf Endpoint",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/EmbedModelView"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "rebuild": {
+            "$ref": "#/components/schemas/RebuildView"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "integer"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "models",
+          "active",
+          "target",
+          "source",
+          "hf_endpoint",
+          "rebuild",
+          "stale"
+        ],
+        "title": "EmbeddingSettingsView",
+        "type": "object"
+      },
       "EndVoteRequest": {
         "description": "结束模组投票：以哪个真人席角色发起 / 同意；缺省取主角席。",
         "properties": {
@@ -2755,6 +2908,44 @@
         "title": "ReadyRequest",
         "type": "object"
       },
+      "RebuildView": {
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "string"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "target",
+          "done",
+          "total",
+          "current",
+          "error"
+        ],
+        "title": "RebuildView",
+        "type": "object"
+      },
       "RollAttributesResponse": {
         "properties": {
           "sets": {
@@ -3651,6 +3842,37 @@
           "base_attributes"
         ],
         "title": "SkillPointsRequest",
+        "type": "object"
+      },
+      "SourceUpdate": {
+        "properties": {
+          "hf_endpoint": {
+            "default": "",
+            "title": "Hf Endpoint",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "SourceUpdate",
+        "type": "object"
+      },
+      "SwitchRequest": {
+        "properties": {
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "SwitchRequest",
         "type": "object"
       },
       "TestResult": {
@@ -11834,6 +12056,258 @@
           }
         },
         "summary": "Ai Status",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding": {
+      "get": {
+        "operationId": "get_embedding_settings_api_settings_embedding_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Embedding Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding/models/{model_id}": {
+      "delete": {
+        "operationId": "delete_model_api_settings_embedding_models__model_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Model",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding/models/{model_id}/cancel": {
+      "post": {
+        "operationId": "cancel_download_api_settings_embedding_models__model_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Download",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding/models/{model_id}/download": {
+      "post": {
+        "operationId": "download_model_api_settings_embedding_models__model_id__download_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Model",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding/rebuild": {
+      "post": {
+        "description": "重建失败后手动重试（或补建与当前模型不一致的旧索引）。",
+        "operationId": "retry_rebuild_api_settings_embedding_rebuild_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Retry Rebuild",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding/source": {
+      "put": {
+        "operationId": "update_source_api_settings_embedding_source_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Source",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding/switch": {
+      "post": {
+        "description": "切换检索模型（后台重建索引）；传当前模型即取消进行中的切换。",
+        "operationId": "switch_model_api_settings_embedding_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Switch Model",
         "tags": [
           "settings"
         ]

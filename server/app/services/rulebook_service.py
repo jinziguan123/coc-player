@@ -2,7 +2,8 @@
 
 设计取舍（见技术选型）：规模极小（400 页 ≈ 1–2k chunk），不引入独立向量库，
 向量以 float32 BLOB 存进现有 SQLite，查询时 numpy 暴力余弦 top-k，零新基础设施。
-嵌入走可插拔 ``Embedder``（默认 fastembed + 中文 bge-small-zh）。
+嵌入走可插拔 ``Embedder``（fastembed + 中文 bge，模型可在设置页切换）；每本规则书记录
+建索引的模型（``Rulebook.embed_model``），检索时按它选嵌入器查询。
 """
 
 from __future__ import annotations
@@ -14,9 +15,9 @@ import re
 import numpy as np
 from sqlalchemy.orm import Session
 
-from app.ai.embedding import Embedder, get_embedder
+from app.ai.embedding import Embedder, embedder_for, get_embedder
 from app.models.rulebook import RuleChunk, Rulebook
-from app.services.vector_search import cosine_top_k
+from app.services.vector_search import grouped_top_k
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +156,8 @@ def ingest_rulebook(
     成功置 status=ready，失败置 failed 并记 error。调用方负责先创建 Rulebook
     （status=indexing）并提交，便于前端轮询进度。
     """
-    embedder = embedder or get_embedder()
     try:
+        embedder = embedder or get_embedder()
         pages = extract_pages(pdf_bytes)
         chunks = chunk_pages(pages)
         if not chunks:
@@ -263,9 +264,11 @@ def retrieve(
     if not rows:
         return []
 
-    embedder = embedder or get_embedder()
-    top = cosine_top_k(
-        [r.embedding for r in rows], embedder.embed_query(query), k + 2,
+    # 按建索引的模型分组查询（显式传 embedder 时一律用它，供测试注入）
+    models = dict(db.query(Rulebook.id, Rulebook.embed_model).all())
+    top = grouped_top_k(
+        [r.embedding for r in rows], [models.get(r.rulebook_id) for r in rows], query, k + 2,
+        resolve=(lambda _m: embedder) if embedder is not None else embedder_for,
     )
     hits = [
         {

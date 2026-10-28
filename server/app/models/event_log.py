@@ -44,4 +44,6 @@ class EventLog(Base, UUIDMixin):
     #: 事件正文的 float32 向量（BLOB），供 recall_history 把被摘要浓缩掉的早期剧情原文
     #: 检索回来。NULL = 尚未索引；由 generation_housekeeping 在浓缩窗口批量补齐。
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    #: 建该向量用的嵌入模型（Embedder.model_name）；事件是增量索引的，所以逐条记
+    embed_model: Mapped[str | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

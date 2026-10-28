@@ -6,9 +6,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import logging
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from app.ai.embedding import Embedder
+
+logger = logging.getLogger(__name__)
 
 
 def cosine_top_k(
@@ -53,3 +60,39 @@ def cosine_top_k(
 
     top = np.argsort(-sims)[:k]
     return [(int(i), float(sims[i])) for i in top]
+
+
+def grouped_top_k(
+    embeddings: Sequence[bytes],
+    models: Sequence[str | None],
+    query: str,
+    k: int,
+    resolve: Callable[[str], Embedder | None],
+    weights: Sequence[float] | None = None,
+) -> list[tuple[int, float]]:
+    """按「建该向量的模型」分组检索后合并：每组用自己的模型嵌入查询。
+
+    不同模型的向量空间互不相通（维度也可能不同），绝不能拿一个模型的查询向量去比另一个模型
+    建的向量。平时所有索引同一个模型、只有一组；切换模型的后台重建期间才会新旧并存。
+    ``resolve`` 取不到嵌入器（模型未知/未下载）的组直接跳过——宁可少给结果，不给错误结果；
+    这些索引会被后台重建补上。跨组得分只在重建窗口里才需要比较，同族 bge 模型的余弦量级相近，
+    按得分合并即可。
+    """
+    if not embeddings or k <= 0:
+        return []
+    groups: dict[str, list[int]] = {}
+    for i, m in enumerate(models):
+        groups.setdefault(m or "", []).append(i)
+    merged: list[tuple[int, float]] = []
+    for model, idx in groups.items():
+        embedder = resolve(model)
+        if embedder is None:
+            logger.warning("向量索引的模型不可用，跳过 %d 条（%s）：等待后台重建", len(idx), model or "未记录")
+            continue
+        top = cosine_top_k(
+            [embeddings[i] for i in idx], embedder.embed_query(query), k,
+            weights=[weights[i] for i in idx] if weights is not None else None,
+        )
+        merged.extend((idx[j], score) for j, score in top)
+    merged.sort(key=lambda pair: pair[1], reverse=True)
+    return merged[:k]

@@ -62,6 +62,11 @@ def client(tmp_path, monkeypatch):
     # 后台入库任务自开 SessionLocal —— 指向测试库，并打桩嵌入/抽取
     monkeypatch.setattr(database, "SessionLocal", TestingSession)
     monkeypatch.setattr(rulebook_service, "get_embedder", lambda: FakeEmbedder())
+    # 检索按规则书记录的模型名取嵌入器
+    monkeypatch.setattr(
+        rulebook_service, "embedder_for",
+        lambda name: FakeEmbedder() if name == FakeEmbedder.model_name else None,
+    )
     monkeypatch.setattr(rulebook_service, "extract_pages", lambda b: CANNED)
 
     yield TestClient(app)
