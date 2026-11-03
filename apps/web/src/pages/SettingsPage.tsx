@@ -19,6 +19,8 @@ import { NetlinkPanel } from '@/features/settings/NetlinkPanel'
 import { AgentAdvancedPanel } from '@/features/settings/AgentAdvancedPanel'
 import { EmbeddingModelPanel } from '@/features/settings/EmbeddingModelPanel'
 import { RagStatsPanel } from '@/features/settings/RagStatsPanel'
+import { RerankerPanel } from '@/features/settings/RerankerPanel'
+import { ModelSourcePanel } from '@/features/settings/ModelSourcePanel'
 
 /* ---------- 二级导航项 ---------- */
 
@@ -68,7 +70,7 @@ export function SettingsPage() {
         )}
         {activeTab === 'network' && <NetworkSettingsPanel />}
         {activeTab === 'appearance' && <AppearanceSettingsPanel />}
-        {activeTab === 'rag' && <><h2 className="page-title">检索</h2><EmbeddingModelPanel /><RagStatsPanel /></>}
+        {activeTab === 'rag' && <><h2 className="page-title">检索</h2><EmbeddingModelPanel /><RerankerPanel /><ModelSourcePanel /><RagStatsPanel /></>}
         {activeTab === 'advanced' && <AgentAdvancedPanel />}
       </div>
     </div>

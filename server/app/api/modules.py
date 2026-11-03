@@ -84,7 +84,16 @@ def _job_update(job_id: str, **fields) -> None:
         job.update({k: v for k, v in fields.items() if v is not None})
 
 
-def _rag_index_bg(module_id: str) -> None:
+def _start_index_task(module) -> str:
+    from app.services import task_center
+
+    return task_center.start(
+        "module_index", f"模组《{module.title}》原文索引", stage="排队中",
+        link={"to": f"/modules/{module.id}", "label": "查看模组"},
+    )
+
+
+def _rag_index_bg(module_id: str, task_id: str | None = None) -> None:
     """后台建模组原文索引：自开会话（请求会话已随响应关闭），失败状态由 service 落库。
 
     与规则书入库同一模式：同步函数交给 BackgroundTasks（在线程池执行），
@@ -94,20 +103,21 @@ def _rag_index_bg(module_id: str) -> None:
     from app.services import task_center
 
     db = SessionLocal()
-    task_id = None
     try:
         module = db.get(Module, module_id)
-        if module:
-            task_id = task_center.start(
-                "module_index", f"模组《{module.title}》原文索引", stage="建索引",
-                link={"to": f"/modules/{module.id}", "label": "查看模组"},
-            )
+        if module is None:
+            task_center.finish(task_id, "cancelled", stage="模组已删除")
+        else:
+            task_id = task_id or _start_index_task(module)
+            task_center.update(task_id, stage="建索引")
             module_rag_service.ingest_module(
                 db, module,
                 on_progress=lambda done, total: task_center.update(task_id, done=done, total=total),
             )
             if module.rag_status == "ready":
                 task_center.finish(task_id, "done", stage="完成")
+            elif not module.rag_status:
+                task_center.finish(task_id, "done", stage="没有可索引的原文，已跳过")
             else:
                 task_center.finish(task_id, "failed", detail="原文索引失败，可在模组详情页重试")
     except Exception as exc:  # noqa: BLE001 — 后台线程：只记录，模组状态由 service 落库
@@ -118,12 +128,16 @@ def _rag_index_bg(module_id: str) -> None:
 
 
 def _kick_rag_index(background, db: Session, module) -> None:
-    """把模组置为 indexing 并安排后台建索引；无原文则跳过（fail-open，不阻塞上传/重建响应）。"""
-    if not (module.raw_content or "").strip():
+    """把模组置为 indexing、登记进「解析进度」并安排后台建索引；无可索引原文则跳过。
+
+    任务在这里（请求内）同步登记，而不是等后台线程跑起来才登记：前端在请求返回后立即
+    拉一次任务列表，晚登记的任务要等下一次刷新才看得到。
+    """
+    if not module_rag_service.has_indexable_text(module):
         return
     module.rag_status = "indexing"
     db.commit()
-    background.add_task(_rag_index_bg, module.id)
+    background.add_task(_rag_index_bg, module.id, _start_index_task(module))
 
 
 router = APIRouter(prefix="/api/modules", tags=["modules"])
@@ -338,10 +352,13 @@ async def _run_upload_job(
         try:
             module = module_service.create_module(db, parsed, raw_content=raw_text)
             # 解析成功后在后台自动建原文 RAG 索引（线程池执行，失败只落 rag_status）
-            if (module.raw_content or "").strip():
+            if module_rag_service.has_indexable_text(module):
                 module.rag_status = "indexing"
                 db.commit()
-                asyncio.get_running_loop().run_in_executor(None, _rag_index_bg, module.id)
+                # 任务先同步登记：上传任务一结束前端就会停止轮询，晚登记的索引任务会看不到
+                asyncio.get_running_loop().run_in_executor(
+                    None, _rag_index_bg, module.id, _start_index_task(module),
+                )
             result = ModuleUploadResponse(
                 id=module.id, title=module.title, rule_system=module.rule_system,
                 description=module.description, scenes_count=len(module.scenes),
@@ -756,8 +773,12 @@ def rebuild_module_rag(
     module = module_service.get_module(db, module_id)
     if not module:
         raise HTTPException(404, "模组不存在")
-    if not (module.raw_content or "").strip():
-        raise HTTPException(400, "该模组没有留存原文（raw_content 为空），无法建原文索引")
+    if not module_rag_service.has_indexable_text(module):
+        # 内置教学模组等只有一句说明、没有原文：不是失败，清掉误留的「索引失败」状态
+        if module.rag_status:
+            module.rag_status = ""
+            db.commit()
+        raise HTTPException(400, "该模组没有可建索引的原文（例如内置教学模组只有一句说明），无需建原文索引")
     _kick_rag_index(background, db, module)
     return module
 

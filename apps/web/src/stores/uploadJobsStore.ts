@@ -21,13 +21,23 @@ export interface UploadJob {
   created_at: number
 }
 
+/** 启动了后台任务后，至少盯这么久（毫秒）：有的任务在后台线程起跑时才登记，晚于请求返回 */
+export const EXPECT_WINDOW_MS = 15_000
+
 interface UploadJobsStore {
   jobs: UploadJob[]
   open: boolean
+  /** 到这个时间点（ms）之前，即使没看到进行中的任务也继续轮询 */
+  watchUntil: number
   /** 拉一次任务列表；已在本页见过「进行中」的任务这次结束了，就弹完成/失败提示（模组还会刷新模组列表）。 */
   refresh: () => Promise<void>
   /** 新提交了一个任务：立刻拉一次，并确保轮询在跑。 */
   track: (taskId: string) => Promise<void>
+  /**
+   * 刚做了会启动后台任务的操作（导入、重建索引、下载、切换模型……）：立刻拉一次，并在接下来
+   * 一段时间里持续轮询。不靠「已经看到进行中的任务」才开始轮询——那样晚登记的任务要刷新页面才出现。
+   */
+  expect: () => Promise<void>
   dismiss: (taskId: string) => Promise<void>
   clearFinished: () => Promise<void>
   setOpen: (open: boolean) => void
@@ -48,6 +58,7 @@ function announce(job: UploadJob) {
 export const useUploadJobsStore = create<UploadJobsStore>((set, get) => ({
   jobs: [],
   open: false,
+  watchUntil: 0,
 
   refresh: async () => {
     let jobs: UploadJob[]
@@ -56,6 +67,7 @@ export const useUploadJobsStore = create<UploadJobsStore>((set, get) => ({
     } catch {
       return   // 连不上本机后端（如作为客人连到别人的主机）：保持现状，不打扰
     }
+    if (!Array.isArray(jobs)) return   // 响应不是任务列表（如本机后端版本不符）：同上
     let moduleFinished = false
     for (const job of jobs) {
       if (job.status === 'running') {
@@ -70,9 +82,17 @@ export const useUploadJobsStore = create<UploadJobsStore>((set, get) => ({
     if (moduleFinished) void useModuleStore.getState().fetchModules()
   },
 
-  track: async (taskId) => {
+  track: (taskId) => {
     seenRunning.add(taskId)
-    await get().refresh()
+    return get().expect()
+  },
+
+  expect: () => {
+    const until = Date.now() + EXPECT_WINDOW_MS
+    set({ watchUntil: until })
+    // 窗口到期把标记清掉，让同步钩子重新判断要不要继续轮询
+    setTimeout(() => { if (get().watchUntil === until) set({ watchUntil: 0 }) }, EXPECT_WINDOW_MS + 50)
+    return get().refresh()
   },
 
   dismiss: async (taskId) => {

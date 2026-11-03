@@ -103,6 +103,11 @@ def backfill_scene_hints(chunks: list[dict], scenes: list[dict] | None) -> list[
     return result
 
 
+def has_indexable_text(module: Module) -> bool:
+    """原文够不够切出至少一块（内置教学模组只留一句说明，不够）。"""
+    return bool(chunk_text(module.raw_content or ""))
+
+
 def ingest_module(
     db: Session,
     module: Module,
@@ -111,16 +116,20 @@ def ingest_module(
 ) -> Module:
     """对模组原文建（或重建）RAG 索引：切块→回填场景→嵌入→写 ModuleChunk。
 
-    成功置 rag_status=ready，失败置 failed。fail-open：本函数吞掉一切异常只落
+    成功置 rag_status=ready，失败置 failed；没有可切块的原文（如内置教学模组只有一句说明）
+    置回 ""（未建索引）——那不是失败，是本来就无原文可索引。fail-open：本函数吞掉一切异常只落
     状态，绝不向上抛——建索引失败不得阻塞模组解析/跑团主流程。
     """
+    if not has_indexable_text(module):
+        module.rag_status = ""
+        db.commit()
+        logger.info("模组没有可索引的原文，跳过原文索引：%s", module.title)
+        return module
     try:
         embedder = embedder or get_embedder()
         chunks = backfill_scene_hints(
             chunk_text(module.raw_content or ""), module.scenes,
         )
-        if not chunks:
-            raise ValueError("模组没有可切块的原文（raw_content 为空或过短）")
 
         texts = [c["text"] for c in chunks]
         vectors: list[list[float]] = []

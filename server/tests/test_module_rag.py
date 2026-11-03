@@ -158,10 +158,12 @@ def test_ingest_module_roundtrip(db_factory):
 def test_ingest_module_fail_open(db_factory):
     db = db_factory()
 
-    # 无原文 → failed（而非抛异常阻塞主流程）
-    empty = _make_module(db, raw="")
-    module_rag_service.ingest_module(db, empty, embedder=FakeEmbedder())
-    assert empty.rag_status == "failed"
+    # 无原文（如内置教学模组只有一句说明）→ 置回「未建索引」：不是失败，本来就无原文可索引
+    for raw in ("", "本模组为 CoC Player 项目原创新手教学示例内容。"):
+        empty = _make_module(db, raw=raw)
+        empty.rag_status = "failed"   # 旧版留下的误判状态也一并清掉
+        module_rag_service.ingest_module(db, empty, embedder=FakeEmbedder())
+        assert empty.rag_status == ""
 
     # 嵌入报错 → failed，同样不上抛
     class BoomEmbedder(FakeEmbedder):

@@ -11,9 +11,15 @@ const toastSuccess = vi.fn()
 const toastError = vi.fn()
 vi.mock('sonner', () => ({ toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) } }))
 
-import { useUploadJobsStore, type UploadJob } from '@/stores/uploadJobsStore'
+import { EXPECT_WINDOW_MS, useUploadJobsStore, type UploadJob } from '@/stores/uploadJobsStore'
+import { useUploadJobsSync } from './useUploadJobsSync'
 import { Sidebar } from './Sidebar'
 import { UploadJobsDrawer } from './UploadJobsDrawer'
+
+function SyncProbe() {
+  useUploadJobsSync()
+  return null
+}
 
 const running: UploadJob = {
   id: 'module:j1', kind: 'module', title: '陵墓.pdf', status: 'running',
@@ -24,7 +30,7 @@ beforeEach(() => {
   get.mockReset()
   toastSuccess.mockReset()
   toastError.mockReset()
-  useUploadJobsStore.setState({ jobs: [], open: false })
+  useUploadJobsStore.setState({ jobs: [], open: false, watchUntil: 0 })
 })
 
 describe('解析进度', () => {
@@ -81,5 +87,31 @@ describe('解析进度', () => {
     await act(() => useUploadJobsStore.getState().refresh())
     expect(toastSuccess).toHaveBeenCalledWith('规则书《守秘人规则书》导入：完成：400 页 / 3273 片段')
     expect(screen.getByRole('link', { name: /查看规则书/ })).toHaveAttribute('href', '/rules?tab=books')
+  })
+
+  it('刚启动后台任务时即使还没看到进行中的任务也会轮询一阵（不必刷新页面），到期即停', async () => {
+    vi.useFakeTimers()
+    try {
+      get.mockResolvedValue([])
+      render(<MemoryRouter><SyncProbe /></MemoryRouter>)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      const afterMount = get.mock.calls.length
+
+      await act(async () => { await useUploadJobsStore.getState().expect() })
+      // 任务晚一点才在后台登记：轮询应在窗口内继续把它拉回来
+      get.mockResolvedValue([{ ...running, id: 'module_index:1', kind: 'module_index', title: '模组《雨鲸》原文索引' }])
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(get.mock.calls.length).toBeGreaterThan(afterMount + 1)
+      expect(useUploadJobsStore.getState().jobs[0].title).toBe('模组《雨鲸》原文索引')
+
+      // 任务结束、窗口到期后不再轮询
+      get.mockResolvedValue([])
+      await act(async () => { await vi.advanceTimersByTimeAsync(EXPECT_WINDOW_MS + 2000) })
+      const settled = get.mock.calls.length
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+      expect(get.mock.calls.length).toBe(settled)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

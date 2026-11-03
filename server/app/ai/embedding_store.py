@@ -50,8 +50,6 @@ class EmbeddingSettings:
     target: str | None = None
     source: str = "modelscope"
     hf_endpoint: str = ""
-    #: KP 主动查阅模组原文时用精排模型重排（需已下载）
-    reranker_enabled: bool = False
 
 
 _cache: EmbeddingSettings | None = None
@@ -83,7 +81,6 @@ def _read() -> EmbeddingSettings:
         s.source = raw["source"]
     if isinstance(raw.get("hf_endpoint"), str):
         s.hf_endpoint = raw["hf_endpoint"].strip()
-    s.reranker_enabled = raw.get("reranker_enabled") is True
     return s
 
 
@@ -382,16 +379,13 @@ def delete_model(model_id: str) -> None:
     spec = model_spec(model_id)
     if spec is None:
         raise ValueError(f"未知模型：{model_id}")
-    s = load()
     if spec.kind == "reranker":
         _delete_files(spec)
         from app.ai import reranker
 
-        reranker.release()
-        if s.reranker_enabled:
-            s.reranker_enabled = False   # 模型都没了，开关跟着关掉
-            save(s)
+        reranker.on_model_deleted()   # 模型都没了，精排开关跟着关掉
         return
+    s = load()
     if model_id in (s.active, s.target):
         raise ValueError(f"{spec.label} 正在使用中，不能删除")
     j = job(model_id)
@@ -413,19 +407,3 @@ def _delete_files(spec: EmbedModelSpec) -> None:
         shutil.rmtree(MODELS_DIR / spec.legacy_cache, ignore_errors=True)
     with _jobs_lock:
         _jobs.pop(spec.id, None)
-
-
-def set_reranker_enabled(enabled: bool) -> EmbeddingSettings:
-    """开关精排；开启要求精排模型已下载。"""
-    from app.ai.embedding import RERANKERS
-
-    if enabled and not any(is_installed(sp) for sp in RERANKERS.values()):
-        raise ValueError("精排模型尚未下载")
-    s = load()
-    s.reranker_enabled = enabled
-    save(s)
-    if not enabled:
-        from app.ai import reranker
-
-        reranker.release()
-    return s

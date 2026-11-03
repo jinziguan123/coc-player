@@ -16,7 +16,6 @@ const mockPost = vi.mocked(localApi.post)
 
 type Over = {
   large?: Record<string, unknown>; rebuild?: Record<string, unknown>; target?: string | null; stale?: number
-  reranker?: Record<string, unknown>; rerankerEnabled?: boolean
 }
 
 function view(o: Over = {}) {
@@ -24,26 +23,19 @@ function view(o: Over = {}) {
   return {
     active: 'bge-small-zh-v1.5',
     target: o.target ?? null,
-    source: 'modelscope',
-    hf_endpoint: '',
     stale: o.stale ?? 0,
     rebuild: { running: false, target: '', done: 0, total: 0, current: '', error: '', ...o.rebuild },
     models: [
       { ...base, id: 'bge-small-zh-v1.5', label: 'bge-small-zh-v1.5（默认）', description: '轻量', dim: 512, size_bytes: 95_221_432, installed: true, active: true },
       { ...base, id: 'bge-large-zh-v1.5-int8', label: 'bge-large-zh-v1.5（int8，推荐）', description: '效果最好', size_bytes: 326_604_607, recommended: true, ...o.large },
     ],
-    rerankers: [
-      { ...base, id: 'bge-reranker-v2-m3-int8', label: 'bge-reranker-v2-m3（int8）', description: '重排', dim: 0,
-        size_bytes: 587_812_000, index_speed: '每次查阅约多 2～4 秒', memory: '约 1GB', ...o.reranker },
-    ],
-    reranker_enabled: o.rerankerEnabled ?? false,
   }
 }
 
 describe('EmbeddingModelPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGet.mockResolvedValue(view())
+    mockGet.mockImplementation((url: string) => Promise.resolve(url === '/tasks' ? [] : view()) as never)
   })
 
   it('显示大小、使用中与推荐，点下载即请求下载', async () => {
@@ -77,23 +69,5 @@ describe('EmbeddingModelPanel', () => {
     expect(await screen.findByText(/下载失败：连接超时/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /重试下载/ })).toBeInTheDocument()
     expect(screen.getByText('有 12 条旧索引待重建')).toBeInTheDocument()
-  })
-
-  it('精排：未下载时开关不可用，可下载；已下载后开关发请求', async () => {
-    const { unmount } = render(<EmbeddingModelPanel />)
-    const sw = await screen.findByRole('switch', { name: 'KP 查阅模组原文时精排' })
-    expect(sw).toBeDisabled()
-    expect(screen.getByText(/需先下载精排模型/)).toBeInTheDocument()
-    expect(screen.getByText(/下载 588 MB/)).toBeInTheDocument()
-    unmount()
-
-    mockGet.mockResolvedValue(view({ reranker: { installed: true } }))
-    vi.mocked(localApi.put).mockResolvedValue(view({ reranker: { installed: true, active: true }, rerankerEnabled: true }))
-    render(<EmbeddingModelPanel />)
-    const enabled = await screen.findByRole('switch', { name: 'KP 查阅模组原文时精排' })
-    expect(enabled).not.toBeDisabled()
-    await userEvent.click(enabled)
-    expect(localApi.put).toHaveBeenCalledWith('/settings/embedding/reranker', { enabled: true })
-    expect(await screen.findByRole('switch', { name: 'KP 查阅模组原文时精排' })).toHaveAttribute('aria-checked', 'true')
   })
 })

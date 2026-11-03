@@ -1512,10 +1512,6 @@
             "title": "Active",
             "type": "string"
           },
-          "hf_endpoint": {
-            "title": "Hf Endpoint",
-            "type": "string"
-          },
           "models": {
             "items": {
               "$ref": "#/components/schemas/EmbedModelView"
@@ -1525,23 +1521,6 @@
           },
           "rebuild": {
             "$ref": "#/components/schemas/RebuildView"
-          },
-          "reranker_enabled": {
-            "default": false,
-            "title": "Reranker Enabled",
-            "type": "boolean"
-          },
-          "rerankers": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/EmbedModelView"
-            },
-            "title": "Rerankers",
-            "type": "array"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
           },
           "stale": {
             "title": "Stale",
@@ -1563,8 +1542,6 @@
           "models",
           "active",
           "target",
-          "source",
-          "hf_endpoint",
           "rebuild",
           "stale"
         ],
@@ -2454,6 +2431,24 @@
         "title": "LuckDecisionRequest",
         "type": "object"
       },
+      "ModelSourceView": {
+        "properties": {
+          "hf_endpoint": {
+            "title": "Hf Endpoint",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "hf_endpoint"
+        ],
+        "title": "ModelSourceView",
+        "type": "object"
+      },
       "ModelsProbe": {
         "description": "问上游要模型清单时带的那点信息，取自表单当前的值。",
         "properties": {
@@ -3050,6 +3045,27 @@
           "error"
         ],
         "title": "RebuildView",
+        "type": "object"
+      },
+      "RerankerSettingsView": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/EmbedModelView"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models",
+          "enabled"
+        ],
+        "title": "RerankerSettingsView",
         "type": "object"
       },
       "RerankerUpdate": {
@@ -3996,24 +4012,6 @@
           "base_attributes"
         ],
         "title": "SkillPointsRequest",
-        "type": "object"
-      },
-      "SourceUpdate": {
-        "properties": {
-          "hf_endpoint": {
-            "default": "",
-            "title": "Hf Endpoint",
-            "type": "string"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          }
-        },
-        "required": [
-          "source"
-        ],
-        "title": "SourceUpdate",
         "type": "object"
       },
       "SwitchRequest": {
@@ -12402,89 +12400,6 @@
         ]
       }
     },
-    "/api/settings/embedding/reranker": {
-      "put": {
-        "description": "开关精排（KP 主动查阅模组原文时生效）；开启要求精排模型已下载。",
-        "operationId": "update_reranker_api_settings_embedding_reranker_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RerankerUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmbeddingSettingsView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Reranker",
-        "tags": [
-          "settings"
-        ]
-      }
-    },
-    "/api/settings/embedding/source": {
-      "put": {
-        "operationId": "update_source_api_settings_embedding_source_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SourceUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmbeddingSettingsView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Source",
-        "tags": [
-          "settings"
-        ]
-      }
-    },
     "/api/settings/embedding/switch": {
       "post": {
         "description": "切换检索模型（后台重建索引）；传当前模型即取消进行中的切换。",
@@ -12522,6 +12437,253 @@
           }
         },
         "summary": "Switch Model",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/model-source": {
+      "get": {
+        "operationId": "get_model_source_api_settings_model_source_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSourceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Model Source",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_model_source_api_settings_model_source_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelSourceView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSourceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Model Source",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/reranker": {
+      "get": {
+        "operationId": "get_reranker_settings_api_settings_reranker_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Reranker Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "开关精排；开启要求精排模型已下载。",
+        "operationId": "update_reranker_api_settings_reranker_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerankerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Reranker",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/reranker/models/{model_id}": {
+      "delete": {
+        "operationId": "delete_model_api_settings_reranker_models__model_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Model",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/reranker/models/{model_id}/cancel": {
+      "post": {
+        "operationId": "cancel_download_api_settings_reranker_models__model_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Download",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/reranker/models/{model_id}/download": {
+      "post": {
+        "operationId": "download_model_api_settings_reranker_models__model_id__download_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Model",
         "tags": [
           "settings"
         ]

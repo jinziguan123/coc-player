@@ -3016,43 +3016,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/embedding/reranker": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Update Reranker
-         * @description 开关精排（KP 主动查阅模组原文时生效）；开启要求精排模型已下载。
-         */
-        put: operations["update_reranker_api_settings_embedding_reranker_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/embedding/source": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Update Source */
-        put: operations["update_source_api_settings_embedding_source_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/settings/embedding/switch": {
         parameters: {
             query?: never;
@@ -3067,6 +3030,96 @@ export interface paths {
          * @description 切换检索模型（后台重建索引）；传当前模型即取消进行中的切换。
          */
         post: operations["switch_model_api_settings_embedding_switch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/model-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Model Source */
+        get: operations["get_model_source_api_settings_model_source_get"];
+        /** Update Model Source */
+        put: operations["update_model_source_api_settings_model_source_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/reranker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Reranker Settings */
+        get: operations["get_reranker_settings_api_settings_reranker_get"];
+        /**
+         * Update Reranker
+         * @description 开关精排；开启要求精排模型已下载。
+         */
+        put: operations["update_reranker_api_settings_reranker_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/reranker/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Model */
+        delete: operations["delete_model_api_settings_reranker_models__model_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/reranker/models/{model_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Download */
+        post: operations["cancel_download_api_settings_reranker_models__model_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/reranker/models/{model_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download Model */
+        post: operations["download_model_api_settings_reranker_models__model_id__download_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3809,23 +3862,9 @@ export interface components {
         EmbeddingSettingsView: {
             /** Active */
             active: string;
-            /** Hf Endpoint */
-            hf_endpoint: string;
             /** Models */
             models: components["schemas"]["EmbedModelView"][];
             rebuild: components["schemas"]["RebuildView"];
-            /**
-             * Reranker Enabled
-             * @default false
-             */
-            reranker_enabled: boolean;
-            /**
-             * Rerankers
-             * @default []
-             */
-            rerankers: components["schemas"]["EmbedModelView"][];
-            /** Source */
-            source: string;
             /** Stale */
             stale: number;
             /** Target */
@@ -4288,6 +4327,13 @@ export interface components {
              */
             spend: boolean;
         };
+        /** ModelSourceView */
+        ModelSourceView: {
+            /** Hf Endpoint */
+            hf_endpoint: string;
+            /** Source */
+            source: string;
+        };
         /**
          * ModelsProbe
          * @description 问上游要模型清单时带的那点信息，取自表单当前的值。
@@ -4613,6 +4659,13 @@ export interface components {
             target: string;
             /** Total */
             total: number;
+        };
+        /** RerankerSettingsView */
+        RerankerSettingsView: {
+            /** Enabled */
+            enabled: boolean;
+            /** Models */
+            models: components["schemas"]["EmbedModelView"][];
         };
         /** RerankerUpdate */
         RerankerUpdate: {
@@ -5053,16 +5106,6 @@ export interface components {
             };
             /** Occupation */
             occupation: string;
-        };
-        /** SourceUpdate */
-        SourceUpdate: {
-            /**
-             * Hf Endpoint
-             * @default
-             */
-            hf_endpoint: string;
-            /** Source */
-            source: string;
         };
         /** SwitchRequest */
         SwitchRequest: {
@@ -10542,72 +10585,6 @@ export interface operations {
             };
         };
     };
-    update_reranker_api_settings_embedding_reranker_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RerankerUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmbeddingSettingsView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_source_api_settings_embedding_source_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SourceUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmbeddingSettingsView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     switch_model_api_settings_embedding_switch_post: {
         parameters: {
             query?: never;
@@ -10628,6 +10605,205 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_model_source_api_settings_model_source_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSourceView"];
+                };
+            };
+        };
+    };
+    update_model_source_api_settings_model_source_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelSourceView"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSourceView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reranker_settings_api_settings_reranker_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RerankerSettingsView"];
+                };
+            };
+        };
+    };
+    update_reranker_api_settings_reranker_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RerankerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RerankerSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_model_api_settings_reranker_models__model_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RerankerSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_download_api_settings_reranker_models__model_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RerankerSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_model_api_settings_reranker_models__model_id__download_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RerankerSettingsView"];
                 };
             };
             /** @description Validation Error */

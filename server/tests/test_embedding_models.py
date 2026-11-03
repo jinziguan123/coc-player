@@ -454,7 +454,6 @@ def test_接口列表与仅本机(monkeypatch):
     body = r.json()
     assert [m["id"] for m in body["models"]] == list(CATALOG)
     assert body["active"] == SMALL.id and body["target"] is None
-    assert body["source"] == "modelscope"
     large = next(m for m in body["models"] if m["id"] == LARGE.id)
     assert large["recommended"] and not large["installed"] and large["size_bytes"] == LARGE.size_bytes
     assert local.post("/api/settings/embedding/switch", json={"model_id": LARGE.id}).status_code == 400

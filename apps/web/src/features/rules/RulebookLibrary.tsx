@@ -9,6 +9,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { GiBookCover, GiMagnifyingGlass } from 'react-icons/gi'
 import { Collapse } from '@/components/ui/Collapse'
 import { RulebookTome, type Rulebook } from '@/components/rulebook/RulebookTome'
+import { useUploadJobsStore } from '@/stores/uploadJobsStore'
 
 interface RuleHit {
   text: string
@@ -96,7 +97,10 @@ export function RulebookLibrary({ onCount }: {
     }
     setFiles([])
     if (fileRef.current) fileRef.current.value = ''
-    if (ok) toast.success(`已上传 ${ok} 本，正在后台依次建立索引，进度见书上`)
+    if (ok) {
+      toast.success(`已上传 ${ok} 本，正在后台依次建立索引，进度见书上与「解析进度」`)
+      void useUploadJobsStore.getState().expect()
+    }
     setUploading(false)
   }
 

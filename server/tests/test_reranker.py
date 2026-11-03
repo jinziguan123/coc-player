@@ -61,12 +61,14 @@ def test_注册参数():
 def test_未开启或未下载时不精排(monkeypatch):
     assert reranker.get_reranker() is None                       # 默认关闭
     with pytest.raises(ValueError, match="尚未下载"):
-        embedding_store.set_reranker_enabled(True)
+        reranker.set_enabled(True)
     monkeypatch.setattr(embedding_store, "is_installed", lambda spec: True)
     monkeypatch.setattr(embedding_store, "installed_dir", lambda spec: "/x")
-    embedding_store.set_reranker_enabled(True)
+    reranker.set_enabled(True)
     assert isinstance(reranker.get_reranker(), reranker.Reranker)
-    embedding_store.set_reranker_enabled(False)
+    # 开关存在自己的设置文件里，与检索模型的设置互不相干
+    assert reranker.SETTINGS_FILE.exists() and not embedding_store.SETTINGS_FILE.exists()
+    reranker.set_enabled(False)
     assert reranker.get_reranker() is None
 
 
@@ -98,9 +100,9 @@ def test_精排出错回落向量排序(monkeypatch, module_with_chunks):
 
 def test_删除精排模型时开关一并关闭(monkeypatch):
     monkeypatch.setattr(embedding_store, "is_installed", lambda spec: True)
-    embedding_store.set_reranker_enabled(True)
+    reranker.set_enabled(True)
     embedding_store.delete_model(SPEC.id)
-    assert embedding_store.load().reranker_enabled is False
+    assert reranker.is_enabled() is False
 
 
 def test_下载任务标题区分精排模型(monkeypatch):
@@ -109,13 +111,40 @@ def test_下载任务标题区分精排模型(monkeypatch):
     assert task["title"] == f"下载精排模型 {SPEC.label}"
 
 
-def test_接口_列出精排模型与开关():
+def test_接口_精排与检索模型分开管理():
     from app.main import app
 
     local = TestClient(app, client=("127.0.0.1", 5000))
-    body = local.get("/api/settings/embedding").json()
-    assert [r["id"] for r in body["rerankers"]] == [SPEC.id]
-    assert body["reranker_enabled"] is False and body["rerankers"][0]["installed"] is False
-    assert SPEC.id not in [m["id"] for m in body["models"]]
-    r = local.put("/api/settings/embedding/reranker", json={"enabled": True})
+    body = local.get("/api/settings/reranker").json()
+    assert [m["id"] for m in body["models"]] == [SPEC.id]
+    assert body["enabled"] is False and body["models"][0]["installed"] is False
+    r = local.put("/api/settings/reranker", json={"enabled": True})
     assert r.status_code == 400 and "尚未下载" in r.json()["detail"]
+
+    # 检索模型接口里看不到精排模型，也不能用它下载/删除精排模型，反之亦然
+    emb = local.get("/api/settings/embedding").json()
+    assert SPEC.id not in [m["id"] for m in emb["models"]] and "rerankers" not in emb
+    assert local.post(f"/api/settings/embedding/models/{SPEC.id}/download").status_code == 404
+    assert local.post("/api/settings/reranker/models/bge-small-zh-v1.5/download").status_code == 404
+
+
+def test_接口_模型下载源单独设置():
+    from app.main import app
+
+    local = TestClient(app, client=("127.0.0.1", 5000))
+    assert local.get("/api/settings/model-source").json() == {"source": "modelscope", "hf_endpoint": ""}
+    r = local.put("/api/settings/model-source", json={"source": "huggingface", "hf_endpoint": "https://hf-mirror.example.com/"})
+    assert r.json() == {"source": "huggingface", "hf_endpoint": "https://hf-mirror.example.com"}
+    assert local.put("/api/settings/model-source", json={"source": "ftp", "hf_endpoint": ""}).status_code == 400
+
+
+def test_旧版存在检索模型设置里的精排开关会迁移过来(monkeypatch):
+    import json
+
+    embedding_store.SETTINGS_FILE.write_text(json.dumps({"active": "bge-small-zh-v1.5", "reranker_enabled": True}))
+    assert reranker.is_enabled() is True
+    # 立刻写进自己的文件：检索模型设置下次保存会丢掉旧键
+    assert json.loads(reranker.SETTINGS_FILE.read_text()) == {"enabled": True}
+    embedding_store.set_source("modelscope")
+    monkeypatch.setattr(reranker, "_enabled", None)   # 模拟重启
+    assert reranker.is_enabled() is True

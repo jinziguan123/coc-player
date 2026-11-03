@@ -45,7 +45,8 @@ export function ModulePage() {
   const rebuildRag = async (id: string) => {
     try {
       await localApi.post(`/modules/${id}/rag/rebuild`)
-      toast.success('已开始重建原文索引')
+      toast.success('已开始重建原文索引，进度见「解析进度」')
+      void useUploadJobsStore.getState().expect()
       fetchModules()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '重建索引失败')

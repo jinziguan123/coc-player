@@ -72,6 +72,11 @@ def isolate_embedding_store(tmp_path, monkeypatch):
     monkeypatch.setattr(embedding_store, "_cache", None)
     monkeypatch.setattr(embedding_store, "_jobs", {})
     monkeypatch.setattr(embedding, "_embedders", {})
+    from app.ai import reranker
+
+    monkeypatch.setattr(reranker, "SETTINGS_FILE", tmp_path / "reranker_settings.json")
+    monkeypatch.setattr(reranker, "_enabled", None)
+    monkeypatch.setattr(reranker, "_instance", None)
 
 
 @pytest.fixture(autouse=True)
