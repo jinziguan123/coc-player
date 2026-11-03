@@ -7,7 +7,7 @@ from app.models.event_log import EventLog
 from app.models.intent_history import IntentHistory
 from app.models.lan_peer import LanPeer
 from app.models.module import Module, ModuleChunk
-from app.models.rulebook import RuleChunk, Rulebook, RuleSystemOptions
+from app.models.rulebook import RuleChunk, Rulebook, RuleSection, RuleSystemOptions
 from app.models.session import GameSession
 from app.models.session_ledger import SessionLedger
 from app.models.session_navigation import SessionNavigation
@@ -28,6 +28,7 @@ __all__ = [
     "ModuleChunk",
     "Rulebook",
     "RuleChunk",
+    "RuleSection",
     "RuleSystemOptions",
     "GameSession",
     "SessionLedger",

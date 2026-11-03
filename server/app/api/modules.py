@@ -91,12 +91,28 @@ def _rag_index_bg(module_id: str) -> None:
     嵌入是 CPU 密集操作、不占事件循环。
     """
     from app.models.module import Module
+    from app.services import task_center
 
     db = SessionLocal()
+    task_id = None
     try:
         module = db.get(Module, module_id)
         if module:
-            module_rag_service.ingest_module(db, module)
+            task_id = task_center.start(
+                "module_index", f"模组《{module.title}》原文索引", stage="建索引",
+                link={"to": f"/modules/{module.id}", "label": "查看模组"},
+            )
+            module_rag_service.ingest_module(
+                db, module,
+                on_progress=lambda done, total: task_center.update(task_id, done=done, total=total),
+            )
+            if module.rag_status == "ready":
+                task_center.finish(task_id, "done", stage="完成")
+            else:
+                task_center.finish(task_id, "failed", detail="原文索引失败，可在模组详情页重试")
+    except Exception as exc:  # noqa: BLE001 — 后台线程：只记录，模组状态由 service 落库
+        logger.exception("模组原文索引任务出错：%s", module_id)
+        task_center.finish(task_id, "failed", detail=str(exc)[:300])
     finally:
         db.close()
 

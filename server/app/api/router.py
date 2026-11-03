@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.agent_settings import router as agent_settings_router
 from app.api.embedding_models import router as embedding_models_router
+from app.api.tasks import router as tasks_router
 from app.api.ai_settings import public_router as ai_settings_public_router
 from app.api.ai_settings import router as ai_settings_router
 from app.api.bgm import router as bgm_router
@@ -32,5 +33,6 @@ api_router.include_router(ai_settings_router)
 api_router.include_router(ai_settings_public_router)
 api_router.include_router(agent_settings_router)
 api_router.include_router(embedding_models_router)
+api_router.include_router(tasks_router)
 api_router.include_router(rulebooks_router)
 api_router.include_router(net_router)

@@ -20,6 +20,8 @@ server/images/
 server/bgm/
 # 嵌入模型缓存（fastembed 首次使用时下载 bge-small-zh-v1.5，~90MB，运行时重下，不入库）
 server/models/
+# 本机保存的规则书 PDF 原件（运行时数据，受版权保护，绝不入库）
+server/rulebooks/
 # 打包用的内置种子（由 make_seed.py 从开发库生成，构建时重建，不入库）
 server/seed/
 # 评估 scorecard 运行产物（本地对比用，不入库；fixtures/ 入库）
@@ -33,6 +35,7 @@ server/plugins/
 # 含 AI 密钥，不入库（密钥应从 .env / 设置页注入）
 ai_settings.json
 agent_settings.json
+embedding_settings.json
 # 本机的联机策略（局域网开关、房间 AI 配额），属于个人环境设置，不入库
 net_settings.json
 ai_quota.json

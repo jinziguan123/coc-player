@@ -2,10 +2,22 @@ import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, m } from 'motion/react'
-import { GiSandsOfTime, GiScrollUnfurled } from 'react-icons/gi'
-import { CircleAlert, CircleCheck, Loader2, RefreshCw, X } from 'lucide-react'
+import type { IconType } from 'react-icons'
+import {
+  GiArchiveResearch, GiBookCover, GiCloudDownload, GiCycle, GiSandsOfTime, GiScrollUnfurled,
+} from 'react-icons/gi'
+import { Ban, CircleAlert, CircleCheck, Loader2, RefreshCw, X } from 'lucide-react'
 import { spring } from '@/lib/motion'
 import { runningJobCount, useUploadJobsStore, type UploadJob } from '@/stores/uploadJobsStore'
+
+/** 各类后台任务的标识图标（与对应页面的图标一致） */
+const KIND_ICON: Record<string, IconType> = {
+  module: GiScrollUnfurled,
+  module_index: GiArchiveResearch,
+  rulebook: GiBookCover,
+  embed_download: GiCloudDownload,
+  embed_rebuild: GiCycle,
+}
 
 function timeLabel(sec: number) {
   const d = new Date(sec * 1000)
@@ -13,15 +25,17 @@ function timeLabel(sec: number) {
 }
 
 function JobItem({ job, onDismiss, onNavigate }: { job: UploadJob; onDismiss: () => void; onNavigate: () => void }) {
-  const title = job.result?.title || job.files.join('、') || '未命名文件'
+  const KindIcon = KIND_ICON[job.kind] ?? GiSandsOfTime
   return (
     <li className="upload-job">
       <div className="upload-job-head">
         <span className={`upload-job-icon is-${job.status}`} aria-hidden>
           {job.status === 'running' ? <Loader2 size={14} className="animate-spin" />
-            : job.status === 'done' ? <CircleCheck size={14} /> : <CircleAlert size={14} />}
+            : job.status === 'done' ? <CircleCheck size={14} />
+              : job.status === 'cancelled' ? <Ban size={14} /> : <CircleAlert size={14} />}
         </span>
-        <span className="upload-job-title" title={job.files.join('\n')}>{title}</span>
+        <KindIcon className="upload-job-kind" aria-hidden />
+        <span className="upload-job-title" title={job.title}>{job.title}</span>
         <span className="upload-job-time">{timeLabel(job.created_at)}</span>
         {job.status !== 'running' && (
           <button type="button" className="upload-job-dismiss" onClick={onDismiss} title="从列表移除" aria-label="从列表移除">
@@ -33,24 +47,35 @@ function JobItem({ job, onDismiss, onNavigate }: { job: UploadJob; onDismiss: ()
         <>
           <div className="upload-job-stage">
             <span>{job.stage}</span>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>{job.percent}%</span>
+            {job.percent !== null && <span style={{ fontFamily: 'var(--font-mono)' }}>{job.percent}%</span>}
           </div>
-          <div className="upload-progress-track">
-            <div className="upload-progress-fill" style={{ width: `${Math.max(job.percent, 4)}%` }} />
+          <div
+            className="upload-progress-track"
+            role="progressbar"
+            aria-label={`${job.title} 进度`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={job.percent ?? undefined}
+          >
+            {/* 没有总量的步骤（解析 PDF、等待模型）给一段流动微光，示意仍在工作 */}
+            <div className="upload-progress-fill" style={{ width: `${job.percent === null ? 30 : Math.max(job.percent, 4)}%` }} />
           </div>
         </>
       )}
-      {job.status === 'failed' && <p className="upload-job-error">{job.detail || '解析失败'}</p>}
-      {job.status === 'done' && job.result?.id && (
-        <Link to={`/modules/${job.result.id}`} className="upload-job-link" onClick={onNavigate}>
-          <GiScrollUnfurled aria-hidden /> 查看模组
+      {job.status === 'failed' && <p className="upload-job-error">{job.detail || '失败'}</p>}
+      {job.status !== 'running' && job.status !== 'failed' && job.stage && (
+        <p className="upload-job-note">{job.stage}</p>
+      )}
+      {job.status === 'done' && job.link && (
+        <Link to={job.link.to} className="upload-job-link" onClick={onNavigate}>
+          <KindIcon aria-hidden /> {job.link.label}
         </Link>
       )}
     </li>
   )
 }
 
-/** 「解析进度」抽屉：右侧滑入，列出最近的模组上传解析任务（与运行轨迹抽屉同一套外观）。 */
+/** 「解析进度」抽屉：右侧滑入，列出最近的后台任务（模组解析、规则书导入、检索模型下载与索引重建……）。 */
 export function UploadJobsDrawer() {
   const { jobs, open, setOpen, refresh, dismiss, clearFinished } = useUploadJobsStore()
   const finished = jobs.length - runningJobCount(jobs)
@@ -78,7 +103,7 @@ export function UploadJobsDrawer() {
           <header className="trace-head">
             <div className="min-w-0">
               <div className="trace-title"><GiSandsOfTime aria-hidden /> 解析进度</div>
-              <div className="trace-sub">导入的剧本在后台解析，刷新或离开页面不影响；重启程序后列表清空。</div>
+              <div className="trace-sub">剧本解析、规则书导入、检索模型下载与索引重建都在后台进行，刷新或离开页面不影响；重启程序后列表清空。</div>
             </div>
             <button type="button" className="trace-icon-btn" onClick={() => void refresh()} title="刷新" aria-label="刷新">
               <RefreshCw size={14} />
@@ -89,7 +114,7 @@ export function UploadJobsDrawer() {
           </header>
           <div className="upload-jobs-body">
             {jobs.length === 0 ? (
-              <p className="upload-jobs-empty">暂无解析任务。到「模组」页导入剧本后，进度会显示在这里。</p>
+              <p className="upload-jobs-empty">暂无后台任务。导入剧本或规则书、下载或切换检索模型后，进度会显示在这里。</p>
             ) : (
               <ul className="upload-jobs-list">
                 {jobs.map((job) => (

@@ -42,8 +42,8 @@ type SettingsTab = (typeof SETTINGS_TABS)[number]['key']
 /* ---------- 组件 ---------- */
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('ai')
   const location = useLocation()
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => SETTINGS_TABS.find((t) => t.key === new URLSearchParams(location.search).get('tab'))?.key ?? 'ai')
   const navigate = useNavigate()
   const returnTo = getOnboardingReturnTo(location.state)
 

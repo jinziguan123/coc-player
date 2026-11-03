@@ -139,6 +139,10 @@ async def lifespan(_app: FastAPI):
         from app.services import embedding_switch
 
         embedding_switch.resume_if_needed()
+        # 规则书导入队列：中断的导入按原件重排；切块逻辑升级后有原件的书排队重建（旧索引照常可用）
+        from app.services import rulebook_jobs
+
+        rulebook_jobs.resume_on_startup()
     # 第三方规则插件：逐个校验、失败隔离（坏插件只会让它自己不加载，不影响启动）
     try:
         from app.ai.tools import TOOLS_BY_NAME
@@ -154,8 +158,9 @@ async def lifespan(_app: FastAPI):
     yield
     watchdog.set()
     # 模组文件抽取的子进程池：随服务一起收掉，不留孤儿进程与泄漏的信号量
-    from app.services import module_extract
+    from app.services import module_extract, rulebook_jobs
     module_extract.shutdown()
+    rulebook_jobs.shutdown()
 
 
 app = FastAPI(title="CoC Player", version="0.1.0", lifespan=lifespan)

@@ -75,6 +75,39 @@ def isolate_embedding_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_rulebook_sources(tmp_path, monkeypatch):
+    """规则书 PDF 原件目录指向临时路径：测试上传的文件不得落进开发机的数据目录。"""
+    from app.services import rulebook_service
+
+    monkeypatch.setattr(rulebook_service, "RULEBOOKS_DIR", tmp_path / "rulebooks")
+
+
+@pytest.fixture(autouse=True)
+def isolate_task_center():
+    """后台任务中心是进程级的内存表：每个用例一张空表。"""
+    from app.services import task_center
+
+    task_center.reset()
+    yield
+    task_center.reset()
+
+
+@pytest.fixture(autouse=True)
+def isolate_rulebook_jobs(monkeypatch):
+    """导入队列：测试里在本进程解析（走 rulebook_service.parse_pdf，用例可替换），每个用例一个空队列。"""
+    from collections import deque
+
+    from app.services import rulebook_jobs, rulebook_service
+
+    monkeypatch.setattr(rulebook_jobs, "_parse", lambda pdf: rulebook_service.parse_pdf(pdf))
+    monkeypatch.setattr(rulebook_jobs, "_queue", deque())
+    monkeypatch.setattr(rulebook_jobs, "_jobs", {})
+    monkeypatch.setattr(rulebook_jobs, "_worker", None)
+    yield
+    rulebook_jobs.wait_idle(10)
+
+
+@pytest.fixture(autouse=True)
 def isolate_dev_db(tmp_path, monkeypatch):
     """把 ``SessionLocal`` 指向一次性临时库，任何测试都别想写到开发库上。
 

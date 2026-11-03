@@ -205,7 +205,8 @@ MODULE_EXCERPT_MAX_CHARS = 600
 # 被动注入的规则书要点：单块截断上限。切块本体 500 字、检索侧相邻块合并后最长约
 # 920 字（500+420）——上限必须 ≥ 合并块长，否则检索到的条文尾部被注入环节砍掉
 # （此前 400 < 500 就砍掉过每块末尾约 100 字）。典型轮次仍是 1-3 块 × ≤500 字。
-RULE_EXCERPT_MAX_CHARS = 1000
+# 规则书检索按整条词条返回（正文上限 rulebook_service.SECTION_MAX_CHARS＝1000，另有路径头与截取提示）
+RULE_EXCERPT_MAX_CHARS = 1200
 # 「幕后动态」小节最多注入最近几条幕后事件（visibility=["kp"]，仅 KP 可见）
 MAX_BACKSTAGE_IN_CONTEXT = 5
 # 反 tic 反馈环阈值：最近历史旁白里「不是X，是Y」否定式对比句累计达此数，即在下一轮上下文

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 
 import numpy as np
 from sqlalchemy.orm import Session
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 # 切块参数：~500 字一块、10% 重叠（与规则书取同一量级，保证语义完整与检索粒度）。
 CHUNK_SIZE = 500
+#: 嵌入时每批多少块汇报一次进度（「解析进度」抽屉）
+_EMBED_PROGRESS_BATCH = 64
 CHUNK_OVERLAP = 50
 MIN_CHUNK_CHARS = 30
 # 当前场景块的加权系数：让被动注入的摘录大概率是当前场景文本（泄密三重防线之一）。
@@ -101,6 +104,7 @@ def ingest_module(
     db: Session,
     module: Module,
     embedder: Embedder | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> Module:
     """对模组原文建（或重建）RAG 索引：切块→回填场景→嵌入→写 ModuleChunk。
 
@@ -115,7 +119,12 @@ def ingest_module(
         if not chunks:
             raise ValueError("模组没有可切块的原文（raw_content 为空或过短）")
 
-        vectors = embedder.embed_passages([c["text"] for c in chunks])
+        texts = [c["text"] for c in chunks]
+        vectors: list[list[float]] = []
+        for at in range(0, len(texts), _EMBED_PROGRESS_BATCH):
+            vectors.extend(embedder.embed_passages(texts[at:at + _EMBED_PROGRESS_BATCH]))
+            if on_progress is not None:
+                on_progress(len(vectors), len(texts))
         if len(vectors) != len(chunks):
             raise ValueError("嵌入数量与切块数量不一致")
 

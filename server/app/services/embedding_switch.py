@@ -29,6 +29,7 @@ from app.ai.embedding import CATALOG, Embedder, get_embedder, release_embedders
 from app.models.event_log import EventLog
 from app.models.module import Module, ModuleChunk
 from app.models.rulebook import RuleChunk, Rulebook
+from app.services import rulebook_service, task_center
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class RebuildState:
 _state = RebuildState()
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
+#: 当前这轮重建在「解析进度」抽屉里的任务
+_task_id: str | None = None
+_SETTINGS_LINK = {"to": "/settings?tab=rag", "label": "查看检索模型"}
 
 
 def state() -> RebuildState:
@@ -112,6 +116,8 @@ def _embed_all(
         out.extend(np.asarray(v, dtype=np.float32).tobytes() for v in vecs)
         with _lock:
             _state.done += len(vecs)
+            done, total, current = _state.done, _state.total, _state.current
+        task_center.update(_task_id, stage=f"重建{current}", done=done, total=total)
     if not still_wanted():
         raise _TargetChanged
     return out
@@ -124,7 +130,8 @@ def _rebuild_one(db: Session, embedder: Embedder, still_wanted: Callable[[], boo
     if book is not None:
         _set_current(f"规则书《{book.title}》")
         rows = db.query(RuleChunk).filter(RuleChunk.rulebook_id == book.id).order_by(RuleChunk.ordinal).all()
-        vecs = _embed_all([r.text for r in rows], embedder, still_wanted)
+        # 入向量的文本须与入库时一致（新版子块前面拼着词条路径）
+        vecs = _embed_all(rulebook_service.chunk_embed_texts(db, rows), embedder, still_wanted)
         for r, v in zip(rows, vecs):
             r.embedding = v
         book.embed_model = name
@@ -160,6 +167,7 @@ def _set_current(label: str) -> None:
 
 
 def _worker() -> None:
+    global _task_id
     try:
         while True:
             spec = embedding_store.write_model()
@@ -171,6 +179,13 @@ def _worker() -> None:
                 with _lock:
                     _state.total = total
                 if total:
+                    switching = embedding_store.load().target == spec.id
+                    _task_id = task_center.start(
+                        "embed_rebuild",
+                        f"切换检索模型到 {spec.label}" if switching else f"重建检索索引（{spec.label}）",
+                        stage="准备中", link=_SETTINGS_LINK,
+                    )
+                    task_center.update(_task_id, total=total)
                     embedder = get_embedder()  # 写入模型；默认模型缺失时会先下载
                     still_wanted = lambda: embedding_store.write_model().id == spec.id  # noqa: E731
                     try:
@@ -178,8 +193,10 @@ def _worker() -> None:
                             pass
                     except _TargetChanged:
                         db.rollback()
+                        task_center.finish(_task_id, "cancelled", stage="切换目标已更改")
                         logger.info("嵌入模型切换目标已变，放弃当前索引并按新目标重来")
                         continue
+                    task_center.finish(_task_id, "done", stage=f"已切换到 {spec.label}" if switching else "重建完成")
             if embedding_store.write_model().id != spec.id:
                 continue  # 刚做完时目标又变了
             _finish(spec.id)
@@ -193,6 +210,7 @@ def _worker() -> None:
         logger.exception("嵌入索引重建失败")
         with _lock:
             _state.error = f"{type(e).__name__}: {e}"
+        task_center.finish(_task_id, "failed", detail=_state.error)
     finally:
         with _lock:
             if _thread is threading.current_thread():

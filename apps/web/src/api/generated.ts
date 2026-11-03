@@ -790,9 +790,10 @@ export interface paths {
         put?: never;
         /**
          * Upload Rulebook
-         * @description 上传规则书 PDF：立即建 indexing 记录并返回，嵌入索引在后台进行。
+         * @description 上传规则书 PDF：存原件、建 indexing 记录、排进导入队列，立即返回。
          *
-         *     前端可轮询 GET /api/rulebooks 观察 status 由 indexing → ready/failed。
+         *     后台逐本解析（子进程）与嵌入（见 rulebook_jobs）；前端轮询 GET /api/rulebooks 看进度
+         *     （``progress``）与 status 由 indexing → ready/failed。可以连续上传多本，依次排队。
          */
         post: operations["upload_rulebook_api_rulebooks_upload_post"];
         delete?: never;
@@ -3052,6 +3053,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tasks
+         * @description 最近的后台任务，新的在前；进行中的任务在此显示阶段与进度。
+         */
+        get: operations["list_tasks_api_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Dismiss Task
+         * @description 从列表移除一个已结束的任务；进行中的不能移除。
+         */
+        delete: operations["dismiss_task_api_tasks__task_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3384,6 +3425,29 @@ export interface components {
             luck_rolls: number[];
             /** Notes */
             notes: components["schemas"]["AgeNote"][];
+        };
+        /** BackgroundTask */
+        BackgroundTask: {
+            /** Created At */
+            created_at: number;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            link?: components["schemas"]["TaskLink"] | null;
+            /** Percent */
+            percent?: number | null;
+            /** Stage */
+            stage: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
         };
         /** BaseSkillsRequest */
         BaseSkillsRequest: {
@@ -3962,6 +4026,29 @@ export interface components {
             model?: string | null;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * IngestProgress
+         * @description 导入队列里的进度：queued（排第 queue_position 位）/ parsing / embedding（done/total 子块）/ saving。
+         */
+        IngestProgress: {
+            /**
+             * Done
+             * @default 0
+             */
+            done: number;
+            /**
+             * Queue Position
+             * @default 0
+             */
+            queue_position: number;
+            /** Stage */
+            stage: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /**
          * InventoryDropRequest
@@ -4606,8 +4693,23 @@ export interface components {
             rulebook_id: string;
             /** Score */
             score: number;
+            /**
+             * Section
+             * @default
+             */
+            section: string;
             /** Text */
             text: string;
+            /**
+             * Title Match
+             * @default false
+             */
+            title_match: boolean;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /** RulePluginList */
         RulePluginList: {
@@ -4765,10 +4867,21 @@ export interface components {
             embed_model: string;
             /** Error */
             error: string;
+            /**
+             * Has Source
+             * @default false
+             */
+            has_source: boolean;
             /** Id */
             id: string;
+            /**
+             * Index Outdated
+             * @default false
+             */
+            index_outdated: boolean;
             /** Page Count */
             page_count: number;
+            progress?: components["schemas"]["IngestProgress"] | null;
             /** Rule System */
             rule_system: string;
             /** Status */
@@ -4920,6 +5033,13 @@ export interface components {
         SwitchRequest: {
             /** Model Id */
             model_id: string;
+        };
+        /** TaskLink */
+        TaskLink: {
+            /** Label */
+            label: string;
+            /** To */
+            to: string;
         };
         /** TestResult */
         TestResult: {
@@ -10440,6 +10560,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tasks_api_tasks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackgroundTask"][];
+                };
+            };
+        };
+    };
+    dismiss_task_api_tasks__task_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

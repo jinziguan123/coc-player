@@ -461,3 +461,78 @@ def test_接口列表与仅本机(monkeypatch):
 
     remote = TestClient(app, client=("8.8.8.8", 1234))
     assert remote.get("/api/settings/embedding").status_code == 403
+
+
+def test_切换重建规则书时子块仍带词条路径入向量(fakes):
+    """新版规则书的子块入向量时拼着词条路径；换模型重建必须用同样的文本，否则检索效果悄悄变差。"""
+    from app.models.rulebook import RuleSection
+
+    db = database.SessionLocal()
+    small = fakes[SMALL.name]
+    book = Rulebook(title="新书", rule_system="coc", status="ready", embed_model=SMALL.name)
+    db.add(book)
+    db.flush()
+    sec = RuleSection(rulebook_id=book.id, ordinal=0, level=1, title="行动点",
+                      path="第七章 追逐 › 行动点", page_start=114, page_end=114, text="每一轮都能获得行动点。")
+    db.add(sec)
+    db.flush()
+    db.add(RuleChunk(rulebook_id=book.id, rule_system="coc", ordinal=0, page=114, text=sec.text,
+                     section_id=sec.id, embedding=np.asarray(small._vec(sec.text), dtype=np.float32).tobytes()))
+    db.commit()
+    seen: list[str] = []
+    large = fakes[LARGE.name]
+    original = large.embed_passages
+    large.embed_passages = lambda texts: (seen.extend(texts), original(texts))[1]
+
+    embedding_switch.request_switch(LARGE.id)
+    embedding_switch.wait(10)
+    assert seen == ["第七章 追逐 › 行动点\n每一轮都能获得行动点。"]
+
+
+def _center(kind):
+    from app.services import task_center
+
+    return [t for t in task_center.tasks() if t["kind"] == kind]
+
+
+def test_下载任务登记到解析进度(monkeypatch):
+    spec = _tiny_spec(monkeypatch, FILES)
+    _serve(monkeypatch, _ok(FILES))
+    assert _run_download(spec).state == "done"
+    [task] = _center("embed_download")
+    assert task["status"] == "done" and task["title"] == "下载检索模型 tiny"
+    assert task["link"] == {"to": "/settings?tab=rag", "label": "查看检索模型"}
+
+    spec2 = _tiny_spec(monkeypatch, FILES)
+    monkeypatch.setitem(CATALOG, "tiny", spec2)
+    embedding_store.delete_model("tiny")
+    _serve(monkeypatch, lambda r: httpx.Response(500))
+    assert _run_download(spec2).state == "failed"
+    assert [t["status"] for t in _center("embed_download")] == ["done", "failed"]
+    assert "HTTP 500" in _center("embed_download")[1]["detail"]
+
+
+def test_切换重建登记到解析进度(fakes):
+    db = database.SessionLocal()
+    _seed(db, SMALL.name, fakes[SMALL.name])
+    embedding_switch.request_switch(LARGE.id)
+    embedding_switch.wait(10)
+    [task] = _center("embed_rebuild")
+    assert task["status"] == "done" and task["title"] == f"切换检索模型到 {LARGE.label}"
+    assert task["stage"] == f"已切换到 {LARGE.label}"
+
+
+def test_模组原文索引登记到解析进度(fakes, monkeypatch):
+    from app.api import modules as modules_api
+
+    # modules 若在别的用例中途才首次导入，手里的 SessionLocal 是那个用例的临时库：这里显式指向本用例的
+    monkeypatch.setattr(modules_api, "SessionLocal", database.SessionLocal)
+    db = database.SessionLocal()
+    module = Module(title="雨鲸", rule_system="coc", raw_content="第一章\n" + "大堂里霉味扑面。" * 40,
+                    scenes=[], npcs=[], clues=[], rag_status="indexing")
+    db.add(module)
+    db.commit()
+    modules_api._rag_index_bg(module.id)
+    [task] = _center("module_index")
+    assert task["title"] == "模组《雨鲸》原文索引" and task["status"] == "done"
+    assert task["link"]["to"] == f"/modules/{module.id}"

@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_local_client
@@ -11,6 +11,7 @@ from app.schemas.rulebook import (
     HouseRulesExport,
     HouseRulesImportRequest,
     HouseRulesPreviewRead,
+    IngestProgress,
     RuleSearchResponse,
     RulebookRead,
     RulePluginList,
@@ -21,36 +22,23 @@ from app.schemas.rulebook import (
     VillageRulesRead,
     VillageRulesUpdate,
 )
-from app.services import character_service, rule_options_service, rulebook_service
+from app.services import character_service, rule_options_service, rulebook_jobs, rulebook_service
 
 router = APIRouter(prefix="/api/rulebooks", tags=["rulebooks"])
 logger = logging.getLogger(__name__)
 
 
-def _ingest_bg(rulebook_id: str, pdf_bytes: bytes) -> None:
-    """后台入库：自开会话（请求会话已随响应关闭），失败状态由 service 落库。"""
-    from app.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        book = db.get(Rulebook, rulebook_id)
-        if book:
-            rulebook_service.ingest_rulebook(db, book, pdf_bytes)
-    finally:
-        db.close()
-
-
 @router.post("/upload", dependencies=[Depends(require_local_client)], response_model=RulebookRead)
 async def upload_rulebook(
-    background: BackgroundTasks,
     file: UploadFile,
     title: str | None = None,
     rule_system: str = "coc",
     db: Session = Depends(get_db),
 ):
-    """上传规则书 PDF：立即建 indexing 记录并返回，嵌入索引在后台进行。
+    """上传规则书 PDF：存原件、建 indexing 记录、排进导入队列，立即返回。
 
-    前端可轮询 GET /api/rulebooks 观察 status 由 indexing → ready/failed。
+    后台逐本解析（子进程）与嵌入（见 rulebook_jobs）；前端轮询 GET /api/rulebooks 看进度
+    （``progress``）与 status 由 indexing → ready/failed。可以连续上传多本，依次排队。
     """
     content = await file.read()
     if not content:
@@ -65,16 +53,25 @@ async def upload_rulebook(
         status="indexing",
     )
     db.add(book)
+    db.flush()
+    rulebook_service.save_source(book, content)
     db.commit()
     db.refresh(book)
-
-    background.add_task(_ingest_bg, book.id, content)
-    return book
+    rulebook_jobs.enqueue(book.id, title=book.title)
+    return _read(book)
 
 
 @router.get("", response_model=list[RulebookRead])
 def list_rulebooks(db: Session = Depends(get_db)):
-    return rulebook_service.list_rulebooks(db)
+    return [_read(b) for b in rulebook_service.list_rulebooks(db)]
+
+
+def _read(b: Rulebook) -> RulebookRead:
+    return RulebookRead.model_validate(b).model_copy(update={
+        "index_outdated": b.status == "ready" and b.chunker_version < rulebook_service.CHUNKER_VERSION,
+        "has_source": bool(b.source_file),
+        "progress": IngestProgress(**p) if (p := rulebook_jobs.progress(b.id)) else None,
+    })
 
 
 @router.get("/search", response_model=RuleSearchResponse)
@@ -91,6 +88,7 @@ def search_rules(
 
 @router.delete("/{rulebook_id}", dependencies=[Depends(require_local_client)])
 def delete_rulebook(rulebook_id: str, db: Session = Depends(get_db)):
+    rulebook_jobs.cancel(rulebook_id)  # 排队或导入中的一并中止
     if not rulebook_service.delete_rulebook(db, rulebook_id):
         raise HTTPException(404, "规则书不存在")
     return {"ok": True}

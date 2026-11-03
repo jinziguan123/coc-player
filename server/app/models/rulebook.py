@@ -18,6 +18,29 @@ class Rulebook(Base, UUIDMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(default="indexing")
     embed_model: Mapped[str] = mapped_column(default="")
     error: Mapped[str] = mapped_column(Text, default="")
+    #: 本机保存的 PDF 原件（数据目录 rulebooks/ 下的文件名）；""＝旧版导入时没存原件
+    source_file: Mapped[str] = mapped_column(default="", server_default="")
+    #: 建索引所用的切块逻辑版本（rulebook_service.CHUNKER_VERSION）；落后且有原件时后台自动重建
+    chunker_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class RuleSection(Base, UUIDMixin):
+    """规则书的一个词条（按字号识别的小节）：检索命中子块后，返回给 KP 的是整条词条。"""
+
+    __tablename__ = "rule_sections"
+
+    rulebook_id: Mapped[str] = mapped_column(
+        ForeignKey("rulebooks.id", ondelete="CASCADE"), index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, default=0)
+    #: 标题层级（0＝章；-1＝第一个标题之前的前言）
+    level: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(default="")
+    #: 「第七章 追逐 › 追逐轮 › 追逐轮中的行动」
+    path: Mapped[str] = mapped_column(Text, default="")
+    page_start: Mapped[int] = mapped_column(Integer, default=0)
+    page_end: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text)
 
 
 class RuleChunk(Base, UUIDMixin):
@@ -34,6 +57,10 @@ class RuleChunk(Base, UUIDMixin):
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
     text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[bytes] = mapped_column(LargeBinary)
+    #: 所属词条；None＝旧版切块（没有词条结构，命中即返回块本身）
+    section_id: Mapped[str | None] = mapped_column(
+        ForeignKey("rule_sections.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
 
 
 Index("ix_rule_chunks_book_ord", RuleChunk.rulebook_id, RuleChunk.ordinal)

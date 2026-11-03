@@ -21,7 +21,7 @@ export function ModulePage() {
   const [uploading, setUploading] = useState(false)
   // 进行中的解析任务来自全局任务表：刷新页面后照样显示，完成提示也由全局统一弹
   const uploadJobs = useUploadJobsStore((s) => s.jobs)
-  const runningJobs = uploadJobs.filter((j) => j.status === 'running')
+  const runningJobs = uploadJobs.filter((j) => j.kind === 'module' && j.status === 'running')
   const trackJob = useUploadJobsStore((s) => s.track)
   const openJobs = useUploadJobsStore((s) => s.setOpen)
   const [dragOver, setDragOver] = useState(false)
@@ -77,7 +77,7 @@ export function ModulePage() {
       setSelectedFiles([])
       if (fileRef.current) fileRef.current.value = ''
       // 解析在后台跑：进度看下方或侧边栏「解析进度」，结束时全局提示并刷新列表
-      await trackJob(jobId)
+      await trackJob(`module:${jobId}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '模组上传失败')
     } finally {
@@ -240,17 +240,17 @@ export function ModulePage() {
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
               <Loader2 size={13} className="animate-spin" style={{ flexShrink: 0 }} />
-              <span className="truncate">{job.files.join('、')} · {job.stage}</span>
+              <span className="truncate">{job.title} · {job.stage}</span>
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0 }}>
               <button type="button" className="text-xs underline" onClick={() => openJobs(true)}>全部进度</button>
-              <span style={{ fontFamily: 'var(--font-mono)' }}>{job.percent}%</span>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>{job.percent ?? 0}%</span>
             </span>
           </div>
           <div className="upload-progress-track">
             <div
               className="upload-progress-fill"
-              style={{ width: `${Math.max(job.percent, 4)}%` }}
+              style={{ width: `${Math.max(job.percent ?? 0, 4)}%` }}
             />
           </div>
         </div>

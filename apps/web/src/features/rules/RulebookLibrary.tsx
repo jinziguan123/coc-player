@@ -15,6 +15,12 @@ interface RuleHit {
   page: number
   score: number
   rulebook_id: string
+  /** 因查询命中小节标题而排上来：相关度是语义分，可能低于排在它后面的结果 */
+  title_match?: boolean
+  /** 所属词条路径（旧版索引为空）；text 以「【路径】」开头 */
+  section?: string
+  /** 词条过长，只返回了命中附近的一段 */
+  truncated?: boolean
 }
 
 export function RulebookLibrary({ onCount }: {
@@ -24,7 +30,7 @@ export function RulebookLibrary({ onCount }: {
   const fileRef = useRef<HTMLInputElement>(null)
   const [books, setBooks] = useState<Rulebook[]>([])
   const [ruleSystem, setRuleSystem] = useState('coc')
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
 
@@ -53,43 +59,45 @@ export function RulebookLibrary({ onCount }: {
     return () => clearInterval(t)
   }, [books, fetchBooks])
 
-  const pickFile = (f: File | undefined) => {
-    if (!f) return
-    if (!f.name.toLowerCase().endsWith('.pdf')) {
-      toast.error('规则书目前只支持 PDF')
-      return
-    }
-    setFile(f)
+  const pickFiles = (list: FileList | null | undefined) => {
+    const all = Array.from(list ?? [])
+    const pdfs = all.filter((f) => f.name.toLowerCase().endsWith('.pdf'))
+    if (pdfs.length < all.length) toast.error('规则书目前只支持 PDF，已忽略其他文件')
+    if (pdfs.length) setFiles(pdfs)
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
-    pickFile(e.dataTransfer.files[0])
+    pickFiles(e.dataTransfer.files)
   }, [])
 
+  // 上传只是存原件并排进后台导入队列（服务端逐本解析、建索引），多本依次排队，进度显示在书上
   const handleUpload = async () => {
-    if (!file) return
+    if (!files.length) return
     setUploading(true)
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      const params = new URLSearchParams({ rule_system: ruleSystem, title: file.name.replace(/\.pdf$/i, '') })
-      const res = await fetch(`${getApiBase()}/rulebooks/upload?${params.toString()}`, {
-        method: 'POST',
-        headers: { 'X-Player-Token': getPlayerToken() },
-        body: form,
-      })
-      if (!res.ok) throw new Error(await res.text())
-      setFile(null)
-      if (fileRef.current) fileRef.current.value = ''
-      toast.success('已上传，正在后台建立索引…')
-      fetchBooks()
-    } catch (e) {
-      toast.error(`上传失败：${e instanceof Error ? e.message : '未知错误'}`)
-    } finally {
-      setUploading(false)
+    let ok = 0
+    for (const file of files) {
+      try {
+        const form = new FormData()
+        form.append('file', file)
+        const params = new URLSearchParams({ rule_system: ruleSystem, title: file.name.replace(/\.pdf$/i, '') })
+        const res = await fetch(`${getApiBase()}/rulebooks/upload?${params.toString()}`, {
+          method: 'POST',
+          headers: { 'X-Player-Token': getPlayerToken() },
+          body: form,
+        })
+        if (!res.ok) throw new Error(await res.text())
+        ok += 1
+        fetchBooks()
+      } catch (e) {
+        toast.error(`《${file.name}》上传失败：${e instanceof Error ? e.message : '未知错误'}`)
+      }
     }
+    setFiles([])
+    if (fileRef.current) fileRef.current.value = ''
+    if (ok) toast.success(`已上传 ${ok} 本，正在后台依次建立索引，进度见书上`)
+    setUploading(false)
   }
 
   const deleteBook = async (id: string) => {
@@ -154,19 +162,22 @@ export function RulebookLibrary({ onCount }: {
                   ref={fileRef}
                   type="file"
                   accept=".pdf"
+                  multiple
                   className="hidden"
-                  onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = '' }}
+                  onChange={(e) => { pickFiles(e.target.files); e.target.value = '' }}
                 />
                 <button
                   onClick={() => fileRef.current?.click()}
                   className="btn-secondary btn-sm max-w-[14rem] truncate"
-                  title={file ? `${file.name}（点击可重选）` : '选择要索引的 PDF；也可直接拖进这张卡'}
+                  title={files.length ? `${files.map((f) => f.name).join('、')}（点击可重选）` : '选择要索引的 PDF（可多选）；也可直接拖进这张卡'}
                 >
-                  {file ? `${file.name}（${(file.size / 1024 / 1024).toFixed(1)} MB）` : '选择 PDF…'}
+                  {files.length === 1
+                    ? `${files[0].name}（${(files[0].size / 1024 / 1024).toFixed(1)} MB）`
+                    : files.length > 1 ? `已选 ${files.length} 本` : '选择 PDF…'}
                 </button>
                 <button
                   onClick={handleUpload}
-                  disabled={uploading || !file}
+                  disabled={uploading || !files.length}
                   className="btn-primary btn-sm"
                 >
                   {uploading ? '上传中…' : '上传并索引'}
@@ -186,11 +197,18 @@ export function RulebookLibrary({ onCount }: {
               </div>
             ) : (
               // 书架：一册册立着排开，书名竖排不必截断
+              <>
+              {books.some((b) => b.index_outdated && !b.has_source) && (
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginBottom: '0.5rem' }}>
+                  盖着「旧版索引」的书用旧的切块方式建的索引，条文可能被切断：删除后重新上传同一本 PDF，检索会更准确。
+                </p>
+              )}
               <div className="tome-shelf">
                 {books.map((b, i) => (
                   <RulebookTome key={b.id} book={b} index={i} onDelete={deleteBook} />
                 ))}
               </div>
+              </>
             )}
           </div>
 
@@ -227,9 +245,9 @@ export function RulebookLibrary({ onCount }: {
                         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>无匹配片段</p>
                       ) : (
                         hits.map((h, i) => (
-                          <div key={i} className="px-3 py-2 rounded text-sm" style={{ background: 'var(--color-bg-tertiary)' }}>
+                          <div key={i} className="px-3 py-2 rounded text-sm" style={{ background: 'var(--color-bg-tertiary)', whiteSpace: 'pre-line' }}>
                             <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                              第 {h.page} 页 · 相关度 {h.score.toFixed(3)}
+                              第 {h.page} 页 · 相关度 {h.score.toFixed(3)}{h.title_match && ' · 标题匹配'}{h.truncated && ' · 已截取'}
                             </div>
                             {h.text}
                           </div>

@@ -633,6 +633,70 @@
         "title": "ApplyAgeResponse",
         "type": "object"
       },
+      "BackgroundTask": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "status",
+          "stage",
+          "created_at"
+        ],
+        "title": "BackgroundTask",
+        "type": "object"
+      },
       "BaseSkillsRequest": {
         "properties": {
           "base_attributes": {
@@ -1864,6 +1928,35 @@
           }
         },
         "title": "ImageProfileUpdate",
+        "type": "object"
+      },
+      "IngestProgress": {
+        "description": "导入队列里的进度：queued（排第 queue_position 位）/ parsing / embedding（done/total 子块）/ saving。",
+        "properties": {
+          "done": {
+            "default": 0,
+            "title": "Done",
+            "type": "integer"
+          },
+          "queue_position": {
+            "default": 0,
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stage"
+        ],
+        "title": "IngestProgress",
         "type": "object"
       },
       "InventoryDropRequest": {
@@ -3210,9 +3303,24 @@
             "title": "Score",
             "type": "number"
           },
+          "section": {
+            "default": "",
+            "title": "Section",
+            "type": "string"
+          },
           "text": {
             "title": "Text",
             "type": "string"
+          },
+          "title_match": {
+            "default": false,
+            "title": "Title Match",
+            "type": "boolean"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3512,13 +3620,33 @@
             "title": "Error",
             "type": "string"
           },
+          "has_source": {
+            "default": false,
+            "title": "Has Source",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
           },
+          "index_outdated": {
+            "default": false,
+            "title": "Index Outdated",
+            "type": "boolean"
+          },
           "page_count": {
             "title": "Page Count",
             "type": "integer"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngestProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rule_system": {
             "title": "Rule System",
@@ -3873,6 +4001,24 @@
           "model_id"
         ],
         "title": "SwitchRequest",
+        "type": "object"
+      },
+      "TaskLink": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "label"
+        ],
+        "title": "TaskLink",
         "type": "object"
       },
       "TestResult": {
@@ -6059,7 +6205,7 @@
     },
     "/api/rulebooks/upload": {
       "post": {
-        "description": "上传规则书 PDF：立即建 indexing 记录并返回，嵌入索引在后台进行。\n\n前端可轮询 GET /api/rulebooks 观察 status 由 indexing → ready/failed。",
+        "description": "上传规则书 PDF：存原件、建 indexing 记录、排进导入队列，立即返回。\n\n后台逐本解析（子进程）与嵌入（见 rulebook_jobs）；前端轮询 GET /api/rulebooks 看进度\n（``progress``）与 status 由 indexing → ready/failed。可以连续上传多本，依次排队。",
         "operationId": "upload_rulebook_api_rulebooks_upload_post",
         "parameters": [
           {
@@ -12310,6 +12456,73 @@
         "summary": "Switch Model",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "description": "最近的后台任务，新的在前；进行中的任务在此显示阶段与进度。",
+        "operationId": "list_tasks_api_tasks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackgroundTask"
+                  },
+                  "title": "Response List Tasks Api Tasks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Tasks",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/tasks/{task_id}": {
+      "delete": {
+        "description": "从列表移除一个已结束的任务；进行中的不能移除。",
+        "operationId": "dismiss_task_api_tasks__task_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Task",
+        "tags": [
+          "tasks"
         ]
       }
     }

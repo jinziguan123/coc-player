@@ -1,8 +1,8 @@
 """规则书 API 的 HTTP 层回归（上传→后台入库→列表→检索→删除）。
 
-不触达真实嵌入模型：把 rulebook_service 的 get_embedder/extract_pages 打桩，
+不触达真实嵌入模型：把 rulebook_service 的 get_embedder/parse_pdf 打桩，
 并把 app.database.SessionLocal 指向测试库（后台任务自开会话）。TestClient 会在
-响应后同步跑完 BackgroundTasks，故 upload 返回后即可断言 ready。
+上传只排进导入队列，用例用 rulebook_jobs.wait_idle 等队列跑完再断言 ready。
 """
 
 import numpy as np
@@ -16,7 +16,8 @@ from app.ai.embedding import Embedder
 from app.database import get_db
 from app.main import app
 from app.models import Base, RuleChunk, Rulebook  # noqa: F401 注册表
-from app.services import rulebook_service
+from app.services import rulebook_jobs, rulebook_service
+from app.services.rulebook_parser import ParsedSection
 
 
 class FakeEmbedder(Embedder):
@@ -36,10 +37,10 @@ class FakeEmbedder(Embedder):
         return self._vec(text)
 
 
-CANNED = [
-    (1, "技能检定流程：投掷 d100，结果小于等于技能值即为普通成功，难度由守秘人选定。"),
-    (2, "孤注一掷：技能检定失败后可加倍投入重新掷骰一次，若再次失败则后果显著加重。"),
-]
+CANNED = (2, [
+    ParsedSection(0, "技能检定", ["技能检定"], 1, 1, "投掷 d100，结果小于等于技能值即为普通成功，难度由守秘人选定。", [(0, 1)]),
+    ParsedSection(0, "孤注一掷", ["孤注一掷"], 2, 2, "技能检定失败后可加倍投入重新掷骰一次，若再次失败则后果显著加重。", [(0, 2)]),
+])
 
 
 @pytest.fixture
@@ -67,7 +68,7 @@ def client(tmp_path, monkeypatch):
         rulebook_service, "embedder_for",
         lambda name: FakeEmbedder() if name == FakeEmbedder.model_name else None,
     )
-    monkeypatch.setattr(rulebook_service, "extract_pages", lambda b: CANNED)
+    monkeypatch.setattr(rulebook_service, "parse_pdf", lambda b: CANNED)
 
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -82,15 +83,20 @@ def test_upload_then_indexed_and_searchable(client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["title"] == "守秘人规则书"
-    # 响应在后台任务前生成 → 仍是 indexing
+    # 上传只排队，立即返回 → 仍是 indexing
     assert body["status"] == "indexing"
+    assert body["progress"]["stage"] in ("queued", "parsing", "embedding", "saving")
 
-    # TestClient 已同步跑完后台入库 → 列表应为 ready
+    rulebook_jobs.wait_idle(10)
     lst = client.get("/api/rulebooks").json()
     assert len(lst) == 1
     assert lst[0]["status"] == "ready"
     assert lst[0]["chunk_count"] == 2
     assert lst[0]["embed_model"] == "fake-api"
+    # 原件已存进数据目录，索引是新版切块
+    assert lst[0]["has_source"] is True and lst[0]["index_outdated"] is False
+    assert lst[0]["progress"] is None
+    assert (rulebook_service.RULEBOOKS_DIR / f"{lst[0]['id']}.pdf").read_bytes() == b"%PDF-1.4 fake"
 
     # 检索命中孤注一掷那块
     hits = client.get(
@@ -114,6 +120,7 @@ def test_delete_rulebook(client):
         "/api/rulebooks/upload",
         files={"file": ("coc.pdf", b"%PDF", "application/pdf")},
     )
+    rulebook_jobs.wait_idle(10)
     book_id = client.get("/api/rulebooks").json()[0]["id"]
 
     assert client.delete(f"/api/rulebooks/{book_id}").status_code == 200

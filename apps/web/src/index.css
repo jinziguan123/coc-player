@@ -4049,6 +4049,8 @@ button.chip, .chip-btn { cursor: pointer; }
 }
 .upload-job-head { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
 .upload-job-icon { flex: none; display: inline-flex; color: var(--color-text-secondary); }
+.upload-job-kind { flex: none; color: var(--color-text-accent, var(--color-accent)); }
+.upload-job-note { margin: 0.25rem 0 0; font-size: var(--text-2xs); color: var(--color-text-secondary); }
 .upload-job-icon.is-done { color: var(--color-success, var(--color-text-accent)); }
 .upload-job-icon.is-failed { color: var(--color-danger); }
 .upload-job-title {
@@ -7090,6 +7092,17 @@ select.input option {
 .tome-book-seal--ready { color: var(--color-verdigris); }
 .tome-book-seal--indexing { color: var(--color-dice-gold); animation: pendingBreath 1.8s ease-in-out infinite; }
 .tome-book-seal--failed { color: #e07067; }
+.tome-book-seal--outdated { color: var(--color-dice-gold); }
+.tome-book-progress {
+  position: relative;
+  width: 82%;
+  margin: 0.45rem auto 0;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--color-accent) 85%, transparent);
+  text-align: center;
+}
+.tome-book-progress .upload-progress-track { height: 5px; margin-top: 0.25rem; }
 .tome-book-foot {
   position: relative;
   margin: 0.45rem 0 0;
@@ -7116,6 +7129,21 @@ select.input option {
 }
 .tome-book:hover .tome-book-actions,
 .tome-book:focus-within .tome-book-actions { opacity: 1; transform: none; }
+/* 书皮是暗红色：删除按钮用羊皮纸底才看得见，且常显（悬停才出现时几乎无从发现） */
+.tome-book .tome-book-actions { opacity: 0.85; transform: none; }
+.tome-book-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  font-size: var(--text-2xs);
+  color: var(--color-danger);
+  background: #f1e6cc;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.tome-book-delete:hover { background: #fff6e0; }
 @media (hover: none) { .tome-book .tome-book-actions { opacity: 1; transform: none; } }
 :root[data-theme="parchment"] .tome-book-cover {
   background:

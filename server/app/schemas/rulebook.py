@@ -3,6 +3,15 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class IngestProgress(BaseModel):
+    """导入队列里的进度：queued（排第 queue_position 位）/ parsing / embedding（done/total 子块）/ saving。"""
+
+    stage: str
+    done: int = 0
+    total: int = 0
+    queue_position: int = 0
+
+
 class RulebookRead(BaseModel):
     id: str
     title: str
@@ -13,6 +22,11 @@ class RulebookRead(BaseModel):
     embed_model: str
     error: str
     created_at: datetime | None = None
+    #: 索引由旧版切块逻辑建成（没有原件时需要重新上传才能升级；有原件会在启动时自动重建）
+    index_outdated: bool = False
+    has_source: bool = False
+    #: 在导入队列里时的进度；不在队列里为 None
+    progress: IngestProgress | None = None
 
     model_config = {"from_attributes": True}
 
@@ -22,6 +36,12 @@ class RuleHit(BaseModel):
     page: int
     score: float
     rulebook_id: str
+    #: 因查询命中小节标题而排上来（score 是语义分，可能低于排在后面的结果）
+    title_match: bool = False
+    #: 所属词条路径（旧版索引为空）
+    section: str = ""
+    #: 词条过长，只返回了命中附近的一段
+    truncated: bool = False
 
 
 class RuleSearchResponse(BaseModel):

@@ -25,6 +25,7 @@ import httpx
 
 from app.ai.embedding import CATALOG, DEFAULT_MODEL_ID, EmbedModelSpec
 from app.config import settings
+from app.services import task_center
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,18 @@ class DownloadJob:
     done_bytes: int = 0
     error: str = ""
     cancel: threading.Event = field(default_factory=threading.Event, repr=False)
+    #: 「解析进度」抽屉里的任务（task_center）
+    task_id: str | None = None
+
+
+_SETTINGS_LINK = {"to": "/settings?tab=rag", "label": "查看检索模型"}
+
+
+def _new_job(spec: EmbedModelSpec) -> DownloadJob:
+    return DownloadJob(
+        model_id=spec.id, total_bytes=spec.size_bytes,
+        task_id=task_center.start("embed_download", f"下载检索模型 {spec.label}", stage="下载中", link=_SETTINGS_LINK),
+    )
 
 
 _jobs: dict[str, DownloadJob] = {}
@@ -208,7 +221,7 @@ def start_download(model_id: str) -> DownloadJob:
         current = _jobs.get(model_id)
         if current is not None and current.state == "downloading":
             return current
-        j = DownloadJob(model_id=model_id, total_bytes=spec.size_bytes)
+        j = _new_job(spec)
         _jobs[model_id] = j
     threading.Thread(
         target=_run, args=(spec, j), name=f"embed-download-{model_id}", daemon=True,
@@ -232,7 +245,7 @@ def ensure_installed(spec: EmbedModelSpec) -> Path:
         current = _jobs.get(spec.id)
         mine = current is None or current.state != "downloading"
         if mine:
-            current = DownloadJob(model_id=spec.id, total_bytes=spec.size_bytes)
+            current = _new_job(spec)
             _jobs[spec.id] = current
     if mine:
         _run(spec, current)
@@ -249,14 +262,17 @@ def _run(spec: EmbedModelSpec, j: DownloadJob) -> None:
     try:
         _download(spec, j)
         j.state = "done"
+        task_center.finish(j.task_id, "done", stage="下载完成，可到设置页切换")
         logger.info("嵌入模型下载完成：%s", spec.label)
     except DownloadCancelled:
         shutil.rmtree(_partial_dir(spec), ignore_errors=True)
         j.state = "cancelled"
+        task_center.finish(j.task_id, "cancelled", stage="已取消下载")
         logger.info("嵌入模型下载已取消：%s", spec.label)
     except Exception as e:  # noqa: BLE001 — 下载失败只落状态，半截文件留着续传
         j.state = "failed"
         j.error = _describe(e)
+        task_center.finish(j.task_id, "failed", detail=j.error)
         logger.warning("嵌入模型下载失败：%s：%s", spec.label, j.error)
 
 
@@ -318,6 +334,13 @@ def _download(spec: EmbedModelSpec, j: DownloadJob) -> None:
     os.replace(partial, final)
 
 
+def _report(j: DownloadJob) -> None:
+    task_center.update(
+        j.task_id, stage=f"下载中 {j.done_bytes / 1e6:.0f}/{j.total_bytes / 1e6:.0f} MB",
+        done=j.done_bytes, total=j.total_bytes,
+    )
+
+
 def _fetch(client: httpx.Client, url: str, dest: Path, size: int, j: DownloadJob, base: int) -> None:
     have = dest.stat().st_size if dest.exists() else 0
     if have > size:
@@ -340,6 +363,7 @@ def _fetch(client: httpx.Client, url: str, dest: Path, size: int, j: DownloadJob
                     raise DownloadCancelled
                 f.write(chunk)
                 j.done_bytes += len(chunk)
+                _report(j)
     if dest.stat().st_size != size:
         raise DownloadError(f"{dest.name} 下载中断（{dest.stat().st_size}/{size} 字节）")
 
