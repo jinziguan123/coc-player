@@ -35,7 +35,6 @@ const GRANDFATHERED: Record<string, number> = {
   'components/game/HumanKpPanel.tsx': 1101,
   'pages/ModuleDetailPage.tsx': 1251,   // 表单件 → module/ModuleFormParts；剧情事件字段 → module/SceneEventFields
   'pages/RoomLobbyPage.tsx': 1019,
-  'pages/SettingsPage.tsx': 695,
 }
 
 /** 生成物不算数：它由 openapi-typescript 产出，长度不受我们控制。 */
