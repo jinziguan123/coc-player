@@ -17,6 +17,7 @@ from collections.abc import Callable
 import numpy as np
 from sqlalchemy.orm import Session
 
+from app.ai import reranker
 from app.ai.embedding import Embedder, embedder_for, get_embedder
 from app.models.module import Module, ModuleChunk
 from app.services.vector_search import cosine_top_k
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 # 切块参数：~500 字一块、10% 重叠（与规则书取同一量级，保证语义完整与检索粒度）。
 CHUNK_SIZE = 500
+#: 精排时先按向量取这么多候选（本机评测用 20：再多耗时线性增长，命中已基本饱和）
+RERANK_CANDIDATES = 20
 #: 嵌入时每批多少块汇报一次进度（「解析进度」抽屉）
 _EMBED_PROGRESS_BATCH = 64
 CHUNK_OVERLAP = 50
@@ -154,6 +157,30 @@ def ingest_module(
     return module
 
 
+def _reranked(query, rows, embeddings, query_vec, k, weights) -> list[dict] | None:
+    """向量取候选 → 精排取前 k；精排未开启 / 未下载 / 出错返回 None（调用方回落向量排序）。"""
+    model = reranker.get_reranker()
+    if model is None or k <= 0:
+        return None
+    candidates = cosine_top_k(embeddings, query_vec, max(k, RERANK_CANDIDATES), weights=weights)
+    try:
+        scores = model.scores(query, [rows[i].text for i, _s in candidates])
+    except Exception:  # noqa: BLE001 — 精排是锦上添花：失败就用向量排序，绝不阻塞叙事
+        logger.exception("模组原文精排失败，回落向量排序")
+        return None
+    order = sorted(range(len(candidates)), key=lambda j: -scores[j])[:k]
+    return [
+        {
+            "text": rows[candidates[j][0]].text,
+            "scene_hint": rows[candidates[j][0]].scene_hint,
+            "score": candidates[j][1],
+            "rerank_score": scores[j],
+            "ordinal": rows[candidates[j][0]].ordinal,
+        }
+        for j in order
+    ]
+
+
 def retrieve(
     db: Session,
     module_id: str,
@@ -161,11 +188,13 @@ def retrieve(
     k: int = 3,
     scene_id: str | None = None,
     embedder: Embedder | None = None,
+    rerank: bool = False,
 ) -> list[dict]:
     """检索与 query 最相关的模组原文片段（当前场景块 ×SCENE_BOOST 加权）。
 
-    返回 ``[{"text", "scene_hint", "score", "ordinal"}, ...]`` 按加权得分降序；
-    未建索引/无命中返回空列表（上层据此优雅降级）。
+    ``rerank=True``（KP 主动查阅时）且精排已开启：先按向量取 ``RERANK_CANDIDATES`` 个候选，
+    再按精排分取前 k（见 app.ai.reranker）；精排不可用或出错时照旧按向量排序。
+    返回 ``[{"text", "scene_hint", "score", "ordinal"}, ...]``；未建索引/无命中返回空列表。
     """
     query = (query or "").strip()
     if not query:
@@ -193,6 +222,8 @@ def retrieve(
         ]
     embeddings = [r.embedding for r in rows]
     query_vec = embedder.embed_query(query)
+    if rerank and (reranked := _reranked(query, rows, embeddings, query_vec, k, weights)) is not None:
+        return reranked
     top = cosine_top_k(embeddings, query_vec, k, weights=weights)
 
     # 场景权重只负责排序偏好，不能成为信息隔离墙。把纯语义全局最优块保进结果，避免固定

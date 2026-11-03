@@ -3016,6 +3016,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/embedding/reranker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Reranker
+         * @description 开关精排（KP 主动查阅模组原文时生效）；开启要求精排模型已下载。
+         */
+        put: operations["update_reranker_api_settings_embedding_reranker_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/embedding/source": {
         parameters: {
             query?: never;
@@ -3794,6 +3814,16 @@ export interface components {
             /** Models */
             models: components["schemas"]["EmbedModelView"][];
             rebuild: components["schemas"]["RebuildView"];
+            /**
+             * Reranker Enabled
+             * @default false
+             */
+            reranker_enabled: boolean;
+            /**
+             * Rerankers
+             * @default []
+             */
+            rerankers: components["schemas"]["EmbedModelView"][];
             /** Source */
             source: string;
             /** Stale */
@@ -4583,6 +4613,11 @@ export interface components {
             target: string;
             /** Total */
             total: number;
+        };
+        /** RerankerUpdate */
+        RerankerUpdate: {
+            /** Enabled */
+            enabled: boolean;
         };
         /** RollAttributesResponse */
         RollAttributesResponse: {
@@ -10503,6 +10538,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+        };
+    };
+    update_reranker_api_settings_embedding_reranker_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RerankerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -154,8 +154,9 @@ def _module_lookup_passages(
 ) -> str:
     """检索模组原文并拼成回灌片段；检索不到/失败给降级文案（fail-open）。"""
     try:
+        # KP 主动查阅：需要原文确切细节，开启了精排就用（多等几秒换更准的段落）
         hits = module_rag_service.retrieve(
-            db, module.id, query, k=3, scene_id=game_session.current_scene_id,
+            db, module.id, query, k=3, scene_id=game_session.current_scene_id, rerank=True,
         )
     except Exception:  # noqa: BLE001 — 检索失败降级为无命中
         logger.exception("模组原文检索失败（已降级）：module=%s", module.id)

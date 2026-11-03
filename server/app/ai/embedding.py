@@ -60,6 +60,8 @@ class EmbedModelSpec:
     #: 给设置页看的资源与效果说明（来自本机评测，见设计文档）
     index_speed: str = ""
     memory: str = ""
+    #: embedding＝检索（嵌入）模型；reranker＝精排模型（cross-encoder，见 app.ai.reranker）
+    kind: str = "embedding"
 
     @property
     def size_bytes(self) -> int:
@@ -134,6 +136,41 @@ CATALOG: dict[str, EmbedModelSpec] = {
 }
 DEFAULT_MODEL_ID = "bge-small-zh-v1.5"
 SPECS_BY_NAME = {s.name: s for s in CATALOG.values()}
+
+#: 精排模型（cross-encoder）。本机评测：模组原文 15 条线索查询 nDCG@3 0.551→0.692、完整答案 12→14；
+#: 规则书（已按词条建索引 + 标题命中）上无稳定提升，故只用于 KP 主动查阅模组原文。
+#: 20 个约 500 字候选在本机 CPU 上约 3.6 秒，所以不进每轮的被动检索。
+RERANKERS: dict[str, EmbedModelSpec] = {
+    s.id: s
+    for s in (
+        EmbedModelSpec(
+            id="bge-reranker-v2-m3-int8",
+            name="BAAI/bge-reranker-v2-m3@int8",
+            label="bge-reranker-v2-m3（int8）",
+            description="KP 主动查阅模组原文时，把向量检索取回的候选按与问题的相关度重新排序，"
+                        "让「找到了但排在后面」的那段原文排到前面。",
+            dim=0,
+            repo="onnx-community/bge-reranker-v2-m3-ONNX",
+            files=(
+                ModelFile("config.json", 848, "122e922dcfed6503c8721e6fe1daf090340c3d95ca7f3aa3a72730b321a51cfd"),
+                ModelFile("tokenizer.json", 17082900, "8bf8afbfd11306bd872018c53bfdf2e160a56f8edbcf49933324404791c148d3"),
+                ModelFile("tokenizer_config.json", 1203, "b87c8703482b0300d3da30e201519aa641f6a450f5eb5bf1e624afbf70c74d80"),
+                ModelFile("special_tokens_map.json", 964, "8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835"),
+                ModelFile("onnx/model_int8.onnx", 570727094, "912fc1215c2dbff6499700534bd8d31253af01573861abbfc43afd1fab6cce5d"),
+            ),
+            model_file="onnx/model_int8.onnx",
+            # 候选是不超过 500 字的原文块，1024 token 足够；不改的话按 8192 截断，长输入徒增耗时
+            max_length=1024,
+            recommended=True,
+            index_speed="每次查阅约多 2～4 秒",
+            memory="约 1GB",
+            kind="reranker",
+        ),
+    )
+}
+def model_spec(model_id: str) -> EmbedModelSpec | None:
+    """检索模型或精排模型（下载 / 删除 / 是否已下载对两类通用）。"""
+    return CATALOG.get(model_id) or RERANKERS.get(model_id)
 
 # 兼容旧引用（DEFAULT_EMBED_MODEL 是写进存量索引的那个模型名）
 DEFAULT_EMBED_MODEL = CATALOG[DEFAULT_MODEL_ID].name

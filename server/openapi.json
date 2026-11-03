@@ -1526,6 +1526,19 @@
           "rebuild": {
             "$ref": "#/components/schemas/RebuildView"
           },
+          "reranker_enabled": {
+            "default": false,
+            "title": "Reranker Enabled",
+            "type": "boolean"
+          },
+          "rerankers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EmbedModelView"
+            },
+            "title": "Rerankers",
+            "type": "array"
+          },
           "source": {
             "title": "Source",
             "type": "string"
@@ -3037,6 +3050,19 @@
           "error"
         ],
         "title": "RebuildView",
+        "type": "object"
+      },
+      "RerankerUpdate": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "RerankerUpdate",
         "type": "object"
       },
       "RollAttributesResponse": {
@@ -12371,6 +12397,48 @@
           }
         },
         "summary": "Retry Rebuild",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/embedding/reranker": {
+      "put": {
+        "description": "开关精排（KP 主动查阅模组原文时生效）；开启要求精排模型已下载。",
+        "operationId": "update_reranker_api_settings_embedding_reranker_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerankerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Reranker",
         "tags": [
           "settings"
         ]

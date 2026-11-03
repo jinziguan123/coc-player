@@ -372,8 +372,9 @@ def lookup(
     if scope == "rule":
         return rulebook_service.retrieve(db, query, module.rule_system, k=5)
     if scope == "module":
+        # 真人 KP 的主动检索：同 module_lookup，开启了精排就用
         return module_rag_service.retrieve(
-            db, module.id, query, k=5, scene_id=game_session.current_scene_id,
+            db, module.id, query, k=5, scene_id=game_session.current_scene_id, rerank=True,
         )
     raise ValueError("检索范围必须是 rule 或 module")
 

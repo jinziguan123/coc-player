@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app import database
 from app.ai import embedding_store
-from app.ai.embedding import CATALOG
+from app.ai.embedding import CATALOG, RERANKERS, EmbedModelSpec
 from app.api.deps import require_local_client
 from app.services import embedding_switch
 
@@ -55,6 +55,9 @@ class EmbeddingSettingsView(BaseModel):
     rebuild: RebuildView
     #: 与当前写入模型不一致、还需重建的向量条数（重建没在跑时用于提示「有旧索引待重建」）
     stale: int
+    #: 精排模型（KP 主动查阅模组原文时用）
+    rerankers: list[EmbedModelView] = []
+    reranker_enabled: bool = False
 
 
 class SourceUpdate(BaseModel):
@@ -66,27 +69,40 @@ class SwitchRequest(BaseModel):
     model_id: str
 
 
+class RerankerUpdate(BaseModel):
+    enabled: bool
+
+
+def _model_view(spec: EmbedModelSpec, *, active: bool, target: bool) -> EmbedModelView:
+    j = embedding_store.job(spec.id)
+    return EmbedModelView(
+        id=spec.id, label=spec.label, description=spec.description, dim=spec.dim,
+        size_bytes=spec.size_bytes, recommended=spec.recommended,
+        index_speed=spec.index_speed, memory=spec.memory,
+        installed=embedding_store.is_installed(spec), active=active, target=target,
+        download=DownloadView(
+            state=j.state, done_bytes=j.done_bytes, total_bytes=j.total_bytes, error=j.error,
+        ) if j is not None else None,
+    )
+
+
 def _view() -> EmbeddingSettingsView:
     s = embedding_store.load()
-    models = []
-    for spec in CATALOG.values():
-        j = embedding_store.job(spec.id)
-        models.append(EmbedModelView(
-            id=spec.id, label=spec.label, description=spec.description, dim=spec.dim,
-            size_bytes=spec.size_bytes, recommended=spec.recommended,
-            index_speed=spec.index_speed, memory=spec.memory,
-            installed=embedding_store.is_installed(spec),
-            active=spec.id == s.active, target=spec.id == s.target,
-            download=DownloadView(
-                state=j.state, done_bytes=j.done_bytes, total_bytes=j.total_bytes, error=j.error,
-            ) if j is not None else None,
-        ))
+    models = [
+        _model_view(spec, active=spec.id == s.active, target=spec.id == s.target)
+        for spec in CATALOG.values()
+    ]
+    rerankers = [
+        _model_view(spec, active=s.reranker_enabled and embedding_store.is_installed(spec), target=False)
+        for spec in RERANKERS.values()
+    ]
     st = embedding_switch.state()
     with database.SessionLocal() as db:
         stale = embedding_switch.stale_count(db, embedding_store.write_model().name)
     return EmbeddingSettingsView(
         models=models, active=s.active, target=s.target, source=s.source,
         hf_endpoint=s.hf_endpoint, rebuild=RebuildView(**st.__dict__), stale=stale,
+        rerankers=rerankers, reranker_enabled=s.reranker_enabled,
     )
 
 
@@ -133,6 +149,16 @@ def switch_model(body: SwitchRequest):
     """切换检索模型（后台重建索引）；传当前模型即取消进行中的切换。"""
     try:
         embedding_switch.request_switch(body.model_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _view()
+
+
+@router.put("/reranker", response_model=EmbeddingSettingsView)
+def update_reranker(body: RerankerUpdate):
+    """开关精排（KP 主动查阅模组原文时生效）；开启要求精排模型已下载。"""
+    try:
+        embedding_store.set_reranker_enabled(body.enabled)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _view()

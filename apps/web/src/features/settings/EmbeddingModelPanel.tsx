@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { localApi } from '@/api/client'
 import type { components } from '@/api/generated'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Switch } from '@/components/ui/switch'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -66,7 +67,10 @@ export function EmbeddingModelPanel() {
     localApi.get<View>(ENDPOINT).then(apply).catch((e: Error) => toast.error(`读取检索模型失败：${e.message}`))
   }, [apply])
 
-  const active = !!view && (view.rebuild.running || view.models.some((m) => m.download?.state === 'downloading'))
+  const active = !!view && (
+    view.rebuild.running
+    || [...view.models, ...(view.rerankers ?? [])].some((m) => m.download?.state === 'downloading')
+  )
   useEffect(() => {
     if (!active) return
     const timer = window.setInterval(() => { refresh().catch(() => {}) }, POLL_MS)
@@ -186,6 +190,7 @@ export function EmbeddingModelPanel() {
                     className="btn-secondary agent-param__reset"
                     disabled={busy}
                     onClick={() => run(localApi.post<View>(`${ENDPOINT}/models/${model.id}/download`))}
+                    aria-label={`${dl?.state === 'failed' ? '重试下载' : '下载'} ${model.label}`}
                   >
                     <GiCloudDownload aria-hidden /> {dl?.state === 'failed' ? '重试下载' : '下载'}
                   </button>
@@ -249,6 +254,8 @@ export function EmbeddingModelPanel() {
           )
         })}
 
+        <RerankerSection view={view} busy={busy} run={run} />
+
         <div className="agent-param">
           <div className="agent-param__text">
             <span className="text-sm font-semibold">下载源</span>
@@ -284,5 +291,99 @@ export function EmbeddingModelPanel() {
         </div>
       </div>
     </div>
+  )
+}
+
+
+/**
+ * 精排模型：KP 主动查阅模组原文时，把向量检索取回的候选按相关度重排。
+ * 每轮自动注入的被动检索不用它（每次要多等几秒）。
+ */
+function RerankerSection({ view, busy, run }: { view: View; busy: boolean; run: (r: Promise<View>) => Promise<void> }) {
+  const rerankers = view.rerankers ?? []
+  if (!rerankers.length) return null
+  const installed = rerankers.some((r) => r.installed)
+  return (
+    <>
+      <div className="agent-param">
+        <div className="agent-param__text">
+          <span className="text-sm font-semibold">精排（KP 查阅模组原文时）</span>
+          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            KP 主动查阅模组原文时，先按检索模型取回 20 个候选，再用精排模型按与问题的相关度重新排序，
+            让「找到了但排在后面」的那段原文排到前面。每次查阅约多等 2～4 秒；每轮自动注入的原文摘录不受影响。
+            {!installed && ' 需先下载精排模型。'}
+          </span>
+        </div>
+        <div className="agent-param__control">
+          <Switch
+            label="KP 查阅模组原文时精排"
+            checked={view.reranker_enabled ?? false}
+            disabled={busy || !installed}
+            onChange={(next) => void run(localApi.put<View>(`${ENDPOINT}/reranker`, { enabled: next }))}
+          />
+        </div>
+      </div>
+      {rerankers.map((model) => {
+        const dl = model.download
+        const downloading = dl?.state === 'downloading'
+        return (
+          <div key={model.id} className="agent-param">
+            <div className="agent-param__text" style={{ flex: 1 }}>
+              <span className="text-sm font-semibold" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                {model.label}
+                {model.active && <span className="badge" style={BADGE}><GiCheckMark aria-hidden /> 使用中</span>}
+              </span>
+              <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{model.description}</span>
+              <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                下载 {formatBytes(model.size_bytes)} · {model.index_speed} · 内存{model.memory}
+              </span>
+              {downloading && dl && (
+                <Progress done={dl.done_bytes} total={dl.total_bytes} label={`${model.label} 下载进度`} />
+              )}
+              {dl?.state === 'failed' && (
+                <span className="text-xs" style={{ color: 'var(--color-danger, #c0392b)' }}>下载失败：{dl.error}</span>
+              )}
+            </div>
+            <div className="agent-param__control">
+              {!model.installed && !downloading && (
+                <button
+                  type="button"
+                  className="btn-secondary agent-param__reset"
+                  disabled={busy}
+                  onClick={() => void run(localApi.post<View>(`${ENDPOINT}/models/${model.id}/download`))}
+                  aria-label={`${dl?.state === 'failed' ? '重试下载' : '下载'} ${model.label}`}
+                >
+                  <GiCloudDownload aria-hidden /> {dl?.state === 'failed' ? '重试下载' : '下载'}
+                </button>
+              )}
+              {downloading && (
+                <button
+                  type="button"
+                  className="btn-secondary agent-param__reset"
+                  disabled={busy}
+                  onClick={() => void run(localApi.post<View>(`${ENDPOINT}/models/${model.id}/cancel`))}
+                >
+                  <GiCancel aria-hidden /> 取消
+                </button>
+              )}
+              {model.installed && (
+                <ConfirmDialog
+                  title={`删除 ${model.label}`}
+                  description={`删除已下载的精排模型（${formatBytes(model.size_bytes)}），精排随之关闭；以后要用需重新下载。`}
+                  confirmLabel="删除"
+                  onConfirm={() => run(localApi.delete<View>(`${ENDPOINT}/models/${model.id}`))}
+                >
+                  {(open) => (
+                    <button type="button" className="btn-secondary agent-param__reset" disabled={busy} onClick={open} aria-label={`删除 ${model.label}`}>
+                      <GiTrashCan aria-hidden /> 删除
+                    </button>
+                  )}
+                </ConfirmDialog>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </>
   )
 }

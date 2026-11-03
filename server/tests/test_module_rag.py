@@ -316,7 +316,7 @@ def test_excerpts_helper_gates_on_rag_status(db_factory, monkeypatch):
 
     captured = {}
 
-    def fake_retrieve2(db_, module_id, query, k=3, scene_id=None):
+    def fake_retrieve2(db_, module_id, query, k=3, scene_id=None, **_kw):
         captured["query"] = query
         captured["scene_id"] = scene_id
         return [{"text": "命中片段", "scene_hint": "scene_1", "score": 0.9, "ordinal": 0}]
@@ -362,8 +362,9 @@ def test_module_lookup_text_command_short_circuits_following_commands(db_factory
     module, char, session = _seed_session(db, rag_status="ready")
     seen = {}
 
-    def fake_retrieve(db_, module_id, query, k=3, scene_id=None):
+    def fake_retrieve(db_, module_id, query, k=3, scene_id=None, **kw):
         seen["query"] = query
+        seen["rerank"] = kw.get("rerank")
         return []
 
     monkeypatch.setattr(module_rag_service, "retrieve", fake_retrieve)
@@ -377,6 +378,7 @@ def test_module_lookup_text_command_short_circuits_following_commands(db_factory
     ))
 
     assert seen["query"] == "旅馆大堂的描写"
+    assert seen["rerank"] is True   # KP 主动查阅：开启了精排就用
     dice_events = [
         e for e in session_service.get_session_events(db, session.id)
         if e.event_type == "dice"

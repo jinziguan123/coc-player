@@ -23,7 +23,7 @@ from typing import Literal
 
 import httpx
 
-from app.ai.embedding import CATALOG, DEFAULT_MODEL_ID, EmbedModelSpec
+from app.ai.embedding import CATALOG, DEFAULT_MODEL_ID, EmbedModelSpec, model_spec
 from app.config import settings
 from app.services import task_center
 
@@ -50,6 +50,8 @@ class EmbeddingSettings:
     target: str | None = None
     source: str = "modelscope"
     hf_endpoint: str = ""
+    #: KP 主动查阅模组原文时用精排模型重排（需已下载）
+    reranker_enabled: bool = False
 
 
 _cache: EmbeddingSettings | None = None
@@ -81,6 +83,7 @@ def _read() -> EmbeddingSettings:
         s.source = raw["source"]
     if isinstance(raw.get("hf_endpoint"), str):
         s.hf_endpoint = raw["hf_endpoint"].strip()
+    s.reranker_enabled = raw.get("reranker_enabled") is True
     return s
 
 
@@ -191,7 +194,10 @@ _SETTINGS_LINK = {"to": "/settings?tab=rag", "label": "查看检索模型"}
 def _new_job(spec: EmbedModelSpec) -> DownloadJob:
     return DownloadJob(
         model_id=spec.id, total_bytes=spec.size_bytes,
-        task_id=task_center.start("embed_download", f"下载检索模型 {spec.label}", stage="下载中", link=_SETTINGS_LINK),
+        task_id=task_center.start(
+            "embed_download", f"下载{'精排' if spec.kind == 'reranker' else '检索'}模型 {spec.label}",
+            stage="下载中", link=_SETTINGS_LINK,
+        ),
     )
 
 
@@ -212,7 +218,7 @@ def job(model_id: str) -> DownloadJob | None:
 
 def start_download(model_id: str) -> DownloadJob:
     """后台下载；已在下载则返回现有任务。"""
-    spec = CATALOG.get(model_id)
+    spec = model_spec(model_id)
     if spec is None:
         raise ValueError(f"未知模型：{model_id}")
     if is_installed(spec):
@@ -373,10 +379,19 @@ def _fetch(client: httpx.Client, url: str, dest: Path, size: int, j: DownloadJob
 # ---------------------------------------------------------------------------
 
 def delete_model(model_id: str) -> None:
-    spec = CATALOG.get(model_id)
+    spec = model_spec(model_id)
     if spec is None:
         raise ValueError(f"未知模型：{model_id}")
     s = load()
+    if spec.kind == "reranker":
+        _delete_files(spec)
+        from app.ai import reranker
+
+        reranker.release()
+        if s.reranker_enabled:
+            s.reranker_enabled = False   # 模型都没了，开关跟着关掉
+            save(s)
+        return
     if model_id in (s.active, s.target):
         raise ValueError(f"{spec.label} 正在使用中，不能删除")
     j = job(model_id)
@@ -385,9 +400,32 @@ def delete_model(model_id: str) -> None:
     from app.ai.embedding import release_embedders, SPECS_BY_NAME
 
     release_embedders({n for n in SPECS_BY_NAME if n != spec.name})
+    _delete_files(spec)
+
+
+def _delete_files(spec: EmbedModelSpec) -> None:
+    j = job(spec.id)
+    if j is not None and j.state == "downloading":
+        raise ValueError(f"{spec.label} 正在下载，请先取消")
     shutil.rmtree(_model_dir(spec), ignore_errors=True)
     shutil.rmtree(_partial_dir(spec), ignore_errors=True)
     if spec.legacy_cache:
         shutil.rmtree(MODELS_DIR / spec.legacy_cache, ignore_errors=True)
     with _jobs_lock:
-        _jobs.pop(model_id, None)
+        _jobs.pop(spec.id, None)
+
+
+def set_reranker_enabled(enabled: bool) -> EmbeddingSettings:
+    """开关精排；开启要求精排模型已下载。"""
+    from app.ai.embedding import RERANKERS
+
+    if enabled and not any(is_installed(sp) for sp in RERANKERS.values()):
+        raise ValueError("精排模型尚未下载")
+    s = load()
+    s.reranker_enabled = enabled
+    save(s)
+    if not enabled:
+        from app.ai import reranker
+
+        reranker.release()
+    return s
