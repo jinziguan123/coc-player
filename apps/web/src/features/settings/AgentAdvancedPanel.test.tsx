@@ -63,6 +63,7 @@ describe('AgentAdvancedPanel', () => {
     mockDelete.mockResolvedValue(view())
     const user = userEvent.setup()
     render(<AgentAdvancedPanel />)
+    await user.click(await screen.findByRole('tab', { name: '运行预算' }))
     const input = await screen.findByRole('textbox', { name: '每次生成最多模型调用' })
     await user.clear(input)
     await user.type(input, '64')
@@ -80,6 +81,7 @@ describe('AgentAdvancedPanel', () => {
     mockPut.mockRejectedValueOnce(new Error('每次生成最多模型调用须在 8–200 次之间'))
     const user = userEvent.setup()
     render(<AgentAdvancedPanel />)
+    await user.click(await screen.findByRole('tab', { name: '运行预算' }))
     const input = await screen.findByRole('textbox', { name: '每次生成最多模型调用' })
     await user.clear(input)
     await user.type(input, '1')
@@ -94,10 +96,21 @@ describe('AgentAdvancedPanel', () => {
     })
   })
 
+  it('上下文档位与运行预算分在两个页签，一次只摊开一页', async () => {
+    const user = userEvent.setup()
+    render(<AgentAdvancedPanel />)
+    expect(await screen.findByRole('radio', { name: /省钱/ })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '每次生成最多模型调用' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: '运行预算' }))
+    expect(await screen.findByRole('textbox', { name: '每次生成最多模型调用' })).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: /省钱/ })).not.toBeInTheDocument()
+  })
+
   it('全部恢复默认需要二次确认', async () => {
     mockDelete.mockResolvedValue(view())
     const user = userEvent.setup()
     render(<AgentAdvancedPanel />)
+    await user.click(await screen.findByRole('tab', { name: '运行预算' }))
     await user.click(await screen.findByRole('button', { name: '全部恢复默认' }))
     expect(mockDelete).not.toHaveBeenCalled()
     await user.click(await screen.findByRole('button', { name: '恢复默认' }))

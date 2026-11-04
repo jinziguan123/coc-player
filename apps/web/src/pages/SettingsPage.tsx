@@ -19,6 +19,7 @@ import { NetlinkPanel } from '@/features/settings/NetlinkPanel'
 import { AgentAdvancedPanel } from '@/features/settings/AgentAdvancedPanel'
 import { EmbeddingModelPanel } from '@/features/settings/EmbeddingModelPanel'
 import { RagStatsPanel } from '@/features/settings/RagStatsPanel'
+import { SettingsSections } from '@/features/settings/SettingsSections'
 import { RerankerPanel } from '@/features/settings/RerankerPanel'
 import { ModelSourcePanel } from '@/features/settings/ModelSourcePanel'
 
@@ -70,7 +71,18 @@ export function SettingsPage() {
         )}
         {activeTab === 'network' && <NetworkSettingsPanel />}
         {activeTab === 'appearance' && <AppearanceSettingsPanel />}
-        {activeTab === 'rag' && <><h2 className="page-title">检索</h2><EmbeddingModelPanel /><RerankerPanel /><ModelSourcePanel /><RagStatsPanel /></>}
+        {activeTab === 'rag' && (
+          <SettingsSections
+            title="检索"
+            intro="规则书、模组原文与往事回忆都在本机建索引，KP 拿不准时先检索再裁定。这里管检索用的模型、下载源和用量。"
+            sections={[
+              { key: 'embedding', label: '检索模型', content: <EmbeddingModelPanel /> },
+              { key: 'reranker', label: '精排模型', content: <RerankerPanel /> },
+              { key: 'source', label: '下载源', content: <ModelSourcePanel /> },
+              { key: 'stats', label: '用量统计', content: <RagStatsPanel /> },
+            ]}
+          />
+        )}
         {activeTab === 'advanced' && <AgentAdvancedPanel />}
       </div>
     </div>
@@ -193,199 +205,208 @@ function NetworkSettingsPanel() {
 
   return (
     <div className="network-settings">
-      <h2 className="page-title">联机</h2>
+      <SettingsSections
+        title="联机"
+        sections={[
+          {
+            key: 'lan', label: '局域网', content: (
+              <>
+            {/* 允许局域网加入 */}
+            <div className={`card ${enabled ? 'active-rail' : ''}`}>
+              <div className="setting-head">
+                <h3 className="card-title" style={{ margin: 0 }}>
+                  允许局域网加入
+                </h3>
+                <Switch
+                  label="允许局域网加入"
+                  checked={enabled}
+                  disabled={saving || status === null}
+                  onChange={toggle}
+                  onText={statusText}
+                  offText={statusText}
+                />
+              </div>
+              <p className="setting-description">
+                关闭时后端只监听本机，同一网络内的其他设备也连不上——这是默认状态。
+                打开后其他玩家可以在「加入房间」处填你的地址进来。
+              </p>
 
-      {/* 允许局域网加入 */}
-      <div className={`card ${enabled ? 'active-rail' : ''}`}>
-        <div className="setting-head">
-          <h3 className="card-title" style={{ margin: 0 }}>
-            允许局域网加入
-          </h3>
-          <Switch
-            label="允许局域网加入"
-            checked={enabled}
-            disabled={saving || status === null}
-            onChange={toggle}
-            onText={statusText}
-            offText={statusText}
-          />
-        </div>
-        <p className="setting-description">
-          关闭时后端只监听本机，同一网络内的其他设备也连不上——这是默认状态。
-          打开后其他玩家可以在「加入房间」处填你的地址进来。
-        </p>
+              {statusLoadFailed && (
+                <div className="notice notice--danger setting-retry" role="alert">
+                  <AlertTriangle size={13} aria-hidden="true" />
+                  <span>读取联机状态失败，当前无法确认是否允许其他设备加入。</span>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => void loadStatus()}
+                    title="重新读取联机状态"
+                    aria-label="重新读取联机状态"
+                  >
+                    <RefreshCw size={13} />
+                  </button>
+                </div>
+              )}
 
-        {statusLoadFailed && (
-          <div className="notice notice--danger setting-retry" role="alert">
-            <AlertTriangle size={13} aria-hidden="true" />
-            <span>读取联机状态失败，当前无法确认是否允许其他设备加入。</span>
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => void loadStatus()}
-              title="重新读取联机状态"
-              aria-label="重新读取联机状态"
-            >
-              <RefreshCw size={13} />
-            </button>
-          </div>
-        )}
+              {status?.restart_required && (
+                <div className="notice" style={{ marginTop: '0.75rem' }}>
+                  <RefreshCw
+                    size={12}
+                    style={{ flexShrink: 0, marginTop: '0.15rem' }}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    设置已保存，但监听地址在应用启动时确定——
+                    {enabled ? '需重启应用，其他玩家才能连进来。' : '重启前，本机之外的请求已经被拒绝。'}
+                  </span>
+                </div>
+              )}
 
-        {status?.restart_required && (
-          <div className="notice" style={{ marginTop: '0.75rem' }}>
-            <RefreshCw
-              size={12}
-              style={{ flexShrink: 0, marginTop: '0.15rem' }}
-              aria-hidden="true"
-            />
-            <span>
-              设置已保存，但监听地址在应用启动时确定——
-              {enabled ? '需重启应用，其他玩家才能连进来。' : '重启前，本机之外的请求已经被拒绝。'}
-            </span>
-          </div>
-        )}
+              {status?.lan_enabled && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <div
+                    className="text-xs"
+                    style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
+                  >
+                    {status.addresses.length > 0
+                      ? '把地址连同房间码发给其他玩家（点击复制）：'
+                      : '没有找到可用的局域网地址——本机可能没连上网，或只连着会接管路由的 VPN。'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    {status.addresses.map((addr) => (
+                      <button
+                        key={addr}
+                        type="button"
+                        onClick={() => void copyAddr(urlFor(addr))}
+                        className="copy-line"
+                        title="点击复制"
+                        aria-label={`复制联机地址 ${urlFor(addr)}`}
+                      >
+                        {urlFor(addr)}
+                        <Copy size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-        {status?.lan_enabled && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <div
-              className="text-xs"
-              style={{ color: 'var(--color-text-secondary)', marginBottom: '0.4rem' }}
-            >
-              {status.addresses.length > 0
-                ? '把地址连同房间码发给其他玩家（点击复制）：'
-                : '没有找到可用的局域网地址——本机可能没连上网，或只连着会接管路由的 VPN。'}
+              {/* 谁能连进来。开关只回答「这个网段可不可信」，具体是哪台设备由名册逐个放行。 */}
+              <LanRosterPanel lanEnabled={enabled} />
             </div>
-            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-              {status.addresses.map((addr) => (
-                <button
-                  key={addr}
-                  type="button"
-                  onClick={() => void copyAddr(urlFor(addr))}
-                  className="copy-line"
-                  title="点击复制"
-                  aria-label={`复制联机地址 ${urlFor(addr)}`}
-                >
-                  {urlFor(addr)}
-                  <Copy size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
-                </button>
-              ))}
+
+            {/* 风险提示：用血色左带与正常设置卡区分开 */}
+            <div className="card setting-risk-card">
+              <h3
+                className="card-title"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  color: 'var(--color-danger)',
+                }}
+              >
+                <AlertTriangle size={13} aria-hidden="true" />
+                开启前请确认
+              </h3>
+              <ul
+                className="text-xs"
+                style={{
+                  color: 'var(--color-text-secondary)', lineHeight: 1.8,
+                  paddingLeft: '1.1rem', margin: 0,
+                }}
+              >
+                {/* 有了接入名册之后这条必须改口：同网段的人不再是「知道地址就能进」了。
+                    但也别说过头——名册按 token 认人、不验人，仍然没有账号体系和传输加密。 */}
+                <li>
+                  陌生设备连进来时会先排在上面等你同意，同意过的下次直接进。但这只是「认人」
+                  不是「验人」：本应用没有账号体系，也没有传输加密，同一网络里有心伪造的人
+                  仍然可能冒充已获准的设备，读写房间内容、消耗你配置的 AI 额度。
+                </li>
+                <li>只在可信网络开启：家里或朋友家的 Wi-Fi。公共 Wi-Fi、酒店、公司网络都不要开。</li>
+                <li>
+                  不要把这个端口转发到公网。即使转发了，来自互联网的请求也会被拒绝，
+                  但这只是兜底，不是可以依赖的防护。
+                </li>
+                <li>
+                  想和不在同一网络的朋友一起玩，优先用「内置直连」页签；也可以用 Tailscale
+                  这类覆盖网络把双方接进同一个虚拟内网，而不是暴露端口——它们的地址段本应用已经放行。
+                </li>
+              </ul>
             </div>
-          </div>
-        )}
+              </>
+            ),
+          },
+          { key: 'direct', label: '内置直连', content: <NetlinkPanel backendPort={port} /> },
+          {
+            key: 'quota', label: 'AI 配额', content: (
+              <div className={`card ${quota?.enabled ? 'active-rail' : ''}`}>
+                <div className="setting-head">
+                  <h3 className="card-title" style={{ margin: 0 }}>
+                    房间 AI 配额
+                  </h3>
+                  <Switch
+                    label="房间 AI 配额"
+                    checked={!!quota?.enabled}
+                    disabled={quotaSaving || quota === null}
+                    onChange={(next) => saveQuota({ enabled: next })}
+                    onText={quotaText}
+                    offText={quotaText}
+                  />
+                </div>
+                <p className="setting-description">
+                  房内玩家的正常动作（发言、投骰、推进回合）都会驱动 AI，烧的是你配置的额度。
+                  启用后每个房间在时间窗内能触发的生成次数受限，超出时该房间暂时无法推进。
+                  默认关闭——自己单机玩不该被限。
+                </p>
 
-        {/* 谁能连进来。开关只回答「这个网段可不可信」，具体是哪台设备由名册逐个放行。 */}
-        <LanRosterPanel lanEnabled={enabled} />
-      </div>
+                {quotaLoadFailed && (
+                  <div className="notice notice--danger setting-retry" role="alert">
+                    <AlertTriangle size={13} aria-hidden="true" />
+                    <span>读取 AI 配额失败，限制策略暂不可编辑。</span>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => void loadQuota()}
+                      title="重新读取 AI 配额"
+                      aria-label="重新读取 AI 配额"
+                    >
+                      <RefreshCw size={13} />
+                    </button>
+                  </div>
+                )}
 
-      {/* 内置直连 */}
-      <NetlinkPanel backendPort={port} />
-
-      {/* 房间 AI 配额 */}
-      <div className={`card ${quota?.enabled ? 'active-rail' : ''}`}>
-        <div className="setting-head">
-          <h3 className="card-title" style={{ margin: 0 }}>
-            房间 AI 配额
-          </h3>
-          <Switch
-            label="房间 AI 配额"
-            checked={!!quota?.enabled}
-            disabled={quotaSaving || quota === null}
-            onChange={(next) => saveQuota({ enabled: next })}
-            onText={quotaText}
-            offText={quotaText}
-          />
-        </div>
-        <p className="setting-description">
-          房内玩家的正常动作（发言、投骰、推进回合）都会驱动 AI，烧的是你配置的额度。
-          启用后每个房间在时间窗内能触发的生成次数受限，超出时该房间暂时无法推进。
-          默认关闭——自己单机玩不该被限。
-        </p>
-
-        {quotaLoadFailed && (
-          <div className="notice notice--danger setting-retry" role="alert">
-            <AlertTriangle size={13} aria-hidden="true" />
-            <span>读取 AI 配额失败，限制策略暂不可编辑。</span>
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => void loadQuota()}
-              title="重新读取 AI 配额"
-              aria-label="重新读取 AI 配额"
-            >
-              <RefreshCw size={13} />
-            </button>
-          </div>
-        )}
-
-        {quota?.enabled && (
-          <label className="quota-editor">
-            <span>每房间上限</span>
-            <input
-              className="input"
-              aria-label="每房间 AI 配额上限"
-              value={quotaLimitDraft}
-              onChange={(event) => setQuotaLimitDraft(event.target.value)}
-              onBlur={() => {
-                const value = quotaLimitDraft.trim()
-                if (!value) {
-                  setQuotaLimitDraft(quota.limit)
-                } else if (value !== quota.limit) {
-                  void saveQuota({ limit: value })
-                }
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') event.currentTarget.blur()
-                if (event.key === 'Escape') {
-                  setQuotaLimitDraft(quota.limit)
-                  event.currentTarget.blur()
-                }
-              }}
-              disabled={quotaSaving}
-            />
-            <span className="quota-hint">如 100/hour、20/minute</span>
-          </label>
-        )}
-      </div>
-
-      {/* 风险提示：用血色左带与正常设置卡区分开 */}
-      <div className="card setting-risk-card">
-        <h3
-          className="card-title"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.35rem',
-            color: 'var(--color-danger)',
-          }}
-        >
-          <AlertTriangle size={13} aria-hidden="true" />
-          开启前请确认
-        </h3>
-        <ul
-          className="text-xs"
-          style={{
-            color: 'var(--color-text-secondary)', lineHeight: 1.8,
-            paddingLeft: '1.1rem', margin: 0,
-          }}
-        >
-          {/* 有了接入名册之后这条必须改口：同网段的人不再是「知道地址就能进」了。
-              但也别说过头——名册按 token 认人、不验人，仍然没有账号体系和传输加密。 */}
-          <li>
-            陌生设备连进来时会先排在上面等你同意，同意过的下次直接进。但这只是「认人」
-            不是「验人」：本应用没有账号体系，也没有传输加密，同一网络里有心伪造的人
-            仍然可能冒充已获准的设备，读写房间内容、消耗你配置的 AI 额度。
-          </li>
-          <li>只在可信网络开启：家里或朋友家的 Wi-Fi。公共 Wi-Fi、酒店、公司网络都不要开。</li>
-          <li>
-            不要把这个端口转发到公网。即使转发了，来自互联网的请求也会被拒绝，
-            但这只是兜底，不是可以依赖的防护。
-          </li>
-          <li>
-            想和不在同一网络的朋友一起玩，优先用上面的「内置直连」；也可以用 Tailscale
-            这类覆盖网络把双方接进同一个虚拟内网，而不是暴露端口——它们的地址段本应用已经放行。
-          </li>
-        </ul>
-      </div>
+                {quota?.enabled && (
+                  <label className="quota-editor">
+                    <span>每房间上限</span>
+                    <input
+                      className="input"
+                      aria-label="每房间 AI 配额上限"
+                      value={quotaLimitDraft}
+                      onChange={(event) => setQuotaLimitDraft(event.target.value)}
+                      onBlur={() => {
+                        const value = quotaLimitDraft.trim()
+                        if (!value) {
+                          setQuotaLimitDraft(quota.limit)
+                        } else if (value !== quota.limit) {
+                          void saveQuota({ limit: value })
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur()
+                        if (event.key === 'Escape') {
+                          setQuotaLimitDraft(quota.limit)
+                          event.currentTarget.blur()
+                        }
+                      }}
+                      disabled={quotaSaving}
+                    />
+                    <span className="quota-hint">如 100/hour、20/minute</span>
+                  </label>
+                )}
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }
@@ -402,83 +423,88 @@ function AppearanceSettingsPanel() {
   }
 
   return (
-    <div>
-      <h2 className="page-title">外观</h2>
-      <div className="card">
-        <h3 className="card-title">主题</h3>
-        <p
-          className="text-xs"
-          style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
-        >
-          切换即时生效，刷新后保持。
-        </p>
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-          {THEMES.map((opt) => {
-            const active = theme === opt.value
-            return (
-              <button
-                key={opt.value}
-                onClick={() => choose(opt.value)}
-                className="theme-option"
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem',
-                  padding: '0.75rem',
-                  minWidth: '9rem',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  borderRadius: '4px',
-                  border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
-                  background: active
-                    ? 'rgba(212, 162, 78, 0.08)'
-                    : 'var(--color-input-bg)',
-                  transition: 'border-color 0.2s',
-                }}
+    <SettingsSections
+      title="外观"
+      sections={[
+        {
+          key: 'theme', label: '主题', content: (
+            <div className="card">
+              <h3 className="card-title">主题</h3>
+              <p
+                className="text-xs"
+                style={{ color: 'var(--color-text-secondary)', marginBottom: '0.85rem' }}
               >
-                {/* 色板预览 */}
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  {opt.swatch.map((c) => (
-                    <span
-                      key={c}
+                切换即时生效，刷新后保持。
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                {THEMES.map((opt) => {
+                  const active = theme === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => choose(opt.value)}
+                      className="theme-option"
                       style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: '3px',
-                        background: c,
-                        border: '1px solid rgba(128,128,128,0.35)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.5rem',
+                        padding: '0.75rem',
+                        minWidth: '9rem',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        borderRadius: '4px',
+                        border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
+                        background: active
+                          ? 'rgba(212, 162, 78, 0.08)'
+                          : 'var(--color-input-bg)',
+                        transition: 'border-color 0.2s',
                       }}
-                    />
-                  ))}
-                </div>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-title)',
-                    fontSize: '0.9rem',
-                    fontWeight: 600,
-                    color: active
-                      ? 'var(--color-text-accent)'
-                      : 'var(--color-text-primary)',
-                  }}
-                >
-                  {opt.label}
-                </span>
-                <span
-                  style={{
-                    fontSize: '0.72rem',
-                    color: 'var(--color-text-secondary)',
-                  }}
-                >
-                  {active ? '当前使用' : '点击切换'}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <GameDisplayPanel />
-      <MusicCreditsPanel />
-    </div>
+                    >
+                      {/* 色板预览 */}
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {opt.swatch.map((c) => (
+                          <span
+                            key={c}
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: '3px',
+                              background: c,
+                              border: '1px solid rgba(128,128,128,0.35)',
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <span
+                        style={{
+                          fontFamily: 'var(--font-title)',
+                          fontSize: '0.9rem',
+                          fontWeight: 600,
+                          color: active
+                            ? 'var(--color-text-accent)'
+                            : 'var(--color-text-primary)',
+                        }}
+                      >
+                        {opt.label}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          color: 'var(--color-text-secondary)',
+                        }}
+                      >
+                        {active ? '当前使用' : '点击切换'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ),
+        },
+        { key: 'display', label: '局内显示', content: <GameDisplayPanel /> },
+        { key: 'music', label: '背景音乐', content: <MusicCreditsPanel /> },
+      ]}
+    />
   )
 }

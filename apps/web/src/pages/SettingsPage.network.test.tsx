@@ -56,10 +56,12 @@ describe('设置页联机面板', () => {
     await openNetworkTab(user)
 
     expect(await screen.findByRole('switch', { name: '允许局域网加入' })).toBeChecked()
-    expect(screen.getByRole('switch', { name: '房间 AI 配额' })).toBeChecked()
     expect(
       screen.getByRole('button', { name: '复制联机地址 http://192.168.1.20:8123' }),
     ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'AI 配额' }))
+    expect(await screen.findByRole('switch', { name: '房间 AI 配额' })).toBeChecked()
     expect(screen.getByRole('textbox', { name: '每房间 AI 配额上限' })).toHaveValue('100/hour')
   })
 
@@ -74,7 +76,8 @@ describe('设置页联机面板', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/net/lan', { enabled: false }))
     expect(screen.getByRole('switch', { name: '允许局域网加入' })).not.toBeChecked()
 
-    await user.click(screen.getByRole('switch', { name: '房间 AI 配额' }))
+    await user.click(screen.getByRole('tab', { name: 'AI 配额' }))
+    await user.click(await screen.findByRole('switch', { name: '房间 AI 配额' }))
     await waitFor(() => expect(mockPut).toHaveBeenCalledWith('/settings/ai/quota', {
       enabled: false,
       limit: '100/hour',
@@ -86,6 +89,7 @@ describe('设置页联机面板', () => {
     mockPut.mockResolvedValue({ enabled: true, limit: '100/hour' })
     renderNetworkSettings()
     await openNetworkTab(user)
+    await user.click(screen.getByRole('tab', { name: 'AI 配额' }))
 
     const input = await screen.findByRole('textbox', { name: '每房间 AI 配额上限' })
     await user.clear(input)

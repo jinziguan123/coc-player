@@ -1722,6 +1722,17 @@ body {
   gap: 0.35rem;
 }
 
+/* 页签上方那句分类总述：对整个分类都成立的话，紧贴标题、比卡片说明再淡一档 */
+.settings-intro {
+  margin: -0.35rem 0 1.15rem;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+/* 一个页签里不止一张卡（如「局域网」带风险提示）时，卡与卡之间留出呼吸 */
+.settings-section { display: flex; flex-direction: column; gap: 0.75rem; }
+.settings-section > .card { margin: 0; }
+
 /* 页签固定在顶上：往下翻配置时还看得见自己在哪一页，也不用滚回去切 */
 .settings-tabs {
   position: sticky;

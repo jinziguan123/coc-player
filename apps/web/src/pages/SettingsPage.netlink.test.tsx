@@ -64,6 +64,7 @@ async function openNetworkTab() {
     </MemoryRouter>,
   )
   await user.click(screen.getByRole('button', { name: '联机' }))
+  await user.click(await screen.findByRole('tab', { name: '内置直连' }))
   await screen.findByRole('heading', { name: '内置直连' })
   return user
 }
