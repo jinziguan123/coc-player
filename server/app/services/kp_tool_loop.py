@@ -28,6 +28,7 @@ from app.models.session import GameSession
 from app.rules.kp_tools import KpToolContext, KpToolResult
 from app.services import (
     agent_trace,
+    beat_runtime,
     chat_event_writer,
     command_protocol,
     entity_state,
@@ -35,8 +36,10 @@ from app.services import (
     event_recall,
     illustration_service,
     kp_actions,
+    module_flow,
     module_rag_service,
     narration_protocol,
+    session_service,
     npc_identity,
     npc_runtime,
     plot_progress,
@@ -215,7 +218,7 @@ def _merge_step_result(result: list, step: list) -> None:
 
 # 裸值容错的单参数指令（[SET_FLAG hint_x] 这类漏写键名的旧习惯）→ 对应参数键
 _SOLO_ARG_KEY = {
-    "set_flag": "flag", "clear_flag": "flag", "handout": "id",
+    "beat": "id", "set_flag": "flag", "clear_flag": "flag", "handout": "id",
     "scene_change": "scene_id", "travel_suggest": "scene_id",
     "block_path": "scene_id", "unblock_path": "scene_id",
     "rule_lookup": "query", "module_lookup": "query", "recall_history": "query",
@@ -541,6 +544,21 @@ def _build_kp_tool_executor(
         chunks, note = turn_effects.exec_set_mood(db, session_id, game_session, kv.get("mood", ""))
         return kp_tools.ToolOutcome(note, chunks=chunks)
 
+    async def _h_beat(name, kv):
+        eid = (kv.get("id") or "").strip()
+        if not eid:
+            return kp_tools.ToolOutcome("参数缺失：id 为必填。")
+        events = module_flow.normalize_events(module.events, module.scenes)
+        event = next((e for e in events if str(e.get("id")) == eid), None)
+        if event is None:
+            return kp_tools.ToolOutcome(f"没有 id 为 {eid} 的剧情事件；不要重试，按现有叙事继续。")
+        note = beat_runtime.execute_event(
+            db, session_id, game_session, module, event,
+            player_char, teammates,
+            seq=session_service.get_next_sequence_num(db, session_id) - 1,
+        )
+        return kp_tools.ToolOutcome(note or "ok")
+
     async def _h_hp_change(name, kv):
         chunks = await _exec_hp_change(
             db, session_id, player_char,
@@ -607,6 +625,7 @@ def _build_kp_tool_executor(
         "handout": _h_handout,
         "mark_seen": _h_mark_seen,
         "set_mood": _h_set_mood,
+        "beat": _h_beat,
     }
 
     async def _h_plugin(tool, arguments: dict) -> kp_tools.ToolOutcome:

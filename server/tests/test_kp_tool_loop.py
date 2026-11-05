@@ -797,7 +797,7 @@ def test_registry_covers_all_regex_commands():
     assert tags == {
         "DICE_CHECK", "OPPOSED_CHECK", "SAN_CHECK", "HP_CHANGE", "NPC_ACT",
         "SCENE_CHANGE", "RULE_LOOKUP", "MODULE_LOOKUP", "RECALL_HISTORY",
-        "SET_FLAG", "CLEAR_FLAG",
+        "SET_FLAG", "CLEAR_FLAG", "BEAT",
         "HANDOUT", "SAY", "START_COMBAT", "START_CHASE", "TRAVEL_SUGGEST",
         "BLOCK_PATH", "UNBLOCK_PATH", "MARK_SEEN", "SET_MOOD",
     }
@@ -810,6 +810,7 @@ def test_registry_covers_all_regex_commands():
     assert required["rule_lookup"] == ["query"]
     assert required["module_lookup"] == ["query"]
     assert required["set_flag"] == ["flag"]
+    assert required["beat"] == ["id"]
     assert required["handout"] == ["id"]
     # OpenAI schema 形态 + exclude 裁剪
     schemas = kp_tools.openai_tool_schemas(exclude={"rule_lookup"})

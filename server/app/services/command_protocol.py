@@ -36,6 +36,8 @@ MODULE_LOOKUP_RE = re.compile(r"\[MODULE_LOOKUP:\s*query=([^\]]+)\]")
 RECALL_HISTORY_RE = re.compile(r"\[RECALL_HISTORY:\s*query=([^\]]+)\]")
 SET_FLAG_RE = re.compile(r"\[SET_FLAG[:：\s]\s*(?:flag=)?\s*([^\]]+?)\s*\]")
 CLEAR_FLAG_RE = re.compile(r"\[CLEAR_FLAG[:：\s]\s*(?:flag=)?\s*([^\]]+?)\s*\]")
+# 剧情事件：KP 在叙述事件发生的那一轮发 [BEAT: 事件id]，由系统按事件效果结算。
+BEAT_RE = re.compile(r"\[BEAT[:：\s]\s*(?:id=)?\s*([^\]]+?)\s*\]")
 HANDOUT_RE = re.compile(r"\[HANDOUT[:：\s]\s*([^\]]+?)\s*\]")
 # 记账：KP 主动声明「这条线索/这个桥段我已经给过玩家了」。台账此前只有两条写入路径，
 # 一条要规划器从叙事回推 clue_id、一条只认字面，都会漏；KP 自己最清楚它刚给出了什么。
@@ -59,6 +61,7 @@ CMD_TAG_PREFIXES = (
     "RECALL_HISTORY:",
     "SET_FLAG:",
     "CLEAR_FLAG:",
+    "BEAT:",
     "HANDOUT:",
     "MARK_SEEN:",
     "SET_MOOD:",

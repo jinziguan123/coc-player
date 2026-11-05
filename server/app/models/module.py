@@ -19,7 +19,16 @@ class Module(Base, UUIDMixin, TimestampMixin):
     # 房主可在模组详情页改写——AI 给的是初稿，KP 才是最终裁量。
     character_guidance: Mapped[dict] = mapped_column(JSON, default=dict)
     raw_content: Mapped[str] = mapped_column(Text, default="")
+    # 结构化版本：1=旧结构（scenes 混装 event、无 effects），3=事件/条件/效果模型。
+    # 读侧按版本选择消费方式；新解析一律产 3。
+    schema_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # 地点/章节（kind=location|chapter）。v3 起不再混装剧情事件。
     scenes: Mapped[list] = mapped_column(JSON, default=list)
+    # 剧情事件（v3）：[{id, title, at, phase, once, when:{text,expr}, effects:[...]}]。
+    # 事件是剧情节拍而不是地点——不参与导航、可跨地点、带可执行效果。
+    events: Mapped[list] = mapped_column(JSON, default=list)
+    # 解析期结构校验结果（errors/warnings），供前端「时间线/解析报告」展示。
+    validation: Mapped[dict] = mapped_column(JSON, default=dict)
     # 沙盘上的全部节点：场景节点通过 scene_id 关联 scenes，普通节点 scene_id 为空。
     # 两类节点共享 q/r/biome，便于编辑器统一拖拽与批量修改。
     map_nodes: Mapped[list] = mapped_column(JSON, default=list)

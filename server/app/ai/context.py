@@ -50,6 +50,7 @@ from app.services import (
     combat_service,
     entity_state,
     hex_map,
+    module_flow,
     plot_threads,
     scene_kind,
     session_service,
@@ -1269,10 +1270,16 @@ def _sec_plot_flag_ad(c: _SectionCtx) -> str | None:
 
 def _sec_module_data(c: _SectionCtx) -> str:
     f = c.facts
+    # content_warning 是**桌面信息**（给真人玩家看的内容提示），不是世界内的叙事素材；
+    # 它绝不能进 KP 的朗读上下文，否则模型会把「请确认同桌能接受」写进旁白（超游）。
+    world_setting = {
+        k: v for k, v in (c.module.world_setting or {}).items()
+        if k not in ("content_warning", "opening_beats")
+    }
     return KP_MODULE_DATA_SECTION.format(
         module_title=c.module.title,
         module_description=c.module.description,
-        world_setting=_format_json_compact(c.module.world_setting),
+        world_setting=_format_json_compact(world_setting),
         scenes_info=_compact_scenes(f.scenes, f.scene_id),
         current_scene=f.current_scene_text,
         plot_state=_format_plot_state(f.flags, c.module.triggers),
@@ -1288,40 +1295,91 @@ def _sec_truth(c: _SectionCtx) -> str | None:
     return TRUTH_SECTION.format(truth=truth) if truth else None
 
 
-def _format_plot_events(module: Module, flags: set[str]) -> str:
-    """剧情事件（kind=event）：按条件触发的段落，不是地点。列出触发状态、条件与该置的标志。"""
-    events = scene_kind.event_scenes(module.scenes)
+def _flow_state(module: Module, session: GameSession, flags: set[str], *, is_opening: bool):
+    """构造条件求值所需的世界状态快照。"""
+    ws = getattr(session, "world_state", None) or {}
+    ledger = ws.get("clue_ledger") or {}
+    clues = {
+        str(k) for k, v in ledger.items()
+        if isinstance(v, dict) and str(v.get("status") or "") in ("known", "hint")
+    }
+    nav = getattr(session, "navigation", None)
+    visited = getattr(nav, "visited_scenes", None) or []
+    return module_flow.FlowState(
+        flags={str(k): True for k in flags},
+        at=str(getattr(session, "current_scene_id", "") or ""),
+        visited=frozenset(str(x) for x in visited),
+        clues=frozenset(clues),
+        items={},
+        phase="opening" if is_opening else "scene",
+        seen=frozenset(str(x) for x in (ws.get("flow_seen") or []) if x),
+    )
+
+
+def _format_plot_events(
+    module: Module, session: GameSession, flags: set[str], *, is_opening: bool = False,
+) -> str:
+    """剧情事件（v3）：条件可判定、效果可执行。列出状态、条件与效果，并教 KP 发 [BEAT]."""
+    events = module_flow.normalize_events(
+        getattr(module, "events", None), getattr(module, "scenes", None),
+    )
     if not events:
         return ""
+    state = _flow_state(module, session, flags, is_opening=is_opening)
+    eligible, undecided = module_flow.eligible_events(events, state)
+    eligible_ids = {str(e.get("id")) for e in eligible}
+    undecided_ids = {str(e.get("id")) for e in undecided}
     npc_names = {
         str(n.get("id")): n.get("name") or n.get("id")
         for n in (module.npcs or []) if isinstance(n, dict) and n.get("id")
     }
-    lines = [
-        "【剧情事件】（KP 专属——按条件触发的剧情段落，不是地点，不可前往）"
-    ]
-    for e in events:
-        title = scene_kind.event_title(e)
-        flag_txt = "、".join(scene_kind.event_flags(e))
-        who = "、".join(npc_names.get(n, n) for n in (e.get("npcs") or []))
-        desc = str(e.get("description") or "").strip()[:200]
-        if scene_kind.event_triggered(e, flags):
-            lines.append(f"- [已触发]「{title}」：{desc}")
+    # 旧模组的事件场景用 flags 表示「已触发」；v3 事件用 flow_seen。两者都要认。
+    legacy_events = {
+        str(s.get("id")): s for s in (module.scenes or [])
+        if isinstance(s, dict) and str(s.get("kind") or "").lower() == "event"
+    }
+    lines = ["【剧情事件】（KP 专属——按条件触发的剧情段落，不是地点，不可前往）"]
+    for ev in events:
+        eid = str(ev.get("id") or "")
+        if not eid:
             continue
-        line = f"- [待触发]「{title}」——条件：{e.get('when') or '见描述'}"
+        legacy = legacy_events.get(eid)
+        legacy_done = bool(legacy and scene_kind.event_triggered(legacy, flags))
+        if ev.get("once", True) and (eid in state.seen or legacy_done):
+            lines.append(f"- [已触发]「{ev.get('title') or eid}」：本局已演过，绝不重演。")
+            continue
+        title = str(ev.get("title") or eid)
+        when_text = str((ev.get("when") or {}).get("text") or "").strip() or "见描述"
+        brief = "；".join(
+            module_flow.effect_brief(e) for e in (ev.get("effects") or [])
+        ) or "（无机械效果，由你演出）"
+        who = "、".join(npc_names.get(n, n) for n in (ev.get("npcs") or []))
+        if eid in eligible_ids:
+            tag = "可触发"
+            tail = f"条件已满足；叙述它发生的那一轮，在本段最后一行发 [BEAT: {eid}]，系统会按效果结算。"
+        elif eid in undecided_ids:
+            tag = "待触发"
+            tail = f"条件由你按叙事判断；确已发生时，在本段最后一行发 [BEAT: {eid}]。"
+        else:
+            tag = "未满足"
+            tail = "条件未满足前不要抢跑。"
+        line = f"- [{tag}]「{title}」——条件：{when_text}；效果：{brief}"
         if who:
             line += f"；涉及：{who}"
-        line += f"；内容：{desc}；条件满足、叙述它发生的那一轮发 [SET_FLAG: {flag_txt}]"
+        line += "。" + tail
         lines.append(line)
     lines.append(
-        "待触发事件的条件**未满足前**：绝不抢跑——不叙述、不暗示它已经发生，涉及的 NPC "
-        "保持蛰伏（不现身、不逼近、不行动，也不要描写其形貌）；条件满足时再让它发生并置标志。"
+        "未满足的事件：绝不叙述、不暗示它已经发生，涉及的 NPC 保持蛰伏。"
+        "触发时用 [BEAT: 事件id]——不要自己把传送、扣 SAN、置标志写进旁白，"
+        "那些由系统按事件效果确定性执行。"
     )
     return "\n".join(lines)
 
 
 def _sec_plot_events(c: _SectionCtx) -> str | None:
-    text = _format_plot_events(c.module, c.facts.flags)
+    text = _format_plot_events(
+        c.module, c.session, c.facts.flags, is_opening=c.facts.is_opening,
+    )
     return "\n\n" + text if text else None
 
 
@@ -1605,6 +1663,27 @@ def _assemble_kp_messages(
         # 前两件按模组数据/在场队伍动态出现，落点恒为 KP_OPENING_PROMPT（场景钩子）。
         # 注意：这些只是「开场白要涵盖的内容」，绝不能在叙述里出现编号或小标题（不着痕迹地融为一体）。
         beats: list[str] = []
+        # v3 开场事件：world.opening_beats 指定的导入段落必须先演，再落到起始场景。
+        # 这些事件的效果（SAN、传送）由 [BEAT] 协议执行，不靠模型记。
+        opening_ids = [str(x) for x in (ws.get("opening_beats") or []) if str(x).strip()]
+        if opening_ids:
+            flow_events = module_flow.normalize_events(
+                getattr(module, "events", None), getattr(module, "scenes", None),
+            )
+            by_id = {str(e.get("id")): e for e in flow_events}
+            for oid in opening_ids:
+                ev = by_id.get(oid)
+                if not ev:
+                    continue
+                brief = "；".join(
+                    module_flow.effect_brief(e) for e in (ev.get("effects") or [])
+                ) or "（纯演出）"
+                cond = str((ev.get("when") or {}).get("text") or "").strip()
+                beats.append(
+                    f"先演出开场事件「{ev.get('title') or oid}」"
+                    + (f"（{cond}）" if cond else "")
+                    + f"，效果：{brief}；演完在段末发 [BEAT: {oid}]"
+                )
         intro = ws.get("intro")
         if intro and str(intro).strip():
             beats.append(
@@ -1622,7 +1701,8 @@ def _assemble_kp_messages(
             opening = (
                 "游戏即将开始。请朗读一段**连贯自然**的开场白，把下面几件事不着痕迹地融成一个整体——"
                 "像电影开场般顺滑过渡，**不要分点、不要出现编号或「第一/第二」「世界观导入」之类小标题**，"
-                "也不要剧透：\n"
+                "也不要剧透；**绝不写任何面向玩家的元叙事**——不写内容提示、不写「这个模组包含什么」、"
+                "不写「请确认同桌能接受」，也不对玩家说话；那些属于桌面信息，永远不进旁白：\n"
                 + "；\n".join(beats)
                 + "。\n最后自然落到眼前的起始场景——\n"
                 + KP_OPENING_PROMPT

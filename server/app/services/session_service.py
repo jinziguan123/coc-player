@@ -240,6 +240,14 @@ def create_session(
     first = next(iter(scene_kind.location_scenes(module.scenes)), None) or next(
         (s for s in module.scenes or [] if isinstance(s, dict)), None,
     )
+    # v3：模组可用 world_setting.start 显式指定开场地点（关系图入口），优先于「第一个地点」。
+    # 起始地必须是 location，否则忽略——不能把玩家放进章节/事件节点。
+    start = str((module.world_setting or {}).get("start") or "").strip()
+    if start:
+        first = next(
+            (s for s in scene_kind.location_scenes(module.scenes) if str(s.get("id")) == start),
+            first,
+        )
     first_scene_id = first.get("id") if first else None
 
     # **建局恒为建房**：一律落在 setup，由大厅统一开局。

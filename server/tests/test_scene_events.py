@@ -322,7 +322,8 @@ def test_KP上下文给出待触发事件与蛰伏标注():
     ))
     assert "【剧情事件】" in text
     assert "[待触发]「可怖之物苏醒」" in text
-    assert "[SET_FLAG: monster_awake]" in text
+    # v3：事件由 [BEAT] 触发并由系统结算效果，不再教 KP 自己置标志
+    assert "[BEAT: " in text
     assert "蛰伏中：待剧情事件「可怖之物苏醒」触发前" in text
 
     session.world_state["flags"] = ["monster_awake", "trapped_in_tomb"]

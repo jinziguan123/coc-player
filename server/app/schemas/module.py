@@ -20,7 +20,13 @@ class ModuleRead(BaseModel):
     world_setting: dict
     # 车卡建议：玩家针对本模组建角色时的取向与限制，见 module_service。
     character_guidance: dict = {}
+    # 结构化版本：1=旧结构，3=事件/条件/效果
+    schema_version: int = 1
     scenes: list
+    # 剧情事件（v3）：不参与导航，带可执行效果
+    events: list = []
+    # 解析期结构校验结果（errors/warnings）
+    validation: dict = {}
     npcs: list
     clues: list
     map_nodes: list = []
@@ -52,6 +58,8 @@ class ModuleWrite(BaseModel):
     # None = 本次编辑不动车卡建议（防旧前端把它清空，与 truth 同一处理）
     character_guidance: dict | None = None
     scenes: list = []
+    # None = 本次编辑不动事件（防旧客户端把 v3 事件清空）
+    events: list | None = None
     # None 表示旧客户端未提交地图节点，更新时保留服务端已有普通节点。
     map_nodes: list | None = None
     npcs: list = []

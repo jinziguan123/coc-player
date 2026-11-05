@@ -396,6 +396,19 @@ REGISTRY: tuple[ToolSpec, ...] = (
         kind="lookup",
     ),
     ToolSpec(
+        name="beat",
+        tag="BEAT",
+        description=(
+            "触发一个模组剧情事件：「剧情事件」小节列出的可触发事件，在叙述它发生的那一轮调用。"
+            "系统会按事件声明的效果确定性结算（传送、置标志、揭示线索、结局等），你只需按结算结果"
+            "继续叙述；不要自己把传送/扣数值/置标志写进旁白。"
+        ),
+        parameters=_params({
+            "id": {"type": "string", "description": "事件 id（见剧情事件小节）"},
+        }, ["id"]),
+        kind="state",
+    ),
+    ToolSpec(
         name="set_flag",
         tag="SET_FLAG",
         description=(
@@ -550,9 +563,9 @@ def _tool_mode_base() -> dict:
             "【工具调用模式】本会话已启用标准工具调用：上文提到的方括号指令"
             "（[DICE_CHECK]、[OPPOSED_CHECK]、[SAN_CHECK]、[HP_CHANGE]、[NPC_ACT]、"
             "[SCENE_CHANGE]、[RULE_LOOKUP]、[MODULE_LOOKUP]、[SET_FLAG]、[CLEAR_FLAG]、"
-            "[HANDOUT]、[MARK_SEEN]、[SET_MOOD]）一律改为调用对应的同名工具（dice_check、opposed_check、"
+            "[HANDOUT]、[MARK_SEEN]、[SET_MOOD]、[BEAT]）一律改为调用对应的同名工具（dice_check、opposed_check、"
             "san_check、hp_change、npc_act、scene_change、rule_lookup、module_lookup、"
-            "set_flag、clear_flag、handout、mark_seen、set_mood），不要把这些指令写成文本。"
+            "set_flag、clear_flag、handout、mark_seen、set_mood、beat），不要把这些指令写成文本。"
             "**有名 NPC 开口/行动一律调用 npc_act(npc_id, trigger)**，由 NPC 人格代理"
             "基于该 NPC 自己的记忆与知识边界生成台词；**只有没有正式 NPC 卡的临场龙套**才用"
             " say(who, text) 写一句环境台词。不要再把台词或 [SAY] 写进叙述文本。"

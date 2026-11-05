@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.llm_factory import get_fast_llm, get_llm, get_vision_llm
 from app.models.module import Module
-from app.services import scene_kind
+from app.services import module_flow, scene_kind
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,8 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
   "title": "模组标题",
   "description": "一句话简介（不超过30字，不要透露关键剧情）",
   "player_brief": "开场时玩家角色就合法知道的背景：他们的身份动机、当前处境、接到的委托或为何来到起始地点。只写玩家此刻本就清楚的前情，绝对不要包含任何需要在游戏中被发现的内容（尸体、笔记、隐藏线索、NPC 的秘密、剧情真相、失踪者下落等）。若模组没有明确的玩家前情，留空字符串。",
-  "intro": "面向全桌的【世界观与基调导入】，开场时朗读用：年代质感、地点风物、这是一类什么样的故事（恐怖/悬疑/冒险的调性与预期、内容警示）。它和 player_brief 不同——player_brief 是角色剧内已知的前情事实，intro 是把玩家带入世界的氛围与世界观铺陈。同样严守无剧透：绝不包含任何需要在游戏中被发现的线索/真相/NPC 秘密。若模组没有值得铺陈的世界观，留空字符串。",
+  "intro": "面向全桌的【氛围导入】，开场时朗读用：年代质感、地点风物、这是一类什么样的故事（恐怖/悬疑/冒险的调性）。**只写世界内的氛围，绝不写内容警示、meta 提示或向玩家喊话**；它和 player_brief 不同——player_brief 是角色剧内已知的前情事实。同样严守无剧透：绝不包含任何需要在游戏中被发现的线索/真相/NPC 秘密。若模组没有值得铺陈的世界观，留空字符串。",
+  "content_warning": "面向玩家的内容提示（桌面信息，**永不朗读**）：本模组包含哪些敏感内容、需要同桌确认什么。没有就留空字符串。",
   "player_count": "推荐游玩人数，如 1-4",
   "era": "背景年代标签，如 1920s、现代、中世纪、维多利亚时代",
   "region": "地区标签：模组主要发生地，简短一个，如 阿卡姆、伦敦、埃及、上海、北海道、虚构小镇名等",
@@ -30,7 +31,9 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
   "world_setting": {{
     "era": "详细时代背景描述",
     "location": "地点",
-    "tone": "基调（如恐怖、悬疑、冒险）"
+    "tone": "基调（如恐怖、悬疑、冒险）",
+    "start": "开场落地的地点 id（必须来自 scenes 里的 location）",
+    "opening_beats": ["开场必须先演的事件 id（如 ev_dream）；没有就空数组"]
   }},
   "truth": "幕后真相（守秘人资讯）：整个事件**真正发生了什么**——幕后黑手/元凶是谁、动机为何、按时间顺序的来龙去脉、各 NPC 在其中扮演的角色、玩家介入时局面处于哪一步。模组开头的『守秘人资讯/背景真相/KP须知』一类章节要**完整浓缩收录于此**（可以多段，宁全勿缺）。这是 KP 专属参考，玩家永远不可见。模组没有此类内容时留空字符串",
   "scenes": [
@@ -41,18 +44,40 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
       "danger": "该场景的危险等级，仅限四选一：calm（安全平静）/uneasy（隐隐不安）/dangerous（明确危险）/deadly（致命凶险）",
       "atmosphere": "一句话氛围基调，给 KP 渲染用：以感官（声/味/光/体感）+ 情绪基调描述，如『腐臭、低压、木板随时塌陷』。不要写成剧透或台词",
       "mood": "配乐氛围，仅限六选一：calm（安宁，歇脚/白天的安全处）/explore（调查，默认）/tense（不安）/horror（恐怖）/mythos（神话显现，直面超自然）/sorrow（悲伤）。按玩家**身处此地时**的主基调选，拿不准就 explore",
-      "kind": "三选一：location（一个真实存在、玩家能前往的地点，默认）/ chapter（纯叙事章节或抽象阶段，如『委托与准备』『尾声』）/ event（按条件触发的剧情段落，如『导入：困于帝王谷』『可怖之物苏醒』）——chapter 与 event 都不是地点，不上地图、不可前往",
-      "when": "仅 kind=event：触发条件，**照抄模组原文**（如『约30-40分钟后（调查员探索完前室和耳室时）』）；其他类型留空字符串",
-      "npcs": ["仅 kind=event：该事件中登场或采取行动的 NPC id（取自 npcs 清单）——事件触发前这些 NPC 处于蛰伏，不会对玩家采取行动；其他类型留空数组"],
-      "set_flags": ["仅 kind=event：事件触发后置上的剧情标志名，优先复用 triggers 里同一情节的 set_flags（如 monster_awake）；其他类型留空数组"],
+      "kind": "二选一：location（真实存在、玩家能前往的地点，默认）/ chapter（纯叙事章节或抽象阶段，如『委托与准备』『尾声』）。**剧情事件不是场景，一律写到顶层 events**",
       "keywords": ["解锁关键词：玩家在对话/行动里提到其中任意一个，大地图就解锁该地点，因此**每个词都必须是『这个地点的称呼』**。覆盖：完整地名、核心地名（去掉『废墟/遗址/旧址』等状态词，如『沉思礼拜堂废墟』→『沉思礼拜堂』）、通俗设施名（礼拜堂/图书馆）、专名（沉思/科比特/罗克斯伯里）、模组原文里的门牌地址或俗称/绰号，以及数字写法变体（『2号车厢』要含『二号车厢』）。**绝不要该场景的内容词**：场景里的物件（行李/钥匙/报纸）、人物或怪物（乘务员/循声者）、氛围描写（黑暗/血腥/喘息）都不是地点称呼——这类词一旦出现在任何叙述里就会误解锁该地点、提前剧透。2-6 个，每个≥2字；不要过泛的通用词（如『房间』『那边』『房子』『街区』）。chapter 类场景留空数组"],
       "connections": ["scene_2"],
+      "exits": [{{"to": "scene_2", "direction": "up", "label": "朝坡上去", "condition": {{"text": "POW 检定成功", "expr": null}}, "hidden": false, "one_way": false}}],
       "map": {{"q": 0, "r": -2, "biome": "地貌，仅限十一选一：plain/forest/water/coast/desert/mountain/swamp/urban/ruin/interior/road"}},
-      "events": [
-        {{"trigger": "触发情景，自然语言：进入场景即目睹/翻动尸体/打开衣柜/点灯后……", "kind": "四选一：san_check（见恐怖景象掷理智）/dice_check（需技能检定）/damage（陷阱或环境伤害）/note（其他机制性提示）", "san_loss": "kind=san_check 时的损失规格，**照抄模组原文**（如 0/1d3、1/1d6+1）", "skill": "kind=dice_check 时的技能名", "damage": "kind=damage 时的伤害骰式（如 1d6）", "note": "补充说明或后果"}}
-      ],
       "states": [
         {{"when": ["剧情标志名，如 basement_flooded"], "danger": "切换后的危险度", "atmosphere": "切换后的氛围", "mood": "（可选）切换后的配乐氛围", "description": "（可选）切换后的场景描述，覆盖默认", "structural": false}}
+      ]
+    }}
+  ],
+  "events": [
+    {{
+      "id": "ev_climb",
+      "title": "朝山顶走",
+      "at": "scene_1",
+      "phase": "四选一：opening（开场导入）/ scene（场景内）/ climax（高潮）/ ending（收场）",
+      "once": true,
+      "when": {{"text": "玩家试图朝山顶方向走（**照抄模组原文的触发条件**）", "expr": {{"at": "scene_1"}}}},
+      "npcs": ["该事件中登场或采取行动的 NPC id；没有就空数组"],
+      "effects": [
+        {{"type": "check", "skill": "意志", "difficulty": "POW", "on_success": [{{"type": "goto", "target": "scene_top"}}], "on_failure": [{{"type": "narration", "text": "身体本能地拒绝前行"}}]}},
+        {{"type": "sanity", "loss": "1/1d3", "targets": "party"}},
+        {{"type": "damage", "dice": "1d6", "targets": "actor"}},
+        {{"type": "heal", "amount": "1d3", "targets": "actor"}},
+        {{"type": "set_flag", "flag": "door_open"}},
+        {{"type": "clear_flag", "flag": "monster_dormant"}},
+        {{"type": "reveal_clue", "clue_id": "clue_1"}},
+        {{"type": "grant_item", "item": "御守"}},
+        {{"type": "remove_item", "item": "手电筒"}},
+        {{"type": "npc_state", "npc_id": "npc_1", "alive": false, "location": "scene_3"}},
+        {{"type": "unlock", "location_id": "scene_4"}},
+        {{"type": "block", "location_id": "scene_5"}},
+        {{"type": "ending", "ending_id": "ending_a"}},
+        {{"type": "narration", "text": "给 KP 的演出提示（不影响世界状态）"}}
       ]
     }}
   ],
@@ -113,7 +138,7 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     {{
       "id": "ending_a",
       "name": "结局名（照抄原文的叫法，如 结局A：冲出隧道）",
-      "when": "**达成条件**，写成可判定的一句话：玩家做了什么/发生了什么就算抵达这个结局（如『把油门拉杆推到底让电车加速』『全员在天亮前逃出宅邸』『调查员全部死亡或发疯』）",
+      "when": {{"text": "**达成条件**，写成可判定的一句话：玩家做了什么/发生了什么就算抵达这个结局", "expr": {{"flag": "pulled_the_lever"}}}},
       "description": "这个结局如何收场：会发生什么、调查员的下场、留下什么余韵（KP 据此演出终局）",
       "is_good": true
     }}
@@ -147,10 +172,12 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     - triggers 列出"何时该置/清哪个标志"：when 用自然语言写触发条件，set_flags/clear_flags 写标志名。
     - **标志名必须前后一致呼应**：triggers.set_flags 用到的标志，要在某场景/NPC 的 states.when 里被消费；
       反之 states.when 引用的标志，应有某个 trigger 负责置上。没有任何随剧情变化的内容时，triggers 留空数组 []。
-    - **剧情事件（kind=event）不是地点**：模组里「某条件下发生某事」的段落（导入、怪物苏醒、NPC 归来、
-      风暴降临……）写成 kind=event 的场景，when 照抄原文的触发条件，npcs 列出事件里登场/行动的 NPC，
-      set_flags 写触发后置的标志（与 triggers 里同一情节呼应）；事件发生的地点用 connections 指向
-      对应的 location。事件不给 map、keywords，绝不能把事件写成 location。
+    - **剧情事件不是场景，写到顶层 events**：模组里「某条件下发生某事」的段落（导入、怪物苏醒、
+      NPC 归来、风暴降临、山火、追逐）一律写 events，不要塞进 scenes，也不要只写在场景描述里。
+      每个事件给 at（发生地点的 id）、when（text 照抄原文条件）、effects（可执行后果，见第 21 条）；
+      「玩家被传送到某处」写 goto，「置标志」写 set_flag，绝不要只写在文字说明里。
+    - 同一件事不要同时写成事件和 trigger：能用事件表达就用事件；只有「没有具体后果、只切换
+      场景/NPC 样貌」的转折才留在 triggers（见上）。
 11. 每个 NPC 给出 attributes（CoC 九维 STR/CON/SIZ/DEX/APP/INT/POW/EDU/LUCK，0-90 整数，按身份合理估计）
     与 background（生平来历）：attributes 供战斗/属性对抗与派生值使用；background 写来历渊源，与 secrets 区分。
 12. handouts 只收模组原文**给出了完整正文**的文书（信件/报纸/日记/便条等「递给玩家看的实体道具」）：
@@ -165,8 +192,9 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     也避免『房间』『房子』『街区』这类过泛通用词。chapter / event 类场景 keywords 留空数组 []。
 14. truth（幕后真相）**宁全勿缺**：模组的守秘人资讯是 KP 运转的根基，凡「真正发生了什么」的
     叙述都要收进去；它与 NPC 的 secrets 不冲突（secrets 是单个 NPC 的秘密，truth 是全局真相）。
-15. 场景 events 只收模组**明文规定**的机制点（原文写了「目睹 X 需 0/1d3 理智检定」「触碰 Y 受
-    1d6 伤害」之类）：数值一律照抄原文，绝不自行估值；模组没写的不要编造。无机制点留空数组 []。
+15. 事件的 effects 只收模组**明文规定**的后果：检定、理智损失、伤害、传送、置标志、给物品、
+    抵达结局……数值一律照抄原文，绝不自行估值；模组没写的不要编造。没有任何可执行后果的事件，
+    effects 里只放一条 narration（演出提示）。
 16. 每个 location 场景给出 map（沙盘落位提议）：q/r 为六边形 axial 整数坐标，表达场景间的
     **相对方位**（东为 +q；正北为 (+1,-2) 方向、西北为 (0,-1)、东北为 (+1,-1)；坐标是象征性
     相对位置，不是测绘，无需比例尺）。依据模组文本的方位/空间语义落位：「镇北的教堂」放在
@@ -186,9 +214,9 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     半角括号标专精，不要写「战斗」「射击：手枪」这类自创名或全角标点。
 17. endings 收齐模组写明的**全部**收场分支（原文常写作「结局A/B」「尾声」「失败结局」）：
     包括成功逃脱/达成目的的好结局、代价惨重的坏结局，以及全员死亡/发疯这类失败结局。
-    **when 是这一条最要紧的字段**——必须写成「玩家做了什么就算抵达这个结局」的可判定条件，
+    **when 是这一条最要紧的字段**——写成 {{"text": "玩家做了什么就算抵达这个结局", "expr": 结构化条件或 null}}，
     而不是结局的描述。原文只在某个场景的选择里交代了结局（如「加速：结局A；减速：结局B」）时，
-    也要把它们提成独立的 endings 条目，when 写清那个动作。原文确实没有明确结局分支的模组，
+    也要把它们提成独立的 endings 条目，when.text 写清那个动作。原文确实没有明确结局分支的模组，
     给空数组，不要编造。
 18. aliases 收齐**这个角色本人**在场上会被叫到的其它称呼：姓氏+敬称（史蒂芬·诺特 →「诺特先生」
     「诺特」）、常用单名、绰号、职务称呼（「警长」「老板娘」）。系统靠它判断「玩家是否已经
@@ -205,6 +233,19 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
     判据是**玩家第一眼看到的样子**，不是它究竟是什么：半幽灵在玩家眼里就是个穿学生服的
     青年，写「陌生男性」；反过来，披着人形的怪物若一眼就看得出不对，写「不明存在」。
     这个字段绝不能泄底——「不死恶魔」「腐烂的小女孩」这种把身份说破的写法一律不行。
+20. 结构化条件（when.expr）只允许下面这些写法；写不出来就填 null，但 text 必须保留原文：
+    - 原子：{{"flag": "x"}} / {{"at": "scene_1"}} / {{"visited": "scene_1"}} /
+      {{"clue_known": "clue_1"}} / {{"has_item": "手电筒"}} / {{"phase": "opening"}}
+    - 组合：{{"all": [...]}} / {{"any": [...]}} / {{"not": {{...}}}}
+21. effects 的 type 只能取以下 15 种，且必须有可执行后果：
+    check（检定，必填 skill；成功/失败后果放 on_success/on_failure）/ sanity（loss）/
+    damage（dice）/ heal（amount）/ goto（target）/ set_flag（flag）/ clear_flag（flag）/
+    reveal_clue（clue_id）/ grant_item（item）/ remove_item（item）/ npc_state（npc_id）/
+    unlock（location_id）/ block（location_id）/ ending（ending_id）/ narration（text）。
+    - 「检定成功才能去某处」写成 check 的 on_success 里放 goto，不要把两件事拆成两个事件；
+    - narration 只用于纯演出提示，绝不把机械后果写进 narration；
+    - 所有 id 必须真实存在：goto.target 是 location id，reveal_clue.clue_id 是 clues id，
+      ending.ending_id 是 endings id，npc_state.npc_id 是 npcs id。
 
 模组文本：
 {content}"""
@@ -303,7 +344,8 @@ SUPPLEMENT_PROMPT_TEMPLATE = """你是 {rule_system} 模组解析的质检员。
 
 {{
   "truth": "首轮 truth 遗漏的幕后真相补充（真凶/动机/时间线/来龙去脉）；已收录完整则空字符串",
-  "scenes": ["仅两种条目：①整个被遗漏的场景（完整场景对象，字段同首轮）；②已有场景遗漏了机制点时，给 {{\\"id\\": \\"已有场景id\\", \\"events\\": [仅遗漏的机制点]}}——events 数值照抄原文（如 0/1d3）"],
+  "scenes": ["仅整个被遗漏的地点（完整场景对象，字段同首轮）；v3 起场景内不再有 events"],
+  "events": ["仅两种条目：①整个被遗漏的剧情事件（完整对象，含 id/at/phase/once/when/effects）；②已有事件遗漏了效果时，返回它的 id 与仅遗漏的 effects 数组——效果数值照抄原文"],
   "npcs": ["仅两种条目：①整个被遗漏的 NPC/怪物（完整对象，含 attributes/skills/hp/armor/weapon/damage/goals；怪物的自创攻击方式要有同名技能与 damage）；②已有 NPC 遗漏关键字段时，给 {{\\"id\\": \\"已有id\\", 仅补缺的字段}}"],
   "clues": ["仅整个被遗漏的线索（完整对象）"],
   "handouts": ["仅整个被遗漏的手书（完整对象，content 逐字照抄原文）"],
@@ -312,7 +354,7 @@ SUPPLEMENT_PROMPT_TEMPLATE = """你是 {rule_system} 模组解析的质检员。
 
 铁律：只补遗漏，**绝不重复、改写或删改已收录的内容**；没有遗漏就输出全空（空串/空数组）。
 重点排查：守秘人资讯/背景真相章节、进入场景或特定行动触发的理智检定与伤害（数值照抄）、
-怪物资料（hp/护甲/攻击方式）、被跳过的场景或 NPC、给了完整正文却没收的手书。
+怪物资料（hp/护甲/攻击方式）、被跳过的场景或 NPC、被漏掉的剧情事件（带传送/置标志/结局的转折）、给了完整正文却没收的手书。
 **逐个核对 NPC 的 gender**：首轮常整份留空，而它一空，守秘人就只能按名字猜——外文译名
 （加布里埃尔、艾希礼）在中文里看不出性别，一猜错，那个角色整局都会被写成另一个性别。
 依据原文里的称呼与身份关系判断（妻子/女儿/太太→female，丈夫/儿子/先生→male），
@@ -365,6 +407,43 @@ def _merge_supplement(parsed: dict, patch: dict) -> dict:
         if extra:
             target["events"] = list(target.get("events") or []) + extra
     out["scenes"] = scenes
+
+    # events：新事件追加；已有事件只补缺——空的 when/at 填上，遗漏的效果按类型+参数去重追加
+    events = [dict(e) for e in (out.get("events") or []) if isinstance(e, dict)]
+    have = _by_id(events)
+    for item in (patch or {}).get("events") or []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        eid = str(item["id"])
+        if eid not in have:
+            events.append(item)
+            continue
+        target = have[eid]
+        for key in ("at", "phase", "title"):
+            if not str(target.get(key) or "").strip() and str(item.get(key) or "").strip():
+                target[key] = item[key]
+        cur_when = target.get("when")
+        if isinstance(cur_when, dict):
+            cur_text = str(cur_when.get("text") or "")
+        else:
+            cur_text = str(cur_when or "")
+        if not cur_text.strip() and item.get("when"):
+            target["when"] = item["when"]
+        known = {
+            (str(e.get("type") or ""), str(e.get("skill") or ""), str(e.get("loss") or ""),
+             str(e.get("flag") or ""), str(e.get("target") or ""), str(e.get("text") or ""))
+            for e in (target.get("effects") or []) if isinstance(e, dict)
+        }
+        extra = [
+            e for e in (item.get("effects") or [])
+            if isinstance(e, dict) and (
+                str(e.get("type") or ""), str(e.get("skill") or ""), str(e.get("loss") or ""),
+                str(e.get("flag") or ""), str(e.get("target") or ""), str(e.get("text") or ""),
+            ) not in known
+        ]
+        if extra:
+            target["effects"] = list(target.get("effects") or []) + extra
+    out["events"] = events
 
     # npcs：新 NPC 追加；已有 NPC 只填缺失字段（列表字段追加去重）
     npcs = [dict(n) for n in (out.get("npcs") or [])]
@@ -965,6 +1044,21 @@ def _normalize_map_nodes(map_nodes: list | None, scenes: list) -> list:
     return nodes
 
 
+def _split_flow(data: dict, scenes: list) -> tuple[list, list, dict]:
+    """把解析产物整理成「纯地点 + v3 事件 + 校验报告」。
+
+    v3 起事件不再是场景：旧结构里 kind=event 的条目由 normalize_events 提升为事件，
+    随后从 scenes 里移除——导航、关系图、上下文只面对真正的地点。
+    """
+    events = module_flow.normalize_events(data.get("events"), data.get("scenes"))
+    locations = [
+        s for s in scenes
+        if isinstance(s, dict) and scene_kind.scene_kind(s) != scene_kind.EVENT
+    ]
+    report = module_flow.validate_module({**data, "scenes": locations, "events": events})
+    return locations, events, report
+
+
 def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
     world_setting = data.get("world_setting", {})
     for key in ("player_count", "era", "region", "difficulty", "tags", "player_brief", "intro"):
@@ -977,14 +1071,18 @@ def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
         world_setting["difficulty"] = ""
 
     scenes = _normalize_scenes(data.get("scenes", []), data.get("npcs", []))
+    locations, events, report = _split_flow(data, scenes)
     module = Module(
         title=data.get("title", "未命名模组"),
         rule_system=data.get("rule_system", "coc"),
         description=data.get("description", ""),
         world_setting=world_setting,
         raw_content=raw_content,
-        scenes=scenes,
-        map_nodes=_normalize_map_nodes(data.get("map_nodes"), scenes),
+        scenes=locations,
+        events=events,
+        validation=report,
+        schema_version=module_flow.SCHEMA_VERSION,
+        map_nodes=_normalize_map_nodes(data.get("map_nodes"), locations),
         npcs=data.get("npcs", []),
         clues=data.get("clues", []),
         triggers=data.get("triggers", []),
@@ -1017,9 +1115,17 @@ def update_module(db: Session, module_id: str, data: dict) -> Module | None:
         if ws.get("difficulty") not in MODULE_DIFFICULTIES:
             ws["difficulty"] = ""
         module.world_setting = ws
+    if "events" in data and data["events"] is not None:
+        module.events = module_flow.normalize_events(data["events"], module.scenes)
     if "scenes" in data and data["scenes"] is not None:
         npcs = data["npcs"] if data.get("npcs") is not None else module.npcs
-        module.scenes = _normalize_scenes(data["scenes"], npcs or [])
+        normalized = _normalize_scenes(data["scenes"], npcs or [])
+        # 兼容旧客户端：scenes 里仍可能夹带 kind=event，先提升为事件再从地点里剔除
+        module.events = module_flow.normalize_events(module.events, normalized)
+        module.scenes = [
+            s for s in normalized
+            if scene_kind.scene_kind(s) != scene_kind.EVENT
+        ]
     if "map_nodes" in data and data["map_nodes"] is not None:
         module.map_nodes = _normalize_map_nodes(data["map_nodes"], module.scenes)
     else:
@@ -1043,6 +1149,17 @@ def update_module(db: Session, module_id: str, data: dict) -> Module | None:
     for field in ("default_narrative_style", "default_image_style"):
         if data.get(field) is not None:
             setattr(module, field, str(data[field]).strip())
+    # 每次保存都重算结构校验：悬空 flag、断链、不可达能当场暴露，而不是等玩家撞上
+    module.schema_version = module_flow.SCHEMA_VERSION
+    module.validation = module_flow.validate_module({
+        "world": module.world_setting or {},
+        "scenes": module.scenes or [],
+        "events": module.events or [],
+        "npcs": module.npcs or [],
+        "clues": module.clues or [],
+        "endings": module.endings or [],
+        "triggers": module.triggers or [],
+    })
     db.commit()
     db.refresh(module)
     return module
