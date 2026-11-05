@@ -11,24 +11,41 @@ class DiceRollResult:
     total: int = 0
 
 
+#: 单项：可选符号 + 骰式（数量可省略）或固定值。
+_TERM_RE = re.compile(r"(?P<sign>[+-]?)(?:(?P<count>\d*)d(?P<sides>\d+)|(?P<flat>\d+))")
+#: 整条表达式：固定值与骰式可以任意加减混排（模组原文常见「5+1d5」这类写法）。
+_EXPR_RE = re.compile(r"^[+-]?(?:\d*d\d+|\d+)(?:[+-](?:\d*d\d+|\d+))*$")
+
+
 def roll(notation: str) -> DiceRollResult:
-    """解析并执行骰子表达式，如 '2d6+3', '1d100', '3d6'"""
-    match = re.match(r"(\d+)d(\d+)([+-]\d+)?", notation.strip().lower())
-    if not match:
+    """解析并执行骰子表达式。
+
+    除了常规的 '2d6+3'、'1d100'、'3d6'，也支持模组原文里「固定值 + 骰」的写法：
+    '5+1d5'、'1d5+5'、'1d6-1'、'd5'（省略数量即 1 颗）。多项加减会合并求和。
+    """
+    text = re.sub(r"\s+", "", (notation or "").strip().lower())
+    if not text or not _EXPR_RE.match(text):
         raise ValueError(f"无效的骰子表达式: {notation}")
 
-    count = int(match.group(1))
-    sides = int(match.group(2))
-    modifier = int(match.group(3)) if match.group(3) else 0
-
-    rolls = [random.randint(1, sides) for _ in range(count)]
-    total = sum(rolls) + modifier
+    rolls: list[int] = []
+    modifier = 0
+    for match in _TERM_RE.finditer(text):
+        negative = match.group("sign") == "-"
+        if match.group("sides"):
+            count = int(match.group("count") or 1)
+            sides = int(match.group("sides"))
+            if negative or count <= 0 or sides <= 0:
+                raise ValueError(f"无效的骰子表达式: {notation}")
+            rolls.extend(random.randint(1, sides) for _ in range(count))
+        else:
+            value = int(match.group("flat"))
+            modifier += -value if negative else value
 
     return DiceRollResult(
         notation=notation,
         rolls=rolls,
         modifier=modifier,
-        total=total,
+        total=sum(rolls) + modifier,
     )
 
 
