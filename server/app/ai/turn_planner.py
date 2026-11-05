@@ -21,7 +21,7 @@ from app import agent_settings
 from app.ai import director_signals
 from app.ai.context import _active_flags, _resolve_state
 from app.models import Character, GameSession, Module
-from app.services import agent_runtime, plot_progress, scene_kind, session_service, world_memory
+from app.services import plot_progress, scene_kind, session_service, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -1080,9 +1080,9 @@ def planner_timeout_seconds() -> float:
 
 async def run_turn_planner(llm: Any, messages: list[dict]) -> TurnPlan | None:
     try:
-        messages = agent_runtime.ContextBundle.from_messages(
-            messages, budget_tokens=16000,
-        ).fit().for_model()
+        # 不设上下文预算：规划器的输入（真相、可见 NPC/线索、世界状态、规则条文）都是裁定要用的，
+        # 裁掉哪一块都可能让它判错；此前固定 16000 token，规则书改为整条返回后频繁超标，
+        # 规划器整轮放弃、回退无计划流程——比多花一点输入 token 糟得多。上限交给模型窗口。
         # 不设 max_tokens 硬上限：推理类模型的 reasoning 会占输出预算，硬上限（原为 1200）会让
         # content 被 reasoning 耗空、返回空串（表现为「原始片段为空」）。交由服务端默认上限。
         timeout = planner_timeout_seconds()

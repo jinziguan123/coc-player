@@ -76,19 +76,21 @@ def test_工具续写轮仍钉住最新玩家输入与完整工具交互():
     assert bundle.for_model()[0] == {"role": "system", "content": "身份"}
 
 
-def test_planner_上下文超预算时降级为无计划而非截断约束():
+def test_planner_不设上下文预算_大输入照常交给模型且不截断():
+    """规划器的输入都是裁定要用的：不再按固定预算放弃或截断，上限交给模型窗口。"""
     import asyncio
     from app.ai import turn_planner
 
-    class LLM:
-        called = False
+    big = "规则" * 20000
+    seen: list = []
 
-        async def complete(self, *a, **k):
-            LLM.called = True
+    class LLM:
+        async def complete(self, messages, *a, **k):
+            seen.extend(messages)
             return "{}"
 
-    plan = asyncio.run(turn_planner.run_turn_planner(LLM(), [
-        {"role": "system", "content": "规则" * 20000},
+    asyncio.run(turn_planner.run_turn_planner(LLM(), [
+        {"role": "system", "content": big},
         {"role": "user", "content": "行动"},
     ]))
-    assert plan is None and not LLM.called
+    assert seen and seen[0]["content"] == big and seen[-1]["content"] == "行动"
