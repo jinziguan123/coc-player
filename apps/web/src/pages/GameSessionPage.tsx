@@ -68,6 +68,7 @@ import { KpCombatSpread } from '../components/game/KpCombatSpread'
 import { KpDeskRail } from '../components/game/KpDeskRail'
 import { useKpCombatActions } from '../components/game/useKpCombatActions'
 import { useMinWidth } from '@/lib/useMinWidth'
+import { getMadnessRewriteEnabled } from '@/lib/theme'
 import { KpChaseStage } from '../components/game/KpChaseStage'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
@@ -263,6 +264,9 @@ export function GameSessionPage() {
   // 三份跟着角色/存档走的远端数据。切存档时作废在途请求的规矩统一在那个文件里，
   // 见 features/game-session/useSessionResources.ts。
   const panelChar = usePanelCharacter(shownCharId, refreshTick)
+  // 我的角色：疯狂边框与台词改写都按自己的状态判断，而不是当前查看的面板角色
+  const myChar = usePanelCharacter(myCharId, refreshTick)
+  const insane = !!myChar && ['temporary_insanity', 'indefinite_insanity', 'permanent_insanity'].includes(myChar.status)
   const myWeapons = useMyWeapons(myCharId, refreshTick)
   const { locations, mapNodes, mapBackdrop, canGodView } = useKnownLocations({
     sessionId, myCharId, sceneId: currentSession?.current_scene_id, refreshTick,
@@ -1342,7 +1346,12 @@ export function GameSessionPage() {
     // fire-and-forget：不做本地乐观回显，自己的消息同样经 /live 广播回来渲染，
     // 保证与其他成员看到的内容/顺序一致。
     const { inChar } = splitOOC(text)
-    const body = { content: text, acting_character_id: myCharId }
+    const body = {
+      content: text,
+      acting_character_id: myCharId,
+      // 疯狂台词改写：只在角色确实处于疯狂、且设置里没关掉时请求后端改写
+      madness_rewrite: Boolean(inChar) && getMadnessRewriteEnabled() && insane,
+    }
     try {
       if (!inChar) {
         await api.post(`/sessions/${currentSession.id}/ooc`, body)
@@ -1408,6 +1417,12 @@ export function GameSessionPage() {
       )}
       {sceneVeil && <div className="scene-veil" aria-hidden="true" />}
       {battleVeil && <div className="scene-veil" aria-hidden="true" />}
+      {insane && (
+        <div
+          className={`madness-vignette${myChar?.status === 'permanent_insanity' ? ' is-permanent' : ''}`}
+          aria-hidden="true"
+        />
+      )}
 
       {/* 顶栏工具行：从聊天列提上来横贯整页——沉浸战斗收栏时它不该跟着消失（含 KP 值班条） */}
       <div className="game-topbar flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 mb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>

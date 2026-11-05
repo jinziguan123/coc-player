@@ -150,6 +150,9 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
   const damageBonus = (sd.damageBonus as string) || '0'
   const build = sd.build as number
   const dodge = character.skills?.['闪避'] || 0
+  const madness = (sd.madness ?? null) as {
+    label?: string; manifest?: string; turns_left?: number
+  } | null
 
   const radarValues = RADAR_KEYS.map((k) =>
     k === 'LUK' ? luck : (character.base_attributes[k] || 0)
@@ -187,6 +190,12 @@ function BasicInfoTab({ character }: { character: CharacterData }) {
                 className={`chip mt-1 ${STATUS_DANGER.has(character.status) ? 'chip--solid-danger' : ''}`}
               >
                 {statusLabel(character.status)}
+              </span>
+            )}
+            {character.status === 'temporary_insanity' && madness?.label && (
+              <span className="chip mt-1" title={madness.manifest || undefined}>
+                症状：{madness.label}
+                {typeof madness.turns_left === 'number' ? ` · 剩 ${madness.turns_left} 回合` : ''}
               </span>
             )}
             <ConditionBadges systemData={character.system_data} ruleSystem={character.rule_system} />

@@ -175,11 +175,29 @@ async def chat(
     # 回合确认制：玩家发言只进入「本回合暂存」（打 pending_turn 标记、实时广播给同桌），
     # 不立即触发 KP。要等所有真人各自点「推进」确认后（见 /advance），才整批交 KP。
     segments = split_speech_action(in_character) or [("action", in_character)]
+    # 疯狂台词改写（设置开关）：只动引号内说出口的台词，行动文本与人名/目标保持原样。
+    madness_rewritten = False
+    if data.madness_rewrite:
+        from app.services import madness_voice
+
+        next_segments: list[tuple[str, str]] = []
+        for kind, seg_text in segments:
+            if kind == "dialogue":
+                new_text = await madness_voice.rewrite_dialogue(seg_text, player_char)
+                if new_text != seg_text:
+                    madness_rewritten = True
+                next_segments.append((kind, new_text))
+            else:
+                next_segments.append((kind, seg_text))
+        segments = next_segments
     for kind, seg_text in segments:
+        metadata = {"pending_turn": True}
+        if kind == "dialogue" and data.madness_rewrite:
+            metadata["madness_rewrite"] = madness_rewritten
         ev = session_service.add_event(
             db, session_id, kind, seg_text,
             actor_id=player_char.id, actor_name=player_char.name,
-            metadata={"pending_turn": True},
+            metadata=metadata,
         )
         room_hub.broadcast(session_id, event_to_chunk(ev))
     if ooc:

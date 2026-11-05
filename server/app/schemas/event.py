@@ -25,6 +25,8 @@ class ChatRequest(BaseModel):
     content: str
     # 多人：以哪个角色发言（不传则用会话主角，兼容单人）
     acting_character_id: str | None = None
+    # 玩家处在疯狂状态时，是否把台词改写成符合症状的口吻（前端设置开关控制）
+    madness_rewrite: bool = False
 
 
 class CheckRequest(BaseModel):

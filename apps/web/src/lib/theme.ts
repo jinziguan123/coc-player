@@ -71,6 +71,23 @@ export function setSceneBackdropEnabled(on: boolean): void {
   } catch { /* 存不下就只在本次会话生效 */ }
 }
 
+const MADNESS_REWRITE_KEY = 'trpg_madness_rewrite'
+
+/** 疯狂发作时是否把玩家说出口的台词改写成符合症状的口吻（缺省开，可在设置里关）。 */
+export function getMadnessRewriteEnabled(): boolean {
+  try {
+    return localStorage.getItem(MADNESS_REWRITE_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function setMadnessRewriteEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(MADNESS_REWRITE_KEY, on ? '1' : '0')
+  } catch { /* 存不下就只在本次会话生效 */ }
+}
+
 /**
  * 局内的显示方式：
  * - 'chat'：聊天流（缺省）。场景图在流里清晰出现一次，此后糊成氛围底；

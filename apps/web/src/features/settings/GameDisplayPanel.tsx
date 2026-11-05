@@ -1,5 +1,8 @@
 import { useState } from 'react'
-import { getSceneBackdropEnabled, setSceneBackdropEnabled, type GameDisplayMode } from '@/lib/theme'
+import {
+  getMadnessRewriteEnabled, getSceneBackdropEnabled,
+  setMadnessRewriteEnabled, setSceneBackdropEnabled, type GameDisplayMode,
+} from '@/lib/theme'
 import { useGameDisplay } from '@/features/game-session/vn/useGameDisplay'
 
 const MODES: Array<{ value: GameDisplayMode; label: string; desc: string }> = [
@@ -15,6 +18,7 @@ const MODES: Array<{ value: GameDisplayMode; label: string; desc: string }> = [
 export function GameDisplayPanel() {
   const [mode, setMode] = useGameDisplay()
   const [backdrop, setBackdrop] = useState(() => getSceneBackdropEnabled())
+  const [madnessVoice, setMadnessVoice] = useState(() => getMadnessRewriteEnabled())
   return (
     <div className="card">
       <h3 className="card-title">局内显示</h3>
@@ -59,6 +63,24 @@ export function GameDisplayPanel() {
       <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: '0.4rem' }}>
         把当前场景的配图重度模糊后铺在对局界面后面，只留下这个地方的色调，换场景时跟着变；不影响读字。
         没有配图的场景（未配置生图模型，或图还在生成）自动回落到主题底色。
+      </p>
+      <label
+        className="text-sm"
+        style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginTop: '1rem', cursor: 'pointer' }}
+      >
+        <input
+          type="checkbox"
+          checked={madnessVoice}
+          onChange={(e) => {
+            setMadnessRewriteEnabled(e.target.checked)
+            setMadnessVoice(e.target.checked)
+          }}
+        />
+        <span>疯狂发作时改写我说出口的台词</span>
+      </label>
+      <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: '0.4rem' }}>
+        角色处于临时/不定期/永久疯狂时，用「」引号包住的台词会经一次模型改写，带上症状的口吻；
+        只调整措辞，保留原意、人名与目标，行动描述和场外发言不受影响。关掉则按原文发送。
       </p>
     </div>
   )
