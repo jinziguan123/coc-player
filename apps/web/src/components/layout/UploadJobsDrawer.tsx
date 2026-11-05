@@ -1,12 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, m } from 'motion/react'
 import type { IconType } from 'react-icons'
 import {
-  GiArchiveResearch, GiBookCover, GiCloudDownload, GiCycle, GiSandsOfTime, GiScrollUnfurled,
+  GiArchiveResearch, GiBookCover, GiCloudDownload, GiCycle, GiPaintBrush, GiSandsOfTime, GiScrollUnfurled,
 } from 'react-icons/gi'
 import { Ban, CircleAlert, CircleCheck, Loader2, RefreshCw, X } from 'lucide-react'
+import { toast } from 'sonner'
+import { localApi } from '@/api/client'
 import { spring } from '@/lib/motion'
 import { runningJobCount, useUploadJobsStore, type UploadJob } from '@/stores/uploadJobsStore'
 
@@ -17,6 +19,7 @@ const KIND_ICON: Record<string, IconType> = {
   rulebook: GiBookCover,
   embed_download: GiCloudDownload,
   embed_rebuild: GiCycle,
+  module_image: GiPaintBrush,
 }
 
 function timeLabel(sec: number) {
@@ -24,7 +27,14 @@ function timeLabel(sec: number) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-function JobItem({ job, onDismiss, onNavigate }: { job: UploadJob; onDismiss: () => void; onNavigate: () => void }) {
+function JobItem({ job, onDismiss, onNavigate, onGenerateImages, onSkipImages, hideImagePrompt }: {
+  job: UploadJob
+  onDismiss: () => void
+  onNavigate: () => void
+  onGenerateImages: () => void
+  onSkipImages: () => void
+  hideImagePrompt: boolean
+}) {
   const KindIcon = KIND_ICON[job.kind] ?? GiSandsOfTime
   return (
     <li className="upload-job">
@@ -66,6 +76,21 @@ function JobItem({ job, onDismiss, onNavigate }: { job: UploadJob; onDismiss: ()
       {job.status !== 'running' && job.status !== 'failed' && job.stage && (
         <p className="upload-job-note">{job.stage}</p>
       )}
+      {job.status === 'done' && job.kind === 'module' && job.link && !hideImagePrompt && (
+        <div className="flex items-center gap-3 mt-2">
+          <button type="button" className="btn-secondary btn-sm" onClick={onGenerateImages}>
+            <GiPaintBrush size={13} aria-hidden /> 生成配图
+          </button>
+          <button
+            type="button"
+            className="text-xs underline"
+            style={{ color: 'var(--color-text-secondary)' }}
+            onClick={onSkipImages}
+          >
+            暂不生成
+          </button>
+        </div>
+      )}
       {job.status === 'done' && job.link && (
         <Link to={job.link.to} className="upload-job-link" onClick={onNavigate}>
           <KindIcon aria-hidden /> {job.link.label}
@@ -79,6 +104,29 @@ function JobItem({ job, onDismiss, onNavigate }: { job: UploadJob; onDismiss: ()
 export function UploadJobsDrawer() {
   const { jobs, open, setOpen, refresh, dismiss, clearFinished } = useUploadJobsStore()
   const finished = jobs.length - runningJobCount(jobs)
+  // 解析完成后的「要不要配图」只在这一页生命周期内问一次；点了任一个就不再打扰
+  const [hiddenImagePrompts, setHiddenImagePrompts] = useState<Set<string>>(new Set())
+  const [startingImageJobs, setStartingImageJobs] = useState<Set<string>>(new Set())
+
+  const generateImages = async (job: UploadJob) => {
+    const moduleId = job.link?.to.split('/').filter(Boolean).pop()
+    if (!moduleId) return
+    setStartingImageJobs((s) => new Set(s).add(job.id))
+    try {
+      const res = await localApi.post<{ task_id: string }>(`/modules/${moduleId}/images/generate`, {})
+      toast.success('已开始生成模组配图')
+      if (res?.task_id) await useUploadJobsStore.getState().track(res.task_id)
+      setHiddenImagePrompts((s) => new Set(s).add(job.id))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '生成配图失败')
+    } finally {
+      setStartingImageJobs((s) => {
+        const next = new Set(s)
+        next.delete(job.id)
+        return next
+      })
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -118,7 +166,15 @@ export function UploadJobsDrawer() {
             ) : (
               <ul className="upload-jobs-list">
                 {jobs.map((job) => (
-                  <JobItem key={job.id} job={job} onDismiss={() => void dismiss(job.id)} onNavigate={() => setOpen(false)} />
+                  <JobItem
+                    key={job.id}
+                    job={job}
+                    onDismiss={() => void dismiss(job.id)}
+                    onNavigate={() => setOpen(false)}
+                    onGenerateImages={() => void generateImages(job)}
+                    onSkipImages={() => setHiddenImagePrompts((s) => new Set(s).add(job.id))}
+                    hideImagePrompt={hiddenImagePrompts.has(job.id) || startingImageJobs.has(job.id)}
+                  />
                 ))}
               </ul>
             )}

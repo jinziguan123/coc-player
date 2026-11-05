@@ -143,6 +143,10 @@ def _kick_rag_index(background, db: Session, module) -> None:
 router = APIRouter(prefix="/api/modules", tags=["modules"])
 
 
+class GenerateModuleImagesRequest(BaseModel):
+    #: True = 连已有图片也重出；默认只补缺失（解析后自动配图的语义）
+    force: bool = False
+
 class ModuleImageRegenerateRequest(BaseModel):
     kind: str
     item_id: str
@@ -691,6 +695,64 @@ def get_module(module_id: str, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(404, "模组不存在")
     hex_map.ensure_module_map(db, module)   # 存量模组沙盘坐标懒回填（幂等），供详情页沙盘直用
     return _module_view(module, request)
+
+
+async def _generate_module_images_bg(module_id: str, task_id: str, force: bool) -> None:
+    """后台批量生成模组配图：逐条调用单张生成，进度写进任务中心。"""
+    from app.services import module_image_service, task_center
+
+    db = SessionLocal()
+    try:
+        module = db.get(Module, module_id)
+        if module is None:
+            task_center.finish(task_id, 'cancelled', stage='模组已删除')
+            return
+
+        def on_progress(done: int, total: int, kind: str, _item_id: str) -> None:
+            label = {'scene': '场景', 'npc': 'NPC', 'clue': '线索'}.get(kind, '条目')
+            task_center.update(
+                task_id, stage=f'生成{label}配图（{done}/{total}）', done=done, total=total,
+            )
+
+        result = await module_image_service.generate_all_images(
+            db, module, force=force, on_progress=on_progress,
+        )
+        task_center.finish(
+            task_id, 'done',
+            stage=f"配图完成：{result['created']} 张（共 {result['total']} 个条目）",
+        )
+    except Exception as exc:  # noqa: BLE001 — 后台任务：失败落任务中心，不抛出
+        logger.exception('模组配图生成任务失败：%s', module_id)
+        task_center.finish(task_id, 'failed', detail=str(exc)[:300])
+    finally:
+        db.close()
+
+
+@router.post('/{module_id}/images/generate', dependencies=[Depends(require_local_client)])
+async def generate_module_images(
+    module_id: str,
+    data: GenerateModuleImagesRequest,
+    db: Session = Depends(get_db),
+):
+    """批量生成并保存模组配图（场景/NPC/线索），以后台任务形式跑，返回任务 id。"""
+    module = _module_or_404(db, module_id)
+    from app.ai.image_gen import get_image_llm
+    from app.services import task_center
+    try:
+        ready = get_image_llm().supports_image_gen()
+    except Exception:
+        ready = False
+    if not ready:
+        raise HTTPException(400, '尚未配置生图模型：请先到设置页配置，再回来生成配图')
+
+    task_id = task_center.start(
+        'module_image', f'模组《{module.title}》配图', stage='准备生成',
+        link={'to': f'/modules/{module_id}', 'label': '查看模组'},
+    )
+    task = asyncio.create_task(_generate_module_images_bg(module_id, task_id, data.force))
+    _upload_tasks.add(task)
+    task.add_done_callback(_upload_tasks.discard)
+    return {'task_id': task_id}
 
 
 @router.post("/{module_id}/images/regenerate", dependencies=[Depends(require_local_client)])

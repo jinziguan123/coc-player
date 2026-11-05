@@ -375,3 +375,47 @@ async def regenerate_module_image(
     except Exception:  # noqa: BLE001 — 图片是增强能力，失败时由调用方返回可读错误
         logger.exception("模组图片重新生成失败：module=%s kind=%s item=%s", module.id, kind, item_id)
         return None
+
+
+async def generate_all_images(
+    db: Session,
+    module: Module,
+    *,
+    force: bool = False,
+    on_progress=None,
+) -> dict:
+    """为模组里全部可配图条目生成并保存图片。
+
+    条目：location 场景（image）、NPC（portrait）、线索（image）；事件/章节不上图。
+    force=False 时已有可用图片直接复用，只补缺失（解析后首次自动配图的默认语义）；
+    force=True 时全部重出。on_progress(done, total, kind, item_id) 用于任务进度。
+    返回 {done, total, created}。
+    """
+    targets = []
+    for scene in getattr(module, 'scenes', None) or []:
+        if not isinstance(scene, dict) or not str(scene.get('id') or '').strip():
+            continue
+        if str(scene.get('kind') or 'location').strip().lower() in ('event', 'chapter'):
+            continue
+        targets.append(('scene', str(scene['id']), None))
+    for npc in getattr(module, 'npcs', None) or []:
+        if isinstance(npc, dict) and str(npc.get('id') or '').strip():
+            targets.append(('npc', str(npc['id']), 'portrait'))
+    for clue in getattr(module, 'clues', None) or []:
+        if isinstance(clue, dict) and str(clue.get('id') or '').strip():
+            targets.append(('clue', str(clue['id']), None))
+
+    created = 0
+    for index, (kind, item_id, field) in enumerate(targets, start=1):
+        url = None
+        try:
+            url = await regenerate_module_image(
+                db, module, kind, item_id, field, force=force,
+            )
+        except Exception:  # noqa: BLE001 — 单张失败不拖垮整批
+            logger.exception('模组配图生成失败：module=%s kind=%s item=%s', module.id, kind, item_id)
+        if url:
+            created += 1
+        if on_progress is not None:
+            on_progress(index, len(targets), kind, item_id)
+    return {'done': len(targets), 'total': len(targets), 'created': created}
