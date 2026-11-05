@@ -89,7 +89,7 @@ def test_待投检定挂的是归一后的奖惩骰(db):
     db.add(s); db.commit()
 
     kv = {"skill": "侦查", "difficulty": "hard", "penalty": "1", "reason": "地上有血迹"}
-    _chunks, _descs, pending = asyncio.run(
+    _chunks, _descs, pending, _succeeded = asyncio.run(
         turn_effects._exec_dice_check(db, s.id, s, module, kv, pc, []))
     assert pending
     check = next(iter((db.get(GameSession, s.id).turn_state or {})["pending_checks"].values()))

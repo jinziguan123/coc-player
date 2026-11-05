@@ -18,16 +18,30 @@ def _legacy():
         "endings": [{"id": "end_1", "name": "结局", "when": "玩家走进光里"}],
         "npcs": [],
         "clues": [],
-        "triggers": [],
+        "triggers": [
+            {"id": "trig_1", "when": "玩家打开门", "set_flags": ["door_open"],
+             "clear_flags": [], "description": "门开了"},
+        ],
     }
 
 
 def test_upgrade_promotes_events_and_splits_locations():
     out = mf.upgrade_legacy_module(_legacy())
     assert [s["id"] for s in out["scenes"]] == ["scene_1", "scene_2"]
-    assert [e["id"] for e in out["events"]] == ["scene_ev"]
-    assert out["events"][0]["at"] == "scene_2"
-    assert any(e.get("type") == "sanity" for e in out["events"][0]["effects"])
+    assert "scene_ev" in {e["id"] for e in out["events"]}
+    ev = next(e for e in out["events"] if e["id"] == "scene_ev")
+    assert ev["at"] == "scene_2"
+    assert any(e.get("type") == "sanity" for e in ev["effects"])
+
+
+def test_upgrade_merges_triggers_into_events():
+    out = mf.upgrade_legacy_module(_legacy())
+    trigger = next(e for e in out["events"] if e["id"] == "trig_1")
+    assert any(
+        eff.get("type") == "set_flag" and eff.get("flag") == "door_open"
+        for eff in trigger["effects"]
+    )
+    assert out["triggers"] == []
 
 
 def test_upgrade_fills_start_and_wraps_ending_when():

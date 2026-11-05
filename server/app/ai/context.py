@@ -496,7 +496,9 @@ def _format_plot_state(flags: set[str], triggers: list[dict] | None = None) -> s
 
 
 def _has_plot_state(module: Module) -> bool:
-    """模组是否定义了「随剧情改变」的内容（带 states 的场景/NPC，或 triggers）。"""
+    """模组是否定义了「随剧情改变」的内容（事件、状态变体或触发器）。"""
+    if getattr(module, "events", None):
+        return True
     if module.triggers:
         return True
     if scene_kind.event_scenes(module.scenes):

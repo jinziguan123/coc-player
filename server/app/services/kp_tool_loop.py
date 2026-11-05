@@ -382,7 +382,7 @@ def _build_kp_tool_executor(
     async def _h_dice_check(name, kv):
         if not kv.get("skill"):
             return kp_tools.ToolOutcome("参数缺失：skill 为必填。请带上技能名重试，或直接继续叙述。")
-        chunks, descs, pending = await _exec_dice_check(
+        chunks, descs, pending, _succeeded = await _exec_dice_check(
             db, session_id, game_session, module, kv, player_char, teammates,
             scope=dice_scope,
         )
@@ -580,7 +580,7 @@ def _build_kp_tool_executor(
             "reason": str(event.get("title") or eid),
             "source": str(event.get("title") or ""),
         }
-        chunks, descs, pending = await turn_effects._exec_dice_check(
+        chunks, descs, pending, succeeded = await turn_effects._exec_dice_check(
             db, session_id, game_session, module, kv2,
             player_char, teammates, extra=extra,
         )
@@ -591,6 +591,17 @@ def _build_kp_tool_executor(
                 prefix + "已发起事件检定，等待玩家亲自掷骰；本轮叙述就此收束，绝不预测结果。",
                 chunks=chunks, suspend=True,
             )
+        # 自动掷（NPC 暗骰 / AI 队友）：拿到了成败，直接执行事件分支，不留给 KP 自由发挥。
+        branch = (check.get("on_success") if succeeded else check.get("on_failure")) or []
+        branch_note = ""
+        if branch:
+            branch_note = beat_runtime.execute_effects(
+                db, session_id, game_session, module, branch,
+                player_char, teammates, seq=seq,
+                event_title=str(event.get("title") or eid),
+            )
+        if branch_note:
+            prefix += branch_note + chr(10)
         return kp_tools.ToolOutcome(
             prefix + KP_DICE_CONTINUATION_PROMPT.format(dice_results=chr(10).join(descs)),
             chunks=chunks,

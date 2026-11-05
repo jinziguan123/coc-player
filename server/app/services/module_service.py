@@ -106,15 +106,6 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
       ]
     }}
   ],
-  "triggers": [
-    {{
-      "id": "trig_1",
-      "when": "用自然语言描述触发条件，如『玩家弄塌地下室水管』『管家的秘密被当面揭穿』『某 NPC 被杀』",
-      "set_flags": ["该转折发生后应置上的剧情标志名"],
-      "clear_flags": [],
-      "description": "（可选）这一步剧情推进的简述"
-    }}
-  ],
   "clues": [
     {{
       "id": "clue_1",
@@ -169,15 +160,15 @@ PARSE_PROMPT_TEMPLATE = """你是一个 {rule_system} 模组分析专家。
       personality/initial_location/alive 等）。典型如「地下室进水后由 calm 变 deadly」「管家暴露后从谦卑变敌对并转移位置」。
     - 场景 state 若**改变了物理布局**（打破/打通墙、坍塌、进水淹没、露出新房间/暗格等），标 "structural": true；
       仅氛围/危险度变化（不动布局）则为 false。系统会为 structural=true 的状态**自动生成对应的变体地图**。
-    - triggers 列出"何时该置/清哪个标志"：when 用自然语言写触发条件，set_flags/clear_flags 写标志名。
-    - **标志名必须前后一致呼应**：triggers.set_flags 用到的标志，要在某场景/NPC 的 states.when 里被消费；
-      反之 states.when 引用的标志，应有某个 trigger 负责置上。没有任何随剧情变化的内容时，triggers 留空数组 []。
+    - **状态变体由事件置标志来驱动**：states.when 引用的每个标志，都必须由某个事件的
+      set_flag / clear_flag 效果置上；事件里置的每个标志，也必须在某场景/NPC 的 states.when
+      里被消费，或作为其它事件的 when 条件。没有对应效果就是悬空标志，入库校验会告警。
+    - **不要再输出 triggers 数组**：一切剧情推进（含「只切换场景/NPC 样貌」的转折）都写成 events，
+      用 set_flag / clear_flag 推进状态。解析结果里出现 triggers 会被自动并入 events。
     - **剧情事件不是场景，写到顶层 events**：模组里「某条件下发生某事」的段落（导入、怪物苏醒、
       NPC 归来、风暴降临、山火、追逐）一律写 events，不要塞进 scenes，也不要只写在场景描述里。
       每个事件给 at（发生地点的 id）、when（text 照抄原文条件）、effects（可执行后果，见第 21 条）；
       「玩家被传送到某处」写 goto，「置标志」写 set_flag，绝不要只写在文字说明里。
-    - 同一件事不要同时写成事件和 trigger：能用事件表达就用事件；只有「没有具体后果、只切换
-      场景/NPC 样貌」的转折才留在 triggers（见上）。
 11. 每个 NPC 给出 attributes（CoC 九维 STR/CON/SIZ/DEX/APP/INT/POW/EDU/LUCK，0-90 整数，按身份合理估计）
     与 background（生平来历）：attributes 供战斗/属性对抗与派生值使用；background 写来历渊源，与 secrets 区分。
 12. handouts 只收模组原文**给出了完整正文**的文书（信件/报纸/日记/便条等「递给玩家看的实体道具」）：
@@ -1051,6 +1042,12 @@ def _split_flow(data: dict, scenes: list) -> tuple[list, list, dict]:
     随后从 scenes 里移除——导航、关系图、上下文只面对真正的地点。
     """
     events = module_flow.normalize_events(data.get("events"), data.get("scenes"))
+    # v3 起不再有 triggers：旧结构/模型误输出的触发器并入事件（置/清标志就是它的效果）
+    seen = {e["id"] for e in events}
+    events += [
+        e for e in module_flow.triggers_to_events(data.get("triggers"))
+        if e["id"] not in seen
+    ]
     locations = [
         s for s in scenes
         if isinstance(s, dict) and scene_kind.scene_kind(s) != scene_kind.EVENT
@@ -1085,7 +1082,7 @@ def create_module(db: Session, data: dict, raw_content: str = "") -> Module:
         map_nodes=_normalize_map_nodes(data.get("map_nodes"), locations),
         npcs=data.get("npcs", []),
         clues=data.get("clues", []),
-        triggers=data.get("triggers", []),
+        triggers=[],
         handouts=data.get("handouts", []),
         endings=data.get("endings") or [],
         truth=str(data.get("truth") or ""),
@@ -1135,7 +1132,13 @@ def update_module(db: Session, module_id: str, data: dict) -> Module | None:
     if "clues" in data and data["clues"] is not None:
         module.clues = data["clues"]
     if "triggers" in data and data["triggers"] is not None:
-        module.triggers = data["triggers"]
+        # triggers 已并入事件；仍保留字段是为了旧前端的编辑载荷不报错
+        seen = {e.get("id") for e in (module.events or [])}
+        module.events = list(module.events or []) + [
+            e for e in module_flow.triggers_to_events(data["triggers"])
+            if e.get("id") not in seen
+        ]
+        module.triggers = []
     if "handouts" in data and data["handouts"] is not None:
         module.handouts = data["handouts"]
     if "endings" in data and data["endings"] is not None:

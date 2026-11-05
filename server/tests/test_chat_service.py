@@ -185,8 +185,8 @@ def test_duplicate_dice_check_deduped(db_factory):
     db.commit()
 
     kv = {"skill": "智力", "difficulty": "normal", "char": ""}  # 空 char → 主角（真人）
-    c1, _, p1 = asyncio.run(chat_service._exec_dice_check(db, gs.id, gs, module, dict(kv), pc, []))
-    c2, _, p2 = asyncio.run(chat_service._exec_dice_check(db, gs.id, gs, module, dict(kv), pc, []))
+    c1, _, p1, _ = asyncio.run(chat_service._exec_dice_check(db, gs.id, gs, module, dict(kv), pc, []))
+    c2, _, p2, _ = asyncio.run(chat_service._exec_dice_check(db, gs.id, gs, module, dict(kv), pc, []))
 
     assert p1 and p2  # 两次都收束本轮（suspend）
     req1 = [c for c in c1 if c.type == "check_request"]

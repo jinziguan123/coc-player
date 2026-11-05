@@ -619,6 +619,11 @@ def upgrade_legacy_module(data: dict) -> dict:
     data = dict(data or {})
     scenes = [dict(s) for s in (data.get("scenes") or []) if isinstance(s, dict)]
     events = normalize_events(data.get("events"), scenes)
+    seen = {e["id"] for e in events}
+    events += [
+        e for e in triggers_to_events(data.get("triggers"))
+        if e["id"] not in seen
+    ]
     locations = [s for s in scenes if not _is_event_scene(s)]
 
     world = dict(data.get("world") or data.get("world_setting") or {})
@@ -643,7 +648,44 @@ def upgrade_legacy_module(data: dict) -> dict:
         "scenes": locations,
         "events": events,
         "endings": endings,
+        # triggers 已并入 events，升级后不再保留旧字段内容
+        "triggers": [],
     }
     out["schema_version"] = SCHEMA_VERSION
     out["validation"] = validate_module(out)
+    return out
+
+
+def triggers_to_events(triggers: Any) -> list[dict]:
+    """把旧版触发器转成 v3 事件（置/清标志即效果）。
+
+    解析器不再产出 triggers；存量或模型误输出的 triggers 在入库前并入 events，
+    剧情推进只保留「事件」这一种表达。
+    """
+    out: list[dict] = []
+    for i, trig in enumerate(triggers or []):
+        if not isinstance(trig, dict):
+            continue
+        when = _str(trig.get("when") or trig.get("condition"))
+        sets = [
+            str(f).strip() for f in (trig.get("set_flags") or trig.get("flags") or [])
+            if str(f).strip()
+        ]
+        clears = [str(f).strip() for f in (trig.get("clear_flags") or []) if str(f).strip()]
+        effects = (
+            [{"type": "set_flag", "flag": f} for f in sets]
+            + [{"type": "clear_flag", "flag": f} for f in clears]
+        )
+        if not effects:
+            continue
+        out.append({
+            "id": _str(trig.get("id")) or f"trigger_{i + 1}",
+            "title": _str(trig.get("description") or when)[:80] or "剧情推进",
+            "at": "",
+            "phase": "scene",
+            "once": True,
+            "when": {"text": when, "expr": None},
+            "npcs": [],
+            "effects": effects,
+        })
     return out

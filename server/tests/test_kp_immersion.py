@@ -577,8 +577,8 @@ def test_parse_template_covers_new_fields():
         assert marker in T, f"解析模板缺少：{marker}"
 
 
-def test_create_and_update_module_roundtrips_triggers(db_factory):
-    """create/update 都能持久化 triggers，并随 npcs 携带 attributes/background。"""
+def test_create_and_update_module_merges_triggers_into_events(db_factory):
+    """v3 起 triggers 不再单独持久化：create/update 都会把它并入 events（置标志即效果）。"""
     from app.services import module_service
     db = db_factory()
     triggers = [{"id": "t1", "when": "水管被弄塌", "set_flags": ["basement_flooded"]}]
@@ -588,14 +588,20 @@ def test_create_and_update_module_roundtrips_triggers(db_factory):
         "title": "状态模组", "rule_system": "coc",
         "scenes": [], "npcs": [npc], "clues": [], "triggers": triggers,
     })
-    assert m.triggers == triggers
+    assert m.triggers == []
+    event = next(e for e in m.events if e["id"] == "t1")
+    assert any(
+        eff.get("type") == "set_flag" and eff.get("flag") == "basement_flooded"
+        for eff in event["effects"]
+    )
     assert m.npcs[0]["attributes"]["INT"] == 70
     assert m.npcs[0]["background"] == "侍奉宅邸三十年"
 
     m2 = module_service.update_module(db, m.id, {
         "triggers": [{"id": "t2", "when": "另一条件", "set_flags": ["flag_x"]}],
     })
-    assert m2.triggers[0]["id"] == "t2"
+    assert m2.triggers == []
+    assert any(e["id"] == "t2" for e in m2.events)
 
 
 def test_npc_context_uses_background_and_resolved_state(db_factory):

@@ -781,7 +781,7 @@ async def _exec_dice_check(
     kv: dict, player_char: Character, teammates: list[Character] | None,
     scope: list[Character] | None = None,
     extra: dict | None = None,
-) -> tuple[list[str], list[str], bool]:
+) -> tuple[list[str], list[str], bool, bool | None]:
     """执行一条技能检定。返回 (chunks, 回灌 KP 的结果描述, 是否挂成「待玩家投骰」)。
 
     真人控制、非暗投 → 不自动掷，挂 pending 并广播检定提示（pending=True，本轮就此收束）；
@@ -795,7 +795,7 @@ async def _exec_dice_check(
     rs = rule_options_service.ruleset(db, game_session)
     skill_name = rs.check.display_skill_name((kv.get("skill") or "").strip())
     if not skill_name:
-        return chunks, descs, False
+        return chunks, descs, False, None
     difficulty = (kv.get("difficulty") or "normal").strip() or "normal"
     char_ref = (kv.get("char") or "").strip()
     # 兼容旧模组：planner/旧 KP 没有携带 chars 时，只有明确唯一的场景群检机制点才补全。
@@ -834,7 +834,7 @@ async def _exec_dice_check(
             )
             for c in human_targets
         ):
-            return chunks, descs, True
+            return chunks, descs, True, None
 
         def _pool(c: Character) -> tuple[int, int]:
             cdata = {
@@ -877,7 +877,7 @@ async def _exec_dice_check(
                     succeeded=group_any_success, module=module,
                     on_first_clue=illustration_service._maybe_clue_illustration,
                 )
-            return chunks, descs, False
+            return chunks, descs, False, group_any_success
 
         batch_id = uuid.uuid4().hex
         for c in human_targets:
@@ -915,7 +915,7 @@ async def _exec_dice_check(
                 "check_request", prompt_text, metadata=meta,
                 event_id=ev.id, actor_id=c.id,
             ))
-        return chunks, descs, True
+        return chunks, descs, True, None
 
     char_data, disp_name, is_npc, char_id = _resolve_check_actor(
         char_ref, skill_name, player_char, teammates, module,
@@ -937,7 +937,7 @@ async def _exec_dice_check(
         # 合并文本后逐条处理会重复挂 pending、弹出两张相同的投骰卡。已存在等价（同角色+技能+
         # 难度）待投检定则跳过——不重复挂、不再广播 check_request（仍返回 True 收束本轮）。
         if session_service.find_pending_check(db, session_id, char_id, skill_name, difficulty):
-            return chunks, descs, True
+            return chunks, descs, True, None
         check_id = uuid.uuid4().hex
         pending = {
             "id": check_id, "skill": skill_name, "difficulty": difficulty,
@@ -968,14 +968,14 @@ async def _exec_dice_check(
             "check_request", prompt_text, metadata=meta,
             event_id=ev.id, actor_id=char_id,
         ))
-        return chunks, descs, True  # 等玩家 /roll，本轮不掷、不续写
+        return chunks, descs, True, None  # 等玩家 /roll，本轮不掷、不续写
 
     rc, rd, _succeeded, _fumbled = await _auto_roll_check(
         db, session_id, game_session, module, char_data, disp_name, is_npc,
         skill_name, difficulty, blind, source, bonus, penalty, modifier_reason,
         public_name=shown_name, char_id=None if is_npc else char_id,
     )
-    return chunks + rc, descs + rd, False
+    return chunks + rc, descs + rd, False, _succeeded
 
 
 async def _auto_roll_check(

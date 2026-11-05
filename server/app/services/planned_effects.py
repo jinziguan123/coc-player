@@ -1062,7 +1062,7 @@ async def _ensure_planned_scene(
             continue
         kv = {"skill": skill, "chars": "、".join(c.name for c in movers), "source": "通过出口"}
         try:
-            check_chunks, _descs, _pending = await _exec_dice_check(
+            check_chunks, _descs, _pending, _succeeded = await _exec_dice_check(
                 db, session_id, game_session, module, kv, player_char, teammates,
             )
         except Exception:
@@ -1195,7 +1195,7 @@ async def _ensure_scene_entry_checks(
                 "source": str(mechanism.get("trigger") or "").strip() or "场景机制",
             }
             try:
-                chunks, _descs, _pending = await _exec_dice_check(
+                chunks, _descs, _pending, _succeeded = await _exec_dice_check(
                     db, session_id, game_session, module, kv, player_char, teammates,
                 )
             except Exception:

@@ -70,13 +70,42 @@ def _hooks(module: Any) -> list[dict]:
             "clear_flags": clears,
             "kind": "trigger",
         })
-    for e in scene_kind.event_scenes(getattr(module, "scenes", None)):
+    seen_ids: set[str] = set()
+    candidates = list(getattr(module, "events", None) or []) + scene_kind.event_scenes(
+        getattr(module, "scenes", None),
+    )
+    for e in candidates:
+        if not isinstance(e, dict):
+            continue
+        eid = str(e.get("id") or "")
+        if eid and eid in seen_ids:
+            continue
+        if eid:
+            seen_ids.add(eid)
+        # v3 事件从 effects 取标志；旧结构（scenes 里的 kind=event）回落到 set_flags
+        effects = [x for x in (e.get("effects") or []) if isinstance(x, dict)]
+        if effects:
+            sets = [
+                str(x.get("flag")) for x in effects
+                if x.get("type") == "set_flag" and str(x.get("flag") or "").strip()
+            ]
+            clears = [
+                str(x.get("flag")) for x in effects
+                if x.get("type") == "clear_flag" and str(x.get("flag") or "").strip()
+            ]
+        else:
+            sets = scene_kind.event_flags(e)
+            clears = []
+        if not (sets or clears):
+            continue
+        when = e.get("when")
+        when_text = str(when.get("text") if isinstance(when, dict) else when or "").strip()
         out.append({
-            "id": str(e.get("id") or ""),
-            "title": scene_kind.event_title(e),
-            "when": str(e.get("when") or "").strip(),
-            "set_flags": scene_kind.event_flags(e),
-            "clear_flags": [],
+            "id": eid,
+            "title": str(e.get("title") or when_text).strip()[:80],
+            "when": when_text,
+            "set_flags": sets,
+            "clear_flags": clears,
             "kind": "event",
         })
     return out

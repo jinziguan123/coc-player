@@ -25,7 +25,7 @@ from app.ai.agents.base import BaseAgent
 from app.ai.context import _active_flags
 from app.ai.provider import LLMProvider
 from app.ai.turn_planner import _extract_json_object
-from app.services import scene_kind, world_memory
+from app.services import plot_progress, scene_kind, world_memory
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +76,10 @@ def split_dormant(
 def _untriggered_triggers(module: Any, active_flags: set[str]) -> list[dict]:
     """尚未触发的剧情钩子（set_flags 未全部激活），附带其 set_flags 供 suggest 参考。"""
     out: list[dict] = []
-    for trig in (getattr(module, "triggers", None) or []):
-        if not isinstance(trig, dict):
-            continue
-        set_flags = trig.get("set_flags") or trig.get("flags") or []
-        if isinstance(set_flags, str):
-            set_flags = [set_flags]
-        if set_flags and all(f in active_flags for f in set_flags):
-            continue  # 已触发
-        desc = str(trig.get("description") or trig.get("when") or "").strip()
+    for hook in plot_progress.pending_hooks(module, active_flags):
+        desc = str(hook.get("title") or "").strip()
         if desc:
-            out.append({"when": desc, "set_flags": list(set_flags)})
+            out.append({"when": desc, "set_flags": list(hook.get("set_flags") or [])})
     return out
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.services import world_memory
+from app.services import plot_progress, world_memory
 
 # 聚光灯：在最近这么多条事件里统计每个玩家角色的「出场」次数
 SPOTLIGHT_WINDOW = 30
@@ -169,12 +169,9 @@ def compute_unresolved_threads(module: Any, world_state: dict) -> list[str]:
     """未触发的 triggers + 台账中 partial 的线索，罗列供规划器择机回收。"""
     threads: list[str] = []
     active_flags = set(world_state.get("flags") or [])
-    for trig in (getattr(module, "triggers", None) or []):
-        set_flags = trig.get("set_flags") or []
-        if set_flags and all(f in active_flags for f in set_flags):
-            continue  # 已触发
-        desc = (trig.get("description") or trig.get("when") or "").strip()
-        when = str(trig.get("when") or "").strip()
+    for hook in plot_progress.pending_hooks(module, active_flags):
+        desc = str(hook.get("title") or "").strip()
+        when = str(hook.get("when") or "").strip()
         if desc and when and when != desc:
             # 带上触发条件：只给「怪物苏醒」不给「何时」，规划器会把它当成随时可推的悬念
             threads.append(f"（未触发，条件：{when}）{desc}")

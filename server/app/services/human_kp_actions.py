@@ -144,7 +144,7 @@ async def execute_human_kp_action(
         kv = {str(k): str(v) for k, v in payload.items() if v is not None}
         if not kv.get("skill", "").strip():
             raise ValueError("检定技能不能为空")
-        chunks, descs, pending = await _exec_dice_check(
+        chunks, descs, pending, _succeeded = await _exec_dice_check(
             db, session_id, game_session, module, kv, player_char, teammates,
         )
         # 从待办里的玩家申请发起的：发出去就算处理过了
