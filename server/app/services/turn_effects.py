@@ -437,6 +437,37 @@ def _apply_san_settlement(
         _make_chunk("dice", dice_content, metadata=dice_meta, event_id=ev.id),
         _make_chunk("character_update", metadata={"char_id": tchar.id}),
     ]
+    # 临时疯狂：症状与时长各掷 1D10，单独落一条骰子事件——玩家看到点数，而不是凭空出现症状。
+    if madness == "temporary_insanity":
+        bout = (tchar.system_data or {}).get("madness") or {}
+        symptom_roll = int(bout.get("symptom_roll") or 0)
+        duration_roll = int(bout.get("duration_roll") or bout.get("turns_left") or 0)
+        if symptom_roll:
+            mad_meta = {
+                "skill": "疯狂发作",
+                "actor": tchar.name,
+                "dice": {
+                    "kind": "pool", "notation": "1d10",
+                    "dice": [{"sides": 10, "value": symptom_roll}],
+                    "modifier": 0, "total": symptom_roll,
+                },
+                "madness": {
+                    "symptom_roll": symptom_roll,
+                    "label": bout.get("label"),
+                    "duration_roll": duration_roll,
+                },
+            }
+            mad_content = (
+                f"{tchar.name}｜疯狂症状 1D10 = {symptom_roll} → {bout.get('label')}；"
+                f"持续 1D10 = {duration_roll} 回合"
+            )
+            mad_ev = session_service.add_event(
+                db, session_id, "dice", mad_content, actor_name="系统",
+                metadata=mad_meta, commit=False,
+            )
+            chunks.append(
+                _make_chunk("dice", mad_content, metadata=mad_meta, event_id=mad_ev.id),
+            )
     desc = (
         f"{tchar.name} 理智检定（{outcome_text}）：损失 {result['san_loss']} SAN"
         f"（{result['old_san']}→{result['new_san']}）"

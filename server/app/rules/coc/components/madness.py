@@ -67,12 +67,20 @@ def roll_duration() -> int:
 
 
 def make_bout(options: RuleConfig | None = None) -> dict:
-    """生成一次发作的状态对象，存进 char.system_data['madness']；turns_left 到 0 自动解除。"""
-    s = roll_symptom(options)
+    """生成一次发作的状态对象，存进 char.system_data['madness']；turns_left 到 0 自动解除。
+
+    症状与时长都是 1D10。这里把**骰面**一并记下（symptom_roll / duration_roll），
+    上层据此落一条骰子事件——玩家看到的是「1d10=7 → 暴力冲动」，而不是凭空出现一个症状。
+    """
+    table = symptoms(options) or BOUT_SYMPTOMS
+    symptom_roll = random.randint(1, len(table))
+    s = dict(table[symptom_roll - 1])
+    duration_roll = roll_duration()
     return {
         "symptom": s["key"], "label": s["label"], "manifest": s["manifest"],
         "penalty_skills": s["penalty_skills"], "incapacitated": s["incapacitated"],
-        "override": s["override"], "turns_left": roll_duration(),
+        "override": s["override"], "turns_left": duration_roll,
+        "symptom_roll": symptom_roll, "duration_roll": duration_roll,
     }
 
 
