@@ -59,6 +59,8 @@ interface ModuleData {
   npcs: NPC[]
   clues: Clue[]
   triggers: Trigger[]
+  /** v3 剧情事件（带条件与可执行效果）；旧模组为空数组，时间线自动回落到 triggers。 */
+  events: unknown[]
   /** 模组写明的收场分支。空 = 本模组不判结局（跑到哪算哪，由玩家自己决定何时收桌）。 */
   endings: Ending[]
   truth: string
@@ -72,7 +74,7 @@ interface ModuleData {
 const BLANK: ModuleData = {
   title: '', rule_system: 'coc', description: '',
   world_setting: { era: '', location: '', tone: '', player_count: '', region: '', difficulty: '', tags: [], player_brief: '', intro: '' },
-  scenes: [], map_nodes: [], npcs: [], clues: [], triggers: [], endings: [], truth: '',
+  scenes: [], map_nodes: [], npcs: [], clues: [], triggers: [], events: [], endings: [], truth: '',
   character_guidance: {},
   default_narrative_style: '', default_image_style: '',
 }
@@ -647,7 +649,7 @@ export function ModuleDetailPage() {
       ) : view === 'graph' && !edit ? (
         <ModuleGraph moduleId={data.id} scenes={data.scenes} npcs={data.npcs} clues={data.clues} onImageRegenerated={onGraphImageRegenerated} />
       ) : view === 'timeline' && !edit ? (
-        <ModuleTimeline scenes={data.scenes} npcs={data.npcs} triggers={data.triggers} />
+        <ModuleTimeline scenes={data.scenes} npcs={data.npcs} triggers={data.triggers} events={data.events as never} />
       ) : view === 'sandbox' ? (
         <div className={edit ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_252px]' : ''}>
           <div className="min-w-0">

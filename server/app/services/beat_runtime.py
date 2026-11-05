@@ -41,6 +41,29 @@ def execute_event(
     seq: int = 0,
 ) -> str:
     """执行一个事件的确定性效果，返回给 KP 的结果说明（空串表示无需回注）。"""
+    note = execute_effects(
+        db, session_id, game_session, module,
+        list(event.get("effects") or []),
+        player_char, teammates,
+        seq=seq, event_title=str(event.get("title") or event.get("id") or "事件"),
+    )
+    mark_event_seen(db, game_session, event)
+    return note
+
+
+def execute_effects(
+    db: Session,
+    session_id: str,
+    game_session: GameSession,
+    module: Module,
+    effects: list,
+    player_char: Character,
+    teammates: list[Character] | None = None,
+    *,
+    seq: int = 0,
+    event_title: str = "事件",
+) -> str:
+    """执行一组效果（事件顶层或 check 分支），返回给 KP 的结果说明。"""
     notes: list[str] = []
     deferred: list[str] = []
     party = _party(player_char, teammates)
@@ -53,7 +76,7 @@ def execute_event(
         if isinstance(c, dict) and c.get("id")
     }
 
-    for effect in _all_effects(event.get("effects")):
+    for effect in _all_effects(effects):
         etype = str(effect.get("type") or "")
         try:
             if etype == "set_flag":
@@ -146,31 +169,27 @@ def execute_event(
                 if text:
                     notes.append(text)
             elif etype == "check":
-                branch = "成功/失败分支"
                 deferred.append(
-                    f"「{event.get('title') or event.get('id')}」需要 {effect.get('skill') or '技能'}"
-                    f"检定（{branch}由你在检定结果出来后按事件说明叙述）"
+                    f"「{event_title}」需要 {effect.get('skill') or '技能'}检定："
+                    "成功/失败的后果由系统在检定结果出来后按事件说明结算"
                 )
             elif etype == "sanity":
                 deferred.append(
-                    f"「{event.get('title') or event.get('id')}」需要 SAN 检定 {effect.get('loss')}"
-                    "（用 san_check 工具发起）"
+                    f"「{event_title}」需要 SAN 检定 {effect.get('loss')}（用 san_check 工具发起）"
                 )
         except Exception:
             logger.exception(
                 "事件效果执行失败: event=%s type=%s session=%s",
-                event.get("id"), etype, session_id,
+                event_title, etype, session_id,
             )
             notes.append(f"（{etype} 执行失败，已完成其余效果）")
-
-    _mark_seen(db, game_session, event)
 
     parts = []
     if notes:
         parts.append("系统已结算：" + "；".join(notes) + "。叙述必须与这些结果一致。")
     if deferred:
         parts.append("；".join(deferred) + "。")
-    return "\n".join(parts)
+    return chr(10).join(parts)
 
 
 def _resolve_movers(effect: dict, party: list[Character]) -> list[Character]:
@@ -253,7 +272,7 @@ def _set_path_block(db: Session, session_id: str, scene_id: str, *, blocked: boo
     db.commit()
 
 
-def _mark_seen(db: Session, game_session: GameSession, event: dict) -> None:
+def mark_event_seen(db: Session, game_session: GameSession, event: dict) -> None:
     eid = str(event.get("id") or "")
     if not eid:
         return

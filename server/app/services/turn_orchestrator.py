@@ -29,6 +29,7 @@ from app.models.module import Module
 from app.models.session import GameSession
 from app.services import (
     agent_trace,
+    beat_runtime,
     character_chronicle,
     check_gating,
     effect_channel,
@@ -2172,6 +2173,20 @@ async def _settle_rolled_check(
     )
     succeeded = result.outcome not in ("failure", "fumble")
     fumbled = result.outcome == "fumble"
+    # v3 事件分支：这次检定若由 [BEAT] 发起，按成败执行事件的 on_success / on_failure。
+    # 幸运改判与重掷最终也汇到本函数，因此买来的成功同样会被结算。
+    beat = check.get("beat") if isinstance(check.get("beat"), dict) else None
+    if beat and beat.get("event_id"):
+        branch = (beat.get("on_success") if succeeded else beat.get("on_failure")) or []
+        if branch:
+            beat_note = beat_runtime.execute_effects(
+                db, session_id, game_session, module, branch,
+                player_char, party_others,
+                seq=session_service.get_next_sequence_num(db, session_id) - 1,
+                event_title=str(beat.get("event_id")),
+            )
+            if beat_note:
+                desc = desc + chr(10) + beat_note
     # 「先检定、后移动」按人结算，且必须在群检汇总**之前**：用的是这个人自己这一骰的成败，
     # 成功只移动他（续写据新位置叙述）、失败只结束他的尝试；同批其他人照旧待投。
     if check.get("char_id"):

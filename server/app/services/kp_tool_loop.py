@@ -552,12 +552,49 @@ def _build_kp_tool_executor(
         event = next((e for e in events if str(e.get("id")) == eid), None)
         if event is None:
             return kp_tools.ToolOutcome(f"没有 id 为 {eid} 的剧情事件；不要重试，按现有叙事继续。")
-        note = beat_runtime.execute_event(
-            db, session_id, game_session, module, event,
-            player_char, teammates,
-            seq=session_service.get_next_sequence_num(db, session_id) - 1,
+        effects = [e for e in (event.get("effects") or []) if isinstance(e, dict)]
+        checks = [e for e in effects if e.get("type") == "check"]
+        others = [e for e in effects if e.get("type") != "check"]
+        seq = session_service.get_next_sequence_num(db, session_id) - 1
+        note = beat_runtime.execute_effects(
+            db, session_id, game_session, module, others,
+            player_char, teammates, seq=seq,
+            event_title=str(event.get("title") or eid),
         )
-        return kp_tools.ToolOutcome(note or "ok")
+        if not checks:
+            beat_runtime.mark_event_seen(db, game_session, event)
+            return kp_tools.ToolOutcome(note or "ok")
+        # 事件里的检定：交给既有 dice_check 执行器挂待投；成功/失败分支绑定在
+        # pending check 的 beat 字段上，投骰落定时由 _settle_rolled_check 执行。
+        check = checks[0]
+        extra = {
+            "beat": {
+                "event_id": eid,
+                "on_success": check.get("on_success") or [],
+                "on_failure": check.get("on_failure") or [],
+            },
+        }
+        kv2 = {
+            "skill": check.get("skill") or "技能",
+            "difficulty": check.get("difficulty") or "normal",
+            "reason": str(event.get("title") or eid),
+            "source": str(event.get("title") or ""),
+        }
+        chunks, descs, pending = await turn_effects._exec_dice_check(
+            db, session_id, game_session, module, kv2,
+            player_char, teammates, extra=extra,
+        )
+        beat_runtime.mark_event_seen(db, game_session, event)
+        prefix = (note + chr(10)) if note else ""
+        if pending:
+            return kp_tools.ToolOutcome(
+                prefix + "已发起事件检定，等待玩家亲自掷骰；本轮叙述就此收束，绝不预测结果。",
+                chunks=chunks, suspend=True,
+            )
+        return kp_tools.ToolOutcome(
+            prefix + KP_DICE_CONTINUATION_PROMPT.format(dice_results=chr(10).join(descs)),
+            chunks=chunks,
+        )
 
     async def _h_hp_change(name, kv):
         chunks = await _exec_hp_change(

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, Controls,
-  Handle, Position, BaseEdge, MarkerType, useInternalNode,
+  Handle, Position, BaseEdge, MarkerType, useInternalNode, EdgeLabelRenderer,
   type Node, type Edge, type EdgeProps, type InternalNode,
 } from '@xyflow/react'
 import dagre from 'dagre'
@@ -10,7 +10,8 @@ import { X } from 'lucide-react'
 import { ModuleImage, type ModuleImageKind } from './ModuleImage'
 import '@xyflow/react/dist/base.css'
 
-interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; connections?: string[]; image?: string }
+interface SceneExit { to: string; direction?: string; label?: string; condition?: { text?: string; expr?: unknown } | null; hidden?: boolean; one_way?: boolean }
+interface Scene { id: string; name?: string; title?: string; description?: string; danger?: string; atmosphere?: string; connections?: string[]; exits?: SceneExit[]; image?: string }
 interface NPC { id: string; name?: string; description?: string; personality?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; portrait?: string }
 interface Clue { id: string; name?: string; description?: string; location?: string; trigger_condition?: string; image?: string }
 interface SceneData extends Record<string, unknown> { name: string; npcs: string[]; clues: string[]; orphan?: boolean }
@@ -65,7 +66,7 @@ function nodeIntersection(node: InternalNode, other: InternalNode) {
 }
 
 /** 浮动边：连两节点朝向彼此的边框交点（箭头落在边框，不穿中心）；双向边左右错开避免重叠。 */
-function FloatingEdge({ id, source, target, markerEnd, style }: EdgeProps) {
+function FloatingEdge({ id, source, target, markerEnd, style, label }: EdgeProps) {
   const s = useInternalNode(source)
   const t = useInternalNode(target)
   if (!s || !t) return null
@@ -74,7 +75,30 @@ function FloatingEdge({ id, source, target, markerEnd, style }: EdgeProps) {
   const dx = tp.x - sp.x, dy = tp.y - sp.y, len = Math.hypot(dx, dy) || 1
   const off = (source < target ? 1 : -1) * 20  // 双向边两条朝相反方向弯，避免重叠
   const cx = mx + (-dy / len) * off, cy = my + (dx / len) * off
-  return <BaseEdge id={id} path={`M${sp.x},${sp.y} Q${cx},${cy} ${tp.x},${tp.y}`} markerEnd={markerEnd} style={style} />
+  return (
+    <>
+      <BaseEdge id={id} path={`M${sp.x},${sp.y} Q${cx},${cy} ${tp.x},${tp.y}`} markerEnd={markerEnd} style={style} />
+      {label ? (
+        <EdgeLabelRenderer>
+          <div
+            className="nodrag nopan pointer-events-none"
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${cx}px, ${cy}px)`,
+              fontSize: 10,
+              color: 'var(--color-text-secondary)',
+              background: 'var(--color-bg-card)',
+              padding: '0 4px',
+              borderRadius: 4,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  )
 }
 
 const nodeTypes = { scene: SceneNode }
@@ -100,12 +124,24 @@ function build(scenes: Scene[], npcs: NPC[], clues: Clue[]): { nodes: Node[]; ed
   const edges: Edge[] = []
   const seen = new Set<string>()
   for (const s of scenes) {
-    for (const tgt of s.connections || []) {
+    // v3 exits 优先：带方向/标签/条件/隐藏；旧模组回落到无类型 connections
+    const exits: SceneExit[] = s.exits?.length ? s.exits : (s.connections || []).map((to) => ({ to }))
+    for (const exit of exits) {
+      const tgt = exit.to
       if (!sceneIds.has(tgt)) continue
       const k = `${s.id}->${tgt}`
       if (seen.has(k)) continue
       seen.add(k)
-      edges.push({ id: k, source: s.id, target: tgt, type: 'floating' })
+      const hasCondition = Boolean(exit.condition?.text || exit.condition?.expr)
+      edges.push({
+        id: k,
+        source: s.id,
+        target: tgt,
+        type: 'floating',
+        label: exit.label || exit.direction || (hasCondition ? '条件' : undefined),
+        style: exit.hidden ? { strokeDasharray: '6 4', opacity: 0.6 } : undefined,
+        data: { condition: exit.condition, one_way: Boolean(exit.one_way), hidden: Boolean(exit.hidden) },
+      })
     }
   }
 

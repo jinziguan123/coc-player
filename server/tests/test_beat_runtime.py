@@ -79,6 +79,34 @@ def test_check_and_sanity_are_deferred_not_rolled(db):
     assert not (game.world_state or {}).get("ending_reached")
 
 
+def test_execute_effects_does_not_mark_event_seen(db):
+    module, hero, game = _seed(db)
+    note = beat_runtime.execute_effects(
+        db, game.id, game, module,
+        [{"type": "set_flag", "flag": "branch_flag"}],
+        hero, [],
+    )
+    db.refresh(game)
+    assert "branch_flag" in (game.world_state or {}).get("flags", {})
+    assert not (game.world_state or {}).get("flow_seen")
+    assert "branch_flag" in note
+
+
+def test_check_branch_effects_can_be_applied_directly(db):
+    module, hero, game = _seed(db)
+    note = beat_runtime.execute_effects(
+        db, game.id, game, module,
+        [{"type": "goto", "target": "scene_2"},
+         {"type": "reveal_clue", "clue_id": "clue_1"}],
+        hero, [],
+        event_title="检定分支",
+    )
+    db.refresh(game)
+    assert game.current_scene_id == "scene_2"
+    assert "clue_1" in ((game.world_state or {}).get("clue_ledger") or {})
+    assert "scene_2" in note
+
+
 def test_goto_with_unknown_target_is_ignored(db):
     module, hero, game = _seed(db)
     event = {"id": "ev_3", "effects": [{"type": "goto", "target": "nowhere"}]}

@@ -780,6 +780,7 @@ async def _exec_dice_check(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     kv: dict, player_char: Character, teammates: list[Character] | None,
     scope: list[Character] | None = None,
+    extra: dict | None = None,
 ) -> tuple[list[str], list[str], bool]:
     """执行一条技能检定。返回 (chunks, 回灌 KP 的结果描述, 是否挂成「待玩家投骰」)。
 
@@ -900,6 +901,8 @@ async def _exec_dice_check(
                 "check_any_success": group_any_success,
                 "check_any_fumble": group_any_fumble,
             }
+            if extra:
+                pending.update(extra)
             session_service.add_pending_check(db, session_id, pending)
             prompt_text = _check_prompt_text(
                 c.name, skill_name, difficulty, c_bonus, c_penalty, modifier_reason,
@@ -942,6 +945,8 @@ async def _exec_dice_check(
             "source": source, "reason": reason, "bonus": bonus, "penalty": penalty,
             "modifier_reason": modifier_reason,
         }
+        if extra:
+            pending.update(extra)
         # 治疗类检定：确定被治疗者（KP 显式 target 优先；缺失/误写成施救者自己 → 推断濒死/受伤队友），
         # 投骰成功后由系统确定性回血——不再依赖 KP 记得写 target。
         if _heal_kind(skill_name):

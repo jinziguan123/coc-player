@@ -600,3 +600,50 @@ def _state_flags(states: Any) -> set[str]:
                 if _str(flag):
                     out.add(_str(flag))
     return out
+
+
+def _is_event_scene(scene: dict) -> bool:
+    return _str((scene or {}).get("kind")).lower() == "event"
+
+
+def upgrade_legacy_module(data: dict) -> dict:
+    """把旧结构模组规整成 v3（纯函数，不改入参）。
+
+    - scenes 里的 kind=event 提升到 events，并从地点列表移除；
+    - world.start 缺失时取第一个地点；
+    - endings.when 字符串包成 {text, expr: null}；
+    - 重算 validation，写入 schema_version=3。
+
+    返回新 dict，调用方可直接落库，也可只用来做 dry-run 对比。
+    """
+    data = dict(data or {})
+    scenes = [dict(s) for s in (data.get("scenes") or []) if isinstance(s, dict)]
+    events = normalize_events(data.get("events"), scenes)
+    locations = [s for s in scenes if not _is_event_scene(s)]
+
+    world = dict(data.get("world") or data.get("world_setting") or {})
+    if not _str(world.get("start")):
+        first = next((s for s in locations if _str(s.get("id"))), None)
+        if first:
+            world["start"] = _str(first.get("id"))
+
+    endings = []
+    for ending in data.get("endings") or []:
+        if not isinstance(ending, dict):
+            continue
+        item = dict(ending)
+        when = item.get("when")
+        if isinstance(when, str):
+            item["when"] = {"text": when.strip(), "expr": None}
+        endings.append(item)
+
+    out = {
+        **data,
+        "world": world,
+        "scenes": locations,
+        "events": events,
+        "endings": endings,
+    }
+    out["schema_version"] = SCHEMA_VERSION
+    out["validation"] = validate_module(out)
+    return out

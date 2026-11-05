@@ -4405,6 +4405,11 @@ export interface components {
             /** Clues */
             clues: unknown[];
             /**
+             * Events
+             * @default []
+             */
+            events: unknown[];
+            /**
              * Created At
              * Format: date-time
              */
@@ -4447,6 +4452,8 @@ export interface components {
             rag_status: string;
             /** Rule System */
             rule_system: string;
+            /** Schema Version */
+            schema_version: number;
             /** Scenes */
             scenes: unknown[];
             /** Theme */
@@ -4468,6 +4475,10 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Validation */
+            validation: {
+                [key: string]: unknown;
+            };
             /** World Setting */
             world_setting: {
                 [key: string]: unknown;
@@ -4498,6 +4509,8 @@ export interface components {
             description: string;
             /** Endings */
             endings?: unknown[] | null;
+            /** Events */
+            events?: unknown[] | null;
             /**
              * Handouts
              * @default []
