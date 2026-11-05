@@ -692,7 +692,12 @@ def build_turn_plan_messages(
             {
                 "id": e.get("id", ""),
                 "name": e.get("name", ""),
-                "when": e.get("when", ""),
+                # v3 的 when 是 {text, expr}；规划器只需要可判定的一句话
+                "when": (
+                    (e.get("when") or {}).get("text", "")
+                    if isinstance(e.get("when"), dict)
+                    else (e.get("when") or "")
+                ),
             }
             for e in (getattr(module, "endings", None) or [])
             if isinstance(e, dict) and e.get("id")

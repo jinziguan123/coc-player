@@ -46,8 +46,16 @@ interface MapNode { id: string; q: number; r: number; biome: string; scene_id?: 
 interface NPC { id: string; name?: string; gender?: string; description?: string; personality?: string; background?: string; secrets?: string[]; initial_location?: string; skills?: Record<string, number>; attributes?: Record<string, number>; hp?: number; armor?: number; weapon?: string; damage?: string; goals?: string[]; states?: NpcState[]; portrait?: string }
 interface Clue { id: string; name?: string; description?: string; location?: string; trigger_condition?: string; image?: string }
 interface Trigger { id: string; when?: string; set_flags?: string[]; clear_flags?: string[]; description?: string }
+/** 结局条件：v3 是 {text, expr}，旧数据/手写可能是纯字符串。 */
+type EndingWhen = string | { text?: string; expr?: unknown } | null | undefined
+const whenText = (w: EndingWhen): string => (typeof w === 'string' ? w : w?.text || '')
+/** 编辑时保留原 expr，只改 text——结构化条件不因改文字被清掉。 */
+const whenSpec = (w: EndingWhen, text: string) => ({
+  text,
+  expr: typeof w === 'object' && w ? (w.expr ?? null) : null,
+})
 /** 结局分支：when 是可判定的达成条件，规划器据此认出「玩家已经抵达终局」。 */
-interface Ending { id: string; name?: string; when?: string; description?: string; is_good?: boolean }
+interface Ending { id: string; name?: string; when?: EndingWhen; description?: string; is_good?: boolean }
 interface ModuleData {
   id?: string
   title: string
@@ -374,7 +382,7 @@ export function ModuleDetailPage() {
   const updTrigger = (i: number, patch: Partial<Trigger>) => setData((d) => ({ ...d, triggers: d.triggers.map((t, ii) => ii === i ? { ...t, ...patch } : t) }))
   const rmTrigger = (i: number) => setData((d) => ({ ...d, triggers: d.triggers.filter((_, ii) => ii !== i) }))
 
-  const addEnding = () => setData((d) => ({ ...d, endings: [...(d.endings || []), { id: genId('ending'), name: '', when: '', description: '', is_good: true }] }))
+  const addEnding = () => setData((d) => ({ ...d, endings: [...(d.endings || []), { id: genId('ending'), name: '', when: { text: '', expr: null }, description: '', is_good: true }] }))
   const updEnding = (i: number, patch: Partial<Ending>) => setData((d) => ({ ...d, endings: (d.endings || []).map((e, ii) => ii === i ? { ...e, ...patch } : e) }))
   const rmEnding = (i: number) => setData((d) => ({ ...d, endings: (d.endings || []).filter((_, ii) => ii !== i) }))
 
@@ -1062,7 +1070,7 @@ export function ModuleDetailPage() {
         {(data.endings || []).map((e, i) => (
           <ItemCard key={e.id || i} onRemove={edit ? () => rmEnding(i) : undefined}>
             <Row label="结局名">{edit ? <TextInput value={e.name || ''} onChange={(v) => updEnding(i, { name: v })} placeholder="照抄原文叫法，如 结局A：冲出隧道" /> : <span className="font-semibold">{e.name || '(未命名)'}</span>}</Row>
-            <Row label="达成条件">{edit ? <TextInput value={e.when || ''} onChange={(v) => updEnding(i, { when: v })} placeholder="可判定的一句话，如『把油门拉杆推到底让电车加速』" /> : <span style={{ color: 'var(--color-text-accent)' }}>{e.when || '—'}</span>}</Row>
+            <Row label="达成条件">{edit ? <TextInput value={whenText(e.when)} onChange={(v) => updEnding(i, { when: whenSpec(e.when, v) })} placeholder="可判定的一句话，如『把油门拉杆推到底让电车加速』" /> : <span style={{ color: 'var(--color-text-accent)' }}>{whenText(e.when) || '—'}</span>}</Row>
             <Row label="收场">{edit ? <TextInput value={e.description || ''} onChange={(v) => updEnding(i, { description: v })} multiline placeholder="会发生什么、调查员的下场、留下什么余韵（KP 据此演出终局）" /> : <span className="whitespace-pre-wrap">{e.description || '—'}</span>}</Row>
             <Row label="结果">{edit ? (
               <Select value={e.is_good === false ? 'bad' : 'good'} onValueChange={(v) => updEnding(i, { is_good: v === 'good' })}>
