@@ -61,6 +61,7 @@ import { ChasePanel, type ChaseState } from '../components/game/ChasePanel'
 import { KpSceneBrief } from '../components/game/KpSceneBrief'
 import { KpConsoleDock } from '../components/game/KpConsoleDock'
 import { PlayerComposer } from '../components/game/PlayerComposer'
+import { createPortal } from 'react-dom'
 import { MentionText } from '../components/game/MentionTokens'
 import { useMentionCandidates } from '../components/game/usePlayerMentions'
 import { AgentTracePanel } from '../components/game/AgentTracePanel'
@@ -266,7 +267,9 @@ export function GameSessionPage() {
   const panelChar = usePanelCharacter(shownCharId, refreshTick)
   // 我的角色：疯狂边框与台词改写都按自己的状态判断，而不是当前查看的面板角色
   const myChar = usePanelCharacter(myCharId, refreshTick)
-  const insane = !!myChar && ['temporary_insanity', 'indefinite_insanity', 'permanent_insanity'].includes(myChar.status)
+  // 旧存档/席次解析不到 myCharId 时，面板里显示的自己就是自己——别让疯狂边框与改写因此失效。
+  const selfChar = myChar ?? (panelChar && (!myCharId || panelChar.id === myCharId) ? panelChar : null)
+  const insane = !!selfChar && ['temporary_insanity', 'indefinite_insanity', 'permanent_insanity'].includes(selfChar.status)
   const myWeapons = useMyWeapons(myCharId, refreshTick)
   const { locations, mapNodes, mapBackdrop, canGodView } = useKnownLocations({
     sessionId, myCharId, sceneId: currentSession?.current_scene_id, refreshTick,
@@ -1417,11 +1420,12 @@ export function GameSessionPage() {
       )}
       {sceneVeil && <div className="scene-veil" aria-hidden="true" />}
       {battleVeil && <div className="scene-veil" aria-hidden="true" />}
-      {insane && (
+      {insane && createPortal(
         <div
-          className={`madness-vignette${myChar?.status === 'permanent_insanity' ? ' is-permanent' : ''}`}
+          className={`madness-vignette${selfChar?.status === 'permanent_insanity' ? ' is-permanent' : ''}`}
           aria-hidden="true"
-        />
+        />,
+        document.body,
       )}
 
       {/* 顶栏工具行：从聊天列提上来横贯整页——沉浸战斗收栏时它不该跟着消失（含 KP 值班条） */}
@@ -2057,6 +2061,15 @@ export function GameSessionPage() {
                 {isPlayer && msg.type === 'dialogue' ? (
                   <div className="chat-player">
                     <span className="chat-bubble-player"><MentionText text={msg.content} candidates={mentionCandidates} /></span>
+                    {msg.metadata?.madness_rewrite === true && (
+                      <span
+                        className="text-xs"
+                        style={{ color: 'var(--color-danger, #b4584a)', opacity: 0.8, marginLeft: 6 }}
+                        title="这句话经模型改写成了符合疯狂症状的口吻（设置里可关）"
+                      >
+                        疯狂改写
+                      </span>
+                    )}
                   </div>
                 ) : !isPlayer && msg.type === 'dialogue' ? (
                   // NPC 气泡：有立绘（metadata.portrait，缓存秒挂或生成后 event_patch 补挂）时在气泡旁放小圆头像。
