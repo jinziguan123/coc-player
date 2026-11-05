@@ -69,7 +69,7 @@ import { KpCombatSpread } from '../components/game/KpCombatSpread'
 import { KpDeskRail } from '../components/game/KpDeskRail'
 import { useKpCombatActions } from '../components/game/useKpCombatActions'
 import { useMinWidth } from '@/lib/useMinWidth'
-import { getMadnessRewriteEnabled } from '@/lib/theme'
+import { getMadnessRewriteEnabled, getMadnessVignetteEnabled, MADNESS_VIGNETTE_EVENT } from '@/lib/theme'
 import { KpChaseStage } from '../components/game/KpChaseStage'
 import { usePartyVitals } from '@/features/game-session/usePartyVitals'
 import { useKpPrefill } from '../stores/kpPrefill'
@@ -270,6 +270,17 @@ export function GameSessionPage() {
   // 旧存档/席次解析不到 myCharId 时，面板里显示的自己就是自己——别让疯狂边框与改写因此失效。
   const selfChar = myChar ?? (panelChar && (!myCharId || panelChar.id === myCharId) ? panelChar : null)
   const insane = !!selfChar && ['temporary_insanity', 'indefinite_insanity', 'permanent_insanity'].includes(selfChar.status)
+  // 疯狂边框可单独关；设置页改了开关会广播事件，这里跟着收/放（不刷新页面）
+  const [vignetteOn, setVignetteOn] = useState(() => getMadnessVignetteEnabled())
+  useEffect(() => {
+    const sync = () => setVignetteOn(getMadnessVignetteEnabled())
+    window.addEventListener('storage', sync)
+    window.addEventListener(MADNESS_VIGNETTE_EVENT, sync)
+    return () => {
+      window.removeEventListener('storage', sync)
+      window.removeEventListener(MADNESS_VIGNETTE_EVENT, sync)
+    }
+  }, [])
   const myWeapons = useMyWeapons(myCharId, refreshTick)
   const { locations, mapNodes, mapBackdrop, canGodView } = useKnownLocations({
     sessionId, myCharId, sceneId: currentSession?.current_scene_id, refreshTick,
@@ -1420,7 +1431,7 @@ export function GameSessionPage() {
       )}
       {sceneVeil && <div className="scene-veil" aria-hidden="true" />}
       {battleVeil && <div className="scene-veil" aria-hidden="true" />}
-      {insane && createPortal(
+      {insane && vignetteOn && createPortal(
         <div
           className={`madness-vignette${selfChar?.status === 'permanent_insanity' ? ' is-permanent' : ''}`}
           aria-hidden="true"

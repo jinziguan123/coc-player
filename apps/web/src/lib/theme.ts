@@ -88,6 +88,28 @@ export function setMadnessRewriteEnabled(on: boolean): void {
   } catch { /* 存不下就只在本次会话生效 */ }
 }
 
+const MADNESS_VIGNETTE_KEY = 'trpg_madness_vignette'
+/** 同一页里切换设置后广播，让对局页立刻收/放边框（不用刷新） */
+export const MADNESS_VIGNETTE_EVENT = 'trpg-madness-vignette'
+
+/** 疯狂发作时是否在屏幕四周渲染暗红呼吸边框（缺省开，可在设置里关）。 */
+export function getMadnessVignetteEnabled(): boolean {
+  try {
+    return localStorage.getItem(MADNESS_VIGNETTE_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function setMadnessVignetteEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(MADNESS_VIGNETTE_KEY, on ? '1' : '0')
+  } catch { /* 存不下就只在本次会话生效 */ }
+  try {
+    window.dispatchEvent(new Event(MADNESS_VIGNETTE_EVENT))
+  } catch { /* 无 window（测试/SSR）时忽略 */ }
+}
+
 /**
  * 局内的显示方式：
  * - 'chat'：聊天流（缺省）。场景图在流里清晰出现一次，此后糊成氛围底；

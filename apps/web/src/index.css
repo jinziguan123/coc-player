@@ -8679,6 +8679,7 @@ select.input option {
 .display-mode-art--dialogue i:nth-child(3) { left: 0.9rem; bottom: 0.95rem; width: 55%; height: 0.25rem; background: rgba(231, 220, 196, 0.6); }
 
 
+
 /* 疯狂发作：屏幕边缘的暗红呼吸。pointer-events: none，只影响观感不挡操作。 */
 .madness-vignette {
   position: fixed;
@@ -8686,20 +8687,27 @@ select.input option {
   pointer-events: none;
   z-index: 55;
   background:
-    radial-gradient(ellipse at center, transparent 52%, rgba(96, 8, 8, 0.36) 100%),
-    linear-gradient(180deg, rgba(96, 8, 8, 0.14), transparent 16%, transparent 84%, rgba(96, 8, 8, 0.14));
-  animation: madness-breathe 5.2s ease-in-out infinite;
+    radial-gradient(ellipse 88% 88% at 50% 50%, transparent 38%, rgba(120, 8, 8, 0.62) 100%),
+    linear-gradient(180deg, rgba(120, 8, 8, 0.34), transparent 18%, transparent 82%, rgba(120, 8, 8, 0.34));
+  box-shadow:
+    inset 0 0 180px 50px rgba(110, 6, 6, 0.55),
+    inset 0 0 60px 8px rgba(150, 12, 12, 0.28);
+  animation: madness-breathe 3.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 .madness-vignette.is-permanent {
   background:
-    radial-gradient(ellipse at center, transparent 42%, rgba(70, 0, 0, 0.55) 100%),
-    linear-gradient(180deg, rgba(70, 0, 0, 0.22), transparent 14%, transparent 86%, rgba(70, 0, 0, 0.22));
-  animation-duration: 3.4s;
+    radial-gradient(ellipse 82% 82% at 50% 50%, transparent 26%, rgba(72, 0, 0, 0.8) 100%),
+    linear-gradient(180deg, rgba(72, 0, 0, 0.46), transparent 16%, transparent 84%, rgba(72, 0, 0, 0.46));
+  box-shadow:
+    inset 0 0 240px 70px rgba(60, 0, 0, 0.72),
+    inset 0 0 80px 12px rgba(120, 6, 6, 0.4);
+  animation-duration: 2.6s;
 }
 @keyframes madness-breathe {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 0.95; }
+  0%, 100% { opacity: 0.4; }
+  42% { opacity: 1; }
+  58% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .madness-vignette { animation: none; opacity: 0.7; }
+  .madness-vignette { animation: none; opacity: 0.75; }
 }

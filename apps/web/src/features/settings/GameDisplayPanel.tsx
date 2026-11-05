@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
-  getMadnessRewriteEnabled, getSceneBackdropEnabled,
-  setMadnessRewriteEnabled, setSceneBackdropEnabled, type GameDisplayMode,
+  getMadnessRewriteEnabled, getMadnessVignetteEnabled, getSceneBackdropEnabled,
+  setMadnessRewriteEnabled, setMadnessVignetteEnabled, setSceneBackdropEnabled, type GameDisplayMode,
 } from '@/lib/theme'
 import { useGameDisplay } from '@/features/game-session/vn/useGameDisplay'
 
@@ -19,6 +19,7 @@ export function GameDisplayPanel() {
   const [mode, setMode] = useGameDisplay()
   const [backdrop, setBackdrop] = useState(() => getSceneBackdropEnabled())
   const [madnessVoice, setMadnessVoice] = useState(() => getMadnessRewriteEnabled())
+  const [madnessVignette, setMadnessVignette] = useState(() => getMadnessVignetteEnabled())
   return (
     <div className="card">
       <h3 className="card-title">局内显示</h3>
@@ -63,6 +64,24 @@ export function GameDisplayPanel() {
       <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: '0.4rem' }}>
         把当前场景的配图重度模糊后铺在对局界面后面，只留下这个地方的色调，换场景时跟着变；不影响读字。
         没有配图的场景（未配置生图模型，或图还在生成）自动回落到主题底色。
+      </p>
+      <label
+        className="text-sm"
+        style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginTop: '1rem', cursor: 'pointer' }}
+      >
+        <input
+          type="checkbox"
+          checked={madnessVignette}
+          onChange={(e) => {
+            setMadnessVignetteEnabled(e.target.checked)
+            setMadnessVignette(e.target.checked)
+          }}
+        />
+        <span>疯狂发作时在屏幕四周渲染暗红呼吸边框</span>
+      </label>
+      <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: '0.4rem' }}>
+        角色处于临时/不定期/永久疯狂时，页面边缘会像呼吸一样泛红；永久疯狂更深更快。
+        只影响观感、不挡操作，关掉则完全不显示。
       </p>
       <label
         className="text-sm"
