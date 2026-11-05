@@ -2,13 +2,13 @@
 
 不验证 LLM 行为，只守住两条底线：
 1. 系统提示词里包含核心裁定手册各分区（信息分层 + 检定先行纪律必须在场）。
-2. 渲染后的静态系统提示词留给模组数据的预算足够，防止后续 prompt 膨胀
-   把 MAX_SYSTEM_TOKENS 顶满导致尾部（玩家信息/约束）被截断。
+2. 静态裁定手册不无节制膨胀：系统提示不设上限、不丢段，但它越长，事件区（剧情历史）
+   能分到的就越少，且每轮都要付这份输入。
 """
 
 import re
 
-from app.ai.context import _estimate_tokens, MAX_SYSTEM_TOKENS
+from app.ai.context import _estimate_tokens, SYSTEM_TOKENS_ESTIMATE
 from app.ai.prompts.kp_system import KP_SYSTEM_PROMPT
 
 
@@ -55,11 +55,9 @@ def test_characteristic_checks_and_proactive_guidance():
 def test_rulebook_static_leaves_budget_for_module_data():
     static = re.sub(r"\{[a-z_]+\}", "", KP_SYSTEM_PROMPT)
     static_tokens = _estimate_tokens(static)
-    # 护栏随 MAX_SYSTEM_TOKENS 抬高而抬高（现 17000-6000=11000）。**减数 6000 是这条护栏的
-    # 本体，不许为了塞新规则去动它**：静态提示只是系统内容的一部分，.format() 后还要接模组数据 +
-    # RAG 原文摘录 + 线索台账 + NPC 记忆 + 幕后动态 + handout 清单（合计可达数千 token），
-    # 挤掉的是玩家真正需要的剧本细节。手册确实需要长时，抬 MAX_SYSTEM_TOKENS（总预算），
-    # 而不是缩这 6000。
-    assert static_tokens < MAX_SYSTEM_TOKENS - 6000, (
+    # 系统提示整体按 SYSTEM_TOKENS_ESTIMATE 估算来给事件区留预算；静态手册之外还要接模组数据 +
+    # 模组/规则原文摘录 + 线索台账 + NPC 记忆 + 幕后动态 + handout 清单（合计可达数千 token）。
+    # 减数 6000 给这些下游内容留出估算余量；手册确实需要长时，同步抬 SYSTEM_TOKENS_ESTIMATE。
+    assert static_tokens < SYSTEM_TOKENS_ESTIMATE - 6000, (
         f"KP 系统提示词过长（{static_tokens} token），下游注入内容预算不足"
     )

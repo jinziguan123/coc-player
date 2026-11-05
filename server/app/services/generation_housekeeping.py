@@ -53,13 +53,13 @@ def _event_budget(ws: dict | None) -> int:
     「还没触发摘要就已经溢出」，也不会在校准放大了预算后仍按旧预算过早浓缩。
     """
     from app.ai.context import (
-        MAX_SYSTEM_TOKENS,
+        SYSTEM_TOKENS_ESTIMATE,
         RESERVE_FOR_OUTPUT,
         RESERVE_FOR_TOOLS,
         effective_context_budget,
     )
     return max(
-        effective_context_budget(ws) - MAX_SYSTEM_TOKENS - RESERVE_FOR_OUTPUT - RESERVE_FOR_TOOLS, 4000,
+        effective_context_budget(ws) - SYSTEM_TOKENS_ESTIMATE - RESERVE_FOR_OUTPUT - RESERVE_FOR_TOOLS, 4000,
     )
 
 

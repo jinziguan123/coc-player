@@ -179,19 +179,11 @@ RESERVE_FOR_OUTPUT = 7000
 # 校准系数取的是工具循环第一步「messages + tools」的实测（见 turn_context._record_turn_usage），
 # 不再被工具 schema 与往返压低——这份空间改由这里显式预留。摘要侧 _event_budget 同口径。
 RESERVE_FOR_TOOLS = 12000
-# 系统提示上限。此处装的不只是静态裁定手册，还有模组数据 + RAG 原文摘录（可达 ~2700 token）
-# + 线索台账 + NPC 记忆 + 幕后动态 + handout 清单。KP 手册随能力增强持续变长，12000 下
-# 静态手册被卡在 6000（=MAX-6000 护栏）反复要「加一句砍一句」。提升到 16000：静态手册天花板
-# 随之抬到 10000（充裕生长空间），同时给下游注入内容仍留 6000。用户已授权为「保证最终效果」放宽预算。
-# 2026-08-05 由 16000 抬到 17000：静态手册已长到 ~10000，撞上「留 6000 给下游注入」的护栏
-# （见 tests/test_kp_rulebook）。抬的是**总预算**而不是放松护栏——模组数据 / RAG 原文摘录 /
-# 线索台账 / NPC 记忆这些下游内容的余量必须原样保住，被挤掉的是玩家真正需要的剧本细节。
-# 2026-08-07 由 17000 抬到 20000：换成分段装配后，超预算从「无声地从尾部截字符」变成了
-# 显式的按优先级丢段 + 告警，于是看清了一件一直存在、只是没人看见的事——**大模组的必留段
-# 本身就装不下**：静态手册 10.4k + 大模组数据 6k + 能力广告 1.7k ≈ 18k，台账/NPC 记忆/
-# 幕后动态这些「玩家直接可感」的内容每轮都在被挤掉（实测 evals 的 manor_multiplayer_npc）。
-# 20000 估算 ≈ 13000 真实 token，对 64K 窗口仍只占两成，且事件区有在线校准补偿。
-MAX_SYSTEM_TOKENS = 30000
+#: 系统提示长度的**估算值**，只供滚动摘要计算事件区预算用（见 generation_housekeeping._event_budget），
+#: 不是上限：系统提示不再按预算丢段——模组 / 规则原文、台账、NPC 记忆一律全给，长了就由事件区
+#: 吸收（历史少给几条，更早的已在滚动摘要里）。此前固定 30000 上限且按估算值判断（估算偏高），
+#: 实测只超 433 就整段丢掉本轮预取的模组原文，KP 因此写出不符合模组表述的内容。
+SYSTEM_TOKENS_ESTIMATE = 30000
 MAX_SUMMARY_TOKENS = 2000
 MIN_RECENT_EVENTS = 10
 #: 队友 / NPC 自己的事件窗口上限：条数只是粗筛，单条长旁白不能把上下文撑爆。
@@ -199,7 +191,7 @@ TEAM_EVENT_TOKEN_CAP = 12000
 NPC_EVENT_TOKEN_CAP = 8000
 MIN_AGENT_EVENTS = 6
 
-# 被动注入的模组原文摘录：单块截断（摘录段计入 MAX_SYSTEM_TOKENS 预算）。系统预算放宽后
+# 被动注入的模组原文摘录：单块截断。系统预算放宽后
 # 可给更完整的原文片段，从 400 提到 600 字。
 MODULE_EXCERPT_MAX_CHARS = 600
 # 被动注入的规则书要点：单块截断上限。切块本体 500 字、检索侧相邻块合并后最长约
@@ -220,12 +212,11 @@ VAGUE_NUDGE_THRESHOLD = 3
 
 
 # ── 系统提示的分段装配 ────────────────────────────────────────────────────
-# 系统提示不再是一根拼出来的长字符串，而是一组带「稳定性」与「重要度」标注的段：
-# · tier 决定**排列顺序**。prompt caching 是前缀匹配，前缀里任何字节变了其后全部失效，
-#   所以整场不变的段必须排在会变的段前面。三档按 tier 常量分组成 3 条 system 消息，
-#   provider 层在前两块末尾打缓存断点（见 providers/anthropic.py）。
-# · priority 决定**超预算时的丢弃顺序**（越大越先丢，0 = 绝不丢）。整段丢弃而非按字符
-#   截断：模组数据是紧凑 JSON，从尾部切一刀就是半截非法 JSON，模型会读到残缺的 NPC 列表。
+# 系统提示不再是一根拼出来的长字符串，而是一组带「稳定性」标注的段：
+# tier 决定**排列顺序**。prompt caching 是前缀匹配，前缀里任何字节变了其后全部失效，
+# 所以整场不变的段必须排在会变的段前面。三档按 tier 常量分组成 3 条 system 消息，
+# provider 层在前两块末尾打缓存断点（见 providers/anthropic.py）。
+# 段落一律全给、不设上限（见 SYSTEM_TOKENS_ESTIMATE）。
 SYS_TIER_STATIC = 0      # 整场会话逐字不变：身份 + 裁定手册 + 文风 + 能力广告
 SYS_TIER_SEMI = 1        # 随场景/进度变，同一轮内稳定：模组数据、幕后真相
 SYS_TIER_VOLATILE = 2    # 每轮都可能变：摘录、台账、记忆、幕后动态、封路清单
@@ -239,7 +230,6 @@ _SYS_TIERS = (SYS_TIER_STATIC, SYS_TIER_SEMI, SYS_TIER_VOLATILE)
 #   只要还排在历史前面，每轮一变就让其后整段剧情历史全部失效——挪到尾部之后，
 #   「系统提示 + 剧情摘要 + 历史」才是跨回合逐字不变的前缀。
 # · 关：旧装配，易变档作为第三块紧跟系统提示。
-# 两种摆法的超预算丢弃完全相同：_assemble_system 照旧对三档整体算预算、按 priority 丢。
 KP_SNAPSHOT_LABEL = "[当前局面·供 KP 参考]"
 _KP_SNAPSHOT_HEAD = (
     KP_SNAPSHOT_LABEL + "\n"
@@ -253,47 +243,20 @@ def _is_kp_snapshot(msg: dict) -> bool:
 
 
 class _Seg(NamedTuple):
-    """系统提示的一个段落。``label`` 仅用于超预算丢弃时的日志与测试断言。"""
+    """系统提示的一个段落。``label`` 是注册名，供日志与测试断言定位。"""
     text: str
     tier: int
-    priority: int
     label: str
 
 
-def _assemble_system(segs: list[_Seg], max_tokens: int) -> tuple[list[str], int]:
-    """把段落按 tier 分组拼成 3 个文本块，超预算时按 priority 整段丢弃。
+def _assemble_system(segs: list[_Seg]) -> tuple[list[str], int]:
+    """把段落按 tier 分组拼成 3 个文本块，返回 ``([静态块, 半静态块, 易变块], 估算 token)``。
 
-    返回 ``([静态块, 半静态块, 易变块], 估算 token)``。空块由调用方过滤。
-    priority=0 的段永不丢弃——若它们本身就超预算，宁可超也不切碎裁定手册或模组 JSON，
-    代价由事件区预算吸收（event_budget 相应变小，历史少给几条）。
+    不设上限、不丢段：系统提示里的每一段都是 KP 这一轮要用的（尤其预取的模组与规则原文），
+    长了由事件区预算吸收。空块由调用方过滤。
     """
-    kept = list(segs)
-    total = sum(_estimate_tokens(s.text) for s in kept)
-    if total > max_tokens:
-        before = total
-        # 同 priority 内保持原始顺序（sorted 稳定），使丢弃行为可预测、可测试。
-        dropped: list[str] = []
-        for seg in sorted((s for s in kept if s.priority > 0), key=lambda s: -s.priority):
-            if total <= max_tokens:
-                break
-            kept.remove(seg)
-            total -= _estimate_tokens(seg.text)
-            dropped.append(seg.label)
-        # 一行说清「超了多少、丢了什么、还能不能捞回来」——只报个段名的话，
-        # 读日志的人无从判断这是正常代谢还是预算该调了。
-        # 摘录类的段是**按需可取回**的：KP 手上留着 [MODULE_LOOKUP]/[RULE_LOOKUP]，
-        # 真需要原文会自己去拿；这也正是它们排在丢弃序列最前面的原因。
-        if dropped:
-            recoverable = all(label.endswith("-excerpts") for label in dropped)
-            logger.warning(
-                "系统提示超预算 %s/%s，丢弃 %s token：%s%s",
-                before, max_tokens, before - total, "、".join(dropped),
-                "（摘录类，KP 需要时可用 [MODULE_LOOKUP]/[RULE_LOOKUP] 按需取回）"
-                if recoverable else "",
-            )
-        if total > max_tokens:
-            logger.warning("系统提示仍超预算（%s > %s），保留全部必留段", total, max_tokens)
-    blocks = ["".join(s.text for s in kept if s.tier == t) for t in _SYS_TIERS]
+    total = sum(_estimate_tokens(s.text) for s in segs)
+    blocks = ["".join(s.text for s in segs if s.tier == t) for t in _SYS_TIERS]
     return blocks, total
 
 
@@ -1239,7 +1202,7 @@ class _SectionCtx:
 
 # ── 各小节的生成器：返回小节正文，返回 None/"" 即「本轮不注入」──────────────
 #
-# 命名一律 _sec_<注册名>。函数体里不要出现 tier/priority——那两项属于「排在哪、先丢谁」，
+# 命名一律 _sec_<注册名>。函数体里不要出现 tier——那属于「排在哪」，
 # 是装配策略，写在下面的注册表里；小节自己只回答「这一轮有没有内容要说」。
 
 def _sec_identity(c: _SectionCtx) -> str:
@@ -1440,7 +1403,7 @@ def _sec_handouts(c: _SectionCtx) -> str | None:
 def _sec_clue_ledger(c: _SectionCtx) -> str | None:
     """线索台账：已 known/partial 的线索清单 + 「未列出的一律视为未发现」的硬指示。
 
-    priority 最低（最后才丢）：丢了 KP 会重复安排已发现线索的发现桥段，玩家直接可感。
+    缺了它 KP 会重复安排已发现线索的发现桥段，玩家直接可感。
     """
     if c.facts.is_opening:
         return None
@@ -1504,15 +1467,14 @@ def _sec_improvised_npcs(c: _SectionCtx) -> str | None:
 
 
 class _Section(NamedTuple):
-    """一条小节注册项：``(注册名, 缓存档位, 丢弃优先级, 生成器, 是否 fail-open)``。
+    """一条小节注册项：``(注册名, 缓存档位, 生成器, 是否 fail-open)``。
 
-    ``tier`` 决定排在哪一块（静态 → 半静态 → 易变），``priority`` 决定超预算时谁先被丢
-    （数越大越先丢，0 = 绝不主动丢）。两者都属于装配策略，刻意留在注册表里而不是生成器体内。
+    ``tier`` 决定排在哪一块（静态 → 半静态 → 易变），属于装配策略，刻意留在注册表里
+    而不是生成器体内。
     """
 
     name: str
     tier: int
-    priority: int
     build: Callable[["_SectionCtx"], str | None]
     fail_open: bool = False
 
@@ -1522,46 +1484,40 @@ class _Section(NamedTuple):
 # 全部前缀失效。新增小节前先想清它属于哪一档。
 _SECTIONS: tuple[_Section, ...] = (
     # ── 静态：整场逐字不变（约 1.5 万估算 token，缓存命中的主体）──
-    _Section("identity",          SYS_TIER_STATIC, 0, _sec_identity),
-    _Section("manual",            SYS_TIER_STATIC, 0, _sec_manual),
+    _Section("identity",          SYS_TIER_STATIC, _sec_identity),
+    _Section("manual",            SYS_TIER_STATIC, _sec_manual),
     # 文风与村规紧跟手册是有意的——段内那句「上文的叙事纪律优先级更高」要指得着手册。
-    _Section("narrative-style",   SYS_TIER_STATIC, 0, _sec_narrative_style),
-    _Section("village-rules",     SYS_TIER_STATIC, 0, _sec_village_rules),
+    _Section("narrative-style",   SYS_TIER_STATIC, _sec_narrative_style),
+    _Section("village-rules",     SYS_TIER_STATIC, _sec_village_rules),
     # 能力广告：是否广告取决于本场配置（有无规则书 / 索引 / 多地点），会话内恒定。
-    _Section("travel-suggest",    SYS_TIER_STATIC, 0, _sec_travel_suggest),
-    _Section("rule-lookup-ad",    SYS_TIER_STATIC, 0, _sec_rule_lookup_ad),
-    _Section("module-lookup-ad",  SYS_TIER_STATIC, 0, _sec_module_lookup_ad),
-    _Section("recall-ad",         SYS_TIER_STATIC, 0, _sec_recall_ad),
-    _Section("plot-flag-ad",      SYS_TIER_STATIC, 0, _sec_plot_flag_ad),
-    _Section("set-mood-ad",       SYS_TIER_STATIC, 0, _sec_set_mood_ad),
+    _Section("travel-suggest",    SYS_TIER_STATIC, _sec_travel_suggest),
+    _Section("rule-lookup-ad",    SYS_TIER_STATIC, _sec_rule_lookup_ad),
+    _Section("module-lookup-ad",  SYS_TIER_STATIC, _sec_module_lookup_ad),
+    _Section("recall-ad",         SYS_TIER_STATIC, _sec_recall_ad),
+    _Section("plot-flag-ad",      SYS_TIER_STATIC, _sec_plot_flag_ad),
+    _Section("set-mood-ad",       SYS_TIER_STATIC, _sec_set_mood_ad),
     # ── 半静态：模组数据随已访问场景/剧情推进而变，同一轮内稳定 ──
-    _Section("module-data",       SYS_TIER_SEMI, 0, _sec_module_data),
-    _Section("truth",             SYS_TIER_SEMI, 0, _sec_truth),
-    _Section("plot-events",       SYS_TIER_SEMI, 0, _sec_plot_events),
+    _Section("module-data",       SYS_TIER_SEMI, _sec_module_data),
+    _Section("truth",             SYS_TIER_SEMI, _sec_truth),
+    _Section("plot-events",       SYS_TIER_SEMI, _sec_plot_events),
     # ── 易变：每轮都可能变，排在最后，不污染上面两块的缓存前缀 ──
     # 注意：**这里的先后就是最终拼接的先后**（_assemble_system 按 tier 分组后按本表顺序
-    # 直接 join），不要为了「按 priority 排整齐」而调换——priority 只管超预算时谁先被丢。
-    _Section("party-location",    SYS_TIER_VOLATILE, 2,  _sec_party_location),
-    _Section("blocked-paths",     SYS_TIER_VOLATILE, 15, _sec_blocked_paths),
-    # 摘录类排在丢弃序列最前（priority 最大）：丢了 KP 还能用 [MODULE_LOOKUP] /
-    # [RULE_LOOKUP] 主动取回，是可恢复的损失。
-    _Section("module-excerpts",   SYS_TIER_VOLATILE, 40, _sec_module_excerpts),
-    _Section("rule-excerpts",     SYS_TIER_VOLATILE, 40, _sec_rule_excerpts),
-    # 一次性内容：本轮不给就永远没了，priority=0 绝不主动丢。
-    _Section("combat-result",     SYS_TIER_VOLATILE, 0,  _sec_combat_result),
-    _Section("combat-active",     SYS_TIER_VOLATILE, 0,  _sec_combat_active),
-    _Section("handouts",          SYS_TIER_VOLATILE, 25, _sec_handouts,        True),
-    # 世界记忆四节：台账 priority 最低（最后才丢）——丢了 KP 会重复安排已发现线索的
-    # 发现桥段，玩家直接可感。
-    _Section("clue-ledger",       SYS_TIER_VOLATILE, 5,  _sec_clue_ledger,     True),
-    _Section("scene-events",      SYS_TIER_VOLATILE, 5,  _sec_scene_events,    True),
-    _Section("plot-threads",      SYS_TIER_VOLATILE, 8,  _sec_plot_threads,    True),
-    _Section("mark-seen",         SYS_TIER_VOLATILE, 6,  _sec_mark_seen,       True),
-    _Section("npc-memory",        SYS_TIER_VOLATILE, 10, _sec_npc_memory,      True),
-    _Section("backstage",         SYS_TIER_VOLATILE, 30, _sec_backstage,       True),
-    _Section("improvised-npcs",   SYS_TIER_VOLATILE, 35, _sec_improvised_npcs, True),
-    # 配乐氛围只是锦上添花，超预算时最先丢。
-    _Section("bgm-current",       SYS_TIER_VOLATILE, 50, _sec_bgm_current,     True),
+    # 直接 join），调换会改变 KP 读到的顺序。
+    _Section("party-location",    SYS_TIER_VOLATILE, _sec_party_location),
+    _Section("blocked-paths",     SYS_TIER_VOLATILE, _sec_blocked_paths),
+    _Section("module-excerpts",   SYS_TIER_VOLATILE, _sec_module_excerpts),
+    _Section("rule-excerpts",     SYS_TIER_VOLATILE, _sec_rule_excerpts),
+    _Section("combat-result",     SYS_TIER_VOLATILE, _sec_combat_result),
+    _Section("combat-active",     SYS_TIER_VOLATILE, _sec_combat_active),
+    _Section("handouts",          SYS_TIER_VOLATILE, _sec_handouts,        True),
+    _Section("clue-ledger",       SYS_TIER_VOLATILE, _sec_clue_ledger,     True),
+    _Section("scene-events",      SYS_TIER_VOLATILE, _sec_scene_events,    True),
+    _Section("plot-threads",      SYS_TIER_VOLATILE, _sec_plot_threads,    True),
+    _Section("mark-seen",         SYS_TIER_VOLATILE, _sec_mark_seen,       True),
+    _Section("npc-memory",        SYS_TIER_VOLATILE, _sec_npc_memory,      True),
+    _Section("backstage",         SYS_TIER_VOLATILE, _sec_backstage,       True),
+    _Section("improvised-npcs",   SYS_TIER_VOLATILE, _sec_improvised_npcs, True),
+    _Section("bgm-current",       SYS_TIER_VOLATILE, _sec_bgm_current,     True),
 )
 
 
@@ -1607,7 +1563,7 @@ def _build_system_segments(
             logger.exception("小节 %s 注入 KP 上下文失败（忽略）", spec.name)
             continue
         if text:
-            segs.append(_Seg(text, spec.tier, spec.priority, spec.name))
+            segs.append(_Seg(text, spec.tier, spec.name))
     return segs
 
 
@@ -1625,13 +1581,13 @@ def _assemble_kp_messages(
     预算铺成对话消息，并插入回合交接、导演微调等临场提示。"""
     teammates = facts.teammates
     party_char_ids = {player_char.id} | {t.id for t in teammates}
-    # 装配：超预算按 priority 整段丢弃（不再从尾部切字符——那会切碎模组 JSON）。
+    # 装配：全部段落都给，不按预算丢段（见 SYSTEM_TOKENS_ESTIMATE 的说明）。
     #
     # 系统提示仍是**一条** system 消息，`content` 是完整正文（下游一切读取口径不变）；
     # 分块结果另挂在 CACHE_BLOCKS_KEY 上，供支持 prompt caching 的 provider 拆成
     # system blocks 并在稳定块末尾打断点。不认这个键的 provider 直接用 content 即可，
     # 行为与放宽前完全一致。**provider 必须在发请求前剔除该键**（见 _strip_cache_blocks）。
-    sys_blocks, system_tokens = _assemble_system(segs, MAX_SYSTEM_TOKENS)
+    sys_blocks, system_tokens = _assemble_system(segs)
     # 预算口径不变：system_tokens 仍是三档之和，挪到尾部的快照照样占事件区的预算。
     volatile_tail = settings.kp_volatile_tail
     head_blocks = sys_blocks[:2] if volatile_tail else sys_blocks

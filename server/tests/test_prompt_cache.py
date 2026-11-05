@@ -16,91 +16,48 @@ from app.ai.providers.anthropic import AnthropicProvider
 # ── 分段装配 ────────────────────────────────────────────────────────────
 
 
-def _seg(text, tier, priority, label):
-    return ctx._Seg(text, tier, priority, label)
+def _seg(text, tier, label):
+    return ctx._Seg(text, tier, label)
 
 
 def test_按_tier_分组_静态在前():
     """块顺序必须是 静态 → 半静态 → 易变：缓存是前缀匹配，顺序反了就永远命中不了。"""
     blocks, _ = ctx._assemble_system([
-        _seg("易变", ctx.SYS_TIER_VOLATILE, 10, "v"),
-        _seg("静态", ctx.SYS_TIER_STATIC, 0, "s"),
-        _seg("半静态", ctx.SYS_TIER_SEMI, 0, "m"),
-    ], max_tokens=10_000)
+        _seg("易变", ctx.SYS_TIER_VOLATILE, "v"),
+        _seg("静态", ctx.SYS_TIER_STATIC, "s"),
+        _seg("半静态", ctx.SYS_TIER_SEMI, "m"),
+    ])
     assert blocks == ["静态", "半静态", "易变"]
 
 
 def test_同_tier_内保持入列顺序():
     blocks, _ = ctx._assemble_system([
-        _seg("甲", ctx.SYS_TIER_STATIC, 0, "a"),
-        _seg("乙", ctx.SYS_TIER_STATIC, 0, "b"),
-    ], max_tokens=10_000)
+        _seg("甲", ctx.SYS_TIER_STATIC, "a"),
+        _seg("乙", ctx.SYS_TIER_STATIC, "b"),
+    ])
     assert blocks[0] == "甲乙"
 
 
-def test_超预算按_priority_从大到小整段丢():
-    segs = [
-        _seg("必留" * 200, ctx.SYS_TIER_STATIC, 0, "keep"),
-        _seg("先丢" * 200, ctx.SYS_TIER_VOLATILE, 40, "drop-first"),
-        _seg("后丢" * 200, ctx.SYS_TIER_VOLATILE, 5, "drop-later"),
-    ]
-    full = sum(ctx._estimate_tokens(s.text) for s in segs)
-    # 预算只够两段：priority 最大的那段应当被丢掉，低 priority 的留下
-    blocks, total = ctx._assemble_system(segs, max_tokens=int(full * 0.7))
-    joined = "".join(blocks)
-    assert "先丢" not in joined
-    assert "后丢" in joined and "必留" in joined
-    assert total <= int(full * 0.7)
-
-
-def test_丢段日志说清超了多少与能否取回(caplog):
-    """只报个段名的话，读日志的人无从判断这是正常代谢还是预算该调了。
-
-    摘录类的段是按需可取回的（KP 手上留着 [MODULE_LOOKUP]/[RULE_LOOKUP]），
-    这也正是它们排在丢弃序列最前面的原因——日志得把这层说出来，
-    否则每回合一条「丢弃段落：module-excerpts」看着像在掉东西。
-    """
-    segs = [
-        _seg("必留" * 200, ctx.SYS_TIER_STATIC, 0, "keep"),
-        _seg("摘录" * 200, ctx.SYS_TIER_VOLATILE, 40, "module-excerpts"),
-    ]
-    full = sum(ctx._estimate_tokens(s.text) for s in segs)
-    with caplog.at_level(logging.WARNING):
-        ctx._assemble_system(segs, max_tokens=int(full * 0.7))
-    assert "module-excerpts" in caplog.text
-    assert str(full) in caplog.text                 # 超之前的总量
-    assert "MODULE_LOOKUP" in caplog.text           # 可按需取回
-
-    # 丢的不是摘录类时，不该给出「可取回」的暗示
-    caplog.clear()
-    segs = [
-        _seg("必留" * 200, ctx.SYS_TIER_STATIC, 0, "keep"),
-        _seg("台账" * 200, ctx.SYS_TIER_VOLATILE, 5, "clue-ledger"),
-    ]
-    with caplog.at_level(logging.WARNING):
-        ctx._assemble_system(segs, max_tokens=int(full * 0.7))
-    assert "clue-ledger" in caplog.text
-    assert "MODULE_LOOKUP" not in caplog.text
-
-
-def test_priority_0_的段永不丢弃():
-    """宁可超预算也不切碎裁定手册/模组 JSON——截出半截非法 JSON 比超预算糟得多。"""
-    segs = [_seg("必留" * 500, ctx.SYS_TIER_STATIC, 0, "keep")]
-    blocks, total = ctx._assemble_system(segs, max_tokens=10)
-    assert "".join(blocks) == "必留" * 500
-    assert total > 10  # 如实反映超了，不假装没超
-
-
-def test_丢弃不切碎_JSON():
-    """回归：旧实现从尾部截字符，会把紧凑 JSON 截成非法串喂给模型。"""
+def test_系统提示不设上限_模组与规则原文再长也全给(caplog):
+    """回归：曾按估算 token 设 30000 上限，只超 433 就整段丢掉本轮预取的模组原文，
+    KP 写出与模组表述不符的内容。现在一律全给，也不告警。"""
     payload = json.dumps([{"id": f"npc{i}", "name": "某人"} for i in range(60)],
                          ensure_ascii=False, separators=(",", ":"))
-    blocks, _ = ctx._assemble_system([
-        _seg("静态" * 100, ctx.SYS_TIER_STATIC, 0, "keep"),
-        _seg(payload, ctx.SYS_TIER_SEMI, 0, "module-data"),
-    ], max_tokens=50)
-    body = blocks[1]
-    assert body == "" or json.loads(body)  # 要么整段没了，要么仍是合法 JSON
+    segs = [
+        _seg("手册" * 20000, ctx.SYS_TIER_STATIC, "manual"),
+        _seg(payload, ctx.SYS_TIER_SEMI, "module-data"),
+        _seg("模组原文" * 5000, ctx.SYS_TIER_VOLATILE, "module-excerpts"),
+        _seg("规则原文" * 5000, ctx.SYS_TIER_VOLATILE, "rule-excerpts"),
+        _seg("配乐", ctx.SYS_TIER_VOLATILE, "bgm-current"),
+    ]
+    with caplog.at_level(logging.WARNING):
+        blocks, total = ctx._assemble_system(segs)
+    assert blocks[0] == "手册" * 20000
+    assert json.loads(blocks[1])
+    assert blocks[2] == "模组原文" * 5000 + "规则原文" * 5000 + "配乐"
+    assert total == sum(ctx._estimate_tokens(s.text) for s in segs)
+    assert total > ctx.SYSTEM_TOKENS_ESTIMATE  # 估算值不是上限
+    assert not caplog.records
 
 
 # ── Anthropic：system blocks 与缓存断点 ──────────────────────────────────

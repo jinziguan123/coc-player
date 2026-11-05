@@ -1093,7 +1093,7 @@ def test_event_budget_scales_with_session_calibration(monkeypatch):
     from app.services import generation_housekeeping as gh
 
     monkeypatch.setattr(ctx, "_active_context_budget", lambda: 100_000)
-    reserve = ctx.MAX_SYSTEM_TOKENS + ctx.RESERVE_FOR_OUTPUT + ctx.RESERVE_FOR_TOOLS
+    reserve = ctx.SYSTEM_TOKENS_ESTIMATE + ctx.RESERVE_FOR_OUTPUT + ctx.RESERVE_FOR_TOOLS
     assert gh._event_budget({}) == 100_000 - reserve                       # 未校准 = 1.0
     assert gh._event_budget({"budget_scale": 2.0}) == 200_000 - reserve    # 放大
     assert gh._event_budget({"budget_scale": 0.6}) == 60_000 - reserve     # 收缩
@@ -1112,7 +1112,7 @@ def test_story_summary_trigger_follows_budget_scale(db_factory, monkeypatch, sca
     session = _seed_long_session(db, 50)
     tokens = gh._events_tokens(_all_events(db, session.id))
     # 基准预算取「系数 1.0 时恰在触发点」：系数偏离 1 才决定触不触发
-    base = int(tokens / gh.STORY_SUMMARY_TRIGGER_RATIO) + ctx.MAX_SYSTEM_TOKENS + ctx.RESERVE_FOR_OUTPUT
+    base = int(tokens / gh.STORY_SUMMARY_TRIGGER_RATIO) + ctx.SYSTEM_TOKENS_ESTIMATE + ctx.RESERVE_FOR_OUTPUT
     monkeypatch.setattr(ctx, "_active_context_budget", lambda: base)
     session.world_state = {**(session.world_state or {}), "budget_scale": scale}
     db.commit()
