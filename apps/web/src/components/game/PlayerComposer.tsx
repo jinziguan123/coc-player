@@ -5,7 +5,7 @@
  * 一串输入期行为——自动长高、输入法组字守卫、@ 触发段接线、菜单开着时 Enter 先选人——
  * 都是「输入框自己的事」，跟着输入框走比留在页面里清楚。
  */
-import { useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 
 import { MentionStrip } from './MentionTokens'
 import { applyDraftHeight, usePlayerMentions } from './usePlayerMentions'
@@ -30,6 +30,12 @@ export function PlayerComposer(input: {
   const composing = useRef(false)
 
   const menu = usePlayerMentions({ candidates, textareaRef: ref, onTextChange: setDraft })
+
+  // 草稿变化（打字、恢复草稿、粘贴）后按内容重算高度。onChange 里也调，
+  // 但程序化赋值不走 onChange；这里兜底，避免长文本挤在一行里只露出截断的一截。
+  useEffect(() => {
+    if (ref.current) applyDraftHeight(ref.current)
+  }, [draft, ref])
 
   const submit = () => {
     if (locked || !draft.trim()) return
@@ -80,7 +86,9 @@ export function PlayerComposer(input: {
           // （React 刚赋完值、selection 还没落定），把刚收起的菜单又弹回来。
           onClick={(e) => menu.sync(e.currentTarget)}
           placeholder={placeholder}
-          className="input flex-1"
+          // 不要 flex-1：.chat-input-wrap 是纵向 flex，flex-basis:0 会把内联 height 压掉，
+          // 输入框就永远只有 rows=1 那么高——长文本只能在里面滚动，看得到后一行、看不到前一行。
+          className="input w-full"
           rows={1}
           style={{ resize: 'none' }}
         />
