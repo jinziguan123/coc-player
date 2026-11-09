@@ -182,10 +182,10 @@ export function DataTableView({
         <div className="flex gap-2 mb-2">
           {externalQuery === undefined && (
             <label className="relative flex-1">
-              <Search size={13} aria-hidden className="absolute left-2 top-1/2 -translate-y-1/2"
+              <Search size={13} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2"
                 style={{ color: 'var(--color-text-secondary)' }} />
               <input value={ownQuery} onChange={(e) => setOwnQuery(e.target.value)} aria-label="搜索行"
-                placeholder={`在${table.title}里搜索`} className="input w-full text-sm pl-7" />
+                placeholder={`在${table.title}里搜索`} className="input w-full text-sm !pl-8" />
             </label>
           )}
           <button onClick={add} className="btn-secondary btn-sm inline-flex items-center gap-1 ml-auto">
