@@ -40,8 +40,8 @@ def eligible_skills(db: Session, session_id: str, character_id: str) -> list[dic
             continue
         if md.get("actor") and md.get("actor") != char.name:
             continue
-        # 花幸运买回来的成功不算数（照规则书：走运没教会你任何事）。判据是那次结算
-        # 回填到骰子事件上的 luck_spent——事件的 outcome 已被改写成成功，只看成败会漏。
+        # 花幸运买回来的成功不算数（照规则书：走运没教会你任何事）。判据是 luck_spent：
+        # 幸运记录本身带着它（成败是改判/重掷后的结果），原卡也回填了它（原卡保留原掷成败）。
         if options.luck_spend_blocks_improvement and md.get("luck_spent"):
             continue
         if _is_success(md):

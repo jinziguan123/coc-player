@@ -2058,10 +2058,11 @@ def _broadcast_luck_applied(
     db, session_id: str, pending: dict, result, cost: int, deduction: dict,
     *, reroll: bool = False,
 ) -> None:
-    """把「花了几点、原本掷了多少、现在算什么」摆到台面上，并订正那张结果卡。
+    """把「花了几点、原本掷了多少、现在算什么」记成一条独立的幸运记录，并在原卡上加注。
 
-    改判必须回到原来那张 dice 事件上：玩家（和重连的人）看的是历史记录，留着一张
-    写着「失败」的卡、旁边另起一条「其实成功了」，账就对不上了。
+    原卡**不改写**骰值与成败：那一骰确实掷出了失败，历史里要留着它；改判/重掷的结果
+    记在紧随其后的这条幸运记录上（前端渲染成幸运卡，写明花了几点、从几到几）。
+    原卡只回填 ``luck_spent`` / ``luck_mode``，让它显示「已用幸运」的注记。
 
     两种用法要写得能分辨：补差额是「把骰值压下去」，燃运重骰是「换了一骰」——
     后者可能烧了点数反而更糟，账面上得看得出来是重掷不是没生效。
@@ -2071,6 +2072,7 @@ def _broadcast_luck_applied(
     skill = str(pending.get("skill") or "")
     original = dict(pending.get("result") or {})
     event_id = str(pending.get("dice_event_id") or "")
+    mode = "reroll" if reroll else "spend"
     how = "烧" if reroll else "花"
     verdict = "重掷得" if reroll else "改判"
     content = (
@@ -2080,8 +2082,10 @@ def _broadcast_luck_applied(
     ev = session_service.add_event(
         db, session_id, "dice", content, actor_name="系统",
         metadata={
-            "luck_spend": True, "actor": shown_name, "skill": skill,
-            "cost": cost, "luck_before": deduction["old"], "luck_after": deduction["new"],
+            "luck_spend": True, "luck_mode": mode, "actor": shown_name, "skill": skill,
+            # luck_spent：成长结算据此排除花幸运得来的成功（见 growth_service.eligible_skills）
+            "cost": cost, "luck_spent": cost,
+            "luck_before": deduction["old"], "luck_after": deduction["new"],
             "roll_before": original.get("roll"), "roll": result.roll,
             "outcome": result.outcome, "tier": result.tier,
             "target": result.target, "skill_value": result.skill_value,
@@ -2092,10 +2096,7 @@ def _broadcast_luck_applied(
         "dice", content, metadata=ev.metadata_, event_id=ev.id,
     ))
     if event_id:
-        patch = {
-            "outcome": result.outcome, "tier": result.tier,
-            "roll": result.roll, "luck_spent": cost,
-        }
+        patch = {"luck_spent": cost, "luck_mode": mode, "luck_event_id": ev.id}
         room_hub.broadcast(session_id, _make_chunk(
             "event_patch", metadata={"event_id": event_id, "patch": patch},
         ))

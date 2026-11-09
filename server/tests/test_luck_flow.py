@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Character, GameSession, Module, SessionParticipant  # noqa: F401
-from app.services import chat_service, session_service
+from app.services import chat_service, growth_service, session_service
 
 
 @pytest.fixture
@@ -128,6 +128,40 @@ def test_spending_luck_rewrites_the_verdict_and_resumes(db_factory, monkeypatch)
     assert settled[0].metadata_["roll_before"] == 65
     assert settled[0].metadata_["roll"] == 60
     assert settled[0].metadata_["outcome"] == "success"
+    assert settled[0].metadata_["luck_spent"] == 5
+
+
+def _dice_events(db, session_id):
+    return [e for e in session_service.get_session_events(db, session_id) if e.event_type == "dice"]
+
+
+def test_用幸运后原骰子卡保留原掷失败_只加注记(db_factory, monkeypatch):
+    """回归：原卡曾被改写成新结果，失败那一骰从历史里消失，旁边的幸运记录又长得像普通检定卡，
+    于是出现两张一模一样的成功卡、看不出花过幸运。"""
+    _patch_runtime(monkeypatch, db_factory)
+    db = db_factory()
+    session_id, char = _seed(db, luck=45)
+    session = db.get(GameSession, session_id)
+    session.rule_options = {"luck_spend": True, "luck_reroll": True, "luck_reroll_cost": 10}
+    db.commit()
+    check_id = _hang_pending_check(db, session_id, char)
+    _roll(monkeypatch, 82)
+    asyncio.run(chat_service.run_roll_generation(session_id, check_id))
+    _roll(monkeypatch, 47)
+    asyncio.run(chat_service.run_luck_decision(session_id, False, reroll=True))
+
+    db.expire_all()
+    original, luck_ev = _dice_events(db, session_id)
+    assert original.metadata_["roll"] == 82
+    assert original.metadata_["outcome"] != "success"
+    assert original.metadata_["luck_spent"] == 10
+    assert original.metadata_["luck_mode"] == "reroll"
+    assert original.metadata_["luck_event_id"] == luck_ev.id
+    assert luck_ev.metadata_["luck_spend"] and luck_ev.metadata_["luck_mode"] == "reroll"
+    assert (luck_ev.metadata_["roll_before"], luck_ev.metadata_["roll"]) == (82, 47)
+    assert luck_ev.metadata_["outcome"] == "success"
+    # 重掷来的成功也不给成长标记（两条记录都不算）
+    assert growth_service.eligible_skills(db, session_id, char.id) == []
 
 
 def test_declining_keeps_the_failure(db_factory, monkeypatch):

@@ -4,7 +4,7 @@
  * 从 GameSessionPage 的按类型渲染分支里拆出——这一支只读消息本身与「是否新到达」，
  * 不依赖页面其他状态。3D 投掷期间隐藏结果卡的判断仍留在页面（它要看动画队列）。
  */
-import { GiRollingDices } from 'react-icons/gi'
+import { GiClover, GiRollingDices } from 'react-icons/gi'
 import { fmtTime } from '@/features/game-session/derive'
 import type { ChatMessage } from '@/stores/sessionStore'
 import type { DiceSpec } from './DiceRoller'
@@ -45,6 +45,10 @@ export function DiceMessage({ msg, fresh }: { msg: ChatMessage; fresh: boolean }
     else if (!blind && (oc.includes('fumble') || oc.includes('大失败'))) diceAnim = 'dice-fumble'
     else diceAnim = 'dice-enter'
   }
+  // 幸运注记：花幸运会留下两条记录——原卡（保留原掷成败，只回填 luck_spent）和紧随其后的
+  // 幸运记录（luck_spend，骰值/成败是改判或重掷之后的）。两张卡都得一眼看出动过幸运，
+  // 否则幸运记录长得和普通检定卡一模一样，像是同一骰被记了两遍。
+  const luckChip = luckNote(msg.metadata)
   // 奖惩骰注记与伤害标志（贯穿/燃烧/晕）——两种卡型共用
   const noteChips = (
     <>
@@ -65,6 +69,7 @@ export function DiceMessage({ msg, fresh }: { msg: ChatMessage; fresh: boolean }
           )}
         </span>
       )}
+      {luckChip}
       {diceFlags.map((f) => {
         const gold = f === '贯穿'
         const col = gold ? 'var(--color-dice-gold)' : 'var(--color-danger)'
@@ -101,5 +106,32 @@ export function DiceMessage({ msg, fresh }: { msg: ChatMessage; fresh: boolean }
         {fmtTime(msg.ts) && <span className="msg-ts self-end" style={{ flexShrink: 0 }}>{fmtTime(msg.ts)}</span>}
       </div>
     </div>
+  )
+}
+
+function luckNote(meta: Record<string, unknown> | undefined) {
+  if (!meta || !meta.luck_spent && !meta.luck_spend) return null
+  const reroll = meta.luck_mode === 'reroll'
+  const cost = Number(meta.luck_spent ?? meta.cost ?? 0)
+  let text: string
+  let title: string
+  if (meta.luck_spend) {
+    // 幸运记录本身：写清花了几点、原来掷了多少
+    const before = meta.roll_before
+    text = reroll ? `燃运重骰 · 烧 ${cost} 点幸运` : `花 ${cost} 点幸运改判`
+    if (before !== undefined && before !== null) text += ` · 原掷 ${String(before)}`
+    title = reroll
+      ? '烧固定点数幸运整骰重掷一次，结果照单全收（本桌自定）'
+      : '按差额 1:1 花幸运把骰值压到目标值以内（规则书 p.85）'
+  } else {
+    // 原卡：这一骰确实这么掷的，结果已被下面那条幸运记录取代
+    text = reroll ? `已燃运重骰（烧 ${cost} 点）` : `已花 ${cost} 点幸运改判`
+    title = '这一骰的结果已由紧随其后的幸运记录取代'
+  }
+  return (
+    <span className="chip font-semibold flex items-center gap-1" title={title}
+      style={{ color: 'var(--color-dice-gold)', borderColor: 'var(--color-dice-gold)' }}>
+      <GiClover aria-hidden /> {text}
+    </span>
   )
 }
