@@ -1168,6 +1168,78 @@ async def _exec_scene_change(
     return chunks, sid, ""
 
 
+#: world_state 键：已就「离场前登场事件未演」提醒过 KP 的 (出发地:事件id)。
+LEAVE_WARNED_KEY = "flow_leave_warned"
+
+
+def pending_entrances_at(
+    module: Module | None, game_session: GameSession, scene_id: str | None,
+) -> list[tuple[dict, list[str]]]:
+    """绑在 ``scene_id`` 上、尚未发生的 NPC 登场事件：[(事件, [等它登场的 npc_id…])]。
+
+    只认「登场事件」（让一个仍蛰伏的 NPC 现身）——它们是模组的必经桥段：被一步跳过，
+    这个 NPC 就再也不会出场（《闇暗山》小路上的香澄即此）。可选的调查桥段不在此列。
+    """
+    from app.services import entity_state, scene_kind
+
+    if module is None or not scene_id:
+        return []
+    dormant = scene_kind.module_dormant_npcs(
+        module, entity_state.active_flags(game_session), game_session.world_state,
+    )
+    out: dict[str, tuple[dict, list[str]]] = {}
+    for nid, evs in dormant.items():
+        for ev in evs:
+            eid = str(ev.get("id") or "")
+            at = str(ev.get("at") or ((ev.get("when") or {}).get("expr") or {}).get("at") or "")
+            if not eid or at != scene_id:
+                continue
+            out.setdefault(eid, (ev, []))[1].append(nid)
+    return list(out.values())
+
+
+def _unresolved_entrance_refusal(
+    db: Session, game_session: GameSession, module: Module | None,
+    origin: str | None, target: str | None,
+) -> str:
+    """离场兜底（软闸）：出发地还有没演的登场事件时，**第一次**切换先退回给 KP 说明；
+    KP 判断它确实不成立而再次切换，同一 (出发地, 事件) 就放行，不会卡死。"""
+    if not origin or origin == target:
+        return ""
+    pending = pending_entrances_at(module, game_session, origin)
+    if not pending:
+        return ""
+    warned = [str(x) for x in (game_session.world_state or {}).get(LEAVE_WARNED_KEY) or []]
+    fresh = [(ev, nids) for ev, nids in pending if f"{origin}:{ev.get('id')}" not in warned]
+    if not fresh:
+        return ""
+    from app.services import world_state
+
+    world_state.set_key(
+        db, game_session, LEAVE_WARNED_KEY,
+        warned + [f"{origin}:{ev.get('id')}" for ev, _ in fresh],
+    )
+    names = {
+        str(n.get("id")): n.get("name") or n.get("id")
+        for n in (module.npcs or []) if isinstance(n, dict) and n.get("id")
+    }
+    lines = []
+    for ev, nids in fresh:
+        when = str((ev.get("when") or {}).get("text") or "").strip() or "见事件描述"
+        who = "、".join(names.get(n, n) for n in nids)
+        lines.append(
+            f"「{ev.get('title') or ev.get('id')}」（条件：{when}；{who} 要靠它登场）"
+            f"→ [BEAT: {ev.get('id')}]"
+        )
+    return (
+        "未切换场景：离开这里之前，模组规定在此发生的登场桥段还没演——"
+        + "；".join(lines)
+        + "。这是必经桥段，跳过它这些 NPC 就再也不会出场。请顺着玩家此刻的行动把它引出来"
+        "（玩家正要离开、走向别处，也正是桥段发生的好时机），在本轮演出并发对应的 BEAT；"
+        "若你判断玩家的行动确实让它不可能成立，再调用一次 scene_change 即可放行。"
+    )
+
+
 async def exec_tool_scene_change(
     db: Session, session_id: str, game_session: GameSession, module: Module,
     ref: str, raw_movers: str, player_char: Character, teammates: list[Character] | None,
@@ -1210,6 +1282,9 @@ async def exec_tool_scene_change(
     if refusal:
         return [], None, refusal
     origin = session_service.get_char_location(game_session, movers[0].id)
+    leave_note = _unresolved_entrance_refusal(db, game_session, module, origin, target)
+    if leave_note:
+        return [], None, leave_note
     chunks, sid, note = await _exec_scene_change(
         db, session_id, game_session, module, ref, player_char, teammates, movers=movers,
     )

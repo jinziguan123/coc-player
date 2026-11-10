@@ -64,10 +64,10 @@ def npcs_with_secrets(module: Any) -> list[dict]:
 
 
 def split_dormant(
-    module: Any, secret_npcs: list[dict], flags: set[str],
+    module: Any, secret_npcs: list[dict], flags: set[str], world_state: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """把幕后主体分成 (可行动, 蛰伏)：蛰伏 = 绑定在未触发剧情事件上的 NPC。"""
-    dormant_ids = scene_kind.dormant_npcs(getattr(module, "scenes", None), flags)
+    dormant_ids = scene_kind.module_dormant_npcs(module, flags, world_state)
     active = [n for n in secret_npcs if n.get("id") not in dormant_ids]
     dormant = [n for n in secret_npcs if n.get("id") in dormant_ids]
     return active, dormant
@@ -114,7 +114,7 @@ def build_backstage_messages(
         for s in scene_kind.location_scenes(all_scenes)
     ]
     # 闸门：调用方传进来的可能含蛰伏者，这里再滤一次，保证它们绝不作为可行动主体出现
-    dormant_map = scene_kind.dormant_npcs(all_scenes, flags)
+    dormant_map = scene_kind.module_dormant_npcs(module, flags, ws)
     secret_npcs = [n for n in secret_npcs if n.get("id") not in dormant_map]
     npc_names = {
         str(n.get("id")): n.get("name") or n.get("id")

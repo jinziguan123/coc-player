@@ -602,7 +602,9 @@ def _dormant_npc_names(module: Module | None, game_session: GameSession) -> set[
     """蛰伏 NPC 的名字与别名（用于按名字拦截规划器的 enemies）。"""
     if module is None:
         return set()
-    dormant = scene_kind.dormant_npcs(module.scenes, entity_state.active_flags(game_session))
+    dormant = scene_kind.module_dormant_npcs(
+        module, entity_state.active_flags(game_session), game_session.world_state,
+    )
     out: set[str] = set()
     for npc in module.npcs or []:
         if isinstance(npc, dict) and npc.get("id") in dormant:
@@ -617,7 +619,9 @@ def _npcs_present(module: Module | None, game_session: GameSession) -> list[dict
     if module is None:
         return []
     scene_id = str(game_session.current_scene_id or "").strip()
-    dormant = scene_kind.dormant_npcs(module.scenes, entity_state.active_flags(game_session))
+    dormant = scene_kind.module_dormant_npcs(
+        module, entity_state.active_flags(game_session), game_session.world_state,
+    )
     present = []
     for npc in (module.npcs or []):
         if npc.get("id") in dormant:  # 蛰伏者不算在场交战方

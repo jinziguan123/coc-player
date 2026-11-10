@@ -1033,7 +1033,7 @@ def _collect_kp_facts(
     all_npc_defs = (module.npcs or []) + world_memory.promoted_npc_cards(session.world_state or {})
     npcs = [_resolve_state(n, flags) for n in all_npc_defs]
     # 事件闸门：绑定在未触发剧情事件上的 NPC 标注蛰伏（KP 与幕后推演同一口径）
-    dormant = scene_kind.dormant_npcs(module.scenes, flags)
+    dormant = scene_kind.module_dormant_npcs(module, flags, session.world_state)
     npcs = [
         {**n, "dormant_until": "、".join(scene_kind.event_title(e) for e in dormant[n["id"]])}
         if n.get("id") in dormant and n.get("alive") is not False else n
@@ -1340,6 +1340,12 @@ def _format_plot_events(
         str(s.get("id")): s for s in (module.scenes or [])
         if isinstance(s, dict) and str(s.get("kind") or "").lower() == "event"
     }
+    # 必经登场桥段：让仍蛰伏的 NPC 现身的事件——被跳过，这个 NPC 就再也不会出场
+    dormant = scene_kind.module_dormant_npcs(module, flags, session.world_state)
+    entrance_npcs: dict[str, list[str]] = {}
+    for nid, evs in dormant.items():
+        for dev in evs:
+            entrance_npcs.setdefault(str(dev.get("id") or ""), []).append(nid)
     lines = ["【剧情事件】（KP 专属——按条件触发的剧情段落，不是地点，不可前往）"]
     for ev in events:
         eid = str(ev.get("id") or "")
@@ -1369,6 +1375,12 @@ def _format_plot_events(
         if who:
             line += f"；涉及：{who}"
         line += "。" + tail
+        if eid in entrance_npcs and tag != "未满足":
+            line += (
+                "**必经登场桥段**：" + "、".join(npc_names.get(n, n) for n in entrance_npcs[eid])
+                + " 只能靠它登场——玩家离开此地之前必须让它发生（玩家没照条件里的方式行动，"
+                "也要顺着他此刻的举动把桥段引出来），否则系统会拦下场景切换。"
+            )
         lines.append(line)
     lines.append(
         "未满足的事件：绝不叙述、不暗示它已经发生，涉及的 NPC 保持蛰伏。"

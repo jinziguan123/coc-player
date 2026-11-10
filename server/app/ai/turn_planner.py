@@ -631,7 +631,7 @@ def build_turn_plan_messages(
     _npc_defs = (module.npcs or []) + world_memory.promoted_npc_cards(session.world_state or {})
     resolved_npcs = [_resolve_state(npc, flags) for npc in _npc_defs]
     # 事件闸门：绑定在未触发剧情事件上的 NPC 处于蛰伏，规划器不得让它行动/开战
-    dormant = scene_kind.dormant_npcs(module.scenes, flags)
+    dormant = scene_kind.module_dormant_npcs(module, flags, session.world_state)
 
     visible_ids = _visible_scene_ids(session)
     visible_clues = _filter_visible_items(module.clues, visible_ids)

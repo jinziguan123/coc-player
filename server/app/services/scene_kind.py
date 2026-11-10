@@ -98,5 +98,64 @@ def dormant_npcs(scenes: list | None, flags: set[str]) -> dict[str, list[dict]]:
     return out
 
 
+def _iter_effects(effects) -> list[dict]:
+    """深度展开效果树（含 check 的成功/失败分支）。与 module_flow.iter_effects 同口径，
+    这里自带一份是为了让本模块保持零依赖。"""
+    out: list[dict] = []
+    for eff in effects or []:
+        if not isinstance(eff, dict):
+            continue
+        out.append(eff)
+        if str(eff.get("type") or "") == "check":
+            for key in ("on_success", "on_failure"):
+                out.extend(_iter_effects(eff.get(key)))
+    return out
+
+
+def entrance_events(events: list | None) -> dict[str, list[dict]]:
+    """v3 事件里的「登场事件」：npc_id → 让它在某地现身的事件列表。
+
+    判据是事件效果（含检定分支）里有 ``npc_state`` 且给了 ``location``、``alive`` 不为 False——
+    即「这个 NPC 是由该事件带上场的」。只改态度/生死的 npc_state 不算登场。
+    """
+    out: dict[str, list[dict]] = {}
+    for ev in events or []:
+        if not isinstance(ev, dict) or not ev.get("id"):
+            continue
+        for eff in _iter_effects(ev.get("effects")):
+            if str(eff.get("type") or "") != "npc_state" or eff.get("alive") is False:
+                continue
+            nid = str(eff.get("npc_id") or "").strip()
+            if nid and str(eff.get("location") or "").strip():
+                bucket = out.setdefault(nid, [])
+                if ev not in bucket:
+                    bucket.append(ev)
+    return out
+
+
+def module_dormant_npcs(
+    module, flags: set[str], world_state: dict | None,
+) -> dict[str, list[dict]]:
+    """蛰伏 NPC 的统一入口：旧结构（kind=event 场景）+ v3 登场事件，两者都认。
+
+    v3 模组的事件在 ``module.events``，不在 scenes 里——只看 scenes 的旧闸门对它们恒为空，
+    于是「要等事件才登场」的 NPC 从开局就被当成在场：幕后推演每轮替它行动，KP 也照着写它
+    在暗处尾随（《闇暗山》香澄即此）。
+
+    v3 规则：NPC 有登场事件、且这些事件**一个都还没发生**（不在 flow_seen）、运行时也还没有
+    它的状态（npc_runtime，登场事件执行时写入）→ 蛰伏，等待列表为其未发生的登场事件。
+    """
+    out = dormant_npcs(getattr(module, "scenes", None), flags)
+    ws = world_state or {}
+    seen = {str(x) for x in (ws.get("flow_seen") or []) if x}
+    runtime = ws.get("npc_runtime") or {}
+    for nid, evs in entrance_events(getattr(module, "events", None)).items():
+        if nid in runtime or any(str(e.get("id")) in seen for e in evs):
+            continue
+        bucket = out.setdefault(nid, [])
+        bucket.extend(e for e in evs if e not in bucket)
+    return out
+
+
 def event_title(event: dict) -> str:
     return str(event.get("title") or event.get("name") or event.get("id") or "")
