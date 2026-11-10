@@ -150,3 +150,35 @@ def test_KP事件清单把当前可触发的登场事件标为必经():
     assert "必经登场桥段" in line and "香澄澪" in line
     shrine = next(ln for ln in text.splitlines() if "神社草丛中的呼唤" in ln)
     assert "必经" not in shrine
+
+
+# ── 3. 大地图/旅行路径：不拦，但记一笔给 KP 补演 ─────────────────
+
+
+def test_大地图前往记录遗漏并可在KP清单提示():
+    module = _module()
+    session = _session("scene_smallpath")
+    rec = turn_effects.missed_entrance_records(module, session, "scene_smallpath", "scene_shrine")
+    assert rec == [{
+        "from": "scene_smallpath", "event_id": "ev_smallpath_cliff",
+        "title": "光点与悬崖", "npcs": ["npc_kasumi"],
+    }]
+    # 已演过、或没离开原场景，都不记
+    assert turn_effects.missed_entrance_records(
+        module, _session("scene_smallpath", flow_seen=["ev_smallpath_cliff"]),
+        "scene_smallpath", "scene_shrine",
+    ) == []
+    assert turn_effects.missed_entrance_records(module, session, "scene_smallpath", "scene_smallpath") == []
+
+    session.world_state["flow_leave_missed"] = rec
+    text = _format_plot_events(module, session, set())
+    assert "离开时遗漏的登场桥段" in text and "ev_smallpath_cliff" in text
+
+
+def test_when_expr是字符串时pending不崩溃():
+    ev = dict(EVENTS[0])
+    ev["at"] = ""
+    ev["when"] = {"text": "条件写在字符串里", "expr": "scene_oldpath"}
+    module = _module()
+    module.events = [ev]
+    assert turn_effects.pending_entrances_at(module, _session("scene_oldpath"), "scene_oldpath") == []

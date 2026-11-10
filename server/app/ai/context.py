@@ -1382,6 +1382,24 @@ def _format_plot_events(
                 "也要顺着他此刻的举动把桥段引出来），否则系统会拦下场景切换。"
             )
         lines.append(line)
+    # 大地图/旅行离开时跳过的登场桥段：位置已到新场景，事件的 at 不再匹配，
+    # 不提醒的话 KP 永远看不到它——记一笔，提示可以补演。
+    missed = [
+        m for m in (session.world_state or {}).get("flow_leave_missed") or []
+        if isinstance(m, dict) and m.get("event_id")
+        and str(m["event_id"]) not in state.seen
+    ]
+    if missed:
+        items = "；".join(
+            f"「{m.get('title') or m['event_id']}」（原在 {m.get('from') or '原地点'}）"
+            f"→ [BEAT: {m['event_id']}]"
+            for m in missed[:6]
+        )
+        lines.append(
+            "【离开时遗漏的登场桥段】" + items + "。玩家已用大地图/旅行离开事件地点，"
+            "桥段还没演；若此刻仍能顺势引出（让 NPC 追上来、在下一处现身等），演完并发对应 BEAT；"
+            "若确定不再成立可忽略，但这些 NPC 不会自动出场。"
+        )
     lines.append(
         "未满足的事件：绝不叙述、不暗示它已经发生，涉及的 NPC 保持蛰伏。"
         "触发时用 [BEAT: 事件id]——不要自己把传送、扣 SAN、置标志写进旁白，"

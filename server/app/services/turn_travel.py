@@ -29,9 +29,33 @@ def commit_pending_travel(db: Session, session_id: str, turn: list | None = None
     host = db.get(Character, game_session.player_character_id)
     if host is not None and host not in party:
         party.insert(0, host)
+    # 玩家点「前往」是确定性移动，不驳回；但离开地若有没演的登场桥段，要记一笔给 KP
+    # 补演——否则大地图路径会绕过 AI KP 的离场软闸，桥段无声消失、NPC 再也不出场。
+    from app.services import turn_effects
+
+    missed: list[dict] = []
     for actor_id, scene_id in trips:
         actor = next((c for c in party if c.id == actor_id), None) or db.get(Character, actor_id)
         if actor is None:
             continue
+        origin = session_service.get_char_location(game_session, actor_id)
+        missed.extend(turn_effects.missed_entrance_records(module, game_session, origin, scene_id))
         # 与自然语言移动同一套执行语义：同处的人要么按默认跟随一起走，要么被写实在原处。
         movement.travel(db, session_id, game_session, module, actor, scene_id, party)
+    if missed:
+        from app.services import world_state
+
+        existing = [
+            m for m in (game_session.world_state or {}).get(turn_effects.MISSED_ENTRANCES_KEY) or []
+            if isinstance(m, dict)
+        ]
+        fresh = [
+            m for m in missed
+            if not any(
+                x.get("from") == m["from"] and x.get("event_id") == m["event_id"] for x in existing
+            )
+        ]
+        if fresh:
+            world_state.set_key(
+                db, game_session, turn_effects.MISSED_ENTRANCES_KEY, existing + fresh,
+            )

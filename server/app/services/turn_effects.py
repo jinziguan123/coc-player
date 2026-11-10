@@ -1191,11 +1191,39 @@ def pending_entrances_at(
     for nid, evs in dormant.items():
         for ev in evs:
             eid = str(ev.get("id") or "")
-            at = str(ev.get("at") or ((ev.get("when") or {}).get("expr") or {}).get("at") or "")
+            # expr 正常是 dict/None；旧库或手写数据可能是字符串，这里别让它把整条路径炸掉
+            when = ev.get("when")
+            expr = when.get("expr") if isinstance(when, dict) else None
+            at = str(ev.get("at") or (expr.get("at") if isinstance(expr, dict) else "") or "")
             if not eid or at != scene_id:
                 continue
             out.setdefault(eid, (ev, []))[1].append(nid)
     return list(out.values())
+
+
+#: world_state 键：玩家用大地图/旅行离开时跳过的登场桥段（供 KP 上下文提醒补演）。
+MISSED_ENTRANCES_KEY = "flow_leave_missed"
+
+
+def missed_entrance_records(
+    module: Module | None, game_session: GameSession, origin: str | None, target: str | None,
+) -> list[dict]:
+    """大地图/旅行离开时仍未演出的登场桥段，记下来供 KP 上下文提醒。
+
+    与离场软闸不同：玩家主动点「前往」是确定性位置同步，不该驳回——但桥段不能因此
+    无声消失，所以记一条「遗漏」，让 KP 知道还能补演。
+    """
+    if not origin or not target or origin == target:
+        return []
+    records: list[dict] = []
+    for ev, nids in pending_entrances_at(module, game_session, origin):
+        records.append({
+            "from": origin,
+            "event_id": str(ev.get("id") or ""),
+            "title": str(ev.get("title") or ev.get("id") or ""),
+            "npcs": sorted(str(n) for n in nids),
+        })
+    return records
 
 
 def _unresolved_entrance_refusal(
